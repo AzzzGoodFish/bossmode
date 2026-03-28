@@ -6,6 +6,7 @@ import {
   getKnowledgeEntries, addKnowledgeEntry, updateKnowledgeEntry, deleteKnowledgeEntry as apiDeleteEntry,
 } from "../api/client";
 import { Markdown } from "../components/Markdown";
+import { useDialog } from "../components/dialogs";
 
 const inputCls = "w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600";
 
@@ -17,6 +18,7 @@ interface KnowledgePageProps {
 }
 
 export function KnowledgePage({ selectedKbId, selectedEntryId, onSelectKb, onSelectEntry }: KnowledgePageProps = {}) {
+  const { toast } = useDialog();
   const [bases, setBases] = useState<KnowledgeBaseInfo[]>([]);
   const [selectedKb, setSelectedKb] = useState<string | null>(selectedKbId ?? null);
   const [showCreate, setShowCreate] = useState(selectedKbId === null);
@@ -67,7 +69,7 @@ export function KnowledgePage({ selectedKbId, selectedEntryId, onSelectKb, onSel
       {showCreate && (
         <CreateKbDialog onClose={() => setShowCreate(false)} onCreate={async (name, desc) => {
           try { await createKnowledgeBase(name, desc); setShowCreate(false); refresh(); }
-          catch (err: any) { alert(err.message); }
+          catch (err: any) { toast(err.message, "error"); }
         }} />
       )}
     </div>
@@ -77,6 +79,7 @@ export function KnowledgePage({ selectedKbId, selectedEntryId, onSelectKb, onSel
 function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
   kbId: string; selectedEntryId?: string; onBack: () => void; onSelectEntry?: (entryId: string, title: string) => void;
 }) {
+  const { toast, confirm } = useDialog();
   const [entries, setEntries] = useState<KnowledgeEntryInfo[]>([]);
   const [kbName, setKbName] = useState("");
   const [editEntry, setEditEntry] = useState<KnowledgeEntryInfo | null>(null);
@@ -94,9 +97,9 @@ function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
   const refresh = () => getKnowledgeEntries(kbId).then(setEntries).catch(console.error);
 
   const handleDelete = async () => {
-    if (!confirm("Delete this knowledge base and all entries?")) return;
+    if (!(await confirm("Delete this knowledge base and all entries?"))) return;
     try { await apiDeleteKb(kbId); onBack(); }
-    catch (err: any) { alert(err.message); }
+    catch (err: any) { toast(err.message, "error"); }
   };
 
   const rules = entries.filter((e) => e.type === "rule");
@@ -130,7 +133,7 @@ function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
               <Pencil size={14} /> Edit
             </button>
             <button onClick={async () => {
-              if (!confirm("Delete this entry?")) return;
+              if (!(await confirm("Delete this entry?"))) return;
               await apiDeleteEntry(kbId, previewEntry.id);
               refresh();
               onBack();
@@ -146,7 +149,7 @@ function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
           <EntryDialog initial={editEntry} defaultType={previewEntry.type} onClose={() => setEditEntry(null)}
             onSave={async (title, content, type) => {
               try { await updateKnowledgeEntry(kbId, editEntry.id, title, content); setEditEntry(null); refresh(); }
-              catch (err: any) { alert(err.message); }
+              catch (err: any) { toast(err.message, "error"); }
             }} />
         )}
       </div>
@@ -223,7 +226,7 @@ function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
               setShowAdd(false);
               setEditEntry(null);
               refresh();
-            } catch (err: any) { alert(err.message); }
+            } catch (err: any) { toast(err.message, "error"); }
           }}
         />
       )}
@@ -234,6 +237,7 @@ function KnowledgeDetail({ kbId, selectedEntryId, onBack, onSelectEntry }: {
 function EntryCard({ entry, kbId, onEdit, onRefresh, isRule, onClick }: {
   entry: KnowledgeEntryInfo; kbId: string; onEdit: () => void; onRefresh: () => void; isRule?: boolean; onClick?: () => void;
 }) {
+  const { confirm } = useDialog();
   return (
     <div onClick={onClick}
       className={`bg-white dark:bg-zinc-900 border rounded-lg p-4 ${isRule ? "border-amber-300 dark:border-amber-900/50" : "border-zinc-200 dark:border-zinc-800"} ${onClick ? "cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors" : ""}`}>
@@ -246,7 +250,7 @@ function EntryCard({ entry, kbId, onEdit, onRefresh, isRule, onClick }: {
           <span className="text-xs text-zinc-400 dark:text-zinc-600">by {entry.source}</span>
           <button onClick={onEdit} className="text-xs text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 cursor-pointer">Edit</button>
           <button onClick={async () => {
-            if (!confirm("Delete this entry?")) return;
+            if (!(await confirm("Delete this entry?"))) return;
             await apiDeleteEntry(kbId, entry.id);
             onRefresh();
           }} className="text-xs text-red-500 dark:text-red-400 hover:text-red-400 dark:hover:text-red-300 cursor-pointer">Delete</button>

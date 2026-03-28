@@ -5,6 +5,7 @@ import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
   getAgents, getAgent, getRuntimes, getMemberStatus, restartMember,
 } from "../api/client";
+import { useDialog } from "../components/dialogs";
 
 interface MembersPageProps {
   selectedId?: string | null;
@@ -14,6 +15,7 @@ interface MembersPageProps {
 }
 
 export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, onNavigateAgent }: MembersPageProps) {
+  const { toast, confirm } = useDialog();
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(propSelectedId ?? null);
@@ -31,8 +33,8 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
   const refresh = () => { getMembers().then(setMembers); onRefresh?.(); };
 
   const handleDelete = async (m: MemberInfo) => {
-    if (!confirm(`Delete member "${m.name}"? If this member is used in a room, it will become inactive.`)) return;
-    try { await deleteMemberApi(m.id); refresh(); } catch (err: any) { alert(err.message); }
+    if (!(await confirm(`Delete member "${m.name}"? If this member is used in a room, it will become inactive.`))) return;
+    try { await deleteMemberApi(m.id); refresh(); } catch (err: any) { toast(err.message, "error"); }
   };
 
   const filtered = members.filter((m) =>
@@ -101,6 +103,7 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
 function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: {
   id: string | null; onBack: () => void; isCreate?: boolean; onCreated?: (id: string) => void; onNavigateAgent?: (name: string) => void;
 }) {
+  const { toast, confirm } = useDialog();
   const [member, setMember] = useState<MemberInfo | null>(isCreate ? {} as MemberInfo : null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
@@ -137,7 +140,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
     setSaveState("saving");
     try {
       if (isCreate) {
-        if (!form.name || !form.agent) { alert("Name and agent are required"); setSaveState("idle"); return; }
+        if (!form.name || !form.agent) { toast("Name and agent are required", "error"); setSaveState("idle"); return; }
         const created = await createMember(form as any);
         onCreated?.(created.id);
         setSaveState("saved");
@@ -148,15 +151,15 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       }
       setTimeout(() => setSaveState("idle"), 1500);
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message, "error");
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete member "${member?.name}"?`)) return;
-    try { await deleteMemberApi(id!); onBack(); } catch (err: any) { alert(err.message); }
+    if (!(await confirm(`Delete member "${member?.name}"?`))) return;
+    try { await deleteMemberApi(id!); onBack(); } catch (err: any) { toast(err.message, "error"); }
   };
 
   if (!isCreate && !member) return <div className="flex-1 flex items-center justify-center text-zinc-600">Loading...</div>;
@@ -291,8 +294,8 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300"># {inst.roomName}</span>
                       <button onClick={async () => {
-                        if (!confirm(`Restart ${form.name || "member"} in ${inst.roomName}?`)) return;
-                        try { await restartMember(id!, inst.roomId); refreshStatus(); } catch (err: any) { alert(err.message); }
+                        if (!(await confirm(`Restart ${form.name || "member"} in ${inst.roomName}?`))) return;
+                        try { await restartMember(id!, inst.roomId); refreshStatus(); } catch (err: any) { toast(err.message, "error"); }
                       }} className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" title="Restart">
                         <RefreshCw size={12} />
                       </button>

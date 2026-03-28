@@ -1,0 +1,230 @@
+// Workforce API routes — Agent, Skill, Member CRUD
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { addRoute, sendJson, parseBody } from "./index.js";
+import { logger } from "../foundation/logger.js";
+import {
+  loadAgentDefinitions, loadAgentDefinition, saveAgentDefinition,
+  deleteAgentDefinition, loadAgentTemplates, getAgentsDir,
+} from "../workforce/agent-store.js";
+import {
+  loadSkillDefinitions, loadSkillDefinition, saveSkillDefinition,
+  deleteSkillDefinition, loadSkillTemplates,
+} from "../workforce/skill-store.js";
+import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
+import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
+import * as sessionStore from "../workspace/session-store.js";
+import { parseFrontmatter } from "../shared/frontmatter.js";
+
+// ── Agent CRUD ──
+
+addRoute("GET", "/api/agents", async (_req, res) => {
+  try {
+    const agents = loadAgentDefinitions();
+    const result = agents.map(({ name, model, description, skills, tags, avatar }) => ({
+      name, model, description, skills, tags, avatar,
+    }));
+    sendJson(res, 200, result);
+  } catch {
+    sendJson(res, 200, []);
+  }
+});
+
+addRoute("GET", "/api/agents/templates", async (_req, res) => {
+  const templates = loadAgentTemplates();
+  const result = templates.map(({ name, model, description, skills, tags, avatar }) => ({
+    name, model, description, skills, tags, avatar,
+  }));
+  sendJson(res, 200, result);
+});
+
+addRoute("GET", "/api/agents/:name", async (_req, res, params) => {
+  const agent = loadAgentDefinition(params.name);
+  if (!agent) {
+    sendJson(res, 404, { error: "Agent not found" });
+    return;
+  }
+  sendJson(res, 200, agent);
+});
+
+addRoute("POST", "/api/agents", async (req, res) => {
+  const body = (await parseBody(req)) as { name?: string; content?: string };
+  if (!body.name || !body.content) {
+    sendJson(res, 400, { error: "name and content are required" });
+    return;
+  }
+  if (loadAgentDefinition(body.name)) {
+    sendJson(res, 409, { error: `Agent "${body.name}" already exists` });
+    return;
+  }
+  const agent = saveAgentDefinition(body.name, body.content);
+  sendJson(res, 200, agent);
+});
+
+addRoute("PUT", "/api/agents/:name", async (req, res, params) => {
+  const body = (await parseBody(req)) as { content?: string };
+  if (!body.content) {
+    sendJson(res, 400, { error: "content is required" });
+    return;
+  }
+  const agent = saveAgentDefinition(params.name, body.content);
+  sendJson(res, 200, agent);
+});
+
+addRoute("DELETE", "/api/agents/:name", async (_req, res, params) => {
+  const deleted = deleteAgentDefinition(params.name);
+  if (!deleted) {
+    sendJson(res, 404, { error: "Agent not found" });
+    return;
+  }
+  sendJson(res, 200, { ok: true });
+});
+
+// ── Skill CRUD ──
+
+addRoute("GET", "/api/skills", async (_req, res) => {
+  try {
+    const skills = loadSkillDefinitions();
+    const result = skills.map(({ name, description, tags }) => ({ name, description, tags }));
+    sendJson(res, 200, result);
+  } catch {
+    sendJson(res, 200, []);
+  }
+});
+
+addRoute("GET", "/api/skills/templates", async (_req, res) => {
+  const templates = loadSkillTemplates();
+  const result = templates.map(({ name, description, tags }) => ({ name, description, tags }));
+  sendJson(res, 200, result);
+});
+
+addRoute("GET", "/api/skills/:name", async (_req, res, params) => {
+  const skill = loadSkillDefinition(params.name);
+  if (!skill) {
+    sendJson(res, 404, { error: "Skill not found" });
+    return;
+  }
+  sendJson(res, 200, skill);
+});
+
+addRoute("POST", "/api/skills", async (req, res) => {
+  const body = (await parseBody(req)) as { name?: string; content?: string };
+  if (!body.name || !body.content) {
+    sendJson(res, 400, { error: "name and content are required" });
+    return;
+  }
+  if (loadSkillDefinition(body.name)) {
+    sendJson(res, 409, { error: `Skill "${body.name}" already exists` });
+    return;
+  }
+  const skill = saveSkillDefinition(body.name, body.content);
+  sendJson(res, 200, skill);
+});
+
+addRoute("PUT", "/api/skills/:name", async (req, res, params) => {
+  const body = (await parseBody(req)) as { content?: string };
+  if (!body.content) {
+    sendJson(res, 400, { error: "content is required" });
+    return;
+  }
+  const skill = saveSkillDefinition(params.name, body.content);
+  sendJson(res, 200, skill);
+});
+
+addRoute("DELETE", "/api/skills/:name", async (_req, res, params) => {
+  const deleted = deleteSkillDefinition(params.name);
+  if (!deleted) {
+    sendJson(res, 404, { error: "Skill not found" });
+    return;
+  }
+
+  // Auto-unbind: remove this skill from all agents that reference it
+  try {
+    const agents = loadAgentDefinitions();
+    for (const agent of agents) {
+      if (agent.skills?.includes(params.name)) {
+        const agentPath = join(getAgentsDir(), `${agent.name}.md`);
+        const raw = readFileSync(agentPath, "utf-8");
+        const { meta, body } = parseFrontmatter(raw);
+        const skills = Array.isArray(meta.skills) ? (meta.skills as string[]).filter((s) => s !== params.name) : [];
+        meta.skills = skills;
+        const { stringify } = await import("yaml");
+        const newContent = `---\n${stringify(meta).trim()}\n---\n\n${body}`;
+        saveAgentDefinition(agent.name, newContent);
+      }
+    }
+  } catch (err) {
+    logger.error("api", "failed to auto-unbind skill", { error: String(err) });
+  }
+
+  sendJson(res, 200, { ok: true });
+});
+
+// ── Member CRUD ──
+
+addRoute("GET", "/api/members", async (_req, res) => {
+  sendJson(res, 200, loadMembers());
+});
+
+addRoute("GET", "/api/members/:id", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  sendJson(res, 200, member);
+});
+
+addRoute("POST", "/api/members", async (req, res) => {
+  const body = (await parseBody(req)) as any;
+  if (!body.name || !body.runtime) {
+    sendJson(res, 400, { error: "name and runtime are required" });
+    return;
+  }
+  const member = saveMember({
+    name: body.name,
+    agent: body.agent || "",
+    model: body.model || "sonnet",
+    runtime: body.runtime,
+    thinkingLevel: body.thinkingLevel || "off",
+    avatar: body.avatar,
+    contextLimit: body.contextLimit,
+  });
+  sendJson(res, 200, member);
+});
+
+addRoute("PUT", "/api/members/:id", async (req, res, params) => {
+  const existing = getMember(params.id);
+  if (!existing) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const body = (await parseBody(req)) as any;
+  const member = saveMember({
+    id: params.id,
+    name: body.name ?? existing.name,
+    agent: body.agent ?? existing.agent,
+    model: body.model ?? existing.model,
+    runtime: body.runtime ?? existing.runtime,
+    thinkingLevel: body.thinkingLevel ?? existing.thinkingLevel,
+    avatar: body.avatar ?? existing.avatar,
+    contextLimit: body.contextLimit ?? existing.contextLimit,
+  });
+  sendJson(res, 200, member);
+});
+
+addRoute("DELETE", "/api/members/:id", async (_req, res, params) => {
+  if (!deleteMember(params.id)) { sendJson(res, 404, { error: "Member not found" }); return; }
+  sendJson(res, 200, { ok: true });
+});
+
+addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const instances = getMemberInstances(member.name);
+  sendJson(res, 200, { instances });
+});
+
+addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const roomId = url.searchParams.get("roomId");
+  const member = getMember(params.id);
+  if (!member || !roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
+  destroyInstance(roomId, member.name);
+  sessionStore.saveSession(roomId, member.name, { runtime: member.runtime });
+  sendJson(res, 200, { ok: true, message: "Instance destroyed. Will restart on next activation." });
+});

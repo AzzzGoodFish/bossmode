@@ -20,7 +20,7 @@ function hashPassword(password: string): string {
 const testPasswordHash = hashPassword(TEST_PASSWORD);
 
 export function setupConfigMock(): void {
-  vi.mock("../../src/store/config.js", () => ({
+  vi.mock("../../src/shared/config.js", () => ({
     readConfig: () => ({
       auth: { username: TEST_USERNAME, passwordHash: testPasswordHash },
       apiKeys: {},
@@ -101,16 +101,23 @@ export interface TestServer {
 }
 
 export async function createTestServer(): Promise<TestServer> {
-  const { handleApiRequest } = await import("../../src/server/api.js");
-  const { createWebSocketServer } = await import("../../src/server/ws.js");
-  const { initAgentManager } = await import("../../src/core/agent-manager.js");
-  const { RuntimeRegistry } = await import("../../src/core/runtime/registry.js");
+  const { handleApiRequest } = await import("../../src/api/index.js");
+  const { createWebSocketServer } = await import("../../src/communication/ws.js");
+  const { initAgentManager, activateAgent, activateAll } = await import("../../src/engine/agent-manager.js");
+  const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
+  const { initRouter } = await import("../../src/communication/router.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
   // Initialize mock runtime for tests
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime());
   initAgentManager(registry);
+
+  // Initialize message router — wire @mentions to engine
+  initRouter(
+    (roomId, memberName) => { activateAgent(roomId, memberName).catch(() => {}); },
+    (roomId) => { activateAll(roomId).catch(() => {}); },
+  );
 
   const port = 10000 + Math.floor(Math.random() * 50000);
   const server = http.createServer(async (req, res) => {
@@ -136,7 +143,7 @@ export async function createTestServer(): Promise<TestServer> {
 }
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
-  const { shutdownWebSocket } = await import("../../src/server/ws.js");
+  const { shutdownWebSocket } = await import("../../src/communication/ws.js");
   shutdownWebSocket();
   await new Promise<void>((resolve) => ts.server.close(() => resolve()));
 }

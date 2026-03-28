@@ -7,7 +7,7 @@ import type {
   CreateAgentOpts,
   RuntimeCapabilities,
   RuntimeDetectResult,
-} from "../../src/core/runtime/types.js";
+} from "../../src/engine/runtime/types.js";
 
 // Mutable mock state — tests can reassign via setMockPromptFn etc.
 export let mockPromptFn = vi.fn().mockResolvedValue(undefined);

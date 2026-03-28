@@ -1,13 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
-import { handleApiRequest } from "./api.js";
-import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
-import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates } from "../store/config.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount } from "../core/agent-manager.js";
-import { RuntimeRegistry } from "../core/runtime/registry.js";
-import { PiCliRuntime } from "../core/runtime/pi-cli.js";
-import { ClaudeCliRuntime } from "../core/runtime/claude-cli.js";
+import { handleApiRequest } from "../api/index.js";
+import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
+import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates } from "../shared/config.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
+import { initRouter } from "../communication/router.js";
+import { RuntimeRegistry } from "../engine/runtime/registry.js";
+import { PiCliRuntime } from "../engine/runtime/pi-cli.js";
+import { ClaudeCliRuntime } from "../engine/runtime/claude-cli.js";
 import { logger } from "../foundation/logger.js";
 
 const MIME_TYPES: Record<string, string> = {
@@ -45,6 +46,20 @@ export function startServer(opts: ServerOptions): Promise<void> {
   registry.register(new PiCliRuntime(undefined, opts.port));
   registry.register(new ClaudeCliRuntime(undefined, opts.port));
   initAgentManager(registry);
+
+  // Initialize communication router — wire @mentions to engine activation
+  const unsubscribeRouter = initRouter(
+    (roomId, memberName) => {
+      activateAgent(roomId, memberName).catch((err) => {
+        logger.error("router", "activate failed", { roomId, member: memberName, error: String(err) });
+      });
+    },
+    (roomId) => {
+      activateAll(roomId).catch((err) => {
+        logger.error("router", "activateAll failed", { roomId, error: String(err) });
+      });
+    },
+  );
 
   return new Promise((resolve, reject) => {
     const webDistDir = join(import.meta.dirname, "../../web/dist");
@@ -115,6 +130,7 @@ export function startServer(opts: ServerOptions): Promise<void> {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       logger.info("server", `shutdown signal: ${signal}`, { activeInstances: getActiveInstanceCount() });
+      unsubscribeRouter();
       await shutdownAgents();
       shutdownWebSocket();
       server.close(() => {

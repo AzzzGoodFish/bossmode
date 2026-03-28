@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readConfig, verifyPassword } from "../store/config.js";
+import { readConfig, verifyPassword } from "../shared/config.js";
 import type { SessionToken } from "../shared/types.js";
 
 // In-memory session store (single user, single process)

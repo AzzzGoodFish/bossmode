@@ -17,7 +17,7 @@ import {
   readPidFile,
   removePidFile,
   writeConfig,
-} from "../store/config.js";
+} from "../shared/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

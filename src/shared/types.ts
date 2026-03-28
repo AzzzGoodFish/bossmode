@@ -1,5 +1,5 @@
 // ============================================================================
-// Bossmode Shared Types
+// Bossmode Shared Types — Five Domain Architecture
 // ============================================================================
 
 // -- Config --
@@ -20,13 +20,14 @@ export interface BossmodeConfig {
 
 export interface AgentDefinition {
   name: string;
-  model: string;
   description: string;
   systemPrompt: string;
-  // v2
-  skills: string[];
   avatar?: string;
   tags: string[];
+  // Kept for backward compatibility — new agents may omit these.
+  // Member config takes precedence when present.
+  model?: string;
+  skills?: string[];
 }
 
 // -- Skill Definition --
@@ -37,6 +38,45 @@ export interface SkillDefinition {
   tags: string[];
   content: string;
   source?: string; // directory this skill was loaded from
+}
+
+// -- Member --
+
+export interface MemberBase {
+  id: string;
+  name: string;
+  type: "human" | "agent";
+  avatar?: string;
+}
+
+export interface AgentMemberConfig extends MemberBase {
+  type: "agent";
+  agent: string;             // references agent definition name
+  model: string;
+  runtime: "pi-cli" | "claude-cli";
+  skills?: string[];         // override agent's default skills
+  thinkingLevel: string;
+  contextLimit?: number;     // max messages per activation (default 50)
+}
+
+export interface HumanMemberConfig extends MemberBase {
+  type: "human";
+}
+
+export type MemberConfig = AgentMemberConfig | HumanMemberConfig;
+
+// Backward-compatible type for legacy members.json without type field
+export interface LegacyMemberConfig {
+  id: string;
+  name: string;
+  agent: string;
+  model: string;
+  runtime: "pi-cli" | "claude-cli";
+  thinkingLevel: string;
+  avatar?: string;
+  contextLimit?: number;
+  type?: "agent";
+  skills?: string[];
 }
 
 // -- Knowledge --
@@ -74,7 +114,7 @@ export interface Room {
 
 export interface RoomMessage {
   id: string;
-  sender: string; // "user" or agent name
+  sender: string; // member name or "user" (legacy) or "system"
   content: string;
   mentions: string[];
   ts: number;
@@ -87,7 +127,7 @@ export type AgentStatus = "inactive" | "idle" | "working";
 export interface AgentStatusInfo {
   name: string;
   status: AgentStatus;
-  roomId: string | null; // which room the agent is active in
+  roomId: string | null;
 }
 
 // -- Cursors --
@@ -129,4 +169,12 @@ export interface ApiError {
 export interface SessionToken {
   token: string;
   expiresAt: number;
+}
+
+// -- Agent Session (persisted) --
+
+export interface AgentSession {
+  runtime: string;
+  sessionId?: string;
+  sessionFile?: string;
 }

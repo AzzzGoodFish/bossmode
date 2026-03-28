@@ -1,113 +1,23 @@
-// Agent Manager — agent lifecycle, per (room, member) instances
-// Uses RuntimeRegistry to select CLI runtime per member
-import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
+// Agent Manager — agent lifecycle management (slimmed down)
+// Prompt assembly → engine/prompt-assembler.ts
+// Event handling → engine/event-handler.ts
+// Tool callbacks → engine/tools.ts
+
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
-import { loadAgentDefinition } from "../store/agent-defs.js";
-import { getMemberByName } from "../store/member-store.js";
-import { resolveApiKey, getBossmodeDir } from "../store/config.js";
-import * as roomStore from "../store/room-store.js";
-import * as knowledgeStore from "../store/knowledge-store.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../server/ws.js";
+import { loadAgentDefinition } from "../workforce/agent-store.js";
+import { getMemberByName } from "../workforce/member-store.js";
+import { getBossmodeDir } from "../shared/config.js";
+import * as roomStore from "../workspace/room-store.js";
+import * as sessionStore from "../workspace/session-store.js";
+import * as knowledgeStore from "../knowledge/store.js";
+import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
+import { buildAgentPrompt } from "./prompt-assembler.js";
+import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, MemberConfig } from "./runtime/types.js";
-import type { AgentDefinition, AgentStatus, RoomMessage, KnowledgeEntry } from "../shared/types.js";
-
-// -- Event persistence (JSONL) --
-
-function agentEventsDir(roomId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "agent-events");
-}
-
-function agentEventsPath(roomId: string, agentName: string): string {
-  return join(agentEventsDir(roomId), `${agentName}.jsonl`);
-}
-
-function appendEventToDisk(roomId: string, agentName: string, event: AgentStreamEvent | { type: "user_steer"; text: string }): void {
-  const dir = agentEventsDir(roomId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  // Add timestamp to persisted events
-  const withTs = { ...event, ts: Date.now() };
-  appendFileSync(agentEventsPath(roomId, agentName), JSON.stringify(withTs) + "\n", "utf-8");
-}
-
-function loadEventsFromDisk(roomId: string, agentName: string): AgentStreamEvent[] {
-  const path = agentEventsPath(roomId, agentName);
-  if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return [];
-  return content.split("\n").map((line) => JSON.parse(line));
-}
-
-// -- System Prompt Assembly (5-layer) --
-
-// Build agent-only prompt: Layer 1 (agent def) + Layer 4 (knowledge) + Layer 5 (env)
-// Skills and team prompt are passed separately via CreateAgentOpts — each runtime
-// decides how to deliver them (pi-cli: --skill + --append-system-prompt; claude-cli: inline)
-function buildAgentPrompt(
-  agentDef: AgentDefinition,
-  knowledgeEntries: KnowledgeEntry[],
-  roomMembers: string[],
-  memberName?: string,
-): string {
-  const parts: string[] = [];
-
-  // Layer 1: Agent definition
-  parts.push(agentDef.systemPrompt);
-
-  // Layer 4: Knowledge
-  if (knowledgeEntries.length > 0) {
-    parts.push("---\n\n# Project Knowledge\n");
-    for (const entry of knowledgeEntries) {
-      parts.push(`## ${entry.title}\n\n${entry.content}\n`);
-    }
-  }
-
-  // Layer 5: Environment — use memberName as identity, agentDef.name as role
-  const identity = memberName || agentDef.name;
-  const role = memberName && memberName !== agentDef.name ? agentDef.name : undefined;
-  parts.push(buildEnvironmentPrompt(identity, role, roomMembers));
-
-  const fullPrompt = parts.join("\n");
-  const agentChars = agentDef.systemPrompt.length;
-  const knowledgeChars = knowledgeEntries.reduce((n, e) => n + e.content.length + e.title.length, 0);
-  const envChars = fullPrompt.length - agentChars - knowledgeChars;
-  logger.info("agent", "assemblePrompt", {
-    member: identity, agent: agentDef.name,
-    layers: { agent: agentChars, knowledge: knowledgeChars, env: envChars },
-    totalTokens: `~${Math.round(fullPrompt.length / 4)}`,
-  });
-
-  return fullPrompt;
-}
-
-function buildEnvironmentPrompt(memberName: string, role: string | undefined, roomMembers: string[]): string {
-  const memberList = roomMembers.join(", ");
-  const identity = role ? `"${memberName}" (role: ${role})` : `"${memberName}"`;
-  return `
----
-
-## Environment
-
-You are ${identity} in a Bossmode group chat room.
-Room members: ${memberList}
-
-## Available Tools
-
-- **chat** — Post a message.
-  - \`target: "room"\` (default): visible to everyone in the group chat. **Use this for all normal responses.**
-  - \`target: "user"\`: private reply, only the user sees it. **Only use this when responding to [Private instruction from user] messages.**
-  - \`mentions\`: optional array of agent names to @activate
-- **query_room_messages** — Read recent group chat messages
-- **save_knowledge** / **query_knowledge** — Read/write project knowledge base
-
-## Communication Rules
-
-- When activated by an @ mention in the group chat, **always reply with \`target: "room"\`**. Your response should be visible to everyone.
-- When you receive a message prefixed with \`[Private instruction from user]\`, reply with \`target: "user"\`. This is a private conversation — do not share it in the group chat.
-- Your direct text responses are NOT visible anywhere — only chat tool calls are. Always use the chat tool to communicate.
-`;
-}
+import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
+import type { AgentStatus, RoomMessage } from "../shared/types.js";
 
 // -- Registry injection --
 
@@ -150,6 +60,11 @@ function formatMessagesForAgent(messages: RoomMessage[]): string {
     .join("\n\n");
 }
 
+// Resolve skills: member config > agent definition > empty
+function resolveSkills(member: AgentMemberConfig, agentDef: { skills?: string[] }): string[] {
+  return member.skills ?? agentDef.skills ?? [];
+}
+
 // -- Instance creation --
 
 async function getOrCreate(roomId: string, memberName: string): Promise<AgentInstance | null> {
@@ -164,7 +79,6 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
 
   logger.info("agent", "getOrCreate", { member: memberName, roomId, found: false });
 
-  // Load room
   const room = roomStore.getRoom(roomId);
   if (!room) {
     logger.error("agent", "room not found", { roomId });
@@ -174,7 +88,6 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
   // Find member config — try by name, fall back to auto-create from same-name agent
   let member = getMemberByName(memberName);
   if (!member) {
-    // Auto-create: check if there's an agent definition with this name
     const agentDef = loadAgentDefinition(memberName);
     if (!agentDef) {
       logger.error("agent", "no member or agent definition found", { name: memberName });
@@ -183,35 +96,33 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
     member = {
       id: memberName,
       name: memberName,
-      agent: memberName,        // same as agent name
-      model: agentDef.model,
+      type: "agent",
+      agent: memberName,
+      model: agentDef.model || "claude-sonnet-4-6",
       runtime: "pi-cli",
       thinkingLevel: "off",
       avatar: agentDef.avatar,
     };
-    logger.info("agent", "loadMember", { member: memberName, source: "auto-default", agent: memberName, runtime: "pi-cli", model: agentDef.model });
+    logger.info("agent", "loadMember", { member: memberName, source: "auto-default", agent: memberName, runtime: "pi-cli", model: member.model });
   } else {
     logger.info("agent", "loadMember", { member: memberName, source: "members.json", agent: member.agent, runtime: member.runtime, model: member.model });
   }
 
-  // Load agent definition via member.agent
   const agentDef = loadAgentDefinition(member.agent);
   if (!agentDef) {
     logger.error("agent", "agent definition not found", { member: memberName, agent: member.agent });
     return null;
   }
 
-  // Get runtime
   const runtime = registry.get(member.runtime);
   if (!runtime) {
     logger.error("agent", "runtime not found", { member: memberName, runtime: member.runtime });
     return null;
   }
 
-  // Load knowledge entries + rules
+  // Load knowledge + rules
   const knowledgeEntries = room.knowledgeBaseId ? knowledgeStore.listEntries(room.knowledgeBaseId, { type: "knowledge" }) : [];
 
-  // Build rules prompt from selected rule entries
   let rulesPrompt: string | undefined;
   if (room.knowledgeBaseId && room.ruleIds?.length) {
     const rules = room.ruleIds
@@ -222,14 +133,14 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
     }
   }
 
-  // Build agent-only prompt — use memberName as identity, agentDef.name as role
   const agentPrompt = buildAgentPrompt(agentDef, knowledgeEntries, room.members, memberName);
 
-  // Skill paths from agent definition
-  const skillPaths = agentDef.skills.map((s) => join(getBossmodeDir(), "skills", s));
+  // Resolve skills: member config takes precedence over agent definition
+  const skills = resolveSkills(member, agentDef);
+  const skillPaths = skills.map((s) => join(getBossmodeDir(), "skills", s));
 
-  // Session resume lookup (keyed by memberName)
-  const sessions = roomStore.getSessions(roomId);
+  // Session resume
+  const sessions = sessionStore.getSessions(roomId);
   const savedSession = sessions[memberName];
   const resumeSession = savedSession
     ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
@@ -249,7 +160,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       roomMembers: room.members,
       resumeSession,
       onSessionCreated: (session) => {
-        roomStore.saveSession(roomId, memberName, {
+        sessionStore.saveSession(roomId, memberName, {
           runtime: member.runtime,
           sessionId: session.sessionId,
           sessionFile: session.sessionFile,
@@ -258,12 +169,10 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       },
       callbacks: {
         onChat: async (message: string) => {
-          const msg = roomStore.addMessage(roomId, { sender: memberName, content: message, mentions: [] });
-          broadcastToRoom(roomId, { type: "room:message", roomId, message: msg });
+          postMessage(roomId, memberName, message);
         },
         onMention: async (targetMember: string, message: string) => {
-          const msg = roomStore.addMessage(roomId, { sender: memberName, content: message, mentions: [targetMember] });
-          broadcastToRoom(roomId, { type: "room:message", roomId, message: msg });
+          postMessage(roomId, memberName, message, [targetMember]);
           activateAgent(roomId, targetMember).catch((err) => {
             logger.error("agent", "mention activate failed", { target: targetMember, roomId, error: String(err) });
           });
@@ -284,99 +193,27 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
 
     logger.info("agent", "agentCreated", { member: memberName, agent: member.agent, runtime: member.runtime, roomId });
 
-    const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-      handleAgentEvent(roomId, memberName, event);
-    });
-
     const instance: AgentInstance = {
       handle,
       roomId,
       agentName: memberName,
       status: "idle",
-      unsubscribe,
+      unsubscribe: () => {},
       eventBuffer: [],
     };
+
+    const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
+      const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer);
+      if (newStatus) instance.status = newStatus;
+    });
+    instance.unsubscribe = unsubscribe;
 
     instances.set(key, instance);
     return instance;
   } catch (err: any) {
     logger.error("agent", `failed to create agent`, { member: memberName, agent: member.agent, runtime: member.runtime, error: err.message || String(err) });
-    const errorMsg = roomStore.addMessage(roomId, {
-      sender: "system",
-      content: `Failed to create member "${memberName}" (${member.runtime}): ${err.message || String(err)}`,
-      mentions: [],
-    });
-    broadcastToRoom(roomId, { type: "room:message", roomId, message: errorMsg });
+    postMessage(roomId, "system", `Failed to create member "${memberName}" (${member.runtime}): ${err.message || String(err)}`);
     return null;
-  }
-}
-
-// -- Event handling --
-
-// Accumulate streaming text/thinking so message_end has complete content for persistence
-const streamState = new Map<string, { text: string; thinking: string }>();
-
-function handleAgentEvent(roomId: string, agentName: string, event: AgentStreamEvent): void {
-  const key = instanceKey(roomId, agentName);
-
-  // Log significant events (skip noisy message_update/tool_update)
-  if (event.type === "agent_start" || event.type === "agent_end") {
-    logger.info("runtime", "event", { agent: agentName, type: event.type });
-  } else if (event.type === "tool_start") {
-    logger.info("runtime", "event", { agent: agentName, type: "tool_start", tool: event.toolName });
-  } else if (event.type === "tool_end") {
-    logger.info("runtime", "event", { agent: agentName, type: "tool_end", tool: event.toolName, isError: !!(event as any).isError });
-  }
-
-  // Accumulate text/thinking from message_update
-  if (event.type === "message_update") {
-    const state = streamState.get(key) || { text: "", thinking: "" };
-    if ("text" in event && event.text) state.text += event.text;
-    if ("thinking" in event && event.thinking) state.thinking += event.thinking;
-    streamState.set(key, state);
-  }
-
-  // message_start: clear accumulator
-  if (event.type === "message_start") {
-    streamState.delete(key);
-  }
-
-  // message_end: enrich with accumulated content
-  if (event.type === "message_end") {
-    const state = streamState.get(key);
-    if (state) {
-      if (!event.text && state.text) {
-        (event as any).text = state.text;
-      }
-      if (state.thinking) {
-        (event as any).thinking = state.thinking;
-      }
-      streamState.delete(key);
-    }
-  }
-
-  // Persist non-streaming events to disk (message_end now has complete content)
-  if (event.type !== "message_update" && event.type !== "tool_update") {
-    const instance = instances.get(key);
-    if (instance) instance.eventBuffer.push(event);
-    try { appendEventToDisk(roomId, agentName, event); } catch {}
-  }
-
-  // WebSocket push — always forward all events including message_update for live streaming
-  broadcastToAgentSubscribers(roomId, agentName, {
-    type: "agent:event",
-    roomId,
-    agent: agentName,
-    event,
-  });
-
-  if (event.type === "agent_end") {
-    const instance = instances.get(key);
-    if (instance) {
-      instance.status = "idle";
-      logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
-      broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
-    }
   }
 }
 
@@ -387,25 +224,20 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   const instance = await getOrCreate(roomId, memberName);
   if (!instance) {
-    const errorMsg = roomStore.addMessage(roomId, {
-      sender: "system",
-      content: `Failed to activate member "${memberName}": not found or runtime unavailable.`,
-      mentions: [],
-    });
-    broadcastToRoom(roomId, { type: "room:message", roomId, message: errorMsg });
+    postMessage(roomId, "system", `Failed to activate member "${memberName}": not found or runtime unavailable.`);
     return;
   }
 
   const cursors = roomStore.getCursors(roomId);
   const lastCursor = cursors[memberName] ?? null;
-  const allNewMessages = roomStore.getMessagesSince(roomId, lastCursor);
-  const latestId = roomStore.getLatestMessageId(roomId);
+  const allNewMessages = getMessagesSince(roomId, lastCursor);
+  const latestId = getLatestMessageId(roomId);
   if (latestId) roomStore.updateCursor(roomId, memberName, latestId);
   if (allNewMessages.length === 0) return;
 
-  // Context limit: cap incremental messages
+  // Context limit
   const member = getMemberByName(memberName);
-  const contextLimit = member?.contextLimit || 50;
+  const contextLimit = (member as any)?.contextLimit || 50;
   const newMessages = allNewMessages.length > contextLimit
     ? allNewMessages.slice(-contextLimit)
     : allNewMessages;
@@ -426,12 +258,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
       await instance.handle.prompt(formattedMessages);
     } catch (err: any) {
       logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
-      const errorMsg = roomStore.addMessage(roomId, {
-        sender: "system",
-        content: `Member "${memberName}" error: ${err.message || String(err)}`,
-        mentions: [],
-      });
-      broadcastToRoom(roomId, { type: "room:message", roomId, message: errorMsg });
+      postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
       instance.status = "idle";
       broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "idle" });
     }
@@ -471,7 +298,6 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
 // -- Event history --
 
 export function getAgentEventHistory(roomId: string, agentName: string): AgentStreamEvent[] {
-  // Always read from disk — disk has complete history across sessions
   return loadEventsFromDisk(roomId, agentName);
 }
 
@@ -479,7 +305,6 @@ export function getAgentEventHistory(roomId: string, agentName: string): AgentSt
 
 export function emitAgentReply(roomId: string, agentName: string, text: string): void {
   const event = { type: "agent_reply" as any, text };
-  // Add to in-memory buffer so getAgentEventHistory includes it
   const key = instanceKey(roomId, agentName);
   const instance = instances.get(key);
   if (instance) instance.eventBuffer.push(event);

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2, Pencil, X } from "lucide-react";
 import { getSkill, updateSkill, deleteSkill, createSkill } from "../api/client";
 import { Markdown } from "../components/Markdown";
+import { useDialog } from "../components/dialogs";
 
 interface SkillDetailPageProps {
   name: string;
@@ -13,6 +14,7 @@ interface SkillDetailPageProps {
 const editBtnCls = "px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer transition-colors";
 
 export function SkillDetailPage({ name, onBack, isCreate, onCreated }: SkillDetailPageProps) {
+  const { toast, confirm } = useDialog();
   const [skillName, setSkillName] = useState(name);
   const [skillData, setSkillData] = useState<any>(null);
   const [content, setContent] = useState(isCreate ? "---\nname: \"\"\ndescription: \"\"\n---\n\n" : "");
@@ -30,7 +32,7 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated }: SkillDeta
         setContent(raw);
         setOriginalContent(raw);
       })
-      .catch((err) => alert(`Failed to load: ${err.message}`))
+      .catch((err) => toast(`Failed to load: ${err.message}`, "error"))
       .finally(() => setLoading(false));
   };
 
@@ -42,7 +44,7 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated }: SkillDeta
     setSaveState("saving");
     try {
       if (isCreate) {
-        if (!skillName) { alert("Name is required"); setSaveState("idle"); return; }
+        if (!skillName) { toast("Name is required", "error"); setSaveState("idle"); return; }
         await createSkill(skillName, content);
         onCreated?.(skillName);
       } else {
@@ -54,16 +56,16 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated }: SkillDeta
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) return;
+    if (!(await confirm(`Delete skill "${name}"? This cannot be undone.`))) return;
     try { await deleteSkill(name); onBack(); }
-    catch (err: any) { alert(`Delete failed: ${err.message}`); }
+    catch (err: any) { toast(`Delete failed: ${err.message}`, "error"); }
   };
 
   const handleCancel = () => {

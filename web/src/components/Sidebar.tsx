@@ -4,6 +4,7 @@ import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeBaseInfo } from "
 import { getRooms, getAgents, getMembers, getSkills, getKnowledgeBases } from "../api/client";
 import { SidebarSection, type SidebarItem } from "./SidebarSection";
 import { RoomMenu } from "./RoomMenu";
+import { useDialog } from "./dialogs";
 
 export type ActivePage =
   | { type: "room"; id: string }
@@ -23,6 +24,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey }: SidebarProps) {
+  const { toast, confirm, prompt } = useDialog();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
@@ -107,22 +109,22 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
             renderMenu={(id) => (
               <RoomMenu
                 onRename={async () => {
-                  const newName = prompt("New room name:");
+                  const newName = await prompt("New room name:");
                   if (!newName) return;
                   try {
                     const { renameRoom } = await import("../api/client");
                     await renameRoom(id, newName);
                     refresh();
-                  } catch (err: any) { alert(err.message); }
+                  } catch (err: any) { toast(err.message, "error"); }
                 }}
                 onDelete={async () => {
-                  if (!confirm("Delete this room?")) return;
+                  if (!(await confirm("Delete this room?"))) return;
                   try {
                     const { deleteRoom } = await import("../api/client");
                     await deleteRoom(id);
                     refresh();
                     if (selectedRoomId === id) onNavigate(null);
-                  } catch (err: any) { alert(err.message); }
+                  } catch (err: any) { toast(err.message, "error"); }
                 }}
               />
             )}

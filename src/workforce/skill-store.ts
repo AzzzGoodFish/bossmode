@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { getBossmodeDir } from "./config.js";
-import { parseFrontmatter, asStringArray, asString } from "./frontmatter.js";
+import { getBossmodeDir } from "../shared/config.js";
+import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
 import type { SkillDefinition } from "../shared/types.js";
 
 const PRIMARY_SKILLS_DIR = join(getBossmodeDir(), "skills");
@@ -61,7 +61,6 @@ export function loadSkillDefinitions(): SkillDefinition[] {
   const seen = new Set<string>();
   const all: SkillDefinition[] = [];
 
-  // Scan in priority order — first dir wins on name conflict
   for (const dir of SKILL_DIRS) {
     for (const skill of scanDir(dir)) {
       if (!seen.has(skill.name)) {
@@ -75,7 +74,6 @@ export function loadSkillDefinitions(): SkillDefinition[] {
 }
 
 export function loadSkillDefinition(name: string): SkillDefinition | null {
-  // Search in priority order
   for (const dir of SKILL_DIRS) {
     const skillFile = join(dir, name, "SKILL.md");
     if (!existsSync(skillFile)) continue;

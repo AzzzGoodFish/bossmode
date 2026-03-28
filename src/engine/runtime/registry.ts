@@ -1,5 +1,5 @@
 // Runtime Registry — loads enabled runtimes from config
-import type { AgentRuntime, RuntimesConfig, RuntimeDetectResult } from "./types.js";
+import type { AgentRuntime, RuntimesConfig } from "./types.js";
 import { logger } from "../../foundation/logger.js";
 
 export class RuntimeRegistry {
@@ -43,3 +43,4 @@ export class RuntimeRegistry {
     return result;
   }
 }
+

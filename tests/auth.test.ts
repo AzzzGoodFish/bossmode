@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock config module for auth tests
-vi.mock("../src/store/config.js", () => {
+vi.mock("../src/shared/config.js", () => {
   const hashPassword = (password: string) => {
     const { createHash, randomBytes } = require("node:crypto");
     const salt = randomBytes(16).toString("hex");
@@ -31,13 +31,13 @@ vi.mock("../src/store/config.js", () => {
 });
 
 describe("auth", () => {
-  let login: typeof import("../src/server/auth.js").login;
-  let validateToken: typeof import("../src/server/auth.js").validateToken;
-  let extractToken: typeof import("../src/server/auth.js").extractToken;
-  let requireAuth: typeof import("../src/server/auth.js").requireAuth;
+  let login: typeof import("../src/api/auth.js").login;
+  let validateToken: typeof import("../src/api/auth.js").validateToken;
+  let extractToken: typeof import("../src/api/auth.js").extractToken;
+  let requireAuth: typeof import("../src/api/auth.js").requireAuth;
 
   beforeEach(async () => {
-    const mod = await import("../src/server/auth.js");
+    const mod = await import("../src/api/auth.js");
     login = mod.login;
     validateToken = mod.validateToken;
     extractToken = mod.extractToken;
