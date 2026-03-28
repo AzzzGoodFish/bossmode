@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bossmode — UI Prototype</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontSize: { '2xs': ['10px', '14px'] },
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  .dark ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+  /* Transitions */
+  .section-items { overflow: hidden; transition: max-height 0.2s ease-out; }
+  .section-items.collapsed { max-height: 0 !important; }
+  /* Smooth theme transition */
+  html { transition: background-color 0.2s; }
+  body, .sidebar, .main-area, input, select, textarea, button, div { transition: background-color 0.15s, border-color 0.15s, color 0.15s; }
+</style>
+</head>
+
+<body class="h-screen overflow-hidden dark:bg-zinc-950 bg-zinc-50 dark:text-white text-zinc-900">
+
+<div id="app" class="h-screen flex">
+
+  <!-- ============================================================ -->
+  <!-- SIDEBAR -->
+  <!-- ============================================================ -->
+  <aside class="sidebar w-56 shrink-0 flex flex-col border-r
+                dark:bg-zinc-950 dark:border-zinc-800
+                bg-white border-zinc-200">
+
+    <!-- Logo -->
+    <div class="h-12 flex items-center px-4 border-b dark:border-zinc-800 border-zinc-200 shrink-0">
+      <span class="font-bold text-sm dark:text-white text-zinc-900 tracking-tight">Bossmode</span>
+    </div>
+
+    <!-- Scrollable sections -->
+    <div class="flex-1 overflow-y-auto min-h-0 py-1">
+
+      <!-- === ROOMS === -->
+      <div class="sidebar-section" data-section="rooms" data-default-open="true">
+        <button onclick="toggleSection('rooms')" class="section-header w-full flex items-center justify-between px-3 py-2 cursor-pointer
+                        hover:dark:bg-zinc-900/50 hover:bg-zinc-100 transition-colors">
+          <div class="flex items-center gap-2">
+            <svg class="section-chevron w-3 h-3 dark:text-zinc-600 text-zinc-400 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="text-2xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider">Rooms</span>
+          </div>
+          <span onclick="event.stopPropagation(); selectItem('room-create')" class="dark:text-zinc-600 dark:hover:text-white text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+        </button>
+        <div class="section-items">
+          <div class="pb-1">
+            <!-- Room items -->
+            <div onclick="selectItem('room-bossmode')" data-item="room-bossmode" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-sm dark:text-zinc-600 text-zinc-400">#</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">bossmode dev</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">llm/bossmode</div>
+              </div>
+            </div>
+            <div onclick="selectItem('room-webapp')" data-item="room-webapp" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-sm dark:text-zinc-600 text-zinc-400">#</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">webapp redesign</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">projects/webapp</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- === MEMBERS === -->
+      <div class="sidebar-section" data-section="members" data-default-open="true">
+        <button onclick="toggleSection('members')" class="section-header w-full flex items-center justify-between px-3 py-2 cursor-pointer
+                        hover:dark:bg-zinc-900/50 hover:bg-zinc-100 transition-colors
+                        border-t dark:border-zinc-800 border-zinc-200 mt-1 pt-2">
+          <div class="flex items-center gap-2">
+            <svg class="section-chevron w-3 h-3 dark:text-zinc-600 text-zinc-400 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span class="text-2xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider">Members</span>
+          </div>
+          <span onclick="event.stopPropagation(); selectItem('member-create')" class="dark:text-zinc-600 dark:hover:text-white text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+        </button>
+        <div class="section-items">
+          <div class="pb-1">
+            <div onclick="selectItem('member-pm')" data-item="member-pm" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">📋</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">pm</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">pi-cli · sonnet</div>
+              </div>
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Active in room"></span>
+            </div>
+            <div onclick="selectItem('member-architect')" data-item="member-architect" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">🏗️</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">architect</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">pi-cli · sonnet</div>
+              </div>
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Active in room"></span>
+            </div>
+            <div onclick="selectItem('member-developer')" data-item="member-developer" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">💻</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">developer</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">claude-cli · opus</div>
+              </div>
+            </div>
+            <div onclick="selectItem('member-qa')" data-item="member-qa" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">🧪</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">qa</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">pi-cli · sonnet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- === AGENTS === -->
+      <div class="sidebar-section" data-section="agents" data-default-open="false">
+        <button onclick="toggleSection('agents')" class="section-header w-full flex items-center justify-between px-3 py-2 cursor-pointer
+                        hover:dark:bg-zinc-900/50 hover:bg-zinc-100 transition-colors
+                        border-t dark:border-zinc-800 border-zinc-200 mt-1 pt-2">
+          <div class="flex items-center gap-2">
+            <svg class="section-chevron w-3 h-3 dark:text-zinc-600 text-zinc-400 transition-transform -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span class="text-2xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider">Agents</span>
+            <span class="text-2xs dark:text-zinc-700 text-zinc-400">4</span>
+          </div>
+          <span onclick="event.stopPropagation()" class="dark:text-zinc-600 dark:hover:text-white text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+        </button>
+        <div class="section-items collapsed">
+          <div class="pb-1">
+            <div onclick="selectItem('agent-pm')" data-item="agent-pm" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">📋</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">pm</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">需求、优先级、协调</div>
+              </div>
+            </div>
+            <div onclick="selectItem('agent-architect')" data-item="agent-architect" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">🏗️</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">architect</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">系统设计、技术决策</div>
+              </div>
+            </div>
+            <div onclick="selectItem('agent-developer')" data-item="agent-developer" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">💻</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">developer</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">代码实现、单元测试</div>
+              </div>
+            </div>
+            <div onclick="selectItem('agent-qa')" data-item="agent-qa" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 text-base">🧪</span>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">qa</div>
+                <div class="text-xs dark:text-zinc-600 text-zinc-400 truncate">测试、验收、质量</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- === SKILLS === -->
+      <div class="sidebar-section" data-section="skills" data-default-open="false">
+        <button onclick="toggleSection('skills')" class="section-header w-full flex items-center justify-between px-3 py-2 cursor-pointer
+                        hover:dark:bg-zinc-900/50 hover:bg-zinc-100 transition-colors
+                        border-t dark:border-zinc-800 border-zinc-200 mt-1 pt-2">
+          <div class="flex items-center gap-2">
+            <svg class="section-chevron w-3 h-3 dark:text-zinc-600 text-zinc-400 transition-transform -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span class="text-2xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider">Skills</span>
+            <span class="text-2xs dark:text-zinc-700 text-zinc-400">6</span>
+          </div>
+          <span onclick="event.stopPropagation()" class="dark:text-zinc-600 dark:hover:text-white text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+        </button>
+        <div class="section-items collapsed">
+          <div class="pb-1">
+            <div onclick="selectItem('skill-codebase')" data-item="skill-codebase" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">codebase-mapping</div>
+            </div>
+            <div onclick="selectItem('skill-impl')" data-item="skill-impl" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">implementation-planning</div>
+            </div>
+            <div onclick="selectItem('skill-req')" data-item="skill-req" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">requirement-clarification</div>
+            </div>
+            <div onclick="selectItem('skill-test')" data-item="skill-test" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">test-plan-design</div>
+            </div>
+            <div onclick="selectItem('skill-arch')" data-item="skill-arch" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">architecture-review</div>
+            </div>
+            <div onclick="selectItem('skill-selfv')" data-item="skill-selfv" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">self-verification</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- === KNOWLEDGE === -->
+      <div class="sidebar-section" data-section="knowledge" data-default-open="false">
+        <button onclick="toggleSection('knowledge')" class="section-header w-full flex items-center justify-between px-3 py-2 cursor-pointer
+                        hover:dark:bg-zinc-900/50 hover:bg-zinc-100 transition-colors
+                        border-t dark:border-zinc-800 border-zinc-200 mt-1 pt-2">
+          <div class="flex items-center gap-2">
+            <svg class="section-chevron w-3 h-3 dark:text-zinc-600 text-zinc-400 transition-transform -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span class="text-2xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider">Knowledge</span>
+            <span class="text-2xs dark:text-zinc-700 text-zinc-400">3</span>
+          </div>
+          <span onclick="event.stopPropagation()" class="dark:text-zinc-600 dark:hover:text-white text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+        </button>
+        <div class="section-items collapsed">
+          <div class="pb-1">
+            <div onclick="selectItem('know-collab')" data-item="know-collab" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">协作规范</div>
+              <span class="text-2xs px-1.5 py-0.5 rounded dark:bg-amber-900/40 dark:text-amber-400 bg-amber-100 text-amber-700 shrink-0">rule</span>
+            </div>
+            <div onclick="selectItem('know-code')" data-item="know-code" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">编码规范</div>
+              <span class="text-2xs px-1.5 py-0.5 rounded dark:bg-amber-900/40 dark:text-amber-400 bg-amber-100 text-amber-700 shrink-0">rule</span>
+            </div>
+            <div onclick="selectItem('know-arch')" data-item="know-arch" class="sidebar-item group w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors
+                          dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                          text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              <span class="shrink-0 dark:text-zinc-600 text-zinc-400">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              </span>
+              <div class="text-sm font-medium truncate">架构设计决策</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end scrollable -->
+
+    <!-- Bottom: Settings + Theme + User -->
+    <div class="shrink-0 border-t dark:border-zinc-800 border-zinc-200">
+      <!-- Settings -->
+      <div onclick="selectItem('settings')" data-item="settings" class="sidebar-item flex items-center gap-2 px-4 py-2 cursor-pointer transition-colors
+                    dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-300
+                    text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+        <svg class="w-3.5 h-3.5 dark:text-zinc-500 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span class="text-sm">Settings</span>
+      </div>
+      <!-- User -->
+      <div class="px-3 py-2.5 flex items-center justify-between">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-6 h-6 rounded-full dark:bg-zinc-700 bg-zinc-200 flex items-center justify-center text-xs dark:text-zinc-400 text-zinc-600 shrink-0">F</div>
+          <span class="text-sm dark:text-zinc-400 text-zinc-600 truncate">fish</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <!-- Theme toggle -->
+          <button onclick="toggleTheme()" class="dark:text-zinc-600 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer p-1 rounded" title="Toggle theme">
+            <!-- Sun (shown in dark) -->
+            <svg class="w-3.5 h-3.5 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <!-- Moon (shown in light) -->
+            <svg class="w-3.5 h-3.5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <!-- Logout -->
+          <button class="dark:text-zinc-600 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer p-1 rounded" title="Sign out">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ============================================================ -->
+  <!-- MAIN AREA -->
+  <!-- ============================================================ -->
+  <main class="flex-1 flex flex-col min-w-0 min-h-0 dark:bg-zinc-900 bg-zinc-50">
+
+    <!-- ==================== PAGE: Room Chat ==================== -->
+    <div id="page-room-bossmode" class="page flex-1 flex flex-col min-h-0" style="display:none">
+      <!-- Tab bar -->
+      <div class="h-9 border-b dark:border-zinc-800 border-zinc-200 flex items-end px-2 shrink-0 gap-0.5 dark:bg-zinc-950 bg-white">
+        <button class="flex items-center gap-1 px-3 py-1.5 text-xs rounded-t dark:bg-zinc-800 dark:text-white bg-zinc-100 text-zinc-900 font-medium">
+          # bossmode dev
+        </button>
+        <button class="flex items-center gap-1 px-3 py-1.5 text-xs rounded-t dark:text-zinc-500 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+          architect
+          <span class="dark:text-zinc-600 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 ml-1">×</span>
+        </button>
+        <button class="flex items-center gap-1 px-3 py-1.5 text-xs rounded-t dark:text-zinc-500 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">
+          developer
+          <span class="dark:text-zinc-600 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 ml-1">×</span>
+        </button>
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 ml-auto mb-2.5" title="Connected"></span>
+      </div>
+      <!-- Room header -->
+      <div class="h-8 border-b dark:border-zinc-800 border-zinc-200 flex items-center justify-between px-4 shrink-0 dark:bg-zinc-950 bg-white">
+        <span class="text-xs dark:text-zinc-600 text-zinc-400 truncate">/home/fish/dev/llm/bossmode</span>
+        <div class="flex items-center gap-2 shrink-0">
+          <button class="text-xs dark:text-zinc-500 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">+ Member</button>
+          <button class="text-xs dark:text-zinc-500 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer">Archive</button>
+        </div>
+      </div>
+      <!-- Chat + member panel -->
+      <div class="flex-1 flex min-h-0">
+        <!-- Messages -->
+        <div class="flex-1 flex flex-col min-w-0">
+          <div class="flex-1 overflow-y-auto p-4 space-y-4">
+            <!-- User message — right aligned -->
+            <div class="flex justify-end">
+              <div class="max-w-[70%]">
+                <div class="flex items-center justify-end gap-2 mb-1">
+                  <span class="text-xs dark:text-zinc-500 text-zinc-400">10:32</span>
+                  <span class="text-xs font-medium dark:text-zinc-300 text-zinc-700">fish</span>
+                </div>
+                <div class="dark:bg-blue-600/20 dark:text-blue-100 bg-blue-50 text-blue-900 border dark:border-blue-500/20 border-blue-200 rounded-lg px-3 py-2 text-sm">
+                  @pm 我需要重新设计 sidebar 的交互，agent/skill/knowledge 都改成类似 room 的 sidebar 列表模式。请先看下 PRD v2 然后给我需求分析。
+                </div>
+              </div>
+            </div>
+            <!-- Agent message — left aligned -->
+            <div class="flex justify-start">
+              <div class="max-w-[70%]">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs font-medium dark:text-zinc-300 text-zinc-700">📋 pm</span>
+                  <span class="text-xs dark:text-zinc-500 text-zinc-400">10:33</span>
+                </div>
+                <div class="dark:bg-zinc-800 dark:text-zinc-300 bg-white text-zinc-700 border dark:border-zinc-700 border-zinc-200 rounded-lg px-3 py-2 text-sm">
+                  收到，fish。我先看下 PRD v2 和当前 codebase，然后梳理一下需求变更点。<br><br>
+                  初步理解你的意思：把 Agents / Skills / Knowledge 从"导航到独立页面"改成"sidebar 列出条目 → 点击在主区域编辑"，和 Chat Rooms 的交互模式统一。<br><br>
+                  让我 @architect 一起看下技术可行性。
+                </div>
+              </div>
+            </div>
+            <!-- Another agent -->
+            <div class="flex justify-start">
+              <div class="max-w-[70%]">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs font-medium dark:text-zinc-300 text-zinc-700">🏗️ architect</span>
+                  <span class="text-xs dark:text-zinc-500 text-zinc-400">10:35</span>
+                </div>
+                <div class="dark:bg-zinc-800 dark:text-zinc-300 bg-white text-zinc-700 border dark:border-zinc-700 border-zinc-200 rounded-lg px-3 py-2 text-sm">
+                  看了现有 Sidebar.tsx 和 Layout.tsx 的结构。方案可行，核心改动：
+                  <br><br>
+                  <strong>1.</strong> Sidebar 新增可折叠 section（复用 Room 的模式）<br>
+                  <strong>2.</strong> 删除 AgentsPage 卡片网格，列表移到 sidebar<br>
+                  <strong>3.</strong> 提取通用 <code class="dark:bg-zinc-700 bg-zinc-100 px-1 rounded text-xs">SidebarSection</code> 组件<br>
+                  <br>
+                  建议 Designer 出个详细的交互规范。
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Input -->
+          <div class="border-t dark:border-zinc-800 border-zinc-200 p-3 shrink-0 dark:bg-zinc-950 bg-white">
+            <div class="flex items-end gap-2">
+              <div class="flex-1 relative">
+                <textarea rows="1" placeholder="Message #bossmode dev... (@pm, @architect)" class="w-full dark:bg-zinc-800 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:placeholder:text-zinc-600 placeholder:text-zinc-400"></textarea>
+              </div>
+              <button class="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer shrink-0">Send</button>
+            </div>
+          </div>
+        </div>
+        <!-- Member panel -->
+        <div class="w-48 border-l dark:border-zinc-800 border-zinc-200 shrink-0 dark:bg-zinc-950 bg-white">
+          <div class="p-3">
+            <div class="text-xs font-semibold dark:text-zinc-500 text-zinc-400 uppercase tracking-wider mb-3">Members</div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer dark:hover:bg-zinc-800 hover:bg-zinc-100 transition-colors">
+                <span class="text-sm">📋</span>
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">pm</span>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-auto" title="Working"></span>
+              </div>
+              <div class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer dark:hover:bg-zinc-800 hover:bg-zinc-100 transition-colors">
+                <span class="text-sm">🏗️</span>
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">architect</span>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-auto"></span>
+              </div>
+              <div class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer dark:hover:bg-zinc-800 hover:bg-zinc-100 transition-colors">
+                <span class="text-sm">💻</span>
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">developer</span>
+              </div>
+              <div class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer dark:hover:bg-zinc-800 hover:bg-zinc-100 transition-colors">
+                <span class="text-sm">🧪</span>
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">qa</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: Member Detail ==================== -->
+    <div id="page-member-architect" class="page flex-1 flex flex-col min-h-0 overflow-y-auto" style="display:none">
+      <div class="p-6 max-w-3xl">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🏗️</span>
+            <div>
+              <h1 class="text-lg font-bold dark:text-white text-zinc-900">architect</h1>
+              <span class="text-xs dark:text-zinc-500 text-zinc-400">Member · created 3 days ago</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="flex items-center gap-1.5 px-3 py-1.5 dark:text-red-400 dark:hover:text-red-300 text-red-500 hover:text-red-600 text-sm cursor-pointer transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Delete
+            </button>
+            <button class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save
+            </button>
+          </div>
+        </div>
+
+        <!-- Configuration section -->
+        <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5 mb-4">
+          <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider mb-4">Configuration</div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Name</label>
+              <input value="architect" class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Agent Definition</label>
+              <select class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option selected>architect — 系统设计、技术决策</option>
+                <option>pm — 需求、优先级、协调</option>
+                <option>developer — 代码实现、单元测试</option>
+                <option>qa — 测试、验收、质量</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Runtime</label>
+              <select class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option selected>pi-cli (v0.58.3)</option>
+                <option>claude-cli (v2.1.81)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Model</label>
+              <input value="sonnet" placeholder="sonnet, opus, haiku..." class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Thinking Level</label>
+              <select class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option>off</option>
+                <option>minimal</option>
+                <option>low</option>
+                <option selected>medium</option>
+                <option>high</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent Preview section -->
+        <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5 mb-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider">Agent Preview</div>
+            <button onclick="selectItem('agent-architect')" class="text-xs text-blue-500 hover:text-blue-400 cursor-pointer transition-colors">View Agent →</button>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-xl">🏗️</span>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-sm dark:text-white text-zinc-900">architect</div>
+              <div class="text-xs dark:text-zinc-400 text-zinc-500 mt-0.5">Architect — 系统设计、代码架构、技术决策</div>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-2xs dark:bg-zinc-700 dark:text-zinc-400 bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded">dev</span>
+                <span class="text-2xs dark:bg-zinc-700 dark:text-zinc-400 bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded">design</span>
+              </div>
+              <div class="mt-3 pt-3 border-t dark:border-zinc-700 border-zinc-200">
+                <div class="text-xs dark:text-zinc-500 text-zinc-400 mb-1.5">Skills</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <span class="text-2xs dark:bg-blue-900/30 dark:text-blue-400 bg-blue-50 text-blue-700 px-2 py-0.5 rounded">codebase-mapping</span>
+                  <span class="text-2xs dark:bg-blue-900/30 dark:text-blue-400 bg-blue-50 text-blue-700 px-2 py-0.5 rounded">implementation-planning</span>
+                  <span class="text-2xs dark:bg-blue-900/30 dark:text-blue-400 bg-blue-50 text-blue-700 px-2 py-0.5 rounded">architecture-review</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status section -->
+        <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5">
+          <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider mb-4">Status</div>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm dark:text-zinc-400 text-zinc-500">State</span>
+              <span class="flex items-center gap-1.5 text-sm">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span class="text-emerald-500">Active</span>
+              </span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm dark:text-zinc-400 text-zinc-500">Current Room</span>
+              <button onclick="selectItem('room-bossmode')" class="text-sm text-blue-500 hover:text-blue-400 cursor-pointer"># bossmode dev</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: Agent Detail ==================== -->
+    <div id="page-agent-architect" class="page flex-1 flex flex-col min-h-0" style="display:none">
+      <div class="flex-1 flex flex-col overflow-hidden p-6">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-4 shrink-0">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🏗️</span>
+            <div>
+              <h1 class="text-lg font-bold dark:text-white text-zinc-900">architect</h1>
+              <span class="text-xs dark:text-zinc-500 text-zinc-400">Agent Definition · architect.md</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="flex items-center gap-1.5 px-3 py-1.5 dark:text-red-400 dark:hover:text-red-300 text-red-500 hover:text-red-600 text-sm cursor-pointer transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Delete
+            </button>
+            <button class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save
+            </button>
+          </div>
+        </div>
+
+        <!-- Tab: Overview / Source -->
+        <div class="flex gap-0 border-b dark:border-zinc-800 border-zinc-200 mb-4 shrink-0">
+          <button class="px-4 py-2 text-sm font-medium dark:text-white text-zinc-900 border-b-2 border-blue-500">Overview</button>
+          <button class="px-4 py-2 text-sm dark:text-zinc-500 text-zinc-400 hover:dark:text-zinc-300 hover:text-zinc-700 border-b-2 border-transparent cursor-pointer transition-colors">Source</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-4">
+          <!-- Identity -->
+          <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5">
+            <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider mb-4">Identity</div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Name</label>
+                <input value="architect" class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Avatar</label>
+                <input value="🏗️" class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+            </div>
+            <div class="mt-4">
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Description</label>
+              <input value="Architect — 系统设计、代码架构、技术决策" class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-white bg-zinc-50 border border-zinc-300 text-zinc-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mt-4">
+              <label class="block text-xs dark:text-zinc-400 text-zinc-500 mb-1.5">Tags</label>
+              <div class="flex items-center gap-2">
+                <span class="text-xs dark:bg-zinc-700 dark:text-zinc-300 bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded flex items-center gap-1">dev <span class="cursor-pointer dark:text-zinc-500 text-zinc-400 hover:dark:text-white hover:text-zinc-900">×</span></span>
+                <span class="text-xs dark:bg-zinc-700 dark:text-zinc-300 bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded flex items-center gap-1">design <span class="cursor-pointer dark:text-zinc-500 text-zinc-400 hover:dark:text-white hover:text-zinc-900">×</span></span>
+                <button class="text-xs dark:text-zinc-500 dark:hover:text-zinc-300 text-zinc-400 hover:text-zinc-700 cursor-pointer transition-colors">+ Add tag</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Skills -->
+          <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider">Skills (3 attached)</div>
+            </div>
+            <div class="space-y-1">
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" checked class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">codebase-mapping</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">读取和理解代码库架构</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" checked class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">implementation-planning</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">设计具体实现计划</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" checked class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">architecture-review</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">审查架构合规性</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">self-verification</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">系统化自我验证</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">requirement-clarification</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">分解模糊需求</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded dark:hover:bg-zinc-800 hover:bg-zinc-50 cursor-pointer transition-colors">
+                <input type="checkbox" class="accent-blue-500">
+                <span class="text-sm dark:text-zinc-300 text-zinc-700">test-plan-design</span>
+                <span class="text-xs dark:text-zinc-600 text-zinc-400 ml-auto">设计测试计划</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="dark:bg-zinc-800/50 bg-white border dark:border-zinc-800 border-zinc-200 rounded-lg p-5">
+            <div class="text-xs font-semibold dark:text-zinc-400 text-zinc-500 uppercase tracking-wider mb-4">System Prompt</div>
+            <textarea rows="16" spellcheck="false" class="w-full dark:bg-zinc-900 dark:border-zinc-700 dark:text-zinc-300 bg-zinc-50 border border-zinc-300 text-zinc-700 rounded-lg px-4 py-3 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500">You are the Architect of this team. Your purpose is to own the technical design: choosing patterns, defining boundaries, and making structural decisions that keep the codebase healthy as it grows.
+
+## Identity
+
+- **Role**: Architect — the one who designs the system
+- **Mindset**: Simplicity is the ultimate sophistication. Every abstraction must earn its place.
+- **Communication**: Technical and precise. Diagrams, file trees, interface contracts.
+
+## Responsibilities
+
+### System Design
+- Define module boundaries, data flow, and integration points
+- Choose libraries, frameworks, and patterns with explicit rationale
+- Produce implementation plans that Developer can execute
+
+### Code Quality Stewardship
+- Review code for architectural compliance
+- Detect entropy: duplication, boundary violations, abstraction leaks
+- Propose refactoring when complexity exceeds threshold
+
+### Technical Decision-Making
+- Document decisions with context and trade-offs
+- Evaluate build-vs-buy with evidence, not instinct
+
+## Discipline
+
+- NEVER start implementation without a plan
+- NEVER let "it works" override "it's right"
+- ALWAYS document key decisions and their rationale</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: Default (no selection) ==================== -->
+    <div id="page-default" class="page flex-1 flex items-center justify-center">
+      <div class="text-center">
+        <p class="text-lg dark:text-zinc-500 text-zinc-400">Select an item</p>
+        <p class="text-sm dark:text-zinc-600 text-zinc-400 mt-1">from the sidebar to get started</p>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// === State ===
+const sectionState = {};
+let selectedItem = null;
+
+// Map items to pages (items without a specific page show the default)
+const itemPageMap = {
+  'room-bossmode': 'page-room-bossmode',
+  'member-architect': 'page-member-architect',
+  'agent-architect': 'page-agent-architect',
+};
+
+// === Section toggle ===
+function toggleSection(name) {
+  const section = document.querySelector(`[data-section="${name}"]`);
+  const items = section.querySelector('.section-items');
+  const chevron = section.querySelector('.section-chevron');
+
+  if (items.classList.contains('collapsed')) {
+    items.classList.remove('collapsed');
+    items.style.maxHeight = items.scrollHeight + 'px';
+    chevron.style.transform = 'rotate(0deg)';
+    sectionState[name] = true;
+  } else {
+    items.classList.add('collapsed');
+    items.style.maxHeight = '0px';
+    chevron.style.transform = 'rotate(-90deg)';
+    sectionState[name] = false;
+  }
+}
+
+// === Item selection ===
+function selectItem(id) {
+  // Deselect previous
+  document.querySelectorAll('.sidebar-item').forEach(el => {
+    el.classList.remove('dark:bg-zinc-800', 'dark:text-white', 'bg-zinc-100', 'text-zinc-900');
+  });
+
+  // Select new
+  const el = document.querySelector(`[data-item="${id}"]`);
+  if (el) {
+    el.classList.add('dark:bg-zinc-800', 'dark:text-white', 'bg-zinc-100', 'text-zinc-900');
+  }
+  selectedItem = id;
+
+  // If item is in a collapsed section, expand it
+  const parentSection = el?.closest('.sidebar-section');
+  if (parentSection) {
+    const sectionName = parentSection.dataset.section;
+    const items = parentSection.querySelector('.section-items');
+    if (items.classList.contains('collapsed')) {
+      toggleSection(sectionName);
+    }
+  }
+
+  // Show corresponding page
+  document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+  const pageId = itemPageMap[id];
+  if (pageId) {
+    document.getElementById(pageId).style.display = 'flex';
+  } else {
+    document.getElementById('page-default').style.display = 'flex';
+  }
+}
+
+// === Theme toggle ===
+function toggleTheme() {
+  document.documentElement.classList.toggle('dark');
+}
+
+// === Init: set default section states ===
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.sidebar-section').forEach(section => {
+    const name = section.dataset.section;
+    const defaultOpen = section.dataset.defaultOpen === 'true';
+    const items = section.querySelector('.section-items');
+    const chevron = section.querySelector('.section-chevron');
+
+    if (defaultOpen) {
+      items.classList.remove('collapsed');
+      items.style.maxHeight = items.scrollHeight + 'px';
+      chevron.style.transform = 'rotate(0deg)';
+    } else {
+      items.classList.add('collapsed');
+      items.style.maxHeight = '0px';
+      chevron.style.transform = 'rotate(-90deg)';
+    }
+    sectionState[name] = defaultOpen;
+  });
+
+  // Select room by default
+  selectItem('room-bossmode');
+});
+</script>
+
+</body>
+</html>

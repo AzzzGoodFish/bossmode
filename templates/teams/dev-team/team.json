@@ -1,0 +1,6 @@
+{
+  "name": "dev-team",
+  "description": "全栈开发团队",
+  "leader": "pm",
+  "members": ["pm", "architect", "developer", "qa"]
+}

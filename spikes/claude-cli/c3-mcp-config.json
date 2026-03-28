@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "test-mcp": {
+      "command": "node",
+      "args": ["/home/fish/dev/llm/bossmode/spikes/claude-cli/c3-mcp-server.js"]
+    }
+  }
+}
