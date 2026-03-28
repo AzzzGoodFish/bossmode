@@ -2,20 +2,10 @@
 // Agent Runtime Abstraction Layer V2 — CLI-Only Design
 // ============================================================================
 
-import type { KnowledgeEntry } from "../../shared/types.js";
+import type { KnowledgeEntry, AgentMemberConfig } from "../../shared/types.js";
 
-// -- Member config --
-
-export interface MemberConfig {
-  id: string;
-  name: string;              // user-defined display name, e.g. "arch-sonnet"
-  agent: string;             // references agent definition name, e.g. "architect"
-  model: string;
-  runtime: "pi-cli" | "claude-cli";
-  thinkingLevel: string;
-  avatar?: string;
-  contextLimit?: number;     // max messages per activation (default 50)
-}
+// Re-export AgentMemberConfig as the member config type for runtimes
+export type { AgentMemberConfig };
 
 // -- Runtime interface --
 
@@ -51,7 +41,7 @@ export interface RuntimeCapabilities {
 export interface CreateAgentOpts {
   cwd: string;
   roomId: string;              // bossmode room ID (for tool callbacks)
-  member: MemberConfig;
+  member: AgentMemberConfig;
 
   // Layered prompt content
   agentPrompt: string;       // Layer 1: agent definition body

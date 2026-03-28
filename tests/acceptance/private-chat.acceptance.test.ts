@@ -21,16 +21,15 @@ import type { Room, RoomMessage } from "../../src/shared/types.js";
 
 import { mockPromptFn, mockSteerFn, resetMocks, setMockIsWorking } from "../helpers/mock-runtime.js";
 
-vi.mock("../../src/store/member-store.js", () => ({
+vi.mock("../../src/workforce/member-store.js", () => ({
   getMemberByName: vi.fn().mockImplementation((name: string) => ({
-    id: name, name,
-    agentSource: `~/.bossmode/agents/${name}.md`,
+    id: name, name, type: "agent", agent: name,
     model: "mock-model", runtime: "mock", skills: [], thinkingLevel: "off",
   })),
   loadMembers: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock("../../src/store/agent-defs.js", () => ({
+vi.mock("../../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
     name, model: "mock-model", description: `Test agent ${name}`,
     systemPrompt: `You are ${name}.`, skills: [], tags: [],

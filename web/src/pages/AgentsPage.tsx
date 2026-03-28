@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Bot, Plus, Search } from "lucide-react";
 import type { AgentInfo } from "../api/client";
 import { getAgents, createAgent } from "../api/client";
+import { useDialog } from "../components/dialogs";
 
 interface AgentsPageProps {
   onSelectAgent: (name: string) => void;
@@ -9,6 +10,7 @@ interface AgentsPageProps {
 }
 
 export function AgentsPage({ onSelectAgent, onRefresh }: AgentsPageProps) {
+  const { toast } = useDialog();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -30,7 +32,7 @@ export function AgentsPage({ onSelectAgent, onRefresh }: AgentsPageProps) {
       getAgents().then(setAgents);
       onRefresh();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message, "error");
     }
   };
 

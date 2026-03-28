@@ -36,7 +36,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   createCodingTools: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock("../../src/store/agent-defs.js", () => ({
+vi.mock("../../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
     name,
     model: "claude-sonnet-4-20250514",

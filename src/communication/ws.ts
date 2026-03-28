@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
-import { validateToken } from "./auth.js";
+import { validateToken } from "../api/auth.js";
 
 interface ClientState {
   ws: WebSocket;
@@ -17,7 +17,6 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
   wss = new WebSocketServer({ server });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    // Auth: token in query string ?token=xxx
     const url = new URL(req.url || "", "http://localhost");
     const token = url.searchParams.get("token");
     if (!token || !validateToken(token)) {
@@ -66,7 +65,6 @@ function handleCommand(client: ClientState, cmd: WsClientCommand): void {
   }
 }
 
-// Broadcast to all clients subscribed to a room
 export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
   const payload = JSON.stringify(event);
   for (const [, state] of clients) {
@@ -76,7 +74,6 @@ export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
   }
 }
 
-// Broadcast to clients subscribed to a specific agent's private events
 export function broadcastToAgentSubscribers(roomId: string, agent: string, event: WsServerEvent): void {
   const key = `${roomId}:${agent}`;
   const payload = JSON.stringify(event);

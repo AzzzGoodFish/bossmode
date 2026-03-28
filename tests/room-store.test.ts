@@ -6,18 +6,20 @@ import { tmpdir } from "node:os";
 // Mock getBossmodeDir to use temp dir
 let tempDir: string;
 
-vi.mock("../src/store/config.js", () => ({
+vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
 }));
 
 describe("room-store", () => {
-  let roomStore: typeof import("../src/store/room-store.js");
+  let roomStore: typeof import("../src/workspace/room-store.js");
+  let messageStore: typeof import("../src/workspace/message-store.js");
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bossmode-room-test-"));
     // Re-import to pick up new tempDir
     vi.resetModules();
-    roomStore = await import("../src/store/room-store.js");
+    roomStore = await import("../src/workspace/room-store.js");
+    messageStore = await import("../src/workspace/message-store.js");
   });
 
   afterEach(() => {
@@ -81,13 +83,13 @@ describe("room-store", () => {
     it("should add and retrieve messages", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm"]);
 
-      const msg1 = roomStore.addMessage(room.id, {
+      const msg1 = messageStore.addMessage(room.id, {
         sender: "user",
         content: "Hello @pm",
         mentions: ["pm"],
       });
 
-      const msg2 = roomStore.addMessage(room.id, {
+      const msg2 = messageStore.addMessage(room.id, {
         sender: "pm",
         content: "Hi there!",
         mentions: [],
@@ -97,7 +99,7 @@ describe("room-store", () => {
       expect(msg1.sender).toBe("user");
       expect(msg1.ts).toBeGreaterThan(0);
 
-      const messages = roomStore.getMessages(room.id);
+      const messages = messageStore.getMessages(room.id);
       expect(messages).toHaveLength(2);
       expect(messages[0].content).toBe("Hello @pm");
       expect(messages[1].content).toBe("Hi there!");
@@ -107,10 +109,10 @@ describe("room-store", () => {
       const room = roomStore.createRoom("test", "/tmp", []);
 
       for (let i = 0; i < 10; i++) {
-        roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
+        messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
       }
 
-      const messages = roomStore.getMessages(room.id, { limit: 3 });
+      const messages = messageStore.getMessages(room.id, { limit: 3 });
       expect(messages).toHaveLength(3);
       expect(messages[0].content).toBe("msg 7"); // Last 3
       expect(messages[2].content).toBe("msg 9");
@@ -121,16 +123,16 @@ describe("room-store", () => {
 
       const msgs = [];
       for (let i = 0; i < 5; i++) {
-        msgs.push(roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
+        msgs.push(messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
       }
 
-      const before = roomStore.getMessages(room.id, { before: msgs[3].id });
+      const before = messageStore.getMessages(room.id, { before: msgs[3].id });
       expect(before).toHaveLength(3);
       expect(before[2].content).toBe("msg 2");
     });
 
     it("should return empty array for non-existent room", () => {
-      expect(roomStore.getMessages("nonexistent")).toEqual([]);
+      expect(messageStore.getMessages("nonexistent")).toEqual([]);
     });
   });
 
@@ -140,10 +142,10 @@ describe("room-store", () => {
 
       const msgs = [];
       for (let i = 0; i < 5; i++) {
-        msgs.push(roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
+        msgs.push(messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
       }
 
-      const since = roomStore.getMessagesSince(room.id, msgs[2].id);
+      const since = messageStore.getMessagesSince(room.id, msgs[2].id);
       expect(since).toHaveLength(2);
       expect(since[0].content).toBe("msg 3");
       expect(since[1].content).toBe("msg 4");
@@ -151,9 +153,9 @@ describe("room-store", () => {
 
     it("should return all messages when cursor is null", () => {
       const room = roomStore.createRoom("test", "/tmp", []);
-      roomStore.addMessage(room.id, { sender: "user", content: "msg", mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: "msg", mentions: [] });
 
-      const all = roomStore.getMessagesSince(room.id, null);
+      const all = messageStore.getMessagesSince(room.id, null);
       expect(all).toHaveLength(1);
     });
   });
@@ -161,7 +163,7 @@ describe("room-store", () => {
   describe("cursors", () => {
     it("should update and read cursor", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm"]);
-      const msg = roomStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
+      const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
       roomStore.updateCursor(room.id, "pm", msg.id);
 
@@ -187,7 +189,7 @@ describe("room-store", () => {
 
     it("should initialize new member cursor to latest message", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm"]);
-      const msg = roomStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
+      const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
       roomStore.addMember(room.id, "qa");
       const cursors = roomStore.getCursors(room.id);

@@ -9,7 +9,7 @@ const testPasswordHash = (() => {
   return `${salt}:${hash}`;
 })();
 
-vi.mock("../src/store/config.js", () => ({
+vi.mock("../src/shared/config.js", () => ({
   readConfig: () => ({
     auth: { username: "testuser", passwordHash: testPasswordHash },
     apiKeys: {},
@@ -66,7 +66,7 @@ describe("HTTP server", () => {
 
     // Start server (we need to get the http.Server instance)
     // For testing, let's create server directly
-    const { handleApiRequest } = await import("../src/server/api.js");
+    const { handleApiRequest } = await import("../src/api/index.js");
 
     server = http.createServer(async (req, res) => {
       const handled = await handleApiRequest(req, res);

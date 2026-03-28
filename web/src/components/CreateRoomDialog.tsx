@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import type { MemberInfo, RuntimeInfo, KnowledgeBaseInfo, KnowledgeEntryInfo } from "../api/client";
 import { getMembers, getRuntimes, getKnowledgeBases, getKnowledgeEntries, createMember } from "../api/client";
+import { useDialog } from "./dialogs";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
@@ -173,6 +174,7 @@ function InlineCreateMember({
 }: {
   agentName: string; runtimes: RuntimeInfo[]; onCreated: (member: MemberInfo) => void; onClose: () => void;
 }) {
+  const { toast } = useDialog();
   const [name, setName] = useState(agentName);
   const [runtime, setRuntime] = useState("pi-cli");
   const [model, setModel] = useState("sonnet");
@@ -183,7 +185,7 @@ function InlineCreateMember({
     try {
       const member = await createMember({ name, agent: agentName, model, runtime: runtime as any, thinkingLevel: "off" });
       onCreated(member);
-    } catch (err: any) { alert(err.message); }
+    } catch (err: any) { toast(err.message, "error"); }
     finally { setSaving(false); }
   };
 

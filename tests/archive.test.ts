@@ -5,17 +5,21 @@ import { tmpdir } from "node:os";
 
 let tempDir: string;
 
-vi.mock("../src/store/config.js", () => ({
+vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
 }));
 
 describe("archive", () => {
-  let roomStore: typeof import("../src/store/room-store.js");
+  let roomStore: typeof import("../src/workspace/room-store.js");
+  let messageStore: typeof import("../src/workspace/message-store.js");
+  let archiveStore: typeof import("../src/workspace/archive-store.js");
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bossmode-archive-test-"));
     vi.resetModules();
-    roomStore = await import("../src/store/room-store.js");
+    roomStore = await import("../src/workspace/room-store.js");
+    messageStore = await import("../src/workspace/message-store.js");
+    archiveStore = await import("../src/workspace/archive-store.js");
   });
 
   afterEach(() => {
@@ -27,16 +31,16 @@ describe("archive", () => {
 
     // Add 60 messages
     for (let i = 0; i < 60; i++) {
-      roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
     }
 
-    const result = roomStore.archiveMessages(room.id, 50);
+    const result = archiveStore.archiveMessages(room.id, 50);
     expect(result).not.toBeNull();
     expect(result!.archived).toHaveLength(10);
     expect(result!.kept).toHaveLength(50);
 
     // Verify messages file now only has 50
-    const remaining = roomStore.getMessages(room.id, { limit: 100 });
+    const remaining = messageStore.getMessages(room.id, { limit: 100 });
     expect(remaining).toHaveLength(50);
     expect(remaining[0].content).toBe("msg 10"); // First kept
     expect(remaining[49].content).toBe("msg 59"); // Last kept
@@ -46,10 +50,10 @@ describe("archive", () => {
     const room = roomStore.createRoom("test", "/tmp", []);
 
     for (let i = 0; i < 30; i++) {
-      roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
     }
 
-    const result = roomStore.archiveMessages(room.id, 50);
+    const result = archiveStore.archiveMessages(room.id, 50);
     expect(result).toBeNull();
   });
 
@@ -57,15 +61,15 @@ describe("archive", () => {
     const room = roomStore.createRoom("test", "/tmp", []);
     const msgs = [];
     for (let i = 0; i < 5; i++) {
-      msgs.push(roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
+      msgs.push(messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] }));
     }
 
-    roomStore.saveArchiveSummary(room.id, "Test summary", msgs, Date.now());
+    archiveStore.saveArchiveSummary(room.id, "Test summary", msgs, Date.now());
 
-    const archives = roomStore.listArchives(room.id);
+    const archives = archiveStore.listArchives(room.id);
     expect(archives.length).toBeGreaterThan(0);
 
-    const summary = roomStore.readArchiveSummary(room.id, archives[0].timestamp);
+    const summary = archiveStore.readArchiveSummary(room.id, archives[0].timestamp);
     expect(summary).not.toBeNull();
     expect(summary!.summary).toBe("Test summary");
     expect(summary!.archivedCount).toBe(5);
@@ -75,15 +79,15 @@ describe("archive", () => {
     const room = roomStore.createRoom("test", "/tmp", []);
 
     for (let i = 0; i < 60; i++) {
-      roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
     }
 
-    roomStore.archiveMessages(room.id, 50);
+    archiveStore.archiveMessages(room.id, 50);
 
-    const archives = roomStore.listArchives(room.id);
+    const archives = archiveStore.listArchives(room.id);
     expect(archives.length).toBe(1);
 
-    const archived = roomStore.readArchiveMessages(room.id, archives[0].timestamp);
+    const archived = archiveStore.readArchiveMessages(room.id, archives[0].timestamp);
     expect(archived).toHaveLength(10);
     expect(archived[0].content).toBe("msg 0");
     expect(archived[9].content).toBe("msg 9");
@@ -94,19 +98,19 @@ describe("archive", () => {
 
     // Create two archives
     for (let i = 0; i < 110; i++) {
-      roomStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
     }
 
-    roomStore.archiveMessages(room.id, 50); // Archives 60 messages
+    archiveStore.archiveMessages(room.id, 50); // Archives 60 messages
 
     // Add more and archive again
     for (let i = 0; i < 60; i++) {
-      roomStore.addMessage(room.id, { sender: "user", content: `batch2 ${i}`, mentions: [] });
+      messageStore.addMessage(room.id, { sender: "user", content: `batch2 ${i}`, mentions: [] });
     }
 
-    roomStore.archiveMessages(room.id, 50);
+    archiveStore.archiveMessages(room.id, 50);
 
-    const archives = roomStore.listArchives(room.id);
+    const archives = archiveStore.listArchives(room.id);
     expect(archives.length).toBe(2);
     expect(archives[0].timestamp).toBeGreaterThan(archives[1].timestamp);
   });

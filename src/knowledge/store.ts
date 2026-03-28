@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { getBossmodeDir } from "./config.js";
+import { getBossmodeDir } from "../shared/config.js";
 import type { KnowledgeBase, KnowledgeEntry } from "../shared/types.js";
 
 const KNOWLEDGE_DIR = join(getBossmodeDir(), "knowledge");

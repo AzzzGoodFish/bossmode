@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir } from "./config.js";
-import { parseFrontmatter, asStringArray, asString } from "./frontmatter.js";
+import { getBossmodeDir } from "../shared/config.js";
+import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
 import type { AgentDefinition } from "../shared/types.js";
 
 const AGENTS_DIR = join(getBossmodeDir(), "agents");
@@ -20,12 +20,13 @@ function parseAgentFile(content: string, fallbackName: string): AgentDefinition 
   const { meta, body } = parseFrontmatter(content);
   return {
     name: asString(meta.name, fallbackName),
-    model: asString(meta.model, "claude-sonnet-4-6"),
     description: asString(meta.description),
     systemPrompt: body,
-    skills: asStringArray(meta.skills),
     avatar: meta.avatar ? String(meta.avatar) : undefined,
     tags: asStringArray(meta.tags),
+    // Backward compat: read model/skills if present, but they're optional now
+    model: meta.model ? asString(meta.model) : undefined,
+    skills: meta.skills ? asStringArray(meta.skills) : undefined,
   };
 }
 
@@ -69,7 +70,6 @@ export function deleteAgentDefinition(name: string): boolean {
   return true;
 }
 
-// Load agent templates from templates/ directory
 export function loadAgentTemplates(): AgentDefinition[] {
   const templatesDir = join(import.meta.dirname, "../../templates/agents");
   if (!existsSync(templatesDir)) return [];

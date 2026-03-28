@@ -14,6 +14,7 @@ import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
 import { AgentTab, type CommittedEvent } from "../components/AgentTab";
 import { AddMemberDialog } from "../components/AddMemberDialog";
+import { useDialog } from "../components/dialogs";
 
 interface Tab {
   type: "room" | "agent";
@@ -30,6 +31,7 @@ interface MainProps {
 }
 
 export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, externalShowCreateRoom, onCreateRoomShown }: MainProps) {
+  const { toast, confirm } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
 
@@ -143,10 +145,10 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
         onRoomCreated(newRoom);
         setShowCreateRoom(false);
       } catch (err: any) {
-        alert(err.message);
+        toast(err.message, "error");
       }
     },
-    [onRoomCreated],
+    [onRoomCreated, toast],
   );
 
   const handleAgentEventsChange = useCallback((events: CommittedEvent[]) => {
@@ -158,19 +160,19 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
 
   const handleArchive = useCallback(async () => {
     if (!selectedRoomId) return;
-    if (!confirm("Archive old messages? Last 50 will be kept.")) return;
+    if (!(await confirm("Archive old messages? Last 50 will be kept."))) return;
     try {
       const result = await apiArchiveRoom(selectedRoomId);
       if (result.archivedCount === 0) {
-        alert("Nothing to archive (less than 50 messages).");
+        toast("Nothing to archive (less than 50 messages).", "info");
       } else {
-        alert(`Archived ${result.archivedCount} messages.`);
+        toast(`Archived ${result.archivedCount} messages.`, "success");
         await reloadRoom();
       }
     } catch (err: any) {
-      alert(`Archive failed: ${err.message}`);
+      toast(`Archive failed: ${err.message}`, "error");
     }
-  }, [selectedRoomId, reloadRoom]);
+  }, [selectedRoomId, reloadRoom, confirm, toast]);
 
   const handleAddMember = useCallback(async (agentName: string) => {
     if (!selectedRoomId) return;
@@ -178,9 +180,9 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
       await apiAddMember(selectedRoomId, agentName);
       await reloadRoom();
     } catch (err: any) {
-      alert(`Failed to add member: ${err.message}`);
+      toast(`Failed to add member: ${err.message}`, "error");
     }
-  }, [selectedRoomId, reloadRoom]);
+  }, [selectedRoomId, reloadRoom, toast]);
 
   const activeTab = tabs[activeTabIdx];
 

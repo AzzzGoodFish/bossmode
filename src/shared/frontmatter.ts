@@ -1,4 +1,4 @@
-// Shared YAML frontmatter parser — used by agent-defs, skill-store, team-store
+// Shared YAML frontmatter parser — used by agent-store, skill-store
 import { parse as parseYaml } from "yaml";
 
 export function parseFrontmatter(content: string): { meta: Record<string, unknown>; body: string } {

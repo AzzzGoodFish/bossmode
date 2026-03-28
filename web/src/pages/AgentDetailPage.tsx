@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2, Pencil, X } from "lucide-react";
 import { getAgent, updateAgent, deleteAgent, createAgent } from "../api/client";
 import { Markdown } from "../components/Markdown";
+import { useDialog } from "../components/dialogs";
 
 interface AgentDetailPageProps {
   name: string;
@@ -13,6 +14,7 @@ interface AgentDetailPageProps {
 const editBtnCls = "px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer transition-colors";
 
 export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDetailPageProps) {
+  const { toast, confirm } = useDialog();
   const [agentName, setAgentName] = useState(name);
   const [agentData, setAgentData] = useState<any>(null);
   const [content, setContent] = useState(isCreate ? "---\nname: \"\"\ndescription: \"\"\nmodel: \"sonnet\"\nskills: []\n---\n\n" : "");
@@ -30,7 +32,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
         setContent(raw);
         setOriginalContent(raw);
       })
-      .catch((err) => alert(`Failed to load: ${err.message}`))
+      .catch((err) => toast(`Failed to load: ${err.message}`, "error"))
       .finally(() => setLoading(false));
   };
 
@@ -42,7 +44,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
     setSaveState("saving");
     try {
       if (isCreate) {
-        if (!agentName) { alert("Name is required"); setSaveState("idle"); return; }
+        if (!agentName) { toast("Name is required", "error"); setSaveState("idle"); return; }
         await createAgent(agentName, content);
         onCreated?.(agentName);
       } else {
@@ -54,16 +56,16 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
+    if (!(await confirm(`Delete agent "${name}"? This cannot be undone.`))) return;
     try { await deleteAgent(name); onBack(); }
-    catch (err: any) { alert(`Delete failed: ${err.message}`); }
+    catch (err: any) { toast(`Delete failed: ${err.message}`, "error"); }
   };
 
   const handleCancel = () => {

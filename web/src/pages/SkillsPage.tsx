@@ -2,12 +2,14 @@ import { useState, useEffect } from "react";
 import { Puzzle, Plus, Search } from "lucide-react";
 import type { SkillInfo } from "../api/client";
 import { getSkills, createSkill } from "../api/client";
+import { useDialog } from "../components/dialogs";
 
 interface SkillsPageProps {
   onSelectSkill: (name: string) => void;
 }
 
 export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
+  const { toast } = useDialog();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -28,7 +30,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
       setShowCreate(false);
       getSkills().then(setSkills);
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message, "error");
     }
   };
 

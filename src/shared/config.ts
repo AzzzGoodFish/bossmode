@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
-import type { BossmodeConfig } from "../shared/types.js";
+import type { BossmodeConfig } from "./types.js";
 import { logger } from "../foundation/logger.js";
 
 const BOSSMODE_DIR = process.env.BOSSMODE_DIR || join(homedir(), ".bossmode");
@@ -24,7 +24,11 @@ export function ensureBossmodeDir(): void {
 
 // Seed from templates on first run
 export function seedTemplates(distDir: string): void {
-  const templatesDir = join(distDir, "../templates");
+  // distDir is e.g. dist/server — templates live at repo root
+  let templatesDir = join(distDir, "../templates");
+  if (!existsSync(templatesDir)) {
+    templatesDir = join(distDir, "../../templates");
+  }
   if (!existsSync(templatesDir)) return;
 
   const agentsDir = join(BOSSMODE_DIR, "agents");
@@ -50,7 +54,6 @@ export function seedTemplates(distDir: string): void {
       logger.info("seed", "copied skill templates");
     }
   }
-
 }
 
 export function configExists(): boolean {
@@ -70,7 +73,7 @@ export function writeConfig(config: BossmodeConfig): void {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
 }
 
-// Password hashing: SHA-256 with salt (simple, no bcrypt dep)
+// Password hashing: SHA-256 with salt
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = createHash("sha256").update(salt + password).digest("hex");
@@ -81,7 +84,6 @@ export function verifyPassword(password: string, stored: string): boolean {
   const [salt, expectedHash] = stored.split(":");
   if (!salt || !expectedHash) return false;
   const hash = createHash("sha256").update(salt + password).digest("hex");
-  // Timing-safe comparison
   const a = Buffer.from(hash, "hex");
   const b = Buffer.from(expectedHash, "hex");
   if (a.length !== b.length) return false;
@@ -90,17 +92,14 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // API key resolution: env var first, config fallback
 export function resolveApiKey(provider: string, config?: BossmodeConfig): string | undefined {
-  // Env var convention: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.
   const envKey = `${provider.toUpperCase()}_API_KEY`;
   const fromEnv = process.env[envKey];
   if (fromEnv) return fromEnv;
 
-  // Config fallback
   if (config) {
     return config.apiKeys[provider];
   }
 
-  // Try loading config
   try {
     const cfg = readConfig();
     return cfg.apiKeys[provider];

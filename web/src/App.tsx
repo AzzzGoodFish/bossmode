@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { getToken, clearToken, setOnUnauthorized } from "./api/client";
 import { Login } from "./pages/Login";
 import { Layout } from "./pages/Layout";
+import { DialogProvider } from "./components/dialogs";
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
@@ -24,8 +25,16 @@ export function App() {
   };
 
   if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <DialogProvider>
+        <Login onLogin={handleLogin} />
+      </DialogProvider>
+    );
   }
 
-  return <Layout onLogout={handleLogout} username={username} />;
+  return (
+    <DialogProvider>
+      <Layout onLogout={handleLogout} username={username} />
+    </DialogProvider>
+  );
 }
