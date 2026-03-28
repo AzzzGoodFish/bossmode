@@ -1,0 +1,103 @@
+import type { IncomingMessage } from "node:http";
+import { WebSocketServer, type WebSocket } from "ws";
+import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
+import { validateToken } from "./auth.js";
+
+interface ClientState {
+  ws: WebSocket;
+  roomSubscriptions: Set<string>;
+  agentSubscriptions: Set<string>; // "roomId:agentName"
+}
+
+const clients = new Map<WebSocket, ClientState>();
+
+let wss: WebSocketServer | null = null;
+
+export function createWebSocketServer(server: import("node:http").Server): WebSocketServer {
+  wss = new WebSocketServer({ server });
+
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    // Auth: token in query string ?token=xxx
+    const url = new URL(req.url || "", "http://localhost");
+    const token = url.searchParams.get("token");
+    if (!token || !validateToken(token)) {
+      ws.close(4001, "Unauthorized");
+      return;
+    }
+
+    const state: ClientState = {
+      ws,
+      roomSubscriptions: new Set(),
+      agentSubscriptions: new Set(),
+    };
+    clients.set(ws, state);
+
+    ws.on("message", (data: Buffer) => {
+      try {
+        const cmd = JSON.parse(data.toString()) as WsClientCommand;
+        handleCommand(state, cmd);
+      } catch {
+        // Ignore malformed messages
+      }
+    });
+
+    ws.on("close", () => {
+      clients.delete(ws);
+    });
+  });
+
+  return wss;
+}
+
+function handleCommand(client: ClientState, cmd: WsClientCommand): void {
+  switch (cmd.type) {
+    case "subscribe:room":
+      client.roomSubscriptions.add(cmd.roomId);
+      break;
+    case "unsubscribe:room":
+      client.roomSubscriptions.delete(cmd.roomId);
+      break;
+    case "subscribe:agent":
+      client.agentSubscriptions.add(`${cmd.roomId}:${cmd.agent}`);
+      break;
+    case "unsubscribe:agent":
+      client.agentSubscriptions.delete(`${cmd.roomId}:${cmd.agent}`);
+      break;
+  }
+}
+
+// Broadcast to all clients subscribed to a room
+export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
+  const payload = JSON.stringify(event);
+  for (const [, state] of clients) {
+    if (state.roomSubscriptions.has(roomId) && state.ws.readyState === 1) {
+      state.ws.send(payload);
+    }
+  }
+}
+
+// Broadcast to clients subscribed to a specific agent's private events
+export function broadcastToAgentSubscribers(roomId: string, agent: string, event: WsServerEvent): void {
+  const key = `${roomId}:${agent}`;
+  const payload = JSON.stringify(event);
+  for (const [, state] of clients) {
+    if (state.agentSubscriptions.has(key) && state.ws.readyState === 1) {
+      state.ws.send(payload);
+    }
+  }
+}
+
+export function getConnectedClientCount(): number {
+  return clients.size;
+}
+
+export function shutdownWebSocket(): void {
+  if (wss) {
+    for (const [ws] of clients) {
+      ws.close(1001, "Server shutting down");
+    }
+    clients.clear();
+    wss.close();
+    wss = null;
+  }
+}
