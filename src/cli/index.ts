@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { fork } from "node:child_process";
-import { openSync } from "node:fs";
+import { openSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -273,6 +273,9 @@ Options (for 'on'):
   --host <host>   Bind address (default: 127.0.0.1)
   --port <port>   Port number (default: 8080)
 
+Options (global):
+  --version, -v   Show version
+
 Examples:
   bossmode on
   bossmode on --host 0.0.0.0 --port 1234
@@ -284,6 +287,13 @@ Examples:
 // -- Main --
 
 async function main(): Promise<void> {
+  // --version / -v
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
+    console.log(pkg.version);
+    process.exit(0);
+  }
+
   const { command, flags } = parseArgs(process.argv.slice(2));
 
   switch (command) {
