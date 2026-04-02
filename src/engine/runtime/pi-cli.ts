@@ -406,6 +406,7 @@ export class PiCliRuntime implements AgentRuntime {
     dynamicThinking: true,
     permissionControl: false,
     sessionResume: true,
+    contextUsage: false,
   };
 
   private cliPath: string;

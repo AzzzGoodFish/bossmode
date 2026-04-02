@@ -34,6 +34,7 @@ export interface RuntimeCapabilities {
   dynamicThinking: boolean;
   permissionControl: boolean;
   sessionResume: boolean;
+  contextUsage: boolean;  // supports get_context_usage control_request
 }
 
 // -- Agent creation --
@@ -83,6 +84,7 @@ export interface AgentHandle {
   // Optional — check runtime.capabilities before calling
   setModel?(model: string): void;
   setThinkingLevel?(level: string): void;
+  getContextUsage?(): Promise<ContextUsage | null>;
 }
 
 // -- Unified event model --
@@ -105,6 +107,13 @@ export interface TokenUsage {
   cacheRead?: number;
   cacheWrite?: number;
   cost?: number;
+}
+
+export interface ContextUsage {
+  totalTokens: number;
+  rawMaxTokens: number;
+  percentage: number;
+  model: string;
 }
 
 // -- Runtimes config --

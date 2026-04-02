@@ -7,7 +7,7 @@ import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
-  RuntimeCapabilities, RuntimeDetectResult, TokenUsage,
+  RuntimeCapabilities, RuntimeDetectResult, TokenUsage, ContextUsage,
 } from "./types.js";
 
 // ============================================================================
@@ -163,6 +163,7 @@ class ClaudeCliAgentHandle implements AgentHandle {
   private promptRejecter: ((err: Error) => void) | null = null;
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionCallback: ((session: { sessionId?: string }) => void) | null = null;
+  private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
   readonly pid: number | undefined;
   readonly runtimeName = "claude-cli";
@@ -292,8 +293,46 @@ class ClaudeCliAgentHandle implements AgentHandle {
     this.sessionCallback = cb;
   }
 
+  /** Send a control_request and wait for matching control_response */
+  private sendControlRequest(subtype: string, timeoutMs = 5000): Promise<any> {
+    const requestId = Math.random().toString(36).substring(2, 15);
+    return new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error(`control_request "${subtype}" timed out (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.pendingRequests.set(requestId, { resolve, reject, timer });
+      this.safeStdinWrite(JSON.stringify({
+        type: "control_request",
+        request: { subtype },
+        request_id: requestId,
+      }) + "\n");
+    });
+  }
+
+  async getContextUsage(): Promise<ContextUsage | null> {
+    try {
+      const data = await this.sendControlRequest("get_context_usage", 5000);
+      return {
+        totalTokens: data.totalTokens ?? 0,
+        rawMaxTokens: data.rawMaxTokens ?? 0,
+        percentage: data.percentage ?? 0,
+        model: data.model ?? "unknown",
+      };
+    } catch (err) {
+      logger.warn("runtime:claude-cli", "getContextUsage failed", { pid: this.pid, error: String(err) });
+      return null;
+    }
+  }
+
   destroy(): void {
     this.clearActivityTimer();
+    // Reject all pending control requests
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Agent destroyed"));
+    }
+    this.pendingRequests.clear();
     try { this.proc.kill(); } catch {}
     this.listeners.clear();
     this.resolveIdle();
@@ -323,6 +362,22 @@ class ClaudeCliAgentHandle implements AgentHandle {
       if (this.sessionCallback) {
         this.sessionCallback({ sessionId: raw.session_id });
         this.sessionCallback = null;
+      }
+    }
+
+    // Route control_response to pending request callbacks
+    if (raw.type === "control_response" && raw.response) {
+      const reqId = raw.response.request_id;
+      if (reqId && this.pendingRequests.has(reqId)) {
+        const pending = this.pendingRequests.get(reqId)!;
+        this.pendingRequests.delete(reqId);
+        clearTimeout(pending.timer);
+        if (raw.response.subtype === "success") {
+          pending.resolve(raw.response.response ?? {});
+        } else {
+          pending.reject(new Error(`control_request failed: ${raw.response.subtype}`));
+        }
+        return; // handled, don't pass to mapClaudeEvent
       }
     }
 
@@ -385,6 +440,7 @@ export class ClaudeCliRuntime implements AgentRuntime {
     dynamicThinking: false,
     permissionControl: true,
     sessionResume: true,
+    contextUsage: true,
   };
 
   private cliPath: string;

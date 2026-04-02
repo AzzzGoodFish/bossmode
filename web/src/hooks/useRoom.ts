@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Room, RoomMessage } from "../api/client";
+import type { Room, RoomMessage, ContextUsageData } from "../api/client";
 import {
   getMessages,
   sendMessage as apiSendMessage,
   getRoom,
+  getAgentContextUsage,
 } from "../api/client";
 import type { WsEvent } from "./useWebSocket";
 
@@ -20,6 +21,38 @@ export function useRoom(roomId: string | null) {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [contextUsage, setContextUsage] = useState<Record<string, ContextUsageData>>({});
+
+  // Track agents known to not support context usage (pi-cli, etc.)
+  const unsupportedAgents = useRef(new Set<string>());
+
+  // Fetch context usage for one or all members
+  const fetchContextUsage = useCallback(async (agentName?: string) => {
+    if (!roomId) return;
+    const r = room;
+    if (!r) return;
+
+    const targets = agentName ? [agentName] : r.members;
+    const results = await Promise.allSettled(
+      targets
+        .filter((name) => !unsupportedAgents.current.has(name))
+        .map(async (name) => {
+          const data = await getAgentContextUsage(roomId, name);
+          if (!data.supported) unsupportedAgents.current.add(name);
+          return { name, data };
+        })
+    );
+
+    const updates: Record<string, ContextUsageData> = {};
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        updates[result.value.name] = result.value.data;
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      setContextUsage((prev) => ({ ...prev, ...updates }));
+    }
+  }, [roomId, room]);
 
   // Load room details and initial messages (newest N)
   useEffect(() => {
@@ -28,6 +61,8 @@ export function useRoom(roomId: string | null) {
       setMessages([]);
       setAgentStatus({});
       setHasMore(true);
+      setContextUsage({});
+      unsupportedAgents.current.clear();
       return;
     }
 
@@ -45,6 +80,13 @@ export function useRoom(roomId: string | null) {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [roomId]);
+
+  // Fetch context usage when room loads
+  useEffect(() => {
+    if (room && roomId) {
+      fetchContextUsage();
+    }
+  }, [room, roomId, fetchContextUsage]);
 
   // Load older messages (prepend)
   const loadOlder = useCallback(async (): Promise<void> => {
@@ -77,13 +119,19 @@ export function useRoom(roomId: string | null) {
       }
 
       if (event.type === "agent:status" && event.roomId === roomId) {
+        const newStatus = event.status as "inactive" | "idle" | "working";
         setAgentStatus((prev) => ({
           ...prev,
-          [event.agent]: event.status as "inactive" | "idle" | "working",
+          [event.agent]: newStatus,
         }));
+
+        // Refresh context usage when agent finishes work (idle after working)
+        if (newStatus === "idle") {
+          setTimeout(() => fetchContextUsage(event.agent), 500);
+        }
       }
     },
-    [roomId],
+    [roomId, fetchContextUsage],
   );
 
   const sendMessage = useCallback(
@@ -117,6 +165,7 @@ export function useRoom(roomId: string | null) {
     room,
     messages,
     agentStatus,
+    contextUsage,
     loading,
     hasMore,
     loadingOlder,
