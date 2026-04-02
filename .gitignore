@@ -5,3 +5,5 @@ web/dist/
 *.txt
 .playwright-mcp/
 memory/
+.env
+.env.*

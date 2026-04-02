@@ -73,6 +73,8 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
     setEditing(false);
   };
 
+  const isBuiltin = agentData?.tags?.includes("builtin");
+
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500">Loading...</div>;
 
   return (
@@ -91,12 +93,15 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
               {agentData?.avatar && <span className="text-lg">{agentData.avatar}</span>}
               <h1 className="text-lg font-bold text-zinc-900 dark:text-white">{name}</h1>
               <span className="text-xs text-zinc-400 dark:text-zinc-500">Agent · {name}.md</span>
+              {isBuiltin && (
+                <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">built-in</span>
+              )}
             </>
           )}
           {editing && !isCreate && <span className="text-xs text-amber-500 font-medium">Editing</span>}
         </div>
         <div className="flex items-center gap-2">
-          {!isCreate && !editing && (
+          {!isCreate && !editing && !isBuiltin && (
             <>
               <button onClick={() => setEditing(true)} className={`flex items-center gap-1 ${editBtnCls}`}>
                 <Pencil size={14} /> Edit
@@ -134,7 +139,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
               {agentData.tags?.length > 0 && (
                 <>
                   <span className="text-xs text-zinc-500">Tags:</span>
-                  {agentData.tags.map((t: string) => (
+                  {agentData.tags.filter((t: string) => t !== "builtin").map((t: string) => (
                     <span key={t} className="text-xs px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded">{t}</span>
                   ))}
                   {agentData.skills?.length > 0 && <span className="text-zinc-300 dark:text-zinc-600">·</span>}
@@ -150,10 +155,32 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
               )}
             </div>
           )}
-          {/* Markdown preview */}
-          <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
-            <Markdown content={agentData.systemPrompt || ""} />
-          </div>
+          {/* Builtin agent info card */}
+          {isBuiltin ? (
+            <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">{agentData.avatar || ">_"}</span>
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-white">{agentData.description}</div>
+                </div>
+              </div>
+              <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+                <p>A general-purpose CLI agent that preserves the runtime&apos;s default system prompt.</p>
+                <ul className="list-disc list-inside space-y-1 mt-3">
+                  <li>No custom system prompt injected</li>
+                  <li>No skills pre-loaded</li>
+                  <li>Bossmode tools (chat, knowledge) are available</li>
+                  <li>Define roles dynamically in conversation</li>
+                </ul>
+                <p className="text-xs text-zinc-500 dark:text-zinc-600 mt-4 italic">This agent cannot be edited or deleted.</p>
+              </div>
+            </div>
+          ) : (
+            /* Markdown preview */
+            <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
+              <Markdown content={agentData.systemPrompt || ""} />
+            </div>
+          )}
         </div>
       )}
 

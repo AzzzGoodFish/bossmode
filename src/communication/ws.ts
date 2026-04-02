@@ -43,6 +43,12 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
     ws.on("close", () => {
       clients.delete(ws);
     });
+
+    ws.on("error", (err) => {
+      // Prevent unhandled errors from crashing the server
+      clients.delete(ws);
+      try { ws.terminate(); } catch {}
+    });
   });
 
   return wss;
@@ -69,7 +75,7 @@ export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
   const payload = JSON.stringify(event);
   for (const [, state] of clients) {
     if (state.roomSubscriptions.has(roomId) && state.ws.readyState === 1) {
-      state.ws.send(payload);
+      try { state.ws.send(payload); } catch { clients.delete(state.ws); }
     }
   }
 }
@@ -79,7 +85,7 @@ export function broadcastToAgentSubscribers(roomId: string, agent: string, event
   const payload = JSON.stringify(event);
   for (const [, state] of clients) {
     if (state.agentSubscriptions.has(key) && state.ws.readyState === 1) {
-      state.ws.send(payload);
+      try { state.ws.send(payload); } catch { clients.delete(state.ws); }
     }
   }
 }

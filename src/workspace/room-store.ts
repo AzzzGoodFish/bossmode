@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
+import { logger } from "../foundation/logger.js";
 import type { Room, CursorMap } from "../shared/types.js";
 
 const ROOMS_DIR = join(getBossmodeDir(), "rooms");
@@ -35,7 +36,8 @@ function messagesPath(roomId: string): string {
 function readDirSafe(dir: string): string[] {
   try {
     return readdirSync(dir);
-  } catch {
+  } catch (err) {
+    logger.error("room-store", "failed to read directory", { dir, error: String(err) });
     return [];
   }
 }
@@ -106,8 +108,8 @@ export function listRooms(): Room[] {
     if (existsSync(path)) {
       try {
         rooms.push(JSON.parse(readFileSync(path, "utf-8")) as Room);
-      } catch {
-        // Skip corrupted room files
+      } catch (err) {
+        logger.error("room-store", "failed to parse room json", { roomId: entry, error: String(err) });
       }
     }
   }
@@ -159,7 +161,8 @@ function getLatestMessageIdInline(roomId: string): string | null {
   try {
     const msg = JSON.parse(lines[lines.length - 1]);
     return msg.id;
-  } catch {
+  } catch (err) {
+    logger.error("room-store", "failed to parse last message", { roomId, error: String(err) });
     return null;
   }
 }

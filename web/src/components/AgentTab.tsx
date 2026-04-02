@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent } from "react";
-import { getToken, getAgentEvents } from "../api/client";
+import { getToken, getAgentEvents, abortAgent } from "../api/client";
 import { Markdown } from "./Markdown";
 import { MessageBubble } from "./MessageBubble";
 
@@ -76,6 +76,9 @@ function buildFromHistory(events: AgentEvent[]): CommittedEvent[] {
 
 export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, onEventsChange }: AgentTabProps) {
   const [view, setView] = useState<"chat" | "activity">("chat");
+  const [activityMode, setActivityMode] = useState<"formatted" | "raw">("formatted");
+  const [rawLines, setRawLines] = useState<Array<{ type: "stdout" | "stderr"; text: string; ts: number }>>([]);
+  const MAX_RAW_LINES = 2000;
 
   // Shared event state
   const eventsRef = useRef<CommittedEvent[]>(cachedEvents ?? []);
@@ -167,6 +170,15 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
       case "agent_reply":
         pushEvent({ type: "agent_reply", text: event.text as string, ts });
         break;
+      case "cli:stdout":
+      case "cli:stderr": {
+        const lineType = event.type === "cli:stdout" ? "stdout" as const : "stderr" as const;
+        setRawLines((prev) => {
+          const next = [...prev, { type: lineType, text: event.text as string, ts }];
+          return next.length > MAX_RAW_LINES ? next.slice(-MAX_RAW_LINES) : next;
+        });
+        break;
+      }
     }
   };
 
@@ -205,9 +217,40 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Sub-view tabs */}
-      <div className="flex border-b border-zinc-200 dark:border-zinc-800 px-4 gap-1 shrink-0">
+      <div className="flex items-center border-b border-zinc-200 dark:border-zinc-800 px-4 gap-1 shrink-0">
         <SubTab label="Chat" active={view === "chat"} onClick={() => setView("chat")} />
         <SubTab label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
+        {isWorking && (
+          <button
+            onClick={() => { abortAgent(roomId, agentName).catch(console.error); }}
+            className="ml-auto px-2.5 py-1 text-[11px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer"
+            title={`Interrupt ${agentName}`}
+          >Interrupt</button>
+        )}
+        {view === "activity" && !isWorking && (
+          <div className="ml-auto inline-flex rounded-md border border-zinc-300 dark:border-zinc-700 overflow-hidden" role="radiogroup" aria-label="Output format">
+            <button
+              onClick={() => setActivityMode("formatted")}
+              role="radio"
+              aria-checked={activityMode === "formatted"}
+              className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                activityMode === "formatted"
+                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
+                  : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >Formatted</button>
+            <button
+              onClick={() => setActivityMode("raw")}
+              role="radio"
+              aria-checked={activityMode === "raw"}
+              className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                activityMode === "raw"
+                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
+                  : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >Raw</button>
+          </div>
+        )}
       </div>
 
       {view === "chat"
@@ -218,13 +261,15 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
             onSteer={onSteer}
             onSend={(text) => { onSteer(text); pushEvent({ type: "user_steer", text, ts: now() }); }}
           />
-        : <AgentActivity
-            committed={committed}
-            streamingText={streamingText}
-            streamingThinking={streamingThinking}
-            agentName={agentName}
-            loading={loading}
-          />
+        : activityMode === "formatted"
+          ? <AgentActivity
+              committed={committed}
+              streamingText={streamingText}
+              streamingThinking={streamingThinking}
+              agentName={agentName}
+              loading={loading}
+            />
+          : <RawOutput lines={rawLines} />
       }
     </div>
   );
@@ -506,4 +551,57 @@ function ToolCard({ event }: { event: CommittedEvent }) {
 function truncateArgs(args: unknown): string {
   const str = JSON.stringify(args);
   return str.length > 60 ? str.slice(0, 60) + "..." : str;
+}
+
+// ============================================================================
+// RawOutput — terminal-style CLI stdout/stderr viewer
+// ============================================================================
+
+function RawOutput({ lines }: { lines: Array<{ type: "stdout" | "stderr"; text: string; ts: number }> }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isAutoScroll = useRef(true);
+
+  // Auto-scroll: track whether user has scrolled up
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    isAutoScroll.current = atBottom;
+  }, []);
+
+  // Scroll to bottom when new lines arrive (if auto-scroll enabled)
+  useEffect(() => {
+    if (isAutoScroll.current && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [lines.length]);
+
+  if (lines.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-zinc-950">
+        <span className="text-zinc-600 italic text-sm">Waiting for output...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto bg-zinc-950 px-4 py-2 font-mono text-[13px] leading-[1.6]"
+      role="log"
+      aria-live="polite"
+    >
+      {lines.map((line, i) => (
+        <div key={i} className="py-[1px] whitespace-pre-wrap break-all">
+          {line.type === "stderr" ? (
+            <><span className="text-red-500 font-semibold">[stderr] </span><span className="text-red-400">{line.text}</span></>
+          ) : (
+            <span className="text-zinc-300">{line.text}</span>
+          )}
+        </div>
+      ))}
+      <span className="text-zinc-500 animate-pulse">▊</span>
+    </div>
+  );
 }

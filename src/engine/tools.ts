@@ -6,6 +6,16 @@ import * as knowledgeStore from "../knowledge/store.js";
 import { emitAgentReply, activateAgent } from "./agent-manager.js";
 import { logger } from "../foundation/logger.js";
 
+/** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
+const MAX_RESULT_CHARS = 25_000;
+
+/** Truncate a serialized tool result if it exceeds the limit. */
+export function truncateToolResult(text: string): string {
+  if (text.length <= MAX_RESULT_CHARS) return text;
+  const truncated = text.slice(0, MAX_RESULT_CHARS);
+  return truncated + `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
+}
+
 /** Handle a tool callback from an agent runtime (pi-cli extension or claude MCP) */
 export async function handleToolCallback(
   tool: string,
@@ -62,15 +72,42 @@ export async function handleToolCallback(
       }
       return { ok: true };
     }
+    case "update_knowledge": {
+      const room = roomStore.getRoom(roomId);
+      if (!room?.knowledgeBaseId) return { ok: false, error: "No knowledge base linked to this room" };
+      const entryId = params?.entryId;
+      if (!entryId) return { ok: false, error: "entryId is required" };
+      const updated = knowledgeStore.updateEntry(room.knowledgeBaseId, entryId, params?.title || "", params?.content || "");
+      if (!updated) return { ok: false, error: `Entry not found: ${entryId}` };
+      return { ok: true, entry: { id: updated.id, title: updated.title } };
+    }
+    case "delete_knowledge": {
+      const room = roomStore.getRoom(roomId);
+      if (!room?.knowledgeBaseId) return { ok: false, error: "No knowledge base linked to this room" };
+      const entryId = params?.entryId;
+      if (!entryId) return { ok: false, error: "entryId is required" };
+      const deleted = knowledgeStore.deleteEntry(room.knowledgeBaseId, entryId);
+      if (!deleted) return { ok: false, error: `Entry not found: ${entryId}` };
+      return { ok: true };
+    }
     case "query_knowledge": {
       const room = roomStore.getRoom(roomId);
       if (room?.knowledgeBaseId) {
         let entries = knowledgeStore.listEntries(room.knowledgeBaseId);
         if (params?.query) {
+          // Filtered query — return full content of matching entries
           const q = params.query.toLowerCase();
           entries = entries.filter((e) => e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q));
+          return entries;
         }
-        return entries;
+        // No query — return summaries only (title + type + id) to avoid huge payloads
+        return entries.map((e) => ({
+          id: e.id,
+          title: e.title,
+          type: e.type,
+          source: e.source,
+          contentPreview: e.content.slice(0, 200) + (e.content.length > 200 ? "..." : ""),
+        }));
       }
       return [];
     }

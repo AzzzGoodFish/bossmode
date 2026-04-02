@@ -77,7 +77,10 @@ export function AgentsPage({ onSelectAgent, onRefresh }: AgentsPageProps) {
             </div>
             <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{agent.description}</p>
             <div className="flex flex-wrap gap-1">
-              {agent.tags.map((tag) => (
+              {agent.tags.includes("builtin") && (
+                <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">built-in</span>
+              )}
+              {agent.tags.filter(t => t !== "builtin").map((tag) => (
                 <span key={tag} className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">{tag}</span>
               ))}
               {agent.skills.length > 0 && (

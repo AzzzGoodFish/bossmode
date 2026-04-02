@@ -3,10 +3,25 @@
   "version": "0.1.0",
   "description": "Discord-style AI team chat room",
   "type": "module",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AzzzGoodFish/bossmode.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["ai", "agent", "team", "chat", "bossmode", "mcp", "claude"],
+  "files": [
+    "dist",
+    "templates",
+    "web/dist"
+  ],
   "bin": {
     "bossmode": "./dist/cli/index.js"
   },
   "scripts": {
+    "prebuild": "rm -rf dist",
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { parseMentions } from "../src/communication/router.js";
 
 describe("parseMentions", () => {
-  const members = ["pm", "dev", "qa"];
+  const members = ["pm", "dev", "qa", "dev-opus", "arch-sonnet"];
 
   it("should extract single mention", () => {
     expect(parseMentions("@pm analyze this", members)).toEqual(["pm"]);
@@ -26,6 +26,18 @@ describe("parseMentions", () => {
 
   it("should return empty for no mentions", () => {
     expect(parseMentions("hello world", members)).toEqual([]);
+  });
+
+  it("should match hyphenated member names", () => {
+    expect(parseMentions("@dev-opus please review", members)).toEqual(["dev-opus"]);
+  });
+
+  it("should match multiple hyphenated names", () => {
+    expect(parseMentions("@dev-opus and @arch-sonnet collaborate", members)).toEqual(["dev-opus", "arch-sonnet"]);
+  });
+
+  it("should match mix of hyphenated and simple names", () => {
+    expect(parseMentions("@pm and @dev-opus work together", members)).toEqual(["pm", "dev-opus"]);
   });
 });
 

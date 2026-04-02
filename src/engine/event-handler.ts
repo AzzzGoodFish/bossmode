@@ -63,6 +63,17 @@ export function handleAgentEvent(
     logger.info("runtime", "event", { agent: agentName, type: "tool_end", tool: event.toolName, isError: !!(event as any).isError });
   }
 
+  // cli:stdout / cli:stderr — forward via WS only, no disk persistence, no status change
+  if (event.type === "cli:stdout" || event.type === "cli:stderr") {
+    broadcastToAgentSubscribers(roomId, agentName, {
+      type: "agent:event",
+      roomId,
+      agent: agentName,
+      event,
+    });
+    return undefined;
+  }
+
   // Accumulate text/thinking from message_update
   if (event.type === "message_update") {
     const state = streamState.get(instanceKey) || { text: "", thinking: "" };
@@ -75,24 +86,23 @@ export function handleAgentEvent(
     streamState.delete(instanceKey);
   }
 
-  // message_end: enrich with accumulated content
+  // message_end: enrich with accumulated content (create new object, don't mutate input)
+  let processedEvent: AgentStreamEvent = event;
   if (event.type === "message_end") {
     const state = streamState.get(instanceKey);
     if (state) {
-      if (!event.text && state.text) {
-        (event as any).text = state.text;
-      }
-      if (state.thinking) {
-        (event as any).thinking = state.thinking;
-      }
+      const enriched: Record<string, unknown> = { ...event };
+      if (!event.text && state.text) enriched.text = state.text;
+      if (state.thinking) enriched.thinking = state.thinking;
+      processedEvent = enriched as AgentStreamEvent;
       streamState.delete(instanceKey);
     }
   }
 
   // Persist non-streaming events to disk
-  if (event.type !== "message_update" && event.type !== "tool_update") {
-    eventBuffer.push(event);
-    try { appendEventToDisk(roomId, agentName, event); } catch {}
+  if (processedEvent.type !== "message_update" && processedEvent.type !== "tool_update") {
+    eventBuffer.push(processedEvent);
+    try { appendEventToDisk(roomId, agentName, processedEvent); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
   }
 
   // WebSocket push — forward all events for live streaming
@@ -100,11 +110,11 @@ export function handleAgentEvent(
     type: "agent:event",
     roomId,
     agent: agentName,
-    event,
+    event: processedEvent,
   });
 
   // Status change on agent_end
-  if (event.type === "agent_end") {
+  if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
     broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
     return "idle";

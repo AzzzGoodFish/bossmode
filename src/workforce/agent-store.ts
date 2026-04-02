@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
 import type { AgentDefinition } from "../shared/types.js";
+import { logger } from "../foundation/logger.js";
 
 const AGENTS_DIR = join(getBossmodeDir(), "agents");
 
@@ -40,8 +41,8 @@ export function loadAgentDefinitions(): AgentDefinition[] {
     try {
       const content = readFileSync(join(AGENTS_DIR, file), "utf-8");
       agents.push(parseAgentFile(content, file.replace(/\.md$/, "")));
-    } catch {
-      // Skip corrupted files
+    } catch (err) {
+      logger.error("agent-store", "failed to parse agent file", { file, error: String(err) });
     }
   }
 
@@ -81,8 +82,8 @@ export function loadAgentTemplates(): AgentDefinition[] {
     try {
       const content = readFileSync(join(templatesDir, file), "utf-8");
       templates.push(parseAgentFile(content, file.replace(/\.md$/, "")));
-    } catch {
-      // Skip
+    } catch (err) {
+      logger.error("agent-store", "failed to parse template", { file, error: String(err) });
     }
   }
 

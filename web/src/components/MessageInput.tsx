@@ -34,7 +34,7 @@ export function MessageInput({ onSend, members, disabled }: MessageInputProps) {
     setValue(text);
     const cursorPos = inputRef.current?.selectionStart || text.length;
     const textBeforeCursor = text.slice(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    const atMatch = textBeforeCursor.match(/@([\w-]*)$/);
     if (atMatch) {
       setShowMentions(true);
       setMentionFilter(atMatch[1].toLowerCase());
@@ -47,7 +47,7 @@ export function MessageInput({ onSend, members, disabled }: MessageInputProps) {
     const cursorPos = inputRef.current?.selectionStart || value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
     const textAfterCursor = value.slice(cursorPos);
-    const replaced = textBeforeCursor.replace(/@\w*$/, `@${name} `);
+    const replaced = textBeforeCursor.replace(/@[\w-]*$/, `@${name} `);
     setValue(replaced + textAfterCursor);
     setShowMentions(false);
     inputRef.current?.focus();

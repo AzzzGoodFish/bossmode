@@ -15,6 +15,15 @@ const ROOM = process.env.BOSSMODE_ROOM || "";
 const AGENT = process.env.BOSSMODE_AGENT || "";
 const MEMBERS = (process.env.BOSSMODE_MEMBERS || "").split(",").filter(Boolean);
 
+/** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
+const MAX_RESULT_CHARS = 25_000;
+
+function truncateResult(text: string): string {
+  if (text.length <= MAX_RESULT_CHARS) return text;
+  return text.slice(0, MAX_RESULT_CHARS) +
+    `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
+}
+
 async function callbackTool(tool: string, params: Record<string, unknown>): Promise<string> {
   const res = await fetch(`${SERVER}/internal/tool-callback`, {
     method: "POST",
@@ -22,7 +31,7 @@ async function callbackTool(tool: string, params: Record<string, unknown>): Prom
     body: JSON.stringify({ tool, room: ROOM, agent: AGENT, params }),
   });
   const data = await res.json();
-  return JSON.stringify(data);
+  return truncateResult(JSON.stringify(data));
 }
 
 const server = new McpServer({
@@ -78,13 +87,45 @@ server.tool(
 // Query knowledge tool
 server.tool(
   "query_knowledge",
-  "Query the project knowledge base. Returns matching entries.",
+  "Query the project knowledge base. Without a query, returns entry summaries (titles + types). With a query, returns full content of matching entries.",
   {
-    query: z.string().optional().describe("Search query (omit to list all)"),
+    query: z.string().optional().describe("Search query to filter entries by title/content. Omit to list all entry summaries."),
   },
   async ({ query }) => {
     const result = await callbackTool("query_knowledge", { query });
     return { content: [{ type: "text", text: result }] };
+  },
+);
+
+// Update knowledge tool
+server.tool(
+  "update_knowledge",
+  "Update an existing knowledge entry in the project knowledge base. Use query_knowledge first to find entry IDs.",
+  {
+    entryId: z.string().describe("ID of the entry to update"),
+    title: z.string().describe("New title for the entry"),
+    content: z.string().describe("New content for the entry"),
+  },
+  async ({ entryId, title, content }) => {
+    const result = await callbackTool("update_knowledge", { entryId, title, content });
+    const data = JSON.parse(result);
+    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+    return { content: [{ type: "text", text: `Knowledge updated: ${title}` }] };
+  },
+);
+
+// Delete knowledge tool
+server.tool(
+  "delete_knowledge",
+  "Delete a knowledge entry from the project knowledge base. Use query_knowledge first to find entry IDs.",
+  {
+    entryId: z.string().describe("ID of the entry to delete"),
+  },
+  async ({ entryId }) => {
+    const result = await callbackTool("delete_knowledge", { entryId });
+    const data = JSON.parse(result);
+    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+    return { content: [{ type: "text", text: `Knowledge entry deleted.` }] };
   },
 );
 

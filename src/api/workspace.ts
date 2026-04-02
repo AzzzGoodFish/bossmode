@@ -143,7 +143,7 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
 
 // ── Agent Events & Steer ──
 
-import { getAgentEventHistory, steerAgent } from "../engine/agent-manager.js";
+import { getAgentEventHistory, steerAgent, abortAgent } from "../engine/agent-manager.js";
 
 addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
@@ -181,6 +181,25 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
   } catch (err: any) {
     sendJson(res, 500, { error: err.message });
   }
+});
+
+// ── Agent Abort ──
+
+addRoute("POST", "/api/rooms/:id/agents/:agent/abort", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  if (!room.members.includes(params.agent)) {
+    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
+    return;
+  }
+
+  const result = abortAgent(params.id, params.agent);
+  logger.info("api", "POST /api/rooms/:id/agents/:agent/abort", { agent: params.agent, roomId: params.id, ...result });
+  sendJson(res, 200, result);
 });
 
 // ── Archives ──
