@@ -21,9 +21,11 @@ interface SidebarProps {
   onNavigate: (page: ActivePage) => void;
   onLogout: () => void;
   refreshKey?: number; // increment to trigger data refresh
+  unreadRoomIds?: Set<string>;
+  onRoomsLoaded?: (rooms: Room[]) => void;
 }
 
-export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey }: SidebarProps) {
+export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey, unreadRoomIds, onRoomsLoaded }: SidebarProps) {
   const { toast, confirm, prompt } = useDialog();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -45,7 +47,8 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   useEffect(() => {
     (window as any).__bossmode_rooms = rooms;
     (window as any).__bossmode_refreshSidebar = refresh;
-  }, [rooms]);
+    onRoomsLoaded?.(rooms);
+  }, [rooms, onRoomsLoaded]);
 
   // Selected IDs
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
@@ -60,6 +63,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
     icon: <Hash size={14} />,
     label: r.name,
     sublabel: r.cwd.split("/").slice(-2).join("/"),
+    hasUnread: unreadRoomIds?.has(r.id),
   }));
 
   const memberItems: SidebarItem[] = members.map((m) => ({
