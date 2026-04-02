@@ -7,7 +7,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as archiveStore from "../workspace/archive-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentions } from "../communication/router.js";
-import { getRoomAgentStatuses } from "../engine/agent-manager.js";
+import { getRoomAgentStatuses, getAgentContextUsage } from "../engine/agent-manager.js";
 
 // ── Rooms ──
 
@@ -200,6 +200,28 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/abort", async (_req, res, params)
   const result = abortAgent(params.id, params.agent);
   logger.info("api", "POST /api/rooms/:id/agents/:agent/abort", { agent: params.agent, roomId: params.id, ...result });
   sendJson(res, 200, result);
+});
+
+// ── Agent Context Usage ──
+
+addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  if (!room.members.includes(params.agent)) {
+    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
+    return;
+  }
+
+  const usage = await getAgentContextUsage(params.id, params.agent);
+  if (usage === null) {
+    sendJson(res, 200, { supported: false });
+  } else {
+    sendJson(res, 200, { supported: true, ...usage });
+  }
 });
 
 // ── Archives ──

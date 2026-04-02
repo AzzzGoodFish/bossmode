@@ -352,6 +352,20 @@ export async function abortAgent(roomId: string, agentName: string): Promise<{ o
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/abort`, { method: "POST" });
 }
 
+// -- Context Usage --
+
+export interface ContextUsageData {
+  supported: boolean;
+  totalTokens?: number;
+  rawMaxTokens?: number;
+  percentage?: number;
+  model?: string;
+}
+
+export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsageData> {
+  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/context-usage`);
+}
+
 // -- Archives --
 
 export interface ArchiveInfo {

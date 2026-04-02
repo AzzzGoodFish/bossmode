@@ -70,6 +70,7 @@ export function Main({
     room,
     messages,
     agentStatus,
+    contextUsage,
     loading,
     hasMore,
     loadingOlder,
@@ -307,6 +308,7 @@ export function Main({
           <MemberPanel
             members={room.members}
             agentStatus={agentStatus}
+            contextUsage={contextUsage}
             roomId={room.id}
             onOpenPrivateChat={openAgentTab}
           />

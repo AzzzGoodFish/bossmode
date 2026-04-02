@@ -16,7 +16,7 @@ import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/w
 import { buildAgentPrompt } from "./prompt-assembler.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
+import type { AgentHandle, AgentStreamEvent, AgentMemberConfig, ContextUsage } from "./runtime/types.js";
 import type { AgentStatus, RoomMessage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -294,6 +294,16 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
   const result: Record<string, AgentStatus> = {};
   for (const m of room.members) result[m] = getAgentStatus(roomId, m);
   return result;
+}
+
+// -- Context usage --
+
+export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsage | null> {
+  const key = instanceKey(roomId, agentName);
+  const instance = instances.get(key);
+  if (!instance) return null;
+  if (!instance.handle.getContextUsage) return null;
+  return instance.handle.getContextUsage();
 }
 
 // -- Event history --
