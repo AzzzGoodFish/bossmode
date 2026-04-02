@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { MockRuntime, MockAgentHandle } from "./helpers/mock-runtime.js";
+import { truncateToolResult } from "../src/engine/tools.js";
 
 describe("MockRuntime", () => {
   it("should have correct name and capabilities", () => {
@@ -46,5 +47,28 @@ describe("MockRuntime", () => {
   it("should shutdown cleanly", async () => {
     const runtime = new MockRuntime();
     await expect(runtime.shutdownAll()).resolves.toBeUndefined();
+  });
+});
+
+describe("truncateToolResult", () => {
+  it("passes through short text unchanged", () => {
+    const text = "Hello world";
+    expect(truncateToolResult(text)).toBe(text);
+  });
+
+  it("passes through text at exactly the limit", () => {
+    const text = "a".repeat(25_000);
+    expect(truncateToolResult(text)).toBe(text);
+  });
+
+  it("truncates text exceeding the limit with a message", () => {
+    const text = "x".repeat(30_000);
+    const result = truncateToolResult(text);
+    expect(result.length).toBeLessThan(text.length);
+    expect(result).toContain("Result truncated");
+    expect(result).toContain("30000 chars");
+    expect(result).toContain("25000 limit");
+    // Starts with the original content
+    expect(result.startsWith("x".repeat(25_000))).toBe(true);
   });
 });

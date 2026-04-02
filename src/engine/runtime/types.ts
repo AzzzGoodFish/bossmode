@@ -44,7 +44,8 @@ export interface CreateAgentOpts {
   member: AgentMemberConfig;
 
   // Layered prompt content
-  agentPrompt: string;       // Layer 1: agent definition body
+  agentPrompt: string;       // Layer 1 (agent def) + Layer 4 (knowledge). Empty if no system prompt.
+  envPrompt: string;         // Layer 5 (environment info). Always present.
   skillPaths: string[];      // Layer 2: skill directory paths
   rulesPrompt?: string;      // Layer 3: rules from knowledge base
 
@@ -94,7 +95,9 @@ export type AgentStreamEvent =
   | { type: "message_end"; text: string; usage?: TokenUsage }
   | { type: "tool_start"; toolName: string; toolCallId: string; args: unknown }
   | { type: "tool_update"; toolName: string; toolCallId: string; partialResult: unknown }
-  | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean };
+  | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
+  | { type: "cli:stdout"; text: string }
+  | { type: "cli:stderr"; text: string };
 
 export interface TokenUsage {
   inputTokens: number;

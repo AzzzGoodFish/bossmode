@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import type { AgentMemberConfig, MemberConfig, LegacyMemberConfig } from "../shared/types.js";
+import { logger } from "../foundation/logger.js";
 
 const MEMBERS_PATH = join(getBossmodeDir(), "members.json");
 
@@ -27,7 +28,8 @@ function readAll(): AgentMemberConfig[] {
   try {
     const raw = JSON.parse(readFileSync(MEMBERS_PATH, "utf-8")) as (LegacyMemberConfig | AgentMemberConfig)[];
     return raw.map(normalizeMember);
-  } catch {
+  } catch (err) {
+    logger.error("member-store", "failed to read members.json", { error: String(err) });
     return [];
   }
 }

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
+import { logger } from "../foundation/logger.js";
 import type { SkillDefinition } from "../shared/types.js";
 
 const PRIMARY_SKILLS_DIR = join(getBossmodeDir(), "skills");
@@ -49,7 +50,7 @@ function scanDir(dir: string): SkillDefinition[] {
     try {
       const content = readFileSync(skillFile, "utf-8");
       skills.push(parseSkillFile(content, entry.name, dir));
-    } catch { /* skip */ }
+    } catch (err) { logger.error("skill-store", "failed to parse skill", { name: entry.name, error: String(err) }); }
   }
 
   return skills;

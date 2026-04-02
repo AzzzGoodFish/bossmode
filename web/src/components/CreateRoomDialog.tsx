@@ -95,7 +95,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           <label className="block text-sm text-zinc-400 mb-1">Working Directory</label>
           <input autoComplete="off" type="text" value={cwd} onChange={(e) => setCwd(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
-            placeholder="/home/fish/dev/project" required />
+            placeholder="/path/to/your/project" required />
         </div>
 
         {/* Members */}

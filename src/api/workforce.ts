@@ -62,6 +62,12 @@ addRoute("POST", "/api/agents", async (req, res) => {
 });
 
 addRoute("PUT", "/api/agents/:name", async (req, res, params) => {
+  // Guard: builtin agents cannot be edited
+  const existing = loadAgentDefinition(params.name);
+  if (existing?.tags.includes("builtin")) {
+    sendJson(res, 403, { error: "Built-in agents cannot be edited" });
+    return;
+  }
   const body = (await parseBody(req)) as { content?: string };
   if (!body.content) {
     sendJson(res, 400, { error: "content is required" });
@@ -72,6 +78,12 @@ addRoute("PUT", "/api/agents/:name", async (req, res, params) => {
 });
 
 addRoute("DELETE", "/api/agents/:name", async (_req, res, params) => {
+  // Guard: builtin agents cannot be deleted
+  const agent = loadAgentDefinition(params.name);
+  if (agent?.tags.includes("builtin")) {
+    sendJson(res, 403, { error: "Built-in agents cannot be deleted" });
+    return;
+  }
   const deleted = deleteAgentDefinition(params.name);
   if (!deleted) {
     sendJson(res, 404, { error: "Agent not found" });

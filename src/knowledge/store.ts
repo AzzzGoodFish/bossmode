@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
+import { logger } from "../foundation/logger.js";
 import type { KnowledgeBase, KnowledgeEntry } from "../shared/types.js";
 
 const KNOWLEDGE_DIR = join(getBossmodeDir(), "knowledge");
@@ -54,7 +55,7 @@ export function listKnowledgeBases(): KnowledgeBase[] {
     if (!existsSync(jsonPath)) continue;
     try {
       bases.push(JSON.parse(readFileSync(jsonPath, "utf-8")));
-    } catch { /* skip */ }
+    } catch (err) { logger.error("knowledge-store", "failed to parse KB json", { id: entry.name, error: String(err) }); }
   }
 
   return bases.sort((a, b) => b.createdAt - a.createdAt);
@@ -106,7 +107,7 @@ export function listEntries(kbId: string, filter?: { type?: "rule" | "knowledge"
       // Backfill type for old entries without it
       if (!e.type) e.type = "knowledge";
       entries.push(e);
-    } catch { /* skip */ }
+    } catch (err) { logger.error("knowledge-store", "failed to parse entry", { kbId, file, error: String(err) }); }
   }
 
   if (filter?.type) entries = entries.filter((e) => e.type === filter.type);

@@ -12,7 +12,7 @@ export function parseMentions(content: string, roomMembers: string[]): string[] 
     return ["all"];
   }
 
-  const atPattern = /@(\w+)/g;
+  const atPattern = /@([\w-]+)/g;
   let match;
   while ((match = atPattern.exec(content)) !== null) {
     const name = match[1];

@@ -2,42 +2,57 @@
 import { logger } from "../foundation/logger.js";
 import type { AgentDefinition, KnowledgeEntry } from "../shared/types.js";
 
-/** Build the full agent prompt: Layer 1 (agent def) + Layer 4 (knowledge) + Layer 5 (env) */
+/** Result of prompt assembly — split for runtime injection strategy */
+export interface AssembledPrompt {
+  /** L1 (Agent definition) + L4 (Knowledge). Empty string if agent has no systemPrompt. */
+  agentPrompt: string;
+  /** L5 (Environment info: member list, tools, communication rules). Always present. */
+  envPrompt: string;
+  /** Combined agentPrompt + envPrompt for convenience */
+  fullPrompt: string;
+}
+
+/** Build agent prompt split into agentPrompt (L1+L4) and envPrompt (L5) */
 export function buildAgentPrompt(
   agentDef: AgentDefinition,
   knowledgeEntries: KnowledgeEntry[],
   roomMembers: string[],
   memberName?: string,
-): string {
-  const parts: string[] = [];
+): AssembledPrompt {
+  const agentParts: string[] = [];
 
-  // Layer 1: Agent definition
-  parts.push(agentDef.systemPrompt);
+  // Layer 1: Agent definition (may be empty for builtin general agent)
+  if (agentDef.systemPrompt.trim()) {
+    agentParts.push(agentDef.systemPrompt);
+  }
 
   // Layer 4: Knowledge
   if (knowledgeEntries.length > 0) {
-    parts.push("---\n\n# Project Knowledge\n");
+    agentParts.push("---\n\n# Project Knowledge\n");
     for (const entry of knowledgeEntries) {
-      parts.push(`## ${entry.title}\n\n${entry.content}\n`);
+      agentParts.push(`## ${entry.title}\n\n${entry.content}\n`);
     }
   }
+
+  const agentPrompt = agentParts.join("\n");
 
   // Layer 5: Environment — use memberName as identity, agentDef.name as role
   const identity = memberName || agentDef.name;
   const role = memberName && memberName !== agentDef.name ? agentDef.name : undefined;
-  parts.push(buildEnvironmentPrompt(identity, role, roomMembers));
+  const envPrompt = buildEnvironmentPrompt(identity, role, roomMembers);
 
-  const fullPrompt = parts.join("\n");
+  const fullPrompt = agentPrompt ? agentPrompt + "\n" + envPrompt : envPrompt;
+
   const agentChars = agentDef.systemPrompt.length;
   const knowledgeChars = knowledgeEntries.reduce((n, e) => n + e.content.length + e.title.length, 0);
-  const envChars = fullPrompt.length - agentChars - knowledgeChars;
+  const envChars = envPrompt.length;
   logger.info("agent", "assemblePrompt", {
     member: identity, agent: agentDef.name,
     layers: { agent: agentChars, knowledge: knowledgeChars, env: envChars },
     totalTokens: `~${Math.round(fullPrompt.length / 4)}`,
   });
 
-  return fullPrompt;
+  return { agentPrompt, envPrompt, fullPrompt };
 }
 
 /** Build environment info section (Layer 5) */

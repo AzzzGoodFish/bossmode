@@ -348,6 +348,10 @@ export async function getAgentEvents(roomId: string, agentName: string): Promise
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events`);
 }
 
+export async function abortAgent(roomId: string, agentName: string): Promise<{ ok: boolean; action: string }> {
+  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/abort`, { method: "POST" });
+}
+
 // -- Archives --
 
 export interface ArchiveInfo {

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir } from "./room-store.js";
+import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 
 function messagesPath(roomId: string): string {
@@ -76,7 +77,8 @@ export function getLatestMessageId(roomId: string): string | null {
   try {
     const msg = JSON.parse(lastLine) as RoomMessage;
     return msg.id;
-  } catch {
+  } catch (err) {
+    logger.error("message-store", "failed to parse last message", { roomId, error: String(err) });
     return null;
   }
 }

@@ -1,12 +1,14 @@
+import { abortAgent } from "../api/client";
 import type { AgentStatusMap } from "../hooks/useRoom";
 
 interface MemberPanelProps {
   members: string[];
   agentStatus: AgentStatusMap;
+  roomId: string;
   onOpenPrivateChat?: (agentName: string) => void;
 }
 
-export function MemberPanel({ members, agentStatus, onOpenPrivateChat }: MemberPanelProps) {
+export function MemberPanel({ members, agentStatus, roomId, onOpenPrivateChat }: MemberPanelProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="p-3 border-b border-zinc-200 dark:border-zinc-800">
@@ -31,7 +33,14 @@ export function MemberPanel({ members, agentStatus, onOpenPrivateChat }: MemberP
             <StatusDot status={agentStatus[name] || "idle"} />
             <span className="text-sm text-zinc-700 dark:text-zinc-300">{name}</span>
             {agentStatus[name] === "working" && (
-              <span className="text-xs text-blue-500 ml-auto">working</span>
+              <>
+                <span className="text-xs text-blue-500 ml-auto">working</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); abortAgent(roomId, name).catch(console.error); }}
+                  className="px-1.5 py-0.5 text-[10px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer"
+                  title={`Interrupt ${name}`}
+                >Interrupt</button>
+              </>
             )}
           </button>
         ))}

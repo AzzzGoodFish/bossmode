@@ -22,6 +22,11 @@ export default function (pi) {
   const SERVER = ${JSON.stringify(serverUrl)};
   const ROOM = ${JSON.stringify(roomId)};
   const AGENT = ${JSON.stringify(agentName)};
+  const MAX_RESULT_CHARS = 25000;
+  function truncate(text) {
+    if (text.length <= MAX_RESULT_CHARS) return text;
+    return text.slice(0, MAX_RESULT_CHARS) + "\\n\\n--- Result truncated (" + text.length + " chars). Use a more specific query. ---";
+  }
 
   pi.registerTool({
     name: "chat",
@@ -61,7 +66,7 @@ export default function (pi) {
       const text = messages.length === 0
         ? "No messages in room."
         : messages.map(m => "[" + m.sender + "]: " + m.content).join("\\n\\n");
-      return { content: [{ type: "text", text }], details: {} };
+      return { content: [{ type: "text", text: truncate(text) }], details: {} };
     },
   });
 
@@ -86,9 +91,9 @@ export default function (pi) {
   pi.registerTool({
     name: "query_knowledge",
     label: "Query Knowledge",
-    description: "Query the project knowledge base.",
+    description: "Query the project knowledge base. Without a query, returns entry summaries. With a query, returns full content of matching entries.",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Search query" })),
+      query: Type.Optional(Type.String({ description: "Search query to filter entries by title/content. Omit to list summaries." })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -99,8 +104,48 @@ export default function (pi) {
       const entries = await res.json();
       const text = entries.length === 0
         ? "No knowledge entries found."
-        : entries.map(e => "## " + e.title + "\\n" + e.content).join("\\n---\\n");
-      return { content: [{ type: "text", text }], details: {} };
+        : entries.map(e => "## " + e.title + "\\n" + (e.content || e.contentPreview || "")).join("\\n---\\n");
+      return { content: [{ type: "text", text: truncate(text) }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "update_knowledge",
+    label: "Update Knowledge",
+    description: "Update an existing knowledge entry. Use query_knowledge first to find entry IDs.",
+    parameters: Type.Object({
+      entryId: Type.String({ description: "ID of the entry to update" }),
+      title: Type.String({ description: "New title" }),
+      content: Type.String({ description: "New content" }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "update_knowledge", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Knowledge updated: " + params.title }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "delete_knowledge",
+    label: "Delete Knowledge",
+    description: "Delete a knowledge entry. Use query_knowledge first to find entry IDs.",
+    parameters: Type.Object({
+      entryId: Type.String({ description: "ID of the entry to delete" }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "delete_knowledge", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Knowledge entry deleted." }], details: {} };
     },
   });
 }
@@ -186,7 +231,10 @@ class PiCliAgentHandle implements AgentHandle {
 
     // Parse stdout JSONL
     proc.stdout.on("data", (data: Buffer) => {
-      this.buffer += data.toString();
+      const text = data.toString();
+      // Emit raw stdout for debugging
+      this.emit({ type: "cli:stdout", text });
+      this.buffer += text;
       const lines = this.buffer.split("\n");
       this.buffer = lines.pop() || "";
       for (const line of lines) {
@@ -315,6 +363,11 @@ class PiCliAgentHandle implements AgentHandle {
     if (mapped) this.emit(mapped);
   }
 
+  /** Public emit for external callers (e.g. stderr handler wired after construction) */
+  emitPublic(event: AgentStreamEvent): void {
+    this.emit(event);
+  }
+
   private emit(event: AgentStreamEvent): void {
     for (const fn of this.listeners) fn(event);
   }
@@ -388,10 +441,12 @@ export class PiCliRuntime implements AgentRuntime {
 
     const resolvedModel = normalizeModel(opts.member.model);
 
+    // Decide injection strategy based on whether agentPrompt has content
+    const hasAgentPrompt = opts.agentPrompt.trim().length > 0;
+
     const buildArgs = (sessionFile?: string): string[] => {
       const args = [
         "--mode", "rpc",
-        "--system-prompt", opts.agentPrompt,
         "--model", resolvedModel,
         "--thinking", opts.member.thinkingLevel || "off",
         "--no-extensions",
@@ -399,6 +454,15 @@ export class PiCliRuntime implements AgentRuntime {
         "--extension", extPath,
         ...opts.skillPaths.filter((p) => existsSync(p)).flatMap((p) => ["--skill", p]),
       ];
+
+      if (hasAgentPrompt) {
+        // Override mode: agentPrompt + envPrompt in --system-prompt
+        args.push("--system-prompt", opts.agentPrompt + "\n" + opts.envPrompt);
+      } else {
+        // Append mode: preserve CLI default, append envPrompt
+        args.push("--append-system-prompt", opts.envPrompt);
+      }
+
       if (sessionFile) args.push("--session", sessionFile);
       if (opts.rulesPrompt) args.push("--append-system-prompt", opts.rulesPrompt);
       return args;
@@ -441,7 +505,15 @@ export class PiCliRuntime implements AgentRuntime {
         });
       });
 
-      return new PiCliAgentHandle(proc, `${this.cliPath} ${args.join(" ")}`);
+      const handle = new PiCliAgentHandle(proc, `${this.cliPath} ${args.join(" ")}`);
+
+      // Emit raw stderr for debugging (after handle creation so listeners exist)
+      proc.stderr.on("data", (d: Buffer) => {
+        const text = d.toString();
+        if (text.trim()) handle.emitPublic({ type: "cli:stderr", text });
+      });
+
+      return handle;
     };
 
     // Try with session resume, fallback to fresh

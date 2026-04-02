@@ -34,24 +34,37 @@ export function seedTemplates(distDir: string): void {
   const agentsDir = join(BOSSMODE_DIR, "agents");
   const skillsDir = join(BOSSMODE_DIR, "skills");
 
-  // Agents: copy if empty
-  if (!existsSync(agentsDir) || readdirSync(agentsDir).filter((f) => f.endsWith(".md")).length === 0) {
-    const src = join(templatesDir, "agents");
-    if (existsSync(src)) {
-      mkdirSync(agentsDir, { recursive: true });
-      for (const f of readdirSync(src).filter((f) => f.endsWith(".md"))) {
-        copyFileSync(join(src, f), join(agentsDir, f));
+  // Agents: per-file check — skip existing, seed missing
+  const agentsSrc = join(templatesDir, "agents");
+  if (existsSync(agentsSrc)) {
+    mkdirSync(agentsDir, { recursive: true });
+    let seeded = 0;
+    for (const f of readdirSync(agentsSrc).filter((f) => f.endsWith(".md"))) {
+      const dest = join(agentsDir, f);
+      if (!existsSync(dest)) {
+        copyFileSync(join(agentsSrc, f), dest);
+        seeded++;
       }
-      logger.info("seed", `copied ${readdirSync(src).filter(f => f.endsWith(".md")).length} agent templates`);
+    }
+    if (seeded > 0) {
+      logger.info("seed", `seeded ${seeded} missing agent template(s)`);
     }
   }
 
-  // Skills: copy if empty
-  if (!existsSync(skillsDir) || readdirSync(skillsDir).length === 0) {
-    const src = join(templatesDir, "skills");
-    if (existsSync(src)) {
-      cpSync(src, skillsDir, { recursive: true });
-      logger.info("seed", "copied skill templates");
+  // Skills: per-directory check — skip existing, seed missing
+  const skillsSrc = join(templatesDir, "skills");
+  if (existsSync(skillsSrc)) {
+    mkdirSync(skillsDir, { recursive: true });
+    let seeded = 0;
+    for (const d of readdirSync(skillsSrc)) {
+      const dest = join(skillsDir, d);
+      if (!existsSync(dest)) {
+        cpSync(join(skillsSrc, d), dest, { recursive: true });
+        seeded++;
+      }
+    }
+    if (seeded > 0) {
+      logger.info("seed", `seeded ${seeded} missing skill template(s)`);
     }
   }
 }
