@@ -6,8 +6,8 @@ import {
   archiveRoom as apiArchiveRoom,
   addMember as apiAddMember,
 } from "../api/client";
-import { useWebSocket } from "../hooks/useWebSocket";
 import { useRoom } from "../hooks/useRoom";
+import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
 import { MemberPanel } from "../components/MemberPanel";
 import { MessageInput } from "../components/MessageInput";
@@ -28,9 +28,22 @@ interface MainProps {
   username: string;
   externalShowCreateRoom?: boolean;
   onCreateRoomShown?: () => void;
+  // WebSocket props (lifted to Layout)
+  connected: boolean;
+  reconnecting: boolean;
+  onRegisterWsHandler: (handler: (event: WsEvent) => void) => void;
+  // Unread state
+  unreadTabs: Set<string> | null;
+  onClearUnreadTab: (roomId: string, tabKey: string) => void;
+  onActiveTabKeyChange: (tabKey: string) => void;
 }
 
-export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, externalShowCreateRoom, onCreateRoomShown }: MainProps) {
+export function Main({
+  selectedRoomId, onSelectRoom, onRoomCreated, username,
+  externalShowCreateRoom, onCreateRoomShown,
+  connected, reconnecting, onRegisterWsHandler,
+  unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
+}: MainProps) {
   const { toast, confirm } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
@@ -66,16 +79,10 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
     reloadRoom,
   } = useRoom(selectedRoomId);
 
-  const { connected, reconnecting, subscribeRoom, unsubscribeRoom } = useWebSocket({
-    onEvent: handleWsEvent,
-  });
-
+  // Register useRoom's WS handler with Layout
   useEffect(() => {
-    if (selectedRoomId) {
-      subscribeRoom(selectedRoomId);
-      return () => unsubscribeRoom(selectedRoomId);
-    }
-  }, [selectedRoomId, subscribeRoom, unsubscribeRoom]);
+    onRegisterWsHandler(handleWsEvent);
+  }, [handleWsEvent, onRegisterWsHandler]);
 
   // Restore tabs when room changes
   useEffect(() => {
@@ -100,18 +107,35 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
     }
   }, [tabs, selectedRoomId]);
 
+  // Notify Layout of active tab changes (for unread logic)
+  const activeTab = tabs[activeTabIdx];
+  useEffect(() => {
+    const key = activeTab?.type === "room" ? "room" : activeTab?.agentName ?? "room";
+    onActiveTabKeyChange(key);
+  }, [activeTab, onActiveTabKeyChange]);
+
+  const handleTabSwitch = useCallback((idx: number) => {
+    setActiveTabIdx(idx);
+    // F4: Clear unread when switching to a tab
+    if (selectedRoomId) {
+      const tab = tabs[idx];
+      const tabKey = tab?.type === "room" ? "room" : tab?.agentName;
+      if (tabKey) onClearUnreadTab(selectedRoomId, tabKey);
+    }
+  }, [tabs, selectedRoomId, onClearUnreadTab]);
+
   const openAgentTab = useCallback((agentName: string) => {
     setTabs((prev) => {
       const existingIdx = prev.findIndex((t) => t.type === "agent" && t.agentName === agentName);
       if (existingIdx !== -1) {
-        setActiveTabIdx(existingIdx);
+        handleTabSwitch(existingIdx);
         return prev;
       }
       const newTabs = [...prev, { type: "agent" as const, agentName }];
-      setActiveTabIdx(newTabs.length - 1);
+      handleTabSwitch(newTabs.length - 1);
       return newTabs;
     });
-  }, []);
+  }, [handleTabSwitch]);
 
   const closeTab = useCallback((idx: number) => {
     if (idx === 0) return;
@@ -184,8 +208,6 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
     }
   }, [selectedRoomId, reloadRoom, toast]);
 
-  const activeTab = tabs[activeTabIdx];
-
   if (!room) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -216,15 +238,18 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
         {tabs.map((tab, idx) => {
           const isActive = idx === activeTabIdx;
           const label = tab.type === "room" ? `# ${room.name}` : tab.agentName!;
+          const tabKey = tab.type === "room" ? "room" : tab.agentName!;
+          const hasUnread = !isActive && unreadTabs?.has(tabKey);
           return (
             <button
               key={tab.type === "room" ? "room" : tab.agentName}
-              onClick={() => setActiveTabIdx(idx)}
+              onClick={() => handleTabSwitch(idx)}
               className={`group flex items-center gap-1 px-3 py-1.5 text-xs rounded-t transition-colors cursor-pointer ${
                 isActive ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
               }`}
             >
               <span className="truncate max-w-24">{label}</span>
+              {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
               {tab.type === "agent" && (
                 <span
                   onClick={(e) => { e.stopPropagation(); closeTab(idx); }}
@@ -282,6 +307,7 @@ export function Main({ selectedRoomId, onSelectRoom, onRoomCreated, username, ex
           <MemberPanel
             members={room.members}
             agentStatus={agentStatus}
+            roomId={room.id}
             onOpenPrivateChat={openAgentTab}
           />
         </div>

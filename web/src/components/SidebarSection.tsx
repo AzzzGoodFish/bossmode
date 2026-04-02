@@ -7,6 +7,7 @@ export interface SidebarItem {
   label: string;
   sublabel?: string;
   badge?: { text: string; variant: "amber" | "blue" | "purple" | "zinc" };
+  hasUnread?: boolean;
 }
 
 interface SidebarSectionProps {
@@ -97,6 +98,7 @@ export function SidebarSection({
                     {item.badge.text}
                   </span>
                 )}
+                {item.hasUnread && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />}
                 {renderMenu && <span className="opacity-0 group-hover:opacity-100">{renderMenu(item.id)}</span>}
               </div>
             ))
