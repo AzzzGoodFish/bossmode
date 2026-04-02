@@ -1,6 +1,6 @@
 {
   "name": "bossmode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Discord-style AI team chat room",
   "type": "module",
   "license": "ISC",
@@ -11,7 +11,15 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["ai", "agent", "team", "chat", "bossmode", "mcp", "claude"],
+  "keywords": [
+    "ai",
+    "agent",
+    "team",
+    "chat",
+    "bossmode",
+    "mcp",
+    "claude"
+  ],
   "files": [
     "dist",
     "templates",
