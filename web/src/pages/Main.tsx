@@ -288,7 +288,7 @@ export function Main({
           {activeTab?.type === "room" ? (
             <>
               <ChatArea messages={messages} roomName={room.name} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} />
+              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
           ) : activeTab?.type === "agent" && selectedRoomId ? (
             <AgentTab

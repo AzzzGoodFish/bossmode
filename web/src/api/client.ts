@@ -366,6 +366,39 @@ export async function getAgentContextUsage(roomId: string, agentName: string): P
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/context-usage`);
 }
 
+// -- Attachments --
+
+export interface UploadResult {
+  filename: string;
+  originalFilename: string;
+  path: string;
+  size: number;
+  url: string;
+}
+
+export async function uploadFile(roomId: string, file: File): Promise<UploadResult> {
+  const headers: Record<string, string> = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+  const res = await fetch(
+    `${BASE_URL}/api/rooms/${roomId}/upload?filename=${encodeURIComponent(file.name)}`,
+    { method: "POST", headers, body: file },
+  );
+
+  if (res.status === 401) {
+    clearToken();
+    onUnauthorized?.();
+    throw new Error("Unauthorized");
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
 // -- Archives --
 
 export interface ArchiveInfo {

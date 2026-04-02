@@ -1,5 +1,8 @@
-// Workspace API routes — Room, Message, Archive
-import { existsSync } from "node:fs";
+// Workspace API routes — Room, Message, Archive, Attachments
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { join, extname, basename } from "node:path";
+import { createHash } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
@@ -291,4 +294,134 @@ addRoute("GET", "/api/rooms/:id/archives/:timestamp", async (_req, res, params) 
   const summary = archiveStore.readArchiveSummary(params.id, ts);
 
   sendJson(res, 200, { messages, summary });
+});
+
+// ── Attachments ──
+
+const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
+const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
+
+/** Collect raw binary body from request */
+function parseRawBody(req: IncomingMessage, maxSize: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalSize = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalSize += chunk.length;
+      if (totalSize > maxSize) {
+        req.destroy();
+        reject(new Error(`Upload too large (max ${Math.round(maxSize / 1024 / 1024)}MB)`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/** MIME type map for serving attachments */
+const ATTACHMENT_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".zip": "application/zip",
+};
+
+addRoute("POST", "/api/rooms/:id/upload", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  // Get original filename from query param
+  const url = new URL(req.url || "", "http://localhost");
+  const originalFilename = url.searchParams.get("filename");
+  if (!originalFilename) {
+    sendJson(res, 400, { error: "filename query parameter is required" });
+    return;
+  }
+
+  // Read raw binary body
+  let buffer: Buffer;
+  try {
+    buffer = await parseRawBody(req, MAX_UPLOAD_SIZE);
+  } catch (err: any) {
+    sendJson(res, 413, { error: err.message });
+    return;
+  }
+
+  if (buffer.length === 0) {
+    sendJson(res, 400, { error: "Empty file" });
+    return;
+  }
+
+  // Compute hash-based filename: sha256 first 12 chars + original extension
+  const hash = createHash("sha256").update(buffer).digest("hex").slice(0, 12);
+  const ext = extname(originalFilename) || ".bin";
+  const storedFilename = `${hash}${ext}`;
+
+  // Store in <room.cwd>/.bossmode-attachments/
+  const attachDir = join(room.cwd, ATTACHMENT_DIR_NAME);
+  if (!existsSync(attachDir)) {
+    mkdirSync(attachDir, { recursive: true });
+  }
+  const filePath = join(attachDir, storedFilename);
+  writeFileSync(filePath, buffer);
+
+  logger.info("api", "POST /api/rooms/:id/upload", {
+    roomId: params.id,
+    originalFilename,
+    storedFilename,
+    size: buffer.length,
+  });
+
+  sendJson(res, 200, {
+    filename: storedFilename,
+    originalFilename,
+    path: filePath,
+    size: buffer.length,
+    url: `/api/rooms/${params.id}/attachments/${storedFilename}`,
+  });
+});
+
+addRoute("GET", "/api/rooms/:id/attachments/:filename", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  // Path traversal protection: strip any directory components
+  const safeFilename = basename(params.filename);
+  if (safeFilename !== params.filename || safeFilename.includes("..")) {
+    sendJson(res, 400, { error: "Invalid filename" });
+    return;
+  }
+
+  const filePath = join(room.cwd, ATTACHMENT_DIR_NAME, safeFilename);
+  if (!existsSync(filePath)) {
+    sendJson(res, 404, { error: "Attachment not found" });
+    return;
+  }
+
+  const ext = extname(safeFilename).toLowerCase();
+  const mime = ATTACHMENT_MIME[ext] || "application/octet-stream";
+  const content = readFileSync(filePath);
+
+  res.writeHead(200, {
+    "Content-Type": mime,
+    "Content-Length": content.length,
+    "Cache-Control": "public, max-age=86400",
+  });
+  res.end(content);
 });
