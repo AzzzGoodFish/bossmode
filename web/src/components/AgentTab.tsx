@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, type KeyboardEvent } from "react";
-import { getToken, getAgentEvents, abortAgent } from "../api/client";
+import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type ClipboardEvent } from "react";
+import { Paperclip, X } from "lucide-react";
+import { getToken, getAgentEvents, abortAgent, uploadFile } from "../api/client";
 import { Markdown } from "./Markdown";
 import { MessageBubble } from "./MessageBubble";
 
@@ -258,6 +259,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
             committed={committed}
             isWorking={isWorking}
             agentName={agentName}
+            roomId={roomId}
             onSteer={onSteer}
             onSend={(text) => { onSteer(text); pushEvent({ type: "user_steer", text, ts: now() }); }}
           />
@@ -304,21 +306,38 @@ function formatTime(ts?: number): string {
 // AgentChat — private conversation: user_steer + agent_reply + message
 // ============================================================================
 
+/** Generate clipboard image filename */
+function clipboardFilenameForChat(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `clipboard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
+}
+
+interface PendingChatFile {
+  file: File;
+  preview?: string;
+}
+
 function AgentChat({
   committed,
   isWorking,
   agentName,
+  roomId,
   onSteer,
   onSend,
 }: {
   committed: CommittedEvent[];
   isWorking: boolean;
   agentName: string;
+  roomId: string;
   onSteer: (content: string) => void;
   onSend: (text: string) => void;
 }) {
   const [input, setInput] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const chatEvents = committed.filter((e) => e.type === "user_steer" || e.type === "agent_reply" || e.type === "message");
 
@@ -326,16 +345,73 @@ function AgentChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatEvents.length, isWorking]);
 
-  const handleSend = () => {
+  const addFiles = useCallback((files: File[]) => {
+    setPendingFiles((prev) => [
+      ...prev,
+      ...files.map((file) => ({
+        file,
+        preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+      })),
+    ]);
+  }, []);
+
+  const removeFile = useCallback((idx: number) => {
+    setPendingFiles((prev) => {
+      const removed = prev[idx];
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  const handleSend = async () => {
     const trimmed = input.trim();
-    if (!trimmed) return;
-    onSend(trimmed);
+    if (!trimmed && pendingFiles.length === 0) return;
+
+    let content = trimmed;
+
+    if (pendingFiles.length > 0) {
+      setUploading(true);
+      try {
+        const lines: string[] = [];
+        for (const pf of pendingFiles) {
+          const result = await uploadFile(roomId, pf.file);
+          lines.push(`Attachment: [original filename: ${result.originalFilename}](${result.path})`);
+        }
+        const attachText = lines.join("\n");
+        content = content ? `${content}\n${attachText}` : attachText;
+      } catch (err) {
+        console.error("Upload failed:", err);
+        setUploading(false);
+        return;
+      }
+      pendingFiles.forEach((pf) => { if (pf.preview) URL.revokeObjectURL(pf.preview); });
+      setPendingFiles([]);
+      setUploading(false);
+    }
+
+    if (content) onSend(content);
     setInput("");
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
+
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(new File([file], clipboardFilenameForChat(), { type: file.type }));
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      addFiles(imageFiles);
+    }
+  }, [addFiles]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -363,23 +439,58 @@ function AgentChat({
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2">
+      {/* File preview */}
+      {pendingFiles.length > 0 && (
+        <div className="px-3 pt-2 flex flex-wrap gap-2">
+          {pendingFiles.map((pf, idx) => (
+            <div key={idx} className="relative group">
+              {pf.preview ? (
+                <img src={pf.preview} alt={pf.file.name} className="w-12 h-12 object-cover rounded border border-zinc-300 dark:border-zinc-600" />
+              ) : (
+                <div className="w-12 h-12 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-700">
+                  <span className="text-[9px] text-zinc-500 truncate px-0.5">{pf.file.name.split(".").pop()}</span>
+                </div>
+              )}
+              <button
+                onClick={() => removeFile(idx)}
+                className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <X size={8} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2 items-end">
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          title="Attach files"
+        >
+          <Paperclip size={16} />
+        </button>
+        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
+
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Send private instruction..."
+          onPaste={handlePaste}
+          disabled={uploading}
+          placeholder={uploading ? "Uploading..." : "Send private instruction... (Ctrl+V to paste image)"}
           className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white
                      focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
         />
         <button
           onClick={handleSend}
-          disabled={!input.trim()}
+          disabled={uploading || (!input.trim() && pendingFiles.length === 0)}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
                      text-white text-sm font-medium rounded transition-colors cursor-pointer"
         >
-          Send
+          {uploading ? "..." : "Send"}
         </button>
       </div>
     </div>
