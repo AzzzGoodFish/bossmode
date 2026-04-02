@@ -1,7 +1,8 @@
 // Claude CLI Runtime — spawn claude --input-format stream-json, event mapping, MCP config
 import { spawn, execSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { writeFileSync, unlinkSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, unlinkSync, readFileSync, existsSync, symlinkSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
+import { homedir } from "node:os";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
 import type {
@@ -128,6 +129,15 @@ function mapClaudeEvent(raw: any, state: ClaudeParseState): AgentStreamEvent[] {
       events.push({ type: "agent_end" });
       break;
     }
+
+    case "control_response":
+      // Response to our interrupt request — acknowledged, no action needed
+      logger.info("runtime:claude-cli", "control_response", { subtype: raw.response?.subtype, requestId: raw.request_id });
+      break;
+
+    default:
+      logger.info("runtime:claude-cli", "unhandled event type", { type: raw.type });
+      break;
   }
 
   return events;
@@ -166,7 +176,12 @@ class ClaudeCliAgentHandle implements AgentHandle {
     this.spawnArgs = spawnArgs || "";
 
     proc.stdout.on("data", (data: Buffer) => {
-      this.buffer += data.toString();
+      const text = data.toString();
+      // Any stdout activity resets the timeout (not just valid JSON)
+      this.resetActivityTimer();
+      // Emit raw stdout for debugging (cli:stdout)
+      this.emit({ type: "cli:stdout", text });
+      this.buffer += text;
       const lines = this.buffer.split("\n");
       this.buffer = lines.pop() || "";
       for (const line of lines) {
@@ -174,7 +189,7 @@ class ClaudeCliAgentHandle implements AgentHandle {
         try {
           const raw = JSON.parse(line);
           this.handleRaw(raw);
-        } catch { /* skip */ }
+        } catch (err) { logger.warn("runtime:claude-cli", "stdout JSON parse failed", { line: line.substring(0, 200), error: String(err) }); }
       }
     });
 
@@ -185,6 +200,32 @@ class ClaudeCliAgentHandle implements AgentHandle {
         this.emit({ type: "agent_end" });
       }
       this.resolveIdle();
+    });
+
+    // FIX: Handle spawn/process errors to prevent unhandled exceptions
+    proc.on("error", (err) => {
+      logger.error("runtime:claude-cli", "process error", { pid: proc.pid, error: err.message });
+      this.clearActivityTimer();
+      if (this._isWorking) {
+        this._isWorking = false;
+        this.emit({ type: "agent_end" });
+      }
+      if (this.promptRejecter) {
+        this.promptRejecter(new Error(`Claude CLI process error: ${err.message}`));
+        this.promptRejecter = null;
+      }
+      this.resolveIdle();
+    });
+
+    // FIX: Prevent unhandled errors on stdin when process exits
+    proc.stdin.on("error", (err) => {
+      logger.error("runtime:claude-cli", "stdin error", { pid: proc.pid, error: err.message });
+    });
+
+    // Emit raw stderr for debugging
+    proc.stderr.on("data", (d: Buffer) => {
+      const text = d.toString();
+      if (text.trim()) this.emit({ type: "cli:stderr", text });
     });
   }
 
@@ -205,7 +246,7 @@ class ClaudeCliAgentHandle implements AgentHandle {
         content: [{ type: "text", text: message }],
       },
     };
-    this.proc.stdin.write(JSON.stringify(userMsg) + "\n");
+    this.safeStdinWrite(JSON.stringify(userMsg) + "\n");
 
     // Activity timeout: if no stdout output within 90s, reject
     return new Promise<void>((resolve, reject) => {
@@ -223,11 +264,16 @@ class ClaudeCliAgentHandle implements AgentHandle {
         content: [{ type: "text", text: message }],
       },
     };
-    this.proc.stdin.write(JSON.stringify(userMsg) + "\n");
+    this.safeStdinWrite(JSON.stringify(userMsg) + "\n");
   }
 
   abort(): void {
-    try { this.proc.kill("SIGTERM"); } catch {}
+    const requestId = Math.random().toString(36).substring(2, 15);
+    this.safeStdinWrite(JSON.stringify({
+      request_id: requestId,
+      type: "control_request",
+      request: { subtype: "interrupt" },
+    }) + "\n");
   }
 
   waitForIdle(): Promise<void> {
@@ -253,12 +299,22 @@ class ClaudeCliAgentHandle implements AgentHandle {
     this.resolveIdle();
   }
 
+  /** Write to stdin with safety checks — avoids crashes when process is gone */
+  private safeStdinWrite(data: string): void {
+    try {
+      if (this.proc.stdin.writable && !this.proc.killed) {
+        this.proc.stdin.write(data);
+      } else {
+        logger.error("runtime:claude-cli", "stdin not writable", { pid: this.pid, killed: this.proc.killed });
+      }
+    } catch (err: any) {
+      logger.error("runtime:claude-cli", "stdin write failed", { pid: this.pid, error: err.message });
+    }
+  }
+
   private handleRaw(raw: any): void {
     // DEBUG: log every raw JSON line from Claude stdout
     logger.info("runtime:claude-cli", "raw", { type: raw.type, subtype: raw.subtype, keys: Object.keys(raw) });
-
-    // Any stdout activity resets the timeout
-    this.resetActivityTimer();
 
     if (raw.type === "system" && !this.state.initialized) {
       this.state.initialized = true;
@@ -378,33 +434,53 @@ export class ClaudeCliRuntime implements AgentRuntime {
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig), "utf-8");
     this.mcpFiles.push(mcpConfigPath);
 
-    // Build system prompt — claude has no --skill flag, so inline skills + team into prompt
-    let fullPrompt = opts.agentPrompt;
-
-    // Inline skill content from paths
-    const skillTexts: string[] = [];
+    // Symlink skills to ~/.claude/skills/ so Claude Code discovers them natively.
+    // This replaces the old approach of inlining skill text into --system-prompt.
+    // Benefits: skills load on-demand (via /skill-name or SkillTool), saving tokens.
+    const createdSymlinks: string[] = [];
+    const claudeSkillsDir = join(homedir(), ".claude", "skills");
+    mkdirSync(claudeSkillsDir, { recursive: true });
     for (const sp of opts.skillPaths) {
-      const skillMd = join(sp, "SKILL.md");
-      if (existsSync(skillMd)) {
-        try { skillTexts.push(readFileSync(skillMd, "utf-8")); } catch { /* skip */ }
+      if (!existsSync(sp)) continue;
+      const skillName = basename(sp);
+      const target = join(claudeSkillsDir, skillName);
+      if (!existsSync(target)) {
+        try {
+          symlinkSync(sp, target);
+          createdSymlinks.push(target);
+        } catch (err: any) {
+          logger.warn("runtime:claude-cli", "symlink skill failed", { skill: skillName, error: err.message });
+        }
       }
     }
-    if (skillTexts.length > 0) {
-      fullPrompt += "\n\n---\n\n# Skills\n\n" + skillTexts.join("\n---\n\n");
-    }
 
-    if (opts.rulesPrompt) {
-      fullPrompt += `\n\n---\n\n# Rules\n\n${opts.rulesPrompt}`;
-    }
+    // Decide injection strategy based on whether agentPrompt has content
+    const hasAgentPrompt = opts.agentPrompt.trim().length > 0;
 
     const args = [
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
-      "--system-prompt", fullPrompt,
       "--mcp-config", mcpConfigPath,
       "--dangerously-skip-permissions",
     ];
+
+    if (hasAgentPrompt) {
+      // Override mode: agentPrompt + rules + env all in --system-prompt
+      let fullPrompt = opts.agentPrompt;
+      if (opts.rulesPrompt) {
+        fullPrompt += `\n\n---\n\n# Rules\n\n${opts.rulesPrompt}`;
+      }
+      fullPrompt += "\n" + opts.envPrompt;
+      args.push("--system-prompt", fullPrompt);
+    } else {
+      // Append mode: preserve CLI default system prompt, append env + rules
+      let appendPrompt = opts.envPrompt;
+      if (opts.rulesPrompt) {
+        appendPrompt += `\n\n---\n\n# Rules\n\n${opts.rulesPrompt}`;
+      }
+      args.push("--append-system-prompt", appendPrompt);
+    }
 
     // Model: use alias to avoid auth issues with full model IDs
     const modelAlias = mapModelToAlias(opts.member.model);
