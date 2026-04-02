@@ -125,14 +125,21 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
     getRuntimes().then(setRuntimes);
   }, [id, isCreate]);
 
+  // Track whether selected agent is builtin
+  const [isBuiltinAgent, setIsBuiltinAgent] = useState(false);
+
   // Load agent detail when agent field changes
   useEffect(() => {
     if (form.agent) {
       getAgent(form.agent)
-        .then((a) => setAgentDetail({ description: a.description, skills: a.skills || [], avatar: a.avatar }))
-        .catch(() => setAgentDetail(null));
+        .then((a) => {
+          setAgentDetail({ description: a.description, skills: a.skills || [], avatar: a.avatar });
+          setIsBuiltinAgent(a.tags?.includes("builtin") ?? false);
+        })
+        .catch(() => { setAgentDetail(null); setIsBuiltinAgent(false); });
     } else {
       setAgentDetail(null);
+      setIsBuiltinAgent(false);
     }
   }, [form.agent]);
 
@@ -208,8 +215,11 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
               <select value={form.agent || ""} onChange={(e) => { setForm({ ...form, agent: e.target.value }); if (isCreate && !form.name) setForm((f) => ({ ...f, agent: e.target.value, name: e.target.value })); }}
                 className={inputCls}>
                 <option value="">Select agent...</option>
-                {agents.map((a) => <option key={a.name} value={a.name}>{a.name} — {a.description}</option>)}
+                {agents.map((a) => <option key={a.name} value={a.name}>{a.name}{a.tags.includes("builtin") ? " [BUILT-IN]" : ""} — {a.description}</option>)}
               </select>
+              {isBuiltinAgent && (
+                <p className="text-xs text-slate-400 mt-1.5">Uses CLI default configuration. No additional prompts or skills injected.</p>
+              )}
             </Field>
 
             <Field label="Runtime">
@@ -254,11 +264,16 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
               <div className="flex items-center gap-2">
                 <span className="text-xl">{agentDetail.avatar || "🤖"}</span>
                 <div>
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-white">{form.agent}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-900 dark:text-white">{form.agent}</span>
+                    {isBuiltinAgent && (
+                      <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">built-in</span>
+                    )}
+                  </div>
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">{agentDetail.description}</div>
                 </div>
               </div>
-              {agentDetail.skills.length > 0 && (
+              {!isBuiltinAgent && agentDetail.skills.length > 0 && (
                 <div>
                   <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5">Skills ({agentDetail.skills.length})</div>
                   <div className="flex flex-wrap gap-1.5">
@@ -308,9 +323,14 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                       {inst.pid && <><span className="text-zinc-300 dark:text-zinc-600">·</span><span>PID {inst.pid}</span></>}
                     </div>
                     {inst.spawnArgs && (
-                      <div className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono mt-1 truncate" title={inst.spawnArgs}>
-                        {inst.spawnArgs.slice(0, 100)}{inst.spawnArgs.length > 100 ? "..." : ""}
-                      </div>
+                      <details className="mt-1.5">
+                        <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">
+                          CLI args ({inst.spawnArgs.split(/\s--/).length} flags)
+                        </summary>
+                        <pre className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono mt-1 whitespace-pre-wrap break-all leading-relaxed max-h-48 overflow-y-auto">
+                          {formatSpawnArgs(inst.spawnArgs)}
+                        </pre>
+                      </details>
                     )}
                   </div>
                 ))}
@@ -323,6 +343,19 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   );
 }
 
+
+/** Format CLI spawn args: one --flag per line, truncate long values */
+function formatSpawnArgs(raw: string): string {
+  // Split on ` --` boundaries (preserving the --)
+  const parts = raw.split(/\s(?=--)/).map((p) => p.trim()).filter(Boolean);
+  return parts
+    .map((part) => {
+      // Truncate very long values (e.g. --system-prompt content)
+      if (part.length > 120) return part.slice(0, 117) + "...";
+      return part;
+    })
+    .join("\n");
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

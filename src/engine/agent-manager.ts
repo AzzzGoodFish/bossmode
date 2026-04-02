@@ -133,7 +133,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
     }
   }
 
-  const agentPrompt = buildAgentPrompt(agentDef, knowledgeEntries, room.members, memberName);
+  const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, memberName);
 
   // Resolve skills: member config takes precedence over agent definition
   const skills = resolveSkills(member, agentDef);
@@ -154,7 +154,8 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       cwd: room.cwd,
       roomId,
       member,
-      agentPrompt,
+      agentPrompt: assembled.agentPrompt,
+      envPrompt: assembled.envPrompt,
       skillPaths,
       rulesPrompt,
       roomMembers: room.members,
@@ -308,7 +309,7 @@ export function emitAgentReply(roomId: string, agentName: string, text: string):
   const key = instanceKey(roomId, agentName);
   const instance = instances.get(key);
   if (instance) instance.eventBuffer.push(event);
-  try { appendEventToDisk(roomId, agentName, event); } catch {}
+  try { appendEventToDisk(roomId, agentName, event); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
   broadcastToAgentSubscribers(roomId, agentName, {
     type: "agent:event",
     roomId,
@@ -325,9 +326,14 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
 
   const steerEvent = { type: "user_steer" as any, text: instruction };
   instance.eventBuffer.push(steerEvent);
-  try { appendEventToDisk(roomId, agentName, steerEvent); } catch {}
+  try { appendEventToDisk(roomId, agentName, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
 
-  const userMessage = `[Private instruction from user]: ${instruction}`;
+  // Slash commands (e.g. /compact, /model) are transparently forwarded to the CLI runtime.
+  // Only regular text gets the [Private instruction] prefix wrapper.
+  const isSlashCommand = instruction.startsWith('/');
+  const userMessage = isSlashCommand
+    ? instruction
+    : `[Private instruction from user]: ${instruction}`;
 
   if (instance.handle.isWorking) {
     instance.handle.steer(userMessage);
@@ -342,6 +348,23 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
       broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
     }
   }
+}
+
+// -- Abort --
+
+export function abortAgent(roomId: string, memberName: string): { ok: boolean; action: string } {
+  const key = instanceKey(roomId, memberName);
+  const instance = instances.get(key);
+  if (!instance) return { ok: false, action: "not_found" };
+  if (instance.status !== "working") return { ok: true, action: "already_idle" };
+
+  // Abort via stdin protocol (both pi-cli and claude-cli), keep instance alive
+  instance.handle.abort();
+  instance.status = "idle";
+  logger.info("agent", "aborted", { member: memberName, roomId });
+
+  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "idle" });
+  return { ok: true, action: "aborted" };
 }
 
 // -- Instance management --
