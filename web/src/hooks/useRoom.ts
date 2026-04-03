@@ -81,10 +81,12 @@ export function useRoom(roomId: string | null) {
       .finally(() => setLoading(false));
   }, [roomId]);
 
-  // Fetch context usage when room loads
+  // Fetch context usage when room loads + periodic polling (30s)
   useEffect(() => {
     if (room && roomId) {
       fetchContextUsage();
+      const interval = setInterval(() => fetchContextUsage(), 30_000);
+      return () => clearInterval(interval);
     }
   }, [room, roomId, fetchContextUsage]);
 
@@ -125,8 +127,10 @@ export function useRoom(roomId: string | null) {
           [event.agent]: newStatus,
         }));
 
-        // Refresh context usage when agent finishes work (idle after working)
-        if (newStatus === "idle") {
+        // Refresh context usage when agent starts work (show previous data) or finishes
+        if (newStatus === "working") {
+          fetchContextUsage(event.agent);
+        } else if (newStatus === "idle") {
           setTimeout(() => fetchContextUsage(event.agent), 500);
         }
       }

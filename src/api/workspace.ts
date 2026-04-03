@@ -221,7 +221,8 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, 
 
   const usage = await getAgentContextUsage(params.id, params.agent);
   if (usage === null) {
-    sendJson(res, 200, { supported: false });
+    // No instance or query failed — runtime may support it, just no data yet
+    sendJson(res, 200, { supported: true, unavailable: true });
   } else {
     sendJson(res, 200, { supported: true, ...usage });
   }
