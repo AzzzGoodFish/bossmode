@@ -18,12 +18,12 @@ export function formatTokens(n: number): string {
   return Math.round(n / 1000) + "k";
 }
 
-/** Get progress bar color class based on percentage (low-opacity continuous gradient) */
+/** Get progress bar color class based on percentage — dark mode 25-35% opacity for visibility */
 function getBarColor(pct: number): string {
-  if (pct < 40) return "bg-emerald-500/15 dark:bg-emerald-500/10";
-  if (pct < 70) return "bg-amber-500/20 dark:bg-amber-500/15";
-  if (pct < 90) return "bg-orange-500/25 dark:bg-orange-500/20";
-  return "bg-red-500/30 dark:bg-red-500/25";
+  if (pct < 50) return "bg-emerald-500/20 dark:bg-emerald-400/25";
+  if (pct < 75) return "bg-amber-500/25 dark:bg-amber-400/30";
+  if (pct < 90) return "bg-orange-500/30 dark:bg-orange-400/35";
+  return "bg-red-500/35 dark:bg-red-400/35";
 }
 
 /** Get percentage text color */
@@ -81,13 +81,13 @@ export function MemberPanel({ members, agentStatus, contextUsage, roomId, onOpen
               <div className="relative z-10 flex items-center gap-2 w-full min-w-0">
                 <StatusDot status={status} />
                 <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{name}</span>
-                <span className={`ml-auto text-[11px] font-mono tabular-nums shrink-0 ${hasData ? getPctColor(pct) : "text-zinc-400 dark:text-zinc-600"}`}>
+                <span className={`ml-auto text-[11px] font-mono tabular-nums shrink-0 ${hasData ? getPctColor(pct) : "text-zinc-400 dark:text-zinc-500"}`}>
                   {hasData ? `${Math.round(pct)}%` : "\u2014"}
                 </span>
                 {isWorking && (
                   <button
                     onClick={(e) => { e.stopPropagation(); abortAgent(roomId, name).catch(console.error); }}
-                    className="w-5 h-5 flex items-center justify-center rounded bg-red-600 hover:bg-red-500 text-white transition-colors cursor-pointer shrink-0"
+                    className="w-5 h-5 flex items-center justify-center rounded text-zinc-400 hover:text-red-400 transition-colors cursor-pointer shrink-0"
                     title={`Interrupt ${name}`}
                   >
                     <Square size={10} fill="currentColor" />

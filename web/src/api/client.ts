@@ -356,6 +356,7 @@ export async function abortAgent(roomId: string, agentName: string): Promise<{ o
 
 export interface ContextUsageData {
   supported: boolean;
+  unavailable?: boolean;
   totalTokens?: number;
   rawMaxTokens?: number;
   percentage?: number;
