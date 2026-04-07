@@ -336,8 +336,11 @@ function AgentChat({
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showCommandMenu, setShowCommandMenu] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const COMMANDS = [{ name: "/compact", description: "Compress agent context" }];
 
   const chatEvents = committed.filter((e) => e.type === "user_steer" || e.type === "agent_reply" || e.type === "message");
 
@@ -462,7 +465,24 @@ function AgentChat({
         </div>
       )}
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2 items-end">
+      <div className="relative border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2 items-end">
+        {/* Slash command menu */}
+        {showCommandMenu && (
+          <div className="absolute bottom-full left-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden w-64 z-20">
+            {COMMANDS.filter((c) => c.name.startsWith(input) || input === "/").map((cmd) => (
+              <button
+                key={cmd.name}
+                className="w-full text-left px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-sm transition-colors cursor-pointer"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setInput(cmd.name); setShowCommandMenu(false); }}
+              >
+                <span className="text-zinc-900 dark:text-white font-mono">{cmd.name}</span>
+                <span className="text-zinc-400 dark:text-zinc-500 ml-2 text-xs">{cmd.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
@@ -476,11 +496,15 @@ function AgentChat({
         <input
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setInput(val);
+            setShowCommandMenu(val === "/" || (val.startsWith("/") && val.length <= 10 && !val.includes(" ")));
+          }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={uploading}
-          placeholder={uploading ? "Uploading..." : "Send private instruction... (Ctrl+V to paste image)"}
+          placeholder={uploading ? "Uploading..." : "Type / for commands, or send instruction..."}
           className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white
                      focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
         />

@@ -42,9 +42,14 @@ function mapClaudeEvent(raw: any, state: ClaudeParseState): AgentStreamEvent[] {
 
   switch (raw.type) {
     case "system":
-      // Init event — store session info, no mapped event
       state.sessionId = raw.session_id;
       state.initialized = true;
+      // Map compact_boundary events to a visible message
+      if (raw.subtype === "compact_boundary" && raw.compact_metadata) {
+        const preTokens = raw.compact_metadata.pre_tokens;
+        events.push({ type: "message_start" });
+        events.push({ type: "message_end", text: `Context compacted. Tokens before: ${preTokens}` });
+      }
       break;
 
     case "assistant": {
