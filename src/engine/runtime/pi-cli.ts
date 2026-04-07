@@ -6,7 +6,7 @@ import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
-  RuntimeCapabilities, RuntimeDetectResult, TokenUsage,
+  RuntimeCapabilities, RuntimeDetectResult, TokenUsage, ContextUsage,
 } from "./types.js";
 
 // ============================================================================
@@ -219,6 +219,8 @@ class PiCliAgentHandle implements AgentHandle {
   private idleResolvers: Array<() => void> = [];
   private promptRejecter: ((err: Error) => void) | null = null;
   private buffer = "";
+  private activityTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
   readonly pid: number | undefined;
   readonly runtimeName = "pi-cli";
@@ -231,6 +233,7 @@ class PiCliAgentHandle implements AgentHandle {
 
     // Parse stdout JSONL
     proc.stdout.on("data", (data: Buffer) => {
+      this.resetActivityTimer();
       const text = data.toString();
       // Emit raw stdout for debugging
       this.emit({ type: "cli:stdout", text });
@@ -246,8 +249,27 @@ class PiCliAgentHandle implements AgentHandle {
       }
     });
 
+    // Handle process errors
+    proc.on("error", (err) => {
+      logger.error("runtime:pi-cli", "process error", { pid: this.pid, error: err.message });
+      if (this._isWorking) {
+        this._isWorking = false;
+        this.emit({ type: "agent_end" });
+      }
+      if (this.promptRejecter) {
+        this.promptRejecter(new Error(`Pi CLI process error: ${err.message}`));
+        this.promptRejecter = null;
+      }
+      this.resolveIdle();
+    });
+
+    proc.stdin.on("error", (err) => {
+      logger.error("runtime:pi-cli", "stdin error", { pid: this.pid, error: err.message });
+    });
+
     // Handle process exit
     proc.on("exit", (code) => {
+      this.clearActivityTimer();
       if (this._isWorking) {
         this._isWorking = false;
         this.emit({ type: "agent_end" });
@@ -261,8 +283,14 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   async prompt(message: string): Promise<void> {
+    // Intercept /compact — translate to RPC compact command
+    if (message === "/compact") {
+      return this.handleCompactCommand();
+    }
     const cmd = { type: "prompt", message };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this._isWorking = true;
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
+    this.resetActivityTimer();
     // Wait for agent_end or RPC error response
     return new Promise<void>((resolve, reject) => {
       this.idleResolvers.push(resolve);
@@ -271,13 +299,20 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   steer(message: string): void {
+    // Intercept /compact — translate to RPC compact command
+    if (message === "/compact") {
+      this.handleCompactCommand().catch((err) => {
+        logger.error("runtime:pi-cli", "compact failed in steer", { error: err.message });
+      });
+      return;
+    }
     const cmd = { type: "steer", message };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
   }
 
   abort(): void {
     const cmd = { type: "abort" };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
   }
 
   waitForIdle(): Promise<void> {
@@ -298,15 +333,21 @@ class PiCliAgentHandle implements AgentHandle {
     const cmd = parts.length >= 2
       ? { type: "set_model", provider: parts[0], modelId: parts.slice(1).join("/") }
       : { type: "set_model", provider: "anthropic", modelId: model };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
   }
 
   setThinkingLevel(level: string): void {
     const cmd = { type: "set_thinking_level", level };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
   }
 
   destroy(): void {
+    this.clearActivityTimer();
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Agent destroyed"));
+    }
+    this.pendingRequests.clear();
     try { this.proc.kill(); } catch {}
     this.listeners.clear();
     this.resolveIdle();
@@ -315,7 +356,7 @@ class PiCliAgentHandle implements AgentHandle {
   // Query session state from pi RPC
   querySessionState(): void {
     const cmd = { type: "get_state" };
-    this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
   }
 
   private sessionCallback: ((session: { sessionId?: string; sessionFile?: string }) => void) | null = null;
@@ -325,6 +366,19 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   private handleRawEvent(raw: any): void {
+    // Generic RPC response routing — match pending requests by id
+    if (raw.type === "response" && raw.id && this.pendingRequests.has(raw.id)) {
+      const pending = this.pendingRequests.get(raw.id)!;
+      this.pendingRequests.delete(raw.id);
+      clearTimeout(pending.timer);
+      if (raw.success) {
+        pending.resolve(raw.data ?? {});
+      } else {
+        pending.reject(new Error(raw.error || `RPC ${raw.command} failed`));
+      }
+      return;
+    }
+
     // get_state response — extract session info
     if (raw.type === "response" && raw.command === "get_state" && raw.success && raw.state) {
       const session = {
@@ -354,6 +408,7 @@ class PiCliAgentHandle implements AgentHandle {
     // Track working state
     if (raw.type === "agent_start") this._isWorking = true;
     if (raw.type === "agent_end") {
+      this.clearActivityTimer();
       this._isWorking = false;
       this.promptRejecter = null; // Clear — succeeded
       this.resolveIdle();
@@ -375,6 +430,90 @@ class PiCliAgentHandle implements AgentHandle {
   private resolveIdle(): void {
     for (const resolve of this.idleResolvers) resolve();
     this.idleResolvers = [];
+  }
+
+  private resetActivityTimer(): void {
+    this.clearActivityTimer();
+    if (!this._isWorking) return;
+    this.activityTimer = setTimeout(() => {
+      logger.error("runtime:pi-cli", "activity timeout", { timeoutMs: 90000, pid: this.proc.pid });
+      this._isWorking = false;
+      this.emit({ type: "agent_end" });
+      if (this.promptRejecter) {
+        this.promptRejecter(new Error("Pi CLI activity timeout (90s no output)"));
+        this.promptRejecter = null;
+      }
+      this.resolveIdle();
+    }, 90000);
+  }
+
+  private clearActivityTimer(): void {
+    if (this.activityTimer) {
+      clearTimeout(this.activityTimer);
+      this.activityTimer = null;
+    }
+  }
+
+  // -- RPC request/response matching --
+
+  private sendRpcCommand(type: string, params?: Record<string, unknown>, timeoutMs = 10000): Promise<any> {
+    const id = Math.random().toString(36).substring(2, 15);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`RPC "${type}" timed out (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.pendingRequests.set(id, { resolve, reject, timer });
+      this.safeStdinWrite(JSON.stringify({ type, id, ...params }) + "\n");
+    });
+  }
+
+  async getContextUsage(): Promise<ContextUsage | null> {
+    try {
+      const stats = await this.sendRpcCommand("get_session_stats", {}, 5000);
+      const cu = stats?.contextUsage;
+      if (!cu) return null;
+      return {
+        totalTokens: cu.tokens ?? 0,
+        rawMaxTokens: cu.contextWindow ?? 0,
+        percentage: cu.percent ?? 0,
+        model: stats?.model?.id ?? "unknown",
+      };
+    } catch (err) {
+      logger.warn("runtime:pi-cli", "getContextUsage failed", { pid: this.pid, error: String(err) });
+      return null;
+    }
+  }
+
+  private async handleCompactCommand(): Promise<void> {
+    this._isWorking = true;
+    this.emit({ type: "agent_start" });
+    this.emit({ type: "message_start" });
+
+    try {
+      const result = await this.sendRpcCommand("compact", {}, 30000);
+      const tokensBefore = result?.tokensBefore ?? "unknown";
+      const summary = (result?.summary ?? "No summary").slice(0, 300);
+      this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
+    } catch (err: any) {
+      this.emit({ type: "message_end", text: `Compaction failed: ${err.message}` });
+    }
+
+    this._isWorking = false;
+    this.emit({ type: "agent_end" });
+    this.resolveIdle();
+  }
+
+  private safeStdinWrite(data: string): void {
+    try {
+      if (this.proc.stdin.writable && !this.proc.killed) {
+        this.proc.stdin.write(data);
+      } else {
+        logger.error("runtime:pi-cli", "stdin not writable", { pid: this.pid, killed: this.proc.killed });
+      }
+    } catch (err: any) {
+      logger.error("runtime:pi-cli", "stdin write failed", { pid: this.pid, error: err.message });
+    }
   }
 }
 
@@ -406,7 +545,7 @@ export class PiCliRuntime implements AgentRuntime {
     dynamicThinking: true,
     permissionControl: false,
     sessionResume: true,
-    contextUsage: false,
+    contextUsage: true,
   };
 
   private cliPath: string;
