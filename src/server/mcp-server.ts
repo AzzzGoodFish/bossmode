@@ -129,6 +129,24 @@ server.tool(
   },
 );
 
+// Write summary tool — used by summarizer agent to create topic summaries
+server.tool(
+  "write_summary",
+  "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
+  {
+    title: z.string().describe("Short topic title for this summary segment"),
+    summary: z.string().describe("1-3 sentence summary of the key content, decisions, and conclusions"),
+    from_id: z.string().describe("Message ID of the first message in this segment"),
+    to_id: z.string().describe("Message ID of the last message in this segment"),
+  },
+  async ({ title, summary, from_id, to_id }) => {
+    const result = await callbackTool("write_summary", { title, summary, from_id, to_id });
+    const data = JSON.parse(result);
+    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+    return { content: [{ type: "text", text: `Summary created: "${title}" (${data.coveredCount} messages)` }] };
+  },
+);
+
 // Start stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

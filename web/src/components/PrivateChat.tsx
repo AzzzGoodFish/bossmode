@@ -237,9 +237,17 @@ export function PrivateChat({
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    if (e.key === "Enter") {
+      if (e.shiftKey) {
+        // Shift+Enter: default newline in textarea
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd+Enter: manual newline insert
+        e.preventDefault();
+        // PrivateChat uses <input>, can't insert newlines — just ignore
+      } else {
+        e.preventDefault();
+        handleSend();
+      }
     }
   };
 

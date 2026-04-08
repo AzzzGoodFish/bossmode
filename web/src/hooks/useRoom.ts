@@ -108,12 +108,32 @@ export function useRoom(roomId: string | null) {
     }
   }, [roomId, loadingOlder, hasMore, messages]);
 
+  const reloadRoom = useCallback(async () => {
+    if (!roomId) return;
+    try {
+      const [r, msgs] = await Promise.all([getRoom(roomId), getMessages(roomId, { limit: PAGE_SIZE })]);
+      setRoom(r);
+      setMessages(msgs);
+      setHasMore(msgs.length >= PAGE_SIZE);
+      const status: AgentStatusMap = {};
+      for (const m of r.members) status[m] = "idle";
+      setAgentStatus(status);
+    } catch (err) {
+      console.error("Failed to reload room:", err);
+    }
+  }, [roomId]);
+
   // Handle incoming WS events
   const handleWsEvent = useCallback(
     (event: WsEvent) => {
       if (!roomId) return;
 
       if (event.type === "room:message" && event.roomId === roomId) {
+        // Summary messages trigger full reload (merged view changes)
+        if (event.message.type === "summary") {
+          reloadRoom();
+          return;
+        }
         setMessages((prev) => {
           if (prev.some((m) => m.id === event.message.id)) return prev;
           return [...prev, event.message];
@@ -135,7 +155,7 @@ export function useRoom(roomId: string | null) {
         }
       }
     },
-    [roomId, fetchContextUsage],
+    [roomId, fetchContextUsage, reloadRoom],
   );
 
   const sendMessage = useCallback(
@@ -149,21 +169,6 @@ export function useRoom(roomId: string | null) {
     },
     [roomId],
   );
-
-  const reloadRoom = useCallback(async () => {
-    if (!roomId) return;
-    try {
-      const [r, msgs] = await Promise.all([getRoom(roomId), getMessages(roomId, { limit: PAGE_SIZE })]);
-      setRoom(r);
-      setMessages(msgs);
-      setHasMore(msgs.length >= PAGE_SIZE);
-      const status: AgentStatusMap = {};
-      for (const m of r.members) status[m] = "idle";
-      setAgentStatus(status);
-    } catch (err) {
-      console.error("Failed to reload room:", err);
-    }
-  }, [roomId]);
 
   return {
     room,

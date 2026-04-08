@@ -1,10 +1,12 @@
 import { useEffect, useRef, useCallback } from "react";
 import type { RoomMessage } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
+import { SummaryCard } from "./SummaryCard";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
   roomName: string;
+  roomId?: string;
   hasMore?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => Promise<void>;
@@ -12,7 +14,7 @@ interface ChatAreaProps {
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, hasMore, loadingOlder, onLoadOlder }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(messages.length);
@@ -105,14 +107,18 @@ export function ChatArea({ messages, roomName, hasMore, loadingOlder, onLoadOlde
             return (
               <div key={msg.id}>
                 {showDateSep && <DateSeparator ts={msg.ts} />}
-                <MessageBubble
-                  sender={msg.sender}
-                  content={msg.content}
-                  time={time}
-                  fullTime={fullTime}
-                  grouped={grouped}
-                  isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
-                />
+                {msg.type === "summary" ? (
+                  <SummaryCard message={msg} roomId={roomId || ""} />
+                ) : (
+                  <MessageBubble
+                    sender={msg.sender}
+                    content={msg.content}
+                    time={time}
+                    fullTime={fullTime}
+                    grouped={grouped}
+                    isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
+                  />
+                )}
               </div>
             );
           })}

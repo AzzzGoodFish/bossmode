@@ -295,12 +295,28 @@ export async function renameRoom(id: string, name: string): Promise<Room> {
 
 // -- Messages --
 
+export interface SummaryMeta {
+  title: string;
+  covered_range: {
+    from_id: string;
+    to_id: string;
+    count: number;
+  };
+  time_range: {
+    from: number;
+    to: number;
+  };
+  participants: string[];
+}
+
 export interface RoomMessage {
   id: string;
   sender: string;
   content: string;
   mentions: string[];
   ts: number;
+  type?: "summary";
+  summary_meta?: SummaryMeta;
 }
 
 export async function getMessages(
@@ -400,30 +416,46 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   return res.json();
 }
 
-// -- Archives --
+// -- Summarize --
 
-export interface ArchiveInfo {
-  timestamp: number;
-  summary: string | null;
-  archivedCount: number | null;
-  range: [string, string] | null;
+export interface SummarizeStatus {
+  available: boolean;
+  toSummarize: number;
+  toKeep: number;
+  isSummarizing: boolean;
 }
 
-export async function archiveRoom(roomId: string): Promise<{
-  archivedCount: number;
-  keptCount: number;
-  summary: string;
-}> {
-  return apiFetch(`/api/rooms/${roomId}/archive`, { method: "POST" });
+export async function getSummarizeStatus(roomId: string, keepCount?: number): Promise<SummarizeStatus> {
+  const params = keepCount ? `?keepCount=${keepCount}` : "";
+  return apiFetch(`/api/rooms/${roomId}/summarize/status${params}`);
 }
 
-export async function getArchives(roomId: string): Promise<ArchiveInfo[]> {
-  return apiFetch(`/api/rooms/${roomId}/archives`);
+export async function summarizeRoom(roomId: string, keepCount?: number): Promise<{ ok: boolean; message: string }> {
+  return apiFetch(`/api/rooms/${roomId}/summarize`, {
+    method: "POST",
+    body: JSON.stringify({ keepCount }),
+  });
 }
 
-export async function getArchiveMessages(
-  roomId: string,
-  timestamp: number,
-): Promise<{ messages: RoomMessage[]; summary: any }> {
-  return apiFetch(`/api/rooms/${roomId}/archives/${timestamp}`);
+export async function getMessageRange(roomId: string, fromId: string, toId: string): Promise<RoomMessage[]> {
+  return apiFetch(`/api/rooms/${roomId}/messages/range?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
+}
+
+// -- Summary Settings --
+
+export interface SummarySettings {
+  autoEnabled: boolean;
+  threshold: number;
+  keepCount: number;
+}
+
+export async function getSummarySettings(): Promise<SummarySettings> {
+  return apiFetch("/api/settings/summary");
+}
+
+export async function updateSummarySettings(settings: Partial<SummarySettings>): Promise<SummarySettings> {
+  return apiFetch("/api/settings/summary", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
 }

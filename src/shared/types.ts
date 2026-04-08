@@ -14,6 +14,11 @@ export interface BossmodeConfig {
     host: string;
     port: number;
   };
+  summary?: {
+    autoEnabled: boolean;
+    threshold: number;  // message count to trigger auto-summary
+    keepCount: number;  // keep latest N messages unsummarized
+  };
 }
 
 // -- Agent Definition --
@@ -112,12 +117,28 @@ export interface Room {
 
 // -- Message --
 
+export interface SummaryMeta {
+  title: string;
+  covered_range: {
+    from_id: string;
+    to_id: string;
+    count: number;
+  };
+  time_range: {
+    from: number; // timestamp
+    to: number;
+  };
+  participants: string[];
+}
+
 export interface RoomMessage {
   id: string;
   sender: string; // member name or "user" (legacy) or "system"
   content: string;
   mentions: string[];
   ts: number;
+  type?: "summary";
+  summary_meta?: SummaryMeta;
 }
 
 // -- Agent Status --
