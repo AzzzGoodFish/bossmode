@@ -6,6 +6,7 @@ import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js
 import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates } from "../shared/config.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
+import { initAutoSummary } from "../engine/summarizer.js";
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiCliRuntime } from "../engine/runtime/pi-cli.js";
 import { ClaudeCliRuntime } from "../engine/runtime/claude-cli.js";
@@ -46,6 +47,9 @@ export function startServer(opts: ServerOptions): Promise<void> {
   registry.register(new PiCliRuntime(undefined, opts.port));
   registry.register(new ClaudeCliRuntime(undefined, opts.port));
   initAgentManager(registry);
+
+  // Initialize auto-summary listener
+  const unsubscribeAutoSummary = initAutoSummary();
 
   // Initialize communication router — wire @mentions to engine activation
   const unsubscribeRouter = initRouter(
@@ -131,6 +135,7 @@ export function startServer(opts: ServerOptions): Promise<void> {
     const shutdown = async (signal: string) => {
       logger.info("server", `shutdown signal: ${signal}`, { activeInstances: getActiveInstanceCount() });
       unsubscribeRouter();
+      unsubscribeAutoSummary();
       await shutdownAgents();
       shutdownWebSocket();
       server.close(() => {

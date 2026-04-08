@@ -396,8 +396,38 @@ function AgentChat({
     setInput("");
   };
 
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const newHeight = Math.min(Math.max(el.scrollHeight, 36), 120);
+    el.style.height = newHeight + "px";
+    el.style.overflowY = el.scrollHeight > 120 ? "auto" : "hidden";
+  }, [input]);
+
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === "Enter") {
+      if (e.shiftKey) {
+        // Shift+Enter: browser default inserts newline
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd+Enter: manually insert newline
+        e.preventDefault();
+        const el = inputRef.current;
+        if (el) {
+          const start = el.selectionStart;
+          const end = el.selectionEnd;
+          const newVal = input.slice(0, start) + "\n" + input.slice(end);
+          setInput(newVal);
+          requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + 1; });
+        }
+      } else {
+        e.preventDefault();
+        handleSend();
+      }
+    }
   };
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
@@ -493,8 +523,8 @@ function AgentChat({
         </button>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
 
-        <input
-          type="text"
+        <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => {
             const val = e.target.value;
@@ -504,9 +534,10 @@ function AgentChat({
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={uploading}
+          rows={1}
           placeholder={uploading ? "Uploading..." : "Type / for commands, or send instruction..."}
           className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white
-                     focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 max-h-[120px]"
         />
         <button
           onClick={handleSend}

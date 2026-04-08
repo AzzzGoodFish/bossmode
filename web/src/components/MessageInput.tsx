@@ -64,9 +64,25 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
   }, []);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    if (e.key === "Enter") {
+      if (e.shiftKey) {
+        // Shift+Enter: browser default inserts newline — do nothing
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd+Enter: manually insert newline (browser doesn't do this by default)
+        e.preventDefault();
+        const el = inputRef.current;
+        if (el) {
+          const start = el.selectionStart;
+          const end = el.selectionEnd;
+          const newVal = value.slice(0, start) + "\n" + value.slice(end);
+          setValue(newVal);
+          requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + 1; });
+        }
+      } else {
+        // Bare Enter: send
+        e.preventDefault();
+        handleSend();
+      }
     }
     if (e.key === "Escape" && showMentions) {
       setShowMentions(false);

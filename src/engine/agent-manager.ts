@@ -54,6 +54,8 @@ function formatMessagesForAgent(messages: RoomMessage[]): string {
   if (messages.length === 0) return "";
   return messages
     .map((m) => {
+      // Summary messages already have agent-friendly content
+      if (m.type === "summary") return m.content;
       const sender = m.sender === "user" ? "User" : m.sender;
       return `[${sender}]: ${m.content}`;
     })

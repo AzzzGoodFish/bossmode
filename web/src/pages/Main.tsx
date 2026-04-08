@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Room } from "../api/client";
+import type { Room, SummarizeStatus } from "../api/client";
 import {
   createRoom as apiCreateRoom,
   steerAgent as apiSteerAgent,
-  archiveRoom as apiArchiveRoom,
+  getSummarizeStatus,
+  summarizeRoom as apiSummarizeRoom,
   addMember as apiAddMember,
 } from "../api/client";
 import { useRoom } from "../hooks/useRoom";
@@ -44,7 +45,7 @@ export function Main({
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
 }: MainProps) {
-  const { toast, confirm } = useDialog();
+  const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
 
@@ -183,21 +184,51 @@ export function Main({
     }
   }, [tabs, activeTabIdx]);
 
-  const handleArchive = useCallback(async () => {
+  const [summarizeDialog, setSummarizeDialog] = useState<{ status: SummarizeStatus; totalMessages: number } | null>(null);
+  const [summarizeKeepCount, setSummarizeKeepCount] = useState(50);
+
+  const handleSummarize = useCallback(async () => {
     if (!selectedRoomId) return;
-    if (!(await confirm("Archive old messages? Last 50 will be kept."))) return;
     try {
-      const result = await apiArchiveRoom(selectedRoomId);
-      if (result.archivedCount === 0) {
-        toast("Nothing to archive (less than 50 messages).", "info");
-      } else {
-        toast(`Archived ${result.archivedCount} messages.`, "success");
-        await reloadRoom();
+      const status = await getSummarizeStatus(selectedRoomId);
+      if (status.isSummarizing) {
+        toast("Summarization already in progress.", "info");
+        return;
       }
+      if (!status.available && status.toSummarize === 0) {
+        toast("No messages to summarize.", "info");
+        return;
+      }
+      const total = status.toSummarize + status.toKeep;
+      setSummarizeKeepCount(status.toKeep);
+      setSummarizeDialog({ status, totalMessages: total });
     } catch (err: any) {
-      toast(`Archive failed: ${err.message}`, "error");
+      toast(`Summarize failed: ${err.message}`, "error");
     }
-  }, [selectedRoomId, reloadRoom, confirm, toast]);
+  }, [selectedRoomId, toast]);
+
+  const handleSummarizeConfirm = useCallback(async () => {
+    if (!selectedRoomId) return;
+    setSummarizeDialog(null);
+    try {
+      await apiSummarizeRoom(selectedRoomId, summarizeKeepCount);
+      toast("Summarization started.", "success");
+    } catch (err: any) {
+      toast(`Summarize failed: ${err.message}`, "error");
+    }
+  }, [selectedRoomId, summarizeKeepCount, toast]);
+
+  // Refresh preview when keepCount changes in dialog
+  useEffect(() => {
+    if (!summarizeDialog || !selectedRoomId) return;
+    const total = summarizeDialog.totalMessages;
+    const toSummarize = Math.max(0, total - summarizeKeepCount);
+    setSummarizeDialog((prev) => prev ? {
+      ...prev,
+      status: { ...prev.status, toSummarize, toKeep: summarizeKeepCount, available: toSummarize > 0 },
+    } : null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summarizeKeepCount]);
 
   const handleAddMember = useCallback(async (agentName: string) => {
     if (!selectedRoomId) return;
@@ -277,7 +308,7 @@ export function Main({
           <span className="text-xs text-zinc-500 dark:text-zinc-600 truncate">{room.cwd}</span>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setShowAddMember(true)} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">+ Member</button>
-            <button onClick={handleArchive} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">Archive</button>
+            <button onClick={handleSummarize} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">Summarize</button>
           </div>
         </div>
       )}
@@ -287,7 +318,7 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {activeTab?.type === "room" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
           ) : activeTab?.type === "agent" && selectedRoomId ? (
@@ -320,6 +351,53 @@ export function Main({
       )}
       {showAddMember && (
         <AddMemberDialog currentMembers={room.members} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
+      )}
+      {summarizeDialog && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90]" onClick={() => setSummarizeDialog(null)}>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 w-full max-w-sm shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-3">Summarize Messages</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">
+              {summarizeKeepCount === 0
+                ? `Summarize all ${summarizeDialog.totalMessages} messages into topic summaries.`
+                : `Summarize ${summarizeDialog.status.toSummarize} of ${summarizeDialog.totalMessages} messages into topic summaries. Latest ${summarizeKeepCount} will be kept as-is.`}
+            </p>
+            <div className="mb-4">
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 block mb-1.5">Keep latest messages</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={summarizeDialog.totalMessages}
+                  value={summarizeKeepCount}
+                  onChange={(e) => setSummarizeKeepCount(parseInt(e.target.value))}
+                  className="flex-1 accent-violet-500"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={summarizeDialog.totalMessages}
+                  value={summarizeKeepCount}
+                  onChange={(e) => setSummarizeKeepCount(Math.min(summarizeDialog.totalMessages, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className="w-16 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-sm text-zinc-900 dark:text-white text-center"
+                />
+              </div>
+              {summarizeKeepCount === 0 && (
+                <p className="text-xs text-amber-500 dark:text-amber-400 mt-1.5">All messages will be summarized — agents will lose raw context.</p>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setSummarizeDialog(null)}
+                className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleSummarizeConfirm} disabled={summarizeDialog.status.toSummarize === 0}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+                Summarize
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

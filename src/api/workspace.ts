@@ -1,4 +1,4 @@
-// Workspace API routes — Room, Message, Archive, Attachments
+// Workspace API routes — Room, Message, Summarize, Attachments
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
@@ -7,10 +7,11 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
-import * as archiveStore from "../workspace/archive-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentions } from "../communication/router.js";
 import { getRoomAgentStatuses, getAgentContextUsage } from "../engine/agent-manager.js";
+import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
+import { readConfig, writeConfig } from "../shared/config.js";
 
 // ── Rooms ──
 
@@ -228,73 +229,91 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, 
   }
 });
 
-// ── Archives ──
+// ── Summarize ──
 
-addRoute("POST", "/api/rooms/:id/archive", async (_req, res, params) => {
+addRoute("GET", "/api/rooms/:id/summarize/status", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
 
-  const result = archiveStore.archiveMessages(params.id, 50);
-  if (!result) {
-    sendJson(res, 200, { message: "Nothing to archive", archivedCount: 0 });
-    return;
-  }
-
-  const firstTs = new Date(result.archived[0].ts).toLocaleString();
-  const lastTs = new Date(result.archived[result.archived.length - 1].ts).toLocaleString();
-  const senders = [...new Set(result.archived.map((m) => m.sender))];
-  const summary = `Archived ${result.archived.length} messages from ${firstTs} to ${lastTs}. Participants: ${senders.join(", ")}.`;
-
-  archiveStore.saveArchiveSummary(params.id, summary, result.archived, result.timestamp);
-
-  sendJson(res, 200, {
-    archivedCount: result.archived.length,
-    keptCount: result.kept.length,
-    summary,
-  });
+  const url = new URL(req.url || "", "http://localhost");
+  const keepCount = parseInt(url.searchParams.get("keepCount") || "50", 10);
+  const preview = getSummarizePreview(params.id, keepCount);
+  sendJson(res, 200, preview);
 });
 
-addRoute("GET", "/api/rooms/:id/archives", async (_req, res, params) => {
+addRoute("POST", "/api/rooms/:id/summarize", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
 
-  const archives = archiveStore.listArchives(params.id);
-  const result = archives.map((a) => {
-    const summary = a.timestamp ? archiveStore.readArchiveSummary(params.id, a.timestamp) : null;
-    return {
-      timestamp: a.timestamp,
-      summary: summary?.summary ?? null,
-      archivedCount: summary?.archivedCount ?? null,
-      range: summary?.range ?? null,
+  const body = (await parseBody(req)) as { keepCount?: number };
+  const keepCount = body.keepCount || 50;
+
+  if (isSummarizing(params.id)) {
+    sendJson(res, 409, { error: "Summarization already in progress" });
+    return;
+  }
+
+  // Async execution — return 202 immediately
+  summarizeRoom(params.id, keepCount).catch((err) => {
+    logger.error("api", "summarize failed", { roomId: params.id, error: String(err) });
+  });
+
+  sendJson(res, 202, { ok: true, message: "Summarization started" });
+});
+
+// ── Message Range (for expanding summaries) ──
+
+addRoute("GET", "/api/rooms/:id/messages/range", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  const url = new URL(req.url || "", "http://localhost");
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+
+  if (!from || !to) {
+    sendJson(res, 400, { error: "from and to query parameters are required" });
+    return;
+  }
+
+  const messages = messageStore.getMessagesByRange(params.id, from, to);
+  sendJson(res, 200, messages);
+});
+
+// ── Summary Settings ──
+
+addRoute("GET", "/api/settings/summary", async (_req, res) => {
+  try {
+    const config = readConfig();
+    sendJson(res, 200, config.summary || { autoEnabled: false, threshold: 200, keepCount: 50 });
+  } catch {
+    sendJson(res, 200, { autoEnabled: false, threshold: 200, keepCount: 50 });
+  }
+});
+
+addRoute("PUT", "/api/settings/summary", async (req, res) => {
+  const body = (await parseBody(req)) as { autoEnabled?: boolean; threshold?: number; keepCount?: number };
+  try {
+    const config = readConfig();
+    config.summary = {
+      autoEnabled: body.autoEnabled ?? false,
+      threshold: body.threshold ?? 200,
+      keepCount: body.keepCount ?? 50,
     };
-  });
-
-  sendJson(res, 200, result);
-});
-
-addRoute("GET", "/api/rooms/:id/archives/:timestamp", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
+    writeConfig(config);
+    sendJson(res, 200, config.summary);
+  } catch (err: any) {
+    sendJson(res, 500, { error: err.message });
   }
-
-  const ts = parseInt(params.timestamp, 10);
-  if (isNaN(ts)) {
-    sendJson(res, 400, { error: "Invalid timestamp" });
-    return;
-  }
-
-  const messages = archiveStore.readArchiveMessages(params.id, ts);
-  const summary = archiveStore.readArchiveSummary(params.id, ts);
-
-  sendJson(res, 200, { messages, summary });
 });
 
 // ── Attachments ──
