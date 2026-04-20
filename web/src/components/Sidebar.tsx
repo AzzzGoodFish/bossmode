@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon } from "lucide-react";
-import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeBaseInfo } from "../api/client";
-import { getRooms, getAgents, getMembers, getSkills, getKnowledgeBases } from "../api/client";
+import type { Room, AgentInfo, MemberInfo, SkillInfo } from "../api/client";
+import { getRooms, getAgents, getMembers, getSkills } from "../api/client";
 import { SidebarSection, type SidebarItem } from "./SidebarSection";
 import { RoomMenu } from "./RoomMenu";
 import { useDialog } from "./dialogs";
@@ -11,7 +11,7 @@ export type ActivePage =
   | { type: "member"; id: string | null }
   | { type: "agent"; name: string | null }
   | { type: "skill"; name: string | null }
-  | { type: "knowledge"; id: string | null; entryId?: string; entryTitle?: string }
+  | { type: "knowledge"; path?: string }
   | { type: "settings" }
   | null;
 
@@ -31,14 +31,12 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseInfo[]>([]);
 
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
     getAgents().then(setAgents).catch(console.error);
     getMembers().then(setMembers).catch(console.error);
     getSkills().then(setSkills).catch(console.error);
-    getKnowledgeBases().then(setKnowledgeBases).catch(console.error);
   };
 
   useEffect(() => { refresh(); }, [refreshKey]);
@@ -55,7 +53,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const selectedMemberId = activePage?.type === "member" ? activePage.id : null;
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
-  const selectedKbId = activePage?.type === "knowledge" ? activePage.id : null;
+  const isKnowledgeActive = activePage?.type === "knowledge";
 
   // Map data to SidebarItems
   const roomItems: SidebarItem[] = rooms.map((r) => ({
@@ -83,12 +81,6 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
     id: s.name,
     label: s.name,
     sublabel: s.description?.slice(0, 40),
-  }));
-
-  const kbItems: SidebarItem[] = knowledgeBases.map((kb) => ({
-    id: kb.id,
-    label: kb.name,
-    sublabel: kb.description?.slice(0, 40),
   }));
 
   return (
@@ -173,30 +165,17 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
             onCreate={() => onNavigate({ type: "skill", name: null })}
           />
 
-          <SidebarSection
-            icon={<BookOpen size={14} />}
-            label="Knowledge"
-            count={knowledgeBases.length}
-            items={kbItems}
-            selectedId={selectedKbId}
-            storageKey="knowledge"
-            defaultOpen={false}
-            onSelect={(id) => onNavigate({ type: "knowledge", id })}
-            onCreate={() => onNavigate({ type: "knowledge", id: null })}
-          />
-          {/* Entry sub-tab when viewing an entry */}
-          {activePage?.type === "knowledge" && activePage.entryId && (
-            <div className="flex items-center gap-1.5 pl-8 pr-3 py-1 group bg-zinc-100 dark:bg-zinc-800/50">
-              <span className="text-xs text-zinc-400 dark:text-zinc-500">↳</span>
-              <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate flex-1">{activePage.entryTitle || "Entry"}</span>
-              <button
-                onClick={() => onNavigate({ type: "knowledge", id: activePage.id! })}
-                className="opacity-0 group-hover:opacity-100 text-zinc-400 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer"
-              >
-                <span className="text-xs">×</span>
-              </button>
-            </div>
-          )}
+          <button
+            onClick={() => onNavigate({ type: "knowledge" })}
+            className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
+              isKnowledgeActive
+                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300"
+            }`}
+          >
+            <BookOpen size={14} className="text-zinc-500" />
+            <span>Knowledge</span>
+          </button>
         </div>
       </div>
 

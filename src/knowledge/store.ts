@@ -1,137 +1,415 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+// Single-namespace Knowledge store (0.8.0)
+// =========================================
+// All documents live under a single global root:
+//
+//     ~/.bossmode/knowledge/docs/
+//         ├── rules/dev-team-protocol.md      (seeded default)
+//         ├── bossmode/
+//         │   ├── rules/...
+//         │   ├── architecture/...
+//         │   └── ...
+//         ├── freeu/
+//         │   └── ...
+//         └── ...
+//
+// The previous per-KB container (0.7.0) has been removed. Users organize
+// projects by top-level folders. Rooms reference documents by path via
+// `ruleDocs: string[]` to control which are injected as rules.
+//
+// Each document is a Markdown file with optional YAML frontmatter:
+//
+//     ---
+//     title: Nice Display Title
+//     author: architect
+//     created: 2026-04-20T10:00:00Z
+//     ---
+//
+//     # Markdown body...
+//
+// Document ID = path relative to docs/, e.g. "bossmode/architecture/overview.md".
+// Hierarchy is expressed by directory structure — no type field, no flat list.
+
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
+  rmdirSync, unlinkSync, renameSync, statSync,
+  type Dirent,
+} from "node:fs";
+import { join, dirname, sep, posix } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
-import type { KnowledgeBase, KnowledgeEntry } from "../shared/types.js";
+import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
 
-const KNOWLEDGE_DIR = join(getBossmodeDir(), "knowledge");
+/** Resolved at call time so tests can override BOSSMODE_DIR. */
+function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
+function docsRoot(): string { return join(knowledgeDir(), "docs"); }
 
-function ensureKnowledgeDir(): void {
-  if (!existsSync(KNOWLEDGE_DIR)) mkdirSync(KNOWLEDGE_DIR, { recursive: true });
+// -- Path helpers --
+
+function ensureDocsRoot(): void {
+  const root = docsRoot();
+  if (!existsSync(root)) mkdirSync(root, { recursive: true });
 }
 
-function kbDir(id: string): string {
-  return join(KNOWLEDGE_DIR, id);
-}
-
-function kbJsonPath(id: string): string {
-  return join(kbDir(id), "knowledge.json");
-}
-
-function entriesDir(kbId: string): string {
-  return join(kbDir(kbId), "entries");
-}
-
-function entryPath(kbId: string, entryId: string): string {
-  return join(entriesDir(kbId), `${entryId}.json`);
-}
-
-// -- Knowledge Base CRUD --
-
-export function createKnowledgeBase(name: string, description: string): KnowledgeBase {
-  ensureKnowledgeDir();
-  const kb: KnowledgeBase = {
-    id: randomUUID().slice(0, 8),
-    name,
-    description,
-    createdAt: Date.now(),
-  };
-  const dir = kbDir(kb.id);
-  mkdirSync(dir, { recursive: true });
-  mkdirSync(entriesDir(kb.id), { recursive: true });
-  writeFileSync(kbJsonPath(kb.id), JSON.stringify(kb, null, 2), "utf-8");
-  return kb;
-}
-
-export function listKnowledgeBases(): KnowledgeBase[] {
-  ensureKnowledgeDir();
-  const entries = readdirSync(KNOWLEDGE_DIR, { withFileTypes: true });
-  const bases: KnowledgeBase[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const jsonPath = kbJsonPath(entry.name);
-    if (!existsSync(jsonPath)) continue;
-    try {
-      bases.push(JSON.parse(readFileSync(jsonPath, "utf-8")));
-    } catch (err) { logger.error("knowledge-store", "failed to parse KB json", { id: entry.name, error: String(err) }); }
+/**
+ * Normalize an incoming document path. Prevents path traversal and returns a
+ * path RELATIVE to docs/, using POSIX separators for stable IDs.
+ */
+function normalizeDocPath(docPath: string): string {
+  if (typeof docPath !== "string" || docPath.length === 0) {
+    throw new Error("Document path is required");
   }
-
-  return bases.sort((a, b) => b.createdAt - a.createdAt);
+  const p = docPath.trim().replace(/\\/g, "/");
+  if (p.startsWith("/")) throw new Error("Absolute paths are not allowed");
+  const parts = p.split("/").filter((x) => x.length > 0);
+  if (parts.length === 0) throw new Error("Document path cannot be empty");
+  for (const seg of parts) {
+    if (seg === "..") throw new Error("Path traversal not allowed");
+    if (seg === ".") continue;
+    if (!/^[\w\-. ()+,'\u4e00-\u9fff]+$/u.test(seg)) {
+      throw new Error(`Invalid path segment: ${seg}`);
+    }
+  }
+  return parts.filter((s) => s !== ".").join("/");
 }
 
-export function getKnowledgeBase(id: string): KnowledgeBase | null {
-  const jsonPath = kbJsonPath(id);
-  if (!existsSync(jsonPath)) return null;
-  return JSON.parse(readFileSync(jsonPath, "utf-8"));
+function toPosix(p: string): string { return p.split(sep).join(posix.sep); }
+
+/** Resolve a normalized relative path to an absolute filesystem path inside docs/. */
+function absDocPath(relativeDocPath: string): string {
+  return join(docsRoot(), ...relativeDocPath.split("/"));
 }
 
-export function deleteKnowledgeBase(id: string): boolean {
-  const dir = kbDir(id);
-  if (!existsSync(dir)) return false;
-  rmSync(dir, { recursive: true, force: true });
-  return true;
+// -- Frontmatter --
+
+interface ParsedDoc {
+  frontmatter: Record<string, string | number>;
+  body: string;
 }
 
-// -- Knowledge Entry CRUD --
+function parseFrontmatter(raw: string): ParsedDoc {
+  if (!raw.startsWith("---\n") && !raw.startsWith("---\r\n")) {
+    return { frontmatter: {}, body: raw };
+  }
+  const endIdx = raw.indexOf("\n---", 4);
+  if (endIdx < 0) return { frontmatter: {}, body: raw };
+  const fmBlock = raw.slice(4, endIdx);
+  const rest = raw.slice(endIdx + 4);
+  const body = rest.startsWith("\n") ? rest.slice(1) : rest;
 
-export function addEntry(kbId: string, title: string, content: string, source: string, type: "rule" | "knowledge" = "knowledge"): KnowledgeEntry {
-  const dir = entriesDir(kbId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const fm: Record<string, string | number> = {};
+  for (const line of fmBlock.split(/\r?\n/)) {
+    const m = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    let val: string | number = m[2].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    const asNum = Number(val);
+    if (val !== "" && !Number.isNaN(asNum) && /^[0-9]+$/.test(val)) val = asNum;
+    fm[key] = val;
+  }
+  return { frontmatter: fm, body };
+}
 
-  const entry: KnowledgeEntry = {
-    id: randomUUID().slice(0, 8),
+function serializeFrontmatter(fm: Record<string, string | number>, body: string): string {
+  const lines: string[] = ["---"];
+  for (const [k, v] of Object.entries(fm)) {
+    const val = typeof v === "string" && /[:#]/.test(v) ? JSON.stringify(v) : String(v);
+    lines.push(`${k}: ${val}`);
+  }
+  lines.push("---", "", body.trimStart());
+  return lines.join("\n");
+}
+
+function deriveTitle(fmTitle: string | number | undefined, pathRel: string): string {
+  if (fmTitle !== undefined && String(fmTitle).length > 0) return String(fmTitle);
+  const base = pathRel.split("/").pop() || pathRel;
+  return base.replace(/\.md$/i, "").replace(/[-_]/g, " ");
+}
+
+// -- Document tree --
+
+export function getDocumentTree(): KnowledgeTreeNode {
+  ensureDocsRoot();
+  return walkDir(docsRoot(), "");
+}
+
+function walkDir(absDir: string, relDir: string): KnowledgeTreeNode {
+  const name = relDir === "" ? "docs" : relDir.split("/").pop()!;
+  const node: KnowledgeTreeNode = { path: relDir, name, kind: "folder", children: [] };
+  let entries: Dirent[];
+  try { entries = readdirSync(absDir, { withFileTypes: true }) as Dirent[]; } catch { return node; }
+  entries.sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    const childAbs = join(absDir, e.name);
+    const childRel = relDir === "" ? e.name : `${relDir}/${e.name}`;
+    if (e.isDirectory()) {
+      node.children!.push(walkDir(childAbs, toPosix(childRel)));
+    } else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
+      let title = e.name.replace(/\.md$/i, "");
+      try {
+        const raw = readFileSync(childAbs, "utf-8");
+        const { frontmatter } = parseFrontmatter(raw);
+        title = deriveTitle(frontmatter.title, childRel);
+      } catch { /* ignore */ }
+      node.children!.push({ path: toPosix(childRel), name: e.name, kind: "file", title });
+    }
+  }
+  return node;
+}
+
+/** Flat list of all documents (used for search and lists that need full content). */
+export function listEntries(): KnowledgeEntry[] {
+  ensureDocsRoot();
+  const root = docsRoot();
+  const files: string[] = [];
+  (function recur(dir: string, rel: string) {
+    let es: Dirent[];
+    try { es = readdirSync(dir, { withFileTypes: true }) as Dirent[]; } catch { return; }
+    for (const e of es) {
+      if (e.name.startsWith(".")) continue;
+      const abs = join(dir, e.name);
+      const r = rel === "" ? e.name : `${rel}/${e.name}`;
+      if (e.isDirectory()) recur(abs, r);
+      else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) files.push(toPosix(r));
+    }
+  })(root, "");
+
+  const entries: KnowledgeEntry[] = [];
+  for (const rel of files) {
+    const abs = absDocPath(rel);
+    try {
+      const raw = readFileSync(abs, "utf-8");
+      const { frontmatter, body } = parseFrontmatter(raw);
+      const st = statSync(abs);
+      entries.push({
+        id: rel,
+        title: deriveTitle(frontmatter.title, rel),
+        content: body,
+        source: String(frontmatter.author || frontmatter.source || "user"),
+        createdAt: frontmatter.created
+          ? typeof frontmatter.created === "number"
+            ? frontmatter.created
+            : Date.parse(String(frontmatter.created)) || st.ctimeMs
+          : st.ctimeMs,
+        updatedAt: frontmatter.updated
+          ? typeof frontmatter.updated === "number"
+            ? frontmatter.updated
+            : Date.parse(String(frontmatter.updated)) || st.mtimeMs
+          : st.mtimeMs,
+      });
+    } catch (err) {
+      logger.error("knowledge-store", "parse doc failed", { rel, error: String(err) });
+    }
+  }
+  entries.sort((a, b) => b.updatedAt - a.updatedAt);
+  return entries;
+}
+
+export function getEntry(entryId: string): KnowledgeEntry | null {
+  let rel: string;
+  try { rel = normalizeDocPath(entryId); } catch { return null; }
+  const abs = absDocPath(rel);
+  if (!existsSync(abs)) return null;
+  try {
+    const raw = readFileSync(abs, "utf-8");
+    const { frontmatter, body } = parseFrontmatter(raw);
+    const st = statSync(abs);
+    return {
+      id: rel,
+      title: deriveTitle(frontmatter.title, rel),
+      content: body,
+      source: String(frontmatter.author || frontmatter.source || "user"),
+      createdAt: frontmatter.created
+        ? typeof frontmatter.created === "number" ? frontmatter.created : Date.parse(String(frontmatter.created)) || st.ctimeMs
+        : st.ctimeMs,
+      updatedAt: frontmatter.updated
+        ? typeof frontmatter.updated === "number" ? frontmatter.updated : Date.parse(String(frontmatter.updated)) || st.mtimeMs
+        : st.mtimeMs,
+    };
+  } catch { return null; }
+}
+
+/**
+ * Write/overwrite a document. If no extension provided, `.md` is appended.
+ * Creates intermediate directories.
+ */
+export function addEntry(
+  title: string,
+  content: string,
+  source: string,
+  path?: string,
+): KnowledgeEntry {
+  ensureDocsRoot();
+
+  const rel = path
+    ? ensureMdExtension(normalizeDocPath(path))
+    : `misc/${slugify(title)}.md`;
+  const abs = absDocPath(rel);
+  mkdirSync(dirname(abs), { recursive: true });
+
+  const now = Date.now();
+  const fm: Record<string, string | number> = {
+    title,
+    author: source,
+    created: now,
+    updated: now,
+  };
+  writeFileSync(abs, serializeFrontmatter(fm, content), "utf-8");
+
+  return { id: rel, title, content, source, createdAt: now, updatedAt: now };
+}
+
+export function updateEntry(
+  entryId: string,
+  title: string,
+  content: string,
+): KnowledgeEntry | null {
+  let rel: string;
+  try { rel = normalizeDocPath(entryId); } catch { return null; }
+  const abs = absDocPath(rel);
+  if (!existsSync(abs)) return null;
+  const raw = readFileSync(abs, "utf-8");
+  const { frontmatter } = parseFrontmatter(raw);
+  const now = Date.now();
+  frontmatter.title = title;
+  frontmatter.updated = now;
+  if (!frontmatter.created) frontmatter.created = now;
+  writeFileSync(abs, serializeFrontmatter(frontmatter, content), "utf-8");
+  return {
+    id: rel,
     title,
     content,
-    source,
-    type,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    source: String(frontmatter.author || frontmatter.source || "user"),
+    createdAt: typeof frontmatter.created === "number"
+      ? frontmatter.created
+      : Date.parse(String(frontmatter.created)) || now,
+    updatedAt: now,
   };
-
-  writeFileSync(entryPath(kbId, entry.id), JSON.stringify(entry, null, 2), "utf-8");
-  return entry;
 }
 
-export function listEntries(kbId: string, filter?: { type?: "rule" | "knowledge" }): KnowledgeEntry[] {
-  const dir = entriesDir(kbId);
-  if (!existsSync(dir)) return [];
-
-  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-  let entries: KnowledgeEntry[] = [];
-
-  for (const file of files) {
-    try {
-      const e = JSON.parse(readFileSync(join(dir, file), "utf-8")) as KnowledgeEntry;
-      // Backfill type for old entries without it
-      if (!e.type) e.type = "knowledge";
-      entries.push(e);
-    } catch (err) { logger.error("knowledge-store", "failed to parse entry", { kbId, file, error: String(err) }); }
-  }
-
-  if (filter?.type) entries = entries.filter((e) => e.type === filter.type);
-  return entries.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-export function getEntry(kbId: string, entryId: string): KnowledgeEntry | null {
-  const path = entryPath(kbId, entryId);
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf-8"));
-}
-
-export function updateEntry(kbId: string, entryId: string, title: string, content: string): KnowledgeEntry | null {
-  const path = entryPath(kbId, entryId);
-  if (!existsSync(path)) return null;
-  const existing = JSON.parse(readFileSync(path, "utf-8")) as KnowledgeEntry;
-  const updated: KnowledgeEntry = { ...existing, title, content, updatedAt: Date.now() };
-  writeFileSync(path, JSON.stringify(updated, null, 2), "utf-8");
-  return updated;
-}
-
-export function deleteEntry(kbId: string, entryId: string): boolean {
-  const path = entryPath(kbId, entryId);
-  if (!existsSync(path)) return false;
-  unlinkSync(path);
+export function deleteEntry(entryId: string): boolean {
+  let rel: string;
+  try { rel = normalizeDocPath(entryId); } catch { return false; }
+  const abs = absDocPath(rel);
+  if (!existsSync(abs)) return false;
+  unlinkSync(abs);
+  // Clean up empty parent directories (best-effort)
+  try {
+    const root = docsRoot();
+    let d = dirname(abs);
+    while (d !== root && d !== dirname(d)) {
+      const remaining = readdirSync(d);
+      if (remaining.length > 0) break;
+      rmdirSync(d);
+      d = dirname(d);
+    }
+  } catch { /* ignore */ }
   return true;
 }
+
+/** Move/rename a document. Updates timestamps. */
+export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
+  let fromRel: string, toRel: string;
+  try {
+    fromRel = normalizeDocPath(fromId);
+    toRel = ensureMdExtension(normalizeDocPath(toId));
+  } catch { return null; }
+  const fromAbs = absDocPath(fromRel);
+  const toAbs = absDocPath(toRel);
+  if (!existsSync(fromAbs)) return null;
+  if (existsSync(toAbs) && fromRel !== toRel) return null; // don't overwrite
+  mkdirSync(dirname(toAbs), { recursive: true });
+  renameSync(fromAbs, toAbs);
+  return getEntry(toRel);
+}
+
+/**
+ * Search documents by substring (case-insensitive) in title or content.
+ * Returns matches with full content.
+ */
+export function searchEntries(query: string): KnowledgeEntry[] {
+  const q = query.toLowerCase();
+  return listEntries().filter((e) =>
+    e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
+  );
+}
+
+// -- Helpers --
+
+function ensureMdExtension(path: string): string {
+  if (path.toLowerCase().endsWith(".md")) return path;
+  return `${path}.md`;
+}
+
+export function slugify(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, "-")
+    .replace(/[^\w\-.\u4e00-\u9fff]/gu, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || `doc-${Date.now()}`;
+}
+
+/**
+ * Seed the built-in dev-team rules at `rules/dev-team-protocol.md` — but only
+ * on fresh installs (empty docs tree). Migrated installs keep their existing
+ * project-scoped rules (e.g. `bossmode/rules/dev-team-protocol.md`) so we
+ * don't clutter the root with duplicate content.
+ */
+export function seedDefaultRulesIfMissing(): void {
+  ensureDocsRoot();
+  const rel = "rules/dev-team-protocol.md";
+  const abs = absDocPath(rel);
+  if (existsSync(abs)) return;
+
+  // Only seed when the tree is empty. If any top-level folder already exists,
+  // assume the user has their own structure and skip.
+  try {
+    const topLevel = readdirSync(docsRoot(), { withFileTypes: true });
+    const hasAny = topLevel.some((e) => !e.name.startsWith("."));
+    if (hasAny) return;
+  } catch { /* docs/ doesn't exist yet — fall through and seed */ }
+
+  const templatePath = findTemplate("teams/dev-team/team-prompt.md");
+  if (!templatePath || !existsSync(templatePath)) {
+    logger.info("knowledge-store", "dev-team template not found, skipping seed", { templatePath });
+    return;
+  }
+  let body = readFileSync(templatePath, "utf-8");
+  const h1Match = body.match(/^#\s+(.+)\n/);
+  let title = "Dev Team Collaboration Protocol";
+  if (h1Match) {
+    title = h1Match[1].trim();
+    body = body.slice(h1Match[0].length).trimStart();
+  }
+  addEntry(title, body, "builtin", rel);
+  logger.info("knowledge-store", "seeded dev-team rules", { path: rel });
+}
+
+function findTemplate(subPath: string): string | null {
+  const candidates = [
+    join(process.cwd(), "templates", subPath),
+    join(process.cwd(), "..", "templates", subPath),
+  ];
+  try {
+    const here = new URL(".", import.meta.url).pathname;
+    candidates.push(join(here, "..", "..", "templates", subPath));
+    candidates.push(join(here, "..", "..", "..", "templates", subPath));
+  } catch { /* ignore */ }
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
+/** Re-export path helpers for migration / external callers. */
+export const _internal = { normalizeDocPath, docsRoot, absDocPath };

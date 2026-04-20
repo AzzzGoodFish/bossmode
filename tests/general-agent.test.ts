@@ -44,12 +44,15 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     expect(result.fullPrompt).toContain("Room members:");
   });
 
-  it("includes knowledge in agentPrompt when present", () => {
+  it("includes knowledge titles in agentPrompt when present (on-demand content)", () => {
     const agent = makeAgent("You are the PM.", "pm");
     const entries = [makeEntry("Design Doc", "The system uses React")];
     const result = buildAgentPrompt(agent, entries, ["pm"]);
+    // Titles are injected as a lightweight document index
     expect(result.agentPrompt).toContain("Design Doc");
-    expect(result.agentPrompt).toContain("The system uses React");
+    // Full content is NOT injected (retrieved on-demand via query_knowledge)
+    expect(result.agentPrompt).not.toContain("The system uses React");
+    expect(result.agentPrompt).toContain("query_knowledge");
   });
 
   it("empty systemPrompt + knowledge still produces non-empty agentPrompt", () => {

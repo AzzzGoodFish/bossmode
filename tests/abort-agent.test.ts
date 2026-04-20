@@ -20,12 +20,13 @@ vi.mock("../src/shared/config.js", () => ({
 vi.mock("../src/workspace/room-store.js", () => ({
   getRoom: vi.fn(),
   getCursors: vi.fn(() => ({})),
-  updateCursor: vi.fn(),
+  setCursor: vi.fn(),
 }));
 
 vi.mock("../src/workspace/session-store.js", () => ({
   getSessions: vi.fn(() => ({})),
   saveSession: vi.fn(),
+  clearSession: vi.fn(),
 }));
 
 vi.mock("../src/knowledge/store.js", () => ({

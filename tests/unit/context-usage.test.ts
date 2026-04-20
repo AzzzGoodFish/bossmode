@@ -215,16 +215,16 @@ describe("control_request/response matching", () => {
 // -- API endpoint logic --
 
 describe("context-usage API endpoint logic", () => {
-  it("returns { supported: false } when no instance", () => {
-    // Simulates getAgentContextUsage returning null
+  it("returns cache-unavailable payload when cache is empty", () => {
+    // New behavior: API is cache-only, never triggers runtime request.
     const usage = null;
-    const response = usage === null ? { supported: false } : { supported: true, ...usage };
-    expect(response).toEqual({ supported: false });
+    const response = usage === null ? { supported: true, unavailable: true } : { supported: true, ...usage };
+    expect(response).toEqual({ supported: true, unavailable: true });
   });
 
-  it("returns { supported: true, ...data } when data available", () => {
+  it("returns cached usage payload when available", () => {
     const usage = { totalTokens: 45000, rawMaxTokens: 200000, percentage: 22.5, model: "sonnet" };
-    const response = usage === null ? { supported: false } : { supported: true, ...usage };
+    const response = usage === null ? { supported: true, unavailable: true } : { supported: true, ...usage };
     expect(response).toEqual({
       supported: true,
       totalTokens: 45000,
@@ -232,5 +232,22 @@ describe("context-usage API endpoint logic", () => {
       percentage: 22.5,
       model: "sonnet",
     });
+  });
+
+  it("WS push payload shape for agent:context_usage is stable", () => {
+    const event = {
+      type: "agent:context_usage",
+      roomId: "room-1",
+      agent: "developer",
+      usage: {
+        totalTokens: 9000,
+        rawMaxTokens: 200000,
+        percentage: 4.5,
+        model: "sonnet",
+      },
+    };
+
+    expect(event.type).toBe("agent:context_usage");
+    expect(event.usage.percentage).toBe(4.5);
   });
 });

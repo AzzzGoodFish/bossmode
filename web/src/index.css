@@ -43,3 +43,12 @@ textarea::-webkit-scrollbar {
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
+
+/* Load-more: message slide-in from top */
+@keyframes slide-in-top {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg-enter {
+  animation: slide-in-top 250ms ease-out both;
+}

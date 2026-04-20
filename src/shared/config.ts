@@ -78,7 +78,14 @@ export function readConfig(): BossmodeConfig {
     throw new Error(`Config not found at ${CONFIG_PATH}. Run 'bossmode on' to set up.`);
   }
   const raw = readFileSync(CONFIG_PATH, "utf-8");
-  return JSON.parse(raw) as BossmodeConfig;
+  const parsed = JSON.parse(raw) as BossmodeConfig & { sessionResume?: boolean };
+  // Backward compatibility: old config.json files may not have runtime.sessionResume
+  const legacySessionResume = parsed.sessionResume;
+  parsed.runtime = {
+    ...(parsed.runtime || {}),
+    sessionResume: (parsed.runtime?.sessionResume ?? legacySessionResume) !== false,
+  };
+  return parsed;
 }
 
 export function writeConfig(config: BossmodeConfig): void {
@@ -126,6 +133,7 @@ export function getDefaultConfig(): BossmodeConfig {
     auth: { username: "", passwordHash: "" },
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
+    runtime: { sessionResume: true },
   };
 }
 

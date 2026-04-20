@@ -44,7 +44,7 @@ function readDirSafe(dir: string): string[] {
 
 // -- Room CRUD --
 
-export function createRoom(name: string, cwd: string, members: string[], knowledgeBaseId?: string, ruleIds?: string[]): Room {
+export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[]): Room {
   ensureRoomsDir();
 
   const room: Room = {
@@ -53,8 +53,7 @@ export function createRoom(name: string, cwd: string, members: string[], knowled
     cwd,
     members,
     createdAt: Date.now(),
-    ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
-    ...(ruleIds?.length ? { ruleIds } : {}),
+    ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
 
   const dir = roomDir(room.id);
@@ -95,6 +94,22 @@ export function updateRoomName(roomId: string, name: string): Room | null {
   return room;
 }
 
+/** Update the room's rule document paths (replaces any prior value). */
+export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  if (ruleDocs.length > 0) {
+    room.ruleDocs = ruleDocs;
+  } else {
+    delete room.ruleDocs;
+  }
+  // Legacy field clean-up (0.7.0/0.8.0 migration leftovers)
+  delete (room as any).ruleIds;
+  delete (room as any).knowledgeBaseId;
+  writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
+  return room;
+}
+
 export function listRooms(): Room[] {
   ensureRoomsDir();
 
@@ -126,9 +141,9 @@ export function getCursors(roomId: string): CursorMap {
   return JSON.parse(readFileSync(path, "utf-8")) as CursorMap;
 }
 
-export function updateCursor(roomId: string, agentName: string, messageId: string): void {
+export function setCursor(roomId: string, agentName: string, cursor: string | null): void {
   const cursors = getCursors(roomId);
-  cursors[agentName] = messageId;
+  cursors[agentName] = cursor;
   writeFileSync(cursorsPath(roomId), JSON.stringify(cursors, null, 2), "utf-8");
 }
 

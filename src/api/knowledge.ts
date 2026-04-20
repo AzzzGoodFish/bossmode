@@ -1,53 +1,117 @@
-// Knowledge API routes — Knowledge Base and Entry CRUD
+// Knowledge API — single-namespace document management (0.8.0)
+// ===============================================================
+// All docs live under the single global tree at
+// ~/.bossmode/knowledge/docs/. There is no KB container concept.
+//
+// Endpoints:
+//   GET    /api/knowledge/tree                 — directory tree (for UI file explorer)
+//   GET    /api/knowledge/entries              — flat list of all docs (id/title/source/updatedAt)
+//   POST   /api/knowledge/entries              — create doc at explicit path
+//     body: { title, content, path?, source? }
+//   GET    /api/knowledge/entry?path=...       — read single doc by path
+//   PUT    /api/knowledge/entry?path=...       — update doc (body: { title, content })
+//   DELETE /api/knowledge/entry?path=...       — delete doc
+//   POST   /api/knowledge/move                 — move/rename (body: { from, to })
+
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
 
-addRoute("GET", "/api/knowledge", async (_req, res) => {
-  sendJson(res, 200, knowledgeStore.listKnowledgeBases());
+// -- Tree + flat list --
+
+addRoute("GET", "/api/knowledge/tree", async (_req, res) => {
+  sendJson(res, 200, knowledgeStore.getDocumentTree());
 });
 
-addRoute("POST", "/api/knowledge", async (req, res) => {
-  const body = (await parseBody(req)) as { name?: string; description?: string };
-  if (!body.name) { sendJson(res, 400, { error: "name is required" }); return; }
-  const kb = knowledgeStore.createKnowledgeBase(body.name, body.description || "");
-  sendJson(res, 200, kb);
+addRoute("GET", "/api/knowledge/entries", async (_req, res) => {
+  const entries = knowledgeStore.listEntries().map((e) => ({
+    id: e.id,
+    title: e.title,
+    source: e.source,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  }));
+  sendJson(res, 200, entries);
 });
 
-addRoute("GET", "/api/knowledge/:id", async (_req, res, params) => {
-  const kb = knowledgeStore.getKnowledgeBase(params.id);
-  if (!kb) { sendJson(res, 404, { error: "Knowledge base not found" }); return; }
-  sendJson(res, 200, kb);
+// -- Write --
+
+addRoute("POST", "/api/knowledge/entries", async (req, res) => {
+  const body = (await parseBody(req)) as {
+    title?: string; content?: string; path?: string; source?: string;
+  };
+  if (!body.title || body.content === undefined) {
+    sendJson(res, 400, { error: "title and content are required" });
+    return;
+  }
+  try {
+    const entry = knowledgeStore.addEntry(
+      body.title, body.content,
+      body.source || "user",
+      body.path,
+    );
+    sendJson(res, 200, entry);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
 });
 
-addRoute("DELETE", "/api/knowledge/:id", async (_req, res, params) => {
-  if (!knowledgeStore.deleteKnowledgeBase(params.id)) { sendJson(res, 404, { error: "Knowledge base not found" }); return; }
-  sendJson(res, 200, { ok: true });
-});
+// -- Single-doc read / update / delete (path via query string) --
 
-addRoute("GET", "/api/knowledge/:id/entries", async (req, res, params) => {
-  if (!knowledgeStore.getKnowledgeBase(params.id)) { sendJson(res, 404, { error: "Knowledge base not found" }); return; }
+addRoute("GET", "/api/knowledge/entry", async (req, res) => {
   const url = new URL(req.url || "", "http://localhost");
-  const type = url.searchParams.get("type") as "rule" | "knowledge" | null;
-  sendJson(res, 200, knowledgeStore.listEntries(params.id, type ? { type } : undefined));
-});
-
-addRoute("POST", "/api/knowledge/:id/entries", async (req, res, params) => {
-  if (!knowledgeStore.getKnowledgeBase(params.id)) { sendJson(res, 404, { error: "Knowledge base not found" }); return; }
-  const body = (await parseBody(req)) as { title?: string; content?: string; source?: string; type?: "rule" | "knowledge" };
-  if (!body.title || !body.content) { sendJson(res, 400, { error: "title and content are required" }); return; }
-  const entry = knowledgeStore.addEntry(params.id, body.title, body.content, body.source || "user", body.type || "knowledge");
+  const path = url.searchParams.get("path");
+  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const entry = knowledgeStore.getEntry(path);
+  if (!entry) { sendJson(res, 404, { error: "Document not found" }); return; }
   sendJson(res, 200, entry);
 });
 
-addRoute("PUT", "/api/knowledge/:id/entries/:eid", async (req, res, params) => {
+addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const path = url.searchParams.get("path");
+  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
   const body = (await parseBody(req)) as { title?: string; content?: string };
-  if (!body.title || !body.content) { sendJson(res, 400, { error: "title and content are required" }); return; }
-  const updated = knowledgeStore.updateEntry(params.id, params.eid, body.title, body.content);
-  if (!updated) { sendJson(res, 404, { error: "Entry not found" }); return; }
-  sendJson(res, 200, updated);
+  if (!body.title || body.content === undefined) {
+    sendJson(res, 400, { error: "title and content are required" });
+    return;
+  }
+  try {
+    const updated = knowledgeStore.updateEntry(path, body.title, body.content);
+    if (!updated) { sendJson(res, 404, { error: "Document not found" }); return; }
+    sendJson(res, 200, updated);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
 });
 
-addRoute("DELETE", "/api/knowledge/:id/entries/:eid", async (_req, res, params) => {
-  if (!knowledgeStore.deleteEntry(params.id, params.eid)) { sendJson(res, 404, { error: "Entry not found" }); return; }
-  sendJson(res, 200, { ok: true });
+addRoute("DELETE", "/api/knowledge/entry", async (req, res) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const path = url.searchParams.get("path");
+  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  try {
+    if (!knowledgeStore.deleteEntry(path)) {
+      sendJson(res, 404, { error: "Document not found" });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
+});
+
+// -- Move / rename --
+
+addRoute("POST", "/api/knowledge/move", async (req, res) => {
+  const body = (await parseBody(req)) as { from?: string; to?: string };
+  if (!body.from || !body.to) {
+    sendJson(res, 400, { error: "from and to are required" });
+    return;
+  }
+  try {
+    const moved = knowledgeStore.moveEntry(body.from, body.to);
+    if (!moved) { sendJson(res, 404, { error: "Source not found or destination conflicts" }); return; }
+    sendJson(res, 200, moved);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
 });

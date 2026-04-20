@@ -4,7 +4,13 @@ import { getToken } from "../api/client";
 export type WsEvent =
   | { type: "room:message"; roomId: string; message: any }
   | { type: "agent:status"; roomId: string; agent: string; status: string }
-  | { type: "agent:event"; roomId: string; agent: string; event: unknown };
+  | { type: "agent:event"; roomId: string; agent: string; event: unknown }
+  | {
+      type: "agent:context_usage";
+      roomId: string;
+      agent: string;
+      usage: { totalTokens: number; rawMaxTokens: number; percentage: number; model: string } | null;
+    };
 
 interface UseWebSocketOptions {
   onEvent?: (event: WsEvent) => void;

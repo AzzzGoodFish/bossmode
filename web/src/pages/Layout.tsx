@@ -240,12 +240,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
         {/* Knowledge */}
         {activePage?.type === "knowledge" && (
-          <KnowledgePage
-            selectedKbId={activePage.id}
-            selectedEntryId={(activePage as any).entryId}
-            onSelectKb={(id) => setActivePage({ type: "knowledge", id })}
-            onSelectEntry={(kbId, entryId, entryTitle) => setActivePage({ type: "knowledge", id: kbId, entryId, entryTitle } as any)}
-          />
+          <KnowledgePage />
         )}
 
         {/* Members */}

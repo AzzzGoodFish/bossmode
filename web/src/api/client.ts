@@ -176,7 +176,7 @@ export interface MemberInstanceInfo {
   status: "idle" | "working";
   runtime: string;
   pid?: number;
-  spawnArgs?: string;
+  spawnArgs?: string[];
 }
 
 export async function getMemberStatus(id: string): Promise<{ instances: MemberInstanceInfo[] }> {
@@ -202,50 +202,73 @@ export async function getRuntimes(): Promise<RuntimeInfo[]> {
 }
 
 // -- Knowledge --
+//
+// 0.8.0: single global namespace. No KB container; every document is a path
+// relative to ~/.bossmode/knowledge/docs/.
 
-export interface KnowledgeBaseInfo {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: number;
-}
-
+/** Document summary from the list endpoint (no content). */
 export interface KnowledgeEntryInfo {
+  /** Document path, e.g. "bossmode/architecture/overview.md". Acts as the stable ID. */
   id: string;
   title: string;
-  content: string;
   source: string;
-  type: "rule" | "knowledge";
   createdAt: number;
   updatedAt: number;
 }
 
-export async function getKnowledgeBases(): Promise<KnowledgeBaseInfo[]> {
-  return apiFetch("/api/knowledge");
+/** Full document returned from read/update endpoints. */
+export interface KnowledgeEntry extends KnowledgeEntryInfo {
+  content: string;
 }
 
-export async function createKnowledgeBase(name: string, description: string): Promise<KnowledgeBaseInfo> {
-  return apiFetch("/api/knowledge", { method: "POST", body: JSON.stringify({ name, description }) });
+/** Directory tree node for the file-explorer UI. */
+export interface KnowledgeTreeNode {
+  path: string;
+  name: string;
+  kind: "file" | "folder";
+  title?: string;
+  children?: KnowledgeTreeNode[];
 }
 
-export async function deleteKnowledgeBase(id: string): Promise<void> {
-  await apiFetch(`/api/knowledge/${id}`, { method: "DELETE" });
+export async function getKnowledgeEntries(): Promise<KnowledgeEntryInfo[]> {
+  return apiFetch(`/api/knowledge/entries`);
 }
 
-export async function getKnowledgeEntries(kbId: string): Promise<KnowledgeEntryInfo[]> {
-  return apiFetch(`/api/knowledge/${kbId}/entries`);
+export async function getKnowledgeTree(): Promise<KnowledgeTreeNode> {
+  return apiFetch(`/api/knowledge/tree`);
 }
 
-export async function addKnowledgeEntry(kbId: string, title: string, content: string, type: "rule" | "knowledge" = "knowledge"): Promise<KnowledgeEntryInfo> {
-  return apiFetch(`/api/knowledge/${kbId}/entries`, { method: "POST", body: JSON.stringify({ title, content, type }) });
+export async function getKnowledgeEntry(path: string): Promise<KnowledgeEntry> {
+  return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`);
 }
 
-export async function updateKnowledgeEntry(kbId: string, entryId: string, title: string, content: string): Promise<KnowledgeEntryInfo> {
-  return apiFetch(`/api/knowledge/${kbId}/entries/${entryId}`, { method: "PUT", body: JSON.stringify({ title, content }) });
+export async function addKnowledgeEntry(
+  title: string, content: string, path?: string,
+): Promise<KnowledgeEntry> {
+  return apiFetch(`/api/knowledge/entries`, {
+    method: "POST",
+    body: JSON.stringify({ title, content, path }),
+  });
 }
 
-export async function deleteKnowledgeEntry(kbId: string, entryId: string): Promise<void> {
-  await apiFetch(`/api/knowledge/${kbId}/entries/${entryId}`, { method: "DELETE" });
+export async function updateKnowledgeEntry(
+  path: string, title: string, content: string,
+): Promise<KnowledgeEntry> {
+  return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, {
+    method: "PUT",
+    body: JSON.stringify({ title, content }),
+  });
+}
+
+export async function deleteKnowledgeEntry(path: string): Promise<void> {
+  await apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+}
+
+export async function moveKnowledgeEntry(from: string, to: string): Promise<KnowledgeEntry> {
+  return apiFetch(`/api/knowledge/move`, {
+    method: "POST",
+    body: JSON.stringify({ from, to }),
+  });
 }
 
 // -- Rooms --
@@ -256,8 +279,8 @@ export interface Room {
   cwd: string;
   members: string[];
   createdAt: number;
-  knowledgeBaseId?: string;
-  ruleIds?: string[];
+  /** Document paths injected into agents' system prompts as rules. */
+  ruleDocs?: string[];
   agentStatuses?: Record<string, string>;
 }
 
@@ -269,12 +292,21 @@ export async function createRoom(
   name: string,
   cwd: string,
   members: string[],
-  knowledgeBaseId?: string,
-  ruleIds?: string[],
+  ruleDocs?: string[],
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, cwd, members, knowledgeBaseId, ruleIds }),
+    body: JSON.stringify({ name, cwd, members, ruleDocs }),
+  });
+}
+
+export async function updateRoomBindings(
+  id: string,
+  patch: { ruleDocs?: string[] },
+): Promise<Room> {
+  return apiFetch(`/api/rooms/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }
 
@@ -360,8 +392,28 @@ export async function steerAgent(
   });
 }
 
+export async function resetAgentSession(
+  roomId: string,
+  agentName: string,
+): Promise<{ ok: true; message: string }> {
+  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/reset-session`, {
+    method: "POST",
+  });
+}
+
 export async function getAgentEvents(roomId: string, agentName: string): Promise<unknown[]> {
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events`);
+}
+
+export interface PaginatedEvents {
+  events: unknown[];
+  total: number;
+  hasMore: boolean;
+}
+
+export async function getAgentEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): Promise<PaginatedEvents> {
+  const params = before !== undefined ? `?limit=${limit}&before=${before}` : `?limit=${limit}`;
+  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events${params}`);
 }
 
 export async function abortAgent(roomId: string, agentName: string): Promise<{ ok: boolean; action: string }> {
@@ -449,6 +501,10 @@ export interface SummarySettings {
   keepCount: number;
 }
 
+export interface RuntimeSettings {
+  sessionResume: boolean;
+}
+
 export async function getSummarySettings(): Promise<SummarySettings> {
   return apiFetch("/api/settings/summary");
 }
@@ -457,5 +513,16 @@ export async function updateSummarySettings(settings: Partial<SummarySettings>):
   return apiFetch("/api/settings/summary", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+export async function getRuntimeSettings(): Promise<RuntimeSettings> {
+  return apiFetch("/api/settings/runtime");
+}
+
+export async function updateRuntimeSettings(sessionResume: boolean): Promise<RuntimeSettings> {
+  return apiFetch("/api/settings/runtime", {
+    method: "PUT",
+    body: JSON.stringify({ sessionResume }),
   });
 }

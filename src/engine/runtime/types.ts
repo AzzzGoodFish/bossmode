@@ -55,7 +55,8 @@ export interface CreateAgentOpts {
 
   // Session resume
   resumeSession?: { sessionId?: string; sessionFile?: string };
-  onSessionCreated?: (session: { sessionId?: string; sessionFile?: string }) => void;
+  // Called whenever runtime reports session identity (initial + later changes after compact/fork)
+  onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
 }
 
 export interface AgentCallbacks {
@@ -79,7 +80,7 @@ export interface AgentHandle {
   // Metadata for status reporting
   readonly pid?: number;
   readonly runtimeName?: string;
-  readonly spawnArgs?: string;
+  readonly spawnArgs?: string[];
 
   // Optional — check runtime.capabilities before calling
   setModel?(model: string): void;
@@ -99,7 +100,11 @@ export type AgentStreamEvent =
   | { type: "tool_update"; toolName: string; toolCallId: string; partialResult: unknown }
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
   | { type: "cli:stdout"; text: string }
-  | { type: "cli:stderr"; text: string };
+  | { type: "cli:stderr"; text: string }
+  // Emitted exactly once per handle when the CLI process exits.
+  // `unexpected` is true for crashes / startup failures / parse errors;
+  // false only when triggered by handle.destroy() (normal shutdown).
+  | { type: "runtime_exit"; code: number | null; signal: string | null; stderrTail?: string; unexpected: boolean };
 
 export interface TokenUsage {
   inputTokens: number;

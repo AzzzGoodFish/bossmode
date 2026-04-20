@@ -165,9 +165,9 @@ export function Main({
   );
 
   const handleCreateRoom = useCallback(
-    async (name: string, cwd: string, members: string[], knowledgeBaseId?: string, ruleIds?: string[]) => {
+    async (name: string, cwd: string, members: string[], ruleDocs?: string[]) => {
       try {
-        const newRoom = await apiCreateRoom(name, cwd, members, knowledgeBaseId, ruleIds);
+        const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs);
         onRoomCreated(newRoom);
         setShowCreateRoom(false);
       } catch (err: any) {

@@ -4,8 +4,16 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { getBossmodeDir } from "../shared/config.js";
+import { refreshContextUsageOnIdle } from "./agent-manager.js";
+import { postMessage } from "../communication/message-bus.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
+
+export type AgentHistoryEvent =
+  | AgentStreamEvent
+  | { type: "user_steer"; text: string; ts?: number }
+  | { type: "agent_reply"; text: string; ts?: number }
+  | { type: "system"; text: string; ts?: number };
 
 // -- Event persistence (JSONL) --
 
@@ -17,19 +25,28 @@ function agentEventsPath(roomId: string, agentName: string): string {
   return join(agentEventsDir(roomId), `${agentName}.jsonl`);
 }
 
-export function appendEventToDisk(roomId: string, agentName: string, event: AgentStreamEvent | { type: "user_steer"; text: string }): void {
+export function appendEventToDisk(roomId: string, agentName: string, event: AgentHistoryEvent): void {
   const dir = agentEventsDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const withTs = { ...event, ts: Date.now() };
   appendFileSync(agentEventsPath(roomId, agentName), JSON.stringify(withTs) + "\n", "utf-8");
 }
 
-export function loadEventsFromDisk(roomId: string, agentName: string): AgentStreamEvent[] {
+export function loadEventsFromDisk(roomId: string, agentName: string): AgentHistoryEvent[] {
   const path = agentEventsPath(roomId, agentName);
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
   return content.split("\n").map((line) => JSON.parse(line));
+}
+
+/** Load events with tail-based pagination. Returns { events, total, hasMore }. */
+export function loadEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): { events: AgentHistoryEvent[]; total: number; hasMore: boolean } {
+  const all = loadEventsFromDisk(roomId, agentName);
+  const total = all.length;
+  const endIdx = before !== undefined ? Math.min(before, total) : total;
+  const startIdx = Math.max(0, endIdx - limit);
+  return { events: all.slice(startIdx, endIdx), total, hasMore: startIdx > 0 };
 }
 
 // -- Stream state accumulation --
@@ -52,7 +69,7 @@ export function handleAgentEvent(
   agentName: string,
   instanceKey: string,
   event: AgentStreamEvent,
-  eventBuffer: AgentStreamEvent[],
+  eventBuffer: AgentHistoryEvent[],
 ): AgentStatus | undefined {
   // Log significant events
   if (event.type === "agent_start" || event.type === "agent_end") {
@@ -71,6 +88,26 @@ export function handleAgentEvent(
       agent: agentName,
       event,
     });
+    return undefined;
+  }
+
+  // runtime_exit — lifecycle signal from the CLI runtime.
+  //   unexpected=true  → crash / startup failure: post system message + mark inactive.
+  //   unexpected=false → normal shutdown via handle.destroy(): silent.
+  if (event.type === "runtime_exit") {
+    logger.info("runtime", "exit", {
+      agent: agentName, code: event.code, signal: event.signal, unexpected: event.unexpected,
+    });
+    broadcastToAgentSubscribers(roomId, agentName, {
+      type: "agent:event", roomId, agent: agentName, event,
+    });
+    if (event.unexpected) {
+      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
+      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
+      postMessage(roomId, "system", `Member "${agentName}" CLI ${codeStr} unexpectedly.${detail}`);
+      broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "inactive" });
+      return "inactive";
+    }
     return undefined;
   }
 
@@ -117,6 +154,8 @@ export function handleAgentEvent(
   if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
     broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
+    // Proactively refresh context usage cache while agent is idle (responsive to control_request)
+    refreshContextUsageOnIdle(roomId, agentName);
     return "idle";
   }
 

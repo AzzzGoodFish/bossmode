@@ -12,6 +12,8 @@
  * From test plan: docs/test-plan.md §4
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
@@ -226,6 +228,45 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       expect(res.status).toBe(400);
       const data = JSON.parse(res.body);
       expect(data.error).toContain("not a member");
+    });
+  });
+
+  // ── Reset Session ──
+
+  describe("Reset Session", () => {
+    it("clears session metadata, resets cursor to null, and writes a system event", async () => {
+      const room = await createRoom("reset-session-test", ["pm"]);
+      const roomDir = join("/tmp/bossmode-test", "rooms", room.id);
+      mkdirSync(roomDir, { recursive: true });
+      writeFileSync(join(roomDir, "sessions.json"), JSON.stringify({
+        pm: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
+      }, null, 2));
+      writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ pm: "msg-123" }, null, 2));
+
+      const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
+
+      const sessions = JSON.parse(readFileSync(join(roomDir, "sessions.json"), "utf-8"));
+      expect(sessions.pm).toEqual({ runtime: "mock" });
+
+      const cursors = JSON.parse(readFileSync(join(roomDir, "cursors.json"), "utf-8"));
+      expect(cursors.pm).toBeNull();
+
+      const eventsRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/agents/pm/events`, { token });
+      expect(eventsRes.status).toBe(200);
+      const events = JSON.parse(eventsRes.body);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "system",
+        text: "Session reset. Next activation will start fresh.",
+      }));
+    });
+
+    it("returns 400 for non-member agent", async () => {
+      const room = await createRoom("reset-session-non-member", ["pm"]);
+      const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/qa/reset-session`, { token });
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("not a member");
     });
   });
 

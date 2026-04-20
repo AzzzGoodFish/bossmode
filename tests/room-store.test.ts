@@ -161,14 +161,25 @@ describe("room-store", () => {
   });
 
   describe("cursors", () => {
-    it("should update and read cursor", () => {
+    it("should set and read cursor", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm"]);
       const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
-      roomStore.updateCursor(room.id, "pm", msg.id);
+      roomStore.setCursor(room.id, "pm", msg.id);
 
       const cursors = roomStore.getCursors(room.id);
       expect(cursors.pm).toBe(msg.id);
+    });
+
+    it("should allow resetting cursor to null", () => {
+      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
+
+      roomStore.setCursor(room.id, "pm", msg.id);
+      roomStore.setCursor(room.id, "pm", null);
+
+      const cursors = roomStore.getCursors(room.id);
+      expect(cursors.pm).toBeNull();
     });
   });
 

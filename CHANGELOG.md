@@ -4,6 +4,69 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.0] — 2026-04-20
+
+### Changed (breaking: knowledge namespace & room binding)
+- **Knowledge Base concept removed.** All documents now live in a single global tree at `~/.bossmode/knowledge/docs/`. The per-project KB container has been dissolved — users organize projects using top-level folders (e.g. `docs/bossmode/…`, `docs/freeu/…`), the same way Notion/Obsidian/Feishu work. This eliminates a redundant layer of indirection without losing any organizational power.
+- **Rooms no longer bind to a Knowledge Base.** The `room.knowledgeBaseId` field is gone; rooms only keep `ruleDocs: string[]` (paths relative to the shared root) to control which documents are injected as rules. Every agent in every room can read/write the whole knowledge tree.
+- **API routes flattened:**
+  - `GET    /api/knowledge/tree` — single global tree
+  - `GET    /api/knowledge/entries` — flat list of all docs
+  - `POST   /api/knowledge/entries` — create doc at path
+  - `GET    /api/knowledge/entry?path=…` — read
+  - `PUT    /api/knowledge/entry?path=…` — update
+  - `DELETE /api/knowledge/entry?path=…` — delete
+  - `POST   /api/knowledge/move` — rename/move
+  - **Removed:** `GET/POST/DELETE /api/knowledge`, `GET /api/knowledge/:id`, and all `/api/knowledge/:id/*` nested routes.
+- **Agent tools no longer take a KB context.** `save_knowledge` / `update_knowledge` / `delete_knowledge` / `query_knowledge` / `read_knowledge` now operate on the single global tree; they work in every room regardless of binding.
+- **Sidebar simplified.** The Knowledge section used to expand into a list of KBs; it is now a single button that jumps directly to the Knowledge page.
+- **Knowledge page redesigned as two-pane.** Left: collapsible, resizable file tree (folders default-collapsed; width persisted to `localStorage`). Right: Markdown viewer/editor. Drag the divider to resize.
+- **CreateRoomDialog.** The KB selector is removed. Rules are now picked from a tree-style selector over the whole knowledge tree. When you type a working directory, the dialog auto-suggests `<cwd-basename>/rules/*.md` (e.g. `bossmode/rules/*` when cwd ends in `…/bossmode`), falling back to root `rules/*`. This is a soft suggestion — users can override freely.
+
+### Migration (automatic on first 0.8.0 startup)
+- Each legacy KB directory (`~/.bossmode/knowledge/<kbId>/docs/`) is copied into `~/.bossmode/knowledge/docs/<kbNameSlug>/` (e.g. KB "Bossmode" → `docs/bossmode/`, KB "FreeU" → `docs/freeu/`). Colliding slugs are suffixed with `-2`, `-3`, etc.
+- The original KB directory (including `entries.legacy/` from the 0.7.0 migration and `knowledge.json`) is renamed to `<kbId>.legacy/` for safe rollback. Nothing is deleted.
+- Each room's `knowledgeBaseId` is stripped and its `ruleDocs` paths are prefixed with the old KB's slug. `ruleIds` (deprecated in 0.7.0) is dropped. Room JSON is backed up to `<roomDir>/room.json.pre-0.8.0-backup` before rewrite.
+- Migration is idempotent: a second startup detects already-migrated state and skips.
+- Fresh installs (no legacy KBs) automatically seed `docs/rules/dev-team-protocol.md` from the built-in template. Migrated installs are **not** re-seeded at the root — their existing project-scoped rules (e.g. `bossmode/rules/dev-team-protocol.md`) remain authoritative.
+
+### Why
+- The KB container layer was redundant once 0.7.0 moved storage onto the filesystem: folders already provide everything KBs were providing (namespacing, organization), without the extra concept to learn. Removing it simplifies the mental model: one tree, user folders for project separation, rules chosen explicitly per room.
+- Users can now run shared and per-project knowledge in the same tree and let the room-level `ruleDocs` picker decide what each room's agents see as injected rules.
+
+### Known non-goals
+- No per-room scope or filtering. Every agent sees the full tree. This is intentional — separation is done via folder organization, not access control.
+- No automatic pruning of `<kbId>.legacy/` directories. Delete them manually once you've verified the migration.
+
+---
+
+## [0.7.0] — 2026-04-20
+
+### Changed (breaking: knowledge base storage & agent tools)
+- **Knowledge base is now filesystem-native.** Each KB is a directory of Markdown files under `~/.bossmode/knowledge/<kbId>/docs/`, organized however you want (e.g. `rules/`, `architecture/`, `prds/`, `implementation-plans/`). Document IDs are paths (e.g. `architecture/overview.md`). Hierarchy is expressed by directories — no `type: "rule" | "knowledge"` field anymore. Documents can be edited with any external tool (VS Code, Obsidian, git).
+- **Rules are now a room-level binding, not a content attribute.** `room.ruleDocs: string[]` lists document paths to inject as rules. Room creation dialog lets you pick any document as a rule (docs under `rules/` are selected by default).
+- **Knowledge is no longer auto-injected into system prompts.** Agents get a directory-tree INDEX of available documents and read them on demand via `query_knowledge` / `read_knowledge`. This ends the silent spawn-failure risk caused by Linux `MAX_ARG_STRLEN` (128KB per argv entry) when KBs grow large, especially with Chinese / multi-byte content.
+- **New agent tool: `read_knowledge(path)`** — returns a single document's full content by path.
+- **Updated agent tools:**
+  - `save_knowledge(title, content, path?)` — `path` replaces implicit placement; creates intermediate folders
+  - `update_knowledge(path, title, content)` — `path` replaces `entryId`
+  - `delete_knowledge(path)` — `path` replaces `entryId`
+  - `query_knowledge()` — returns the directory tree + summary list (no content)
+  - `query_knowledge(query)` — substring search across titles and bodies
+- **Dev Team Collaboration Protocol is now a seed document.** Freshly created KBs auto-plant `rules/dev-team-protocol.md` from the `templates/teams/dev-team/team-prompt.md` template. It is a regular document from then on: editable, deletable, per-project.
+- **New API endpoints** for file-tree operations:
+  - `GET /api/knowledge/:id/tree` — directory tree for the UI
+  - `GET/PUT/DELETE /api/knowledge/:id/entry?path=…` — single doc CRUD by path
+  - `POST /api/knowledge/:id/move` — rename/move
+  - `PATCH /api/rooms/:id` now also accepts `knowledgeBaseId` and `ruleDocs` (room creation no longer kills rule binding control)
+- **Frontend KnowledgePage rewritten** as a file-tree sidebar + Markdown viewer/editor.
+- **One-time migration** runs on first startup: legacy `<kbId>/entries/<uuid>.json` files are converted to categorized Markdown files (by title heuristic: PRDs, Implementation Plans, Architecture, etc.), room `ruleIds` (UUIDs) are translated to `ruleDocs` (paths), and the old `entries/` folder is preserved as `entries.legacy/` for safety.
+
+### Fixed
+- **E2BIG spawn failure with large Chinese knowledge bases** — fixing this was the direct driver of the filesystem rewrite. System prompts now scale to 1000+ documents without hitting the per-argv byte limit.
+
+---
+
 ## [0.6.3] — 2026-04-17
 
 ### Changed
