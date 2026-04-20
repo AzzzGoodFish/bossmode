@@ -1,6 +1,6 @@
 {
   "name": "bossmode",
-  "version": "0.3.0",
+  "version": "0.6.3",
   "description": "Discord-style AI team chat room",
   "type": "module",
   "license": "ISC",
@@ -30,7 +30,7 @@
   },
   "scripts": {
     "prebuild": "rm -rf dist",
-    "build": "tsc && chmod +x dist/cli/index.js && cd web && npm run build",
+    "build": "tsc && mkdir -p dist/scripts && cp scripts/session_hook_forwarder.cjs dist/scripts/session_hook_forwarder.cjs && chmod +x dist/cli/index.js && cd web && npm run build",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
     "test": "vitest run",

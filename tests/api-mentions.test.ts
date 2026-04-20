@@ -1,43 +1,117 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Test the parseMentions function directly
-// Import after mocking is set up in other test files won't affect pure functions
+const postMessage = vi.fn();
+const emitAgentReply = vi.fn();
+const parseMentions = vi.fn();
+const getRoom = vi.fn();
 
-describe("parseMentions", () => {
-  // Inline implementation for isolated testing (same logic as api.ts)
-  function parseMentions(content: string, roomMembers: string[]): string[] {
-    const mentions: string[] = [];
-    if (/@all\b/.test(content)) return ["all"];
-    const atPattern = /@(\w+)/g;
-    let match;
-    while ((match = atPattern.exec(content)) !== null) {
-      const name = match[1];
-      if (roomMembers.includes(name)) mentions.push(name);
-    }
-    return [...new Set(mentions)];
-  }
+vi.mock("../src/communication/message-bus.js", () => ({
+  postMessage,
+}));
 
-  it("should extract single mention", () => {
-    expect(parseMentions("@pm analyze this", ["pm", "dev"])).toEqual(["pm"]);
+vi.mock("../src/engine/agent-manager.js", () => ({
+  emitAgentReply,
+}));
+
+vi.mock("../src/communication/router.js", () => ({
+  parseMentions,
+}));
+
+vi.mock("../src/workspace/room-store.js", () => ({
+  getRoom,
+}));
+
+vi.mock("../src/workspace/message-store.js", () => ({
+  getMessages: vi.fn(() => []),
+  getMessagesByRange: vi.fn(() => []),
+  addMessage: vi.fn(),
+}));
+
+vi.mock("../src/knowledge/store.js", () => ({
+  listEntries: vi.fn(() => []),
+  addEntry: vi.fn(),
+  updateEntry: vi.fn(),
+  deleteEntry: vi.fn(),
+}));
+
+describe("chat tool mentions semantics", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getRoom.mockReturnValue({ id: "room-1", members: ["pm", "developer", "qa", "architect"] });
+    parseMentions.mockReturnValue([]);
   });
 
-  it("should extract multiple mentions", () => {
-    expect(parseMentions("@pm and @dev work together", ["pm", "dev", "qa"])).toEqual(["pm", "dev"]);
+  it("activates only explicit mentions and does not auto-activate from content", async () => {
+    const { handleToolCallback } = await import("../src/engine/tools.js");
+
+    parseMentions.mockReturnValue(["developer"]);
+    const result = await handleToolCallback("chat", "room-1", "architect", {
+      message: "@developer please implement",
+      mentions: [],
+      target: "room",
+    });
+
+    expect(postMessage).toHaveBeenCalledWith("room-1", "architect", "@developer please implement", []);
+    expect(parseMentions).toHaveBeenCalledWith("@developer please implement", ["pm", "developer", "qa", "architect"]);
+    expect(String((result as any).warning)).toContain("@developer");
+    expect(String((result as any).warning)).toContain("mentions[]");
   });
 
-  it("should ignore non-member mentions", () => {
-    expect(parseMentions("@unknown do something", ["pm", "dev"])).toEqual([]);
+  it("does not warn when content mentions are fully covered by mentions[]", async () => {
+    const { handleToolCallback } = await import("../src/engine/tools.js");
+
+    parseMentions.mockReturnValue(["developer", "qa"]);
+    const result = await handleToolCallback("chat", "room-1", "architect", {
+      message: "@developer and @qa sync",
+      mentions: ["developer", "qa"],
+      target: "room",
+    });
+
+    expect(postMessage).toHaveBeenCalledWith("room-1", "architect", "@developer and @qa sync", ["developer", "qa"]);
+    expect((result as any).warning).toBeUndefined();
   });
 
-  it("should handle @all", () => {
-    expect(parseMentions("@all start working", ["pm", "dev"])).toEqual(["all"]);
+  it("warns only for orphan mentions missing from mentions[]", async () => {
+    const { handleToolCallback } = await import("../src/engine/tools.js");
+
+    parseMentions.mockReturnValue(["developer", "qa"]);
+    const result = await handleToolCallback("chat", "room-1", "architect", {
+      message: "@developer and @qa sync",
+      mentions: ["developer"],
+      target: "room",
+    });
+
+    expect(postMessage).toHaveBeenCalledWith("room-1", "architect", "@developer and @qa sync", ["developer"]);
+    expect(String((result as any).warning)).toContain("@qa");
+    expect(String((result as any).warning)).not.toContain("@developer");
   });
 
-  it("should deduplicate mentions", () => {
-    expect(parseMentions("@pm first task @pm second task", ["pm"])).toEqual(["pm"]);
+  it("does not parse mentions on target=user (F11)", async () => {
+    const { handleToolCallback } = await import("../src/engine/tools.js");
+
+    const result = await handleToolCallback("chat", "room-1", "architect", {
+      message: "@developer private note",
+      mentions: [],
+      target: "user",
+    });
+
+    expect(parseMentions).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(emitAgentReply).toHaveBeenCalledWith("room-1", "architect", "@developer private note");
+    expect(result).toEqual({ ok: true, target: "user" });
   });
 
-  it("should return empty for no mentions", () => {
-    expect(parseMentions("hello world", ["pm"])).toEqual([]);
+  it("silently degrades warning generation when room lookup fails", async () => {
+    const { handleToolCallback } = await import("../src/engine/tools.js");
+
+    getRoom.mockReturnValue(null);
+    const result = await handleToolCallback("chat", "room-1", "architect", {
+      message: "@developer",
+      mentions: [],
+      target: "room",
+    });
+
+    expect(postMessage).toHaveBeenCalledWith("room-1", "architect", "@developer", []);
+    expect(result).toEqual({ ok: true });
   });
 });

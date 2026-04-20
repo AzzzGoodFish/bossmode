@@ -61,7 +61,7 @@ function getUnsummarizedMessages(all: RoomMessage[], keepCount: number): RoomMes
 
   const unsummarized = all
     .slice(lastSummarizedIdx + 1)
-    .filter((m) => m.type !== "summary");
+    .filter((m) => m.type !== "summary" && m.sender !== "system");
 
   if (unsummarized.length <= keepCount) return [];
   return unsummarized.slice(0, unsummarized.length - keepCount);
@@ -194,6 +194,16 @@ describe("getUnsummarizedMessages", () => {
     ];
     const result = getUnsummarizedMessages(msgs, 5);
     expect(result).toEqual([]);
+  });
+
+  it("filters out system messages from unsummarized candidates", () => {
+    const msgs = [
+      makeMsg("1"),
+      { id: "sys-1", sender: "system", content: "Summarizing 10 messages...", mentions: [], ts: Date.now() } as RoomMessage,
+      makeMsg("2"),
+    ];
+    const result = getUnsummarizedMessages(msgs, 0);
+    expect(result.map((m) => m.id)).toEqual(["1", "2"]);
   });
 });
 

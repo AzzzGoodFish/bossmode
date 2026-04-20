@@ -181,7 +181,7 @@ export function getUnsummarizedMessages(roomId: string, keepCount: number): Room
   // Get only non-summary messages after the last summarized point
   const unsummarized = all
     .slice(lastSummarizedIdx + 1)
-    .filter((m) => m.type !== "summary");
+    .filter((m) => m.type !== "summary" && m.sender !== "system");
 
   // Exclude the latest keepCount messages
   if (unsummarized.length <= keepCount) return [];
