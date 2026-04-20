@@ -1,6 +1,6 @@
 // System Prompt five-layer assembly — pure functions, zero side effects
 import { logger } from "../foundation/logger.js";
-import type { AgentDefinition, KnowledgeEntry } from "../shared/types.js";
+import type { AgentDefinition, KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
 
 /** Result of prompt assembly — split for runtime injection strategy */
 export interface AssembledPrompt {
@@ -18,6 +18,8 @@ export function buildAgentPrompt(
   knowledgeEntries: KnowledgeEntry[],
   roomMembers: string[],
   memberName?: string,
+  tree?: KnowledgeTreeNode | null,
+  activeRuleDocs?: string[],
 ): AssembledPrompt {
   const agentParts: string[] = [];
 
@@ -26,12 +28,35 @@ export function buildAgentPrompt(
     agentParts.push(agentDef.systemPrompt);
   }
 
-  // Layer 4: Knowledge
-  if (knowledgeEntries.length > 0) {
-    agentParts.push("---\n\n# Project Knowledge\n");
-    for (const entry of knowledgeEntries) {
-      agentParts.push(`## ${entry.title}\n\n${entry.content}\n`);
+  // Layer 4: Project documents index — directory tree of available docs.
+  // Agents read specific documents on demand via query_knowledge / read_knowledge.
+  // Only the INDEX is injected to keep the system prompt small (<10KB typical).
+  if (tree && tree.children && tree.children.length > 0) {
+    agentParts.push("---\n\n# Project Documents\n");
+    agentParts.push(
+      "This project has a document library. Read documents on demand — do NOT expect their full content here.\n",
+    );
+    agentParts.push("```");
+    agentParts.push("docs/");
+    renderTree(tree.children, "", agentParts, new Set(activeRuleDocs || []));
+    agentParts.push("```\n");
+    agentParts.push(
+      "Tools:",
+      "- `query_knowledge()` — returns the full tree plus doc summaries (no content).",
+      "- `query_knowledge(query: \"keywords\")` — searches document titles and bodies.",
+      "- `read_knowledge(path: \"folder/file.md\")` — returns a specific doc's full content.",
+      "- `save_knowledge(path, title, content)` / `update_knowledge(path, title, content)` / `delete_knowledge(path)`.",
+    );
+    if (activeRuleDocs && activeRuleDocs.length > 0) {
+      agentParts.push(
+        "\nDocs marked `[rule]` above are already injected as rules in this room.",
+      );
     }
+  } else if (knowledgeEntries.length > 0) {
+    // Fallback (should be rare): flat list when tree is unavailable
+    agentParts.push("---\n\n# Project Documents\n");
+    for (const entry of knowledgeEntries) agentParts.push(`- **${entry.title}**`);
+    agentParts.push("\nUse `query_knowledge(\"keywords\")` to read them.");
   }
 
   const agentPrompt = agentParts.join("\n");
@@ -44,15 +69,44 @@ export function buildAgentPrompt(
   const fullPrompt = agentPrompt ? agentPrompt + "\n" + envPrompt : envPrompt;
 
   const agentChars = agentDef.systemPrompt.length;
-  const knowledgeChars = knowledgeEntries.reduce((n, e) => n + e.content.length + e.title.length, 0);
   const envChars = envPrompt.length;
+  const fullPromptBytes = Buffer.byteLength(fullPrompt, "utf8");
   logger.info("agent", "assemblePrompt", {
     member: identity, agent: agentDef.name,
-    layers: { agent: agentChars, knowledge: knowledgeChars, env: envChars },
+    layers: { agent: agentChars, env: envChars, docsCount: knowledgeEntries.length },
+    totalChars: fullPrompt.length,
+    totalBytes: fullPromptBytes,
     totalTokens: `~${Math.round(fullPrompt.length / 4)}`,
   });
 
   return { agentPrompt, envPrompt, fullPrompt };
+}
+
+/** Render directory tree as ASCII hierarchy (compact, token-efficient) */
+function renderTree(
+  nodes: KnowledgeTreeNode[],
+  indent: string,
+  out: string[],
+  activeRuleDocs: Set<string>,
+): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const isLast = i === nodes.length - 1;
+    const branch = isLast ? "└── " : "├── ";
+    const childIndent = indent + (isLast ? "    " : "│   ");
+    if (node.kind === "folder") {
+      out.push(`${indent}${branch}${node.name}/`);
+      if (node.children && node.children.length > 0) {
+        renderTree(node.children, childIndent, out, activeRuleDocs);
+      }
+    } else {
+      const tag = activeRuleDocs.has(node.path) ? "  [rule]" : "";
+      const titleSuffix = node.title && node.title !== node.name.replace(/\.md$/i, "")
+        ? `  — ${node.title}`
+        : "";
+      out.push(`${indent}${branch}${node.name}${titleSuffix}${tag}`);
+    }
+  }
 }
 
 /** Build environment info section (Layer 5) */

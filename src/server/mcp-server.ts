@@ -1,152 +1,174 @@
-#!/usr/bin/env node
-// Bossmode MCP Server — stdio transport, spawned by Claude CLI
-// Receives config via environment variables:
-//   BOSSMODE_SERVER — bossmode HTTP server URL (e.g., http://127.0.0.1:8080)
-//   BOSSMODE_ROOM — room ID
-//   BOSSMODE_AGENT — agent name
-//   BOSSMODE_MEMBERS — comma-separated room member names
-
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-
-const SERVER = process.env.BOSSMODE_SERVER || "http://127.0.0.1:8080";
-const ROOM = process.env.BOSSMODE_ROOM || "";
-const AGENT = process.env.BOSSMODE_AGENT || "";
-const MEMBERS = (process.env.BOSSMODE_MEMBERS || "").split(",").filter(Boolean);
 
 /** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
 const MAX_RESULT_CHARS = 25_000;
 
 function truncateResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
-  return text.slice(0, MAX_RESULT_CHARS) +
-    `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
+  return text.slice(0, MAX_RESULT_CHARS)
+    + `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
 }
 
-async function callbackTool(tool: string, params: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SERVER}/internal/tool-callback`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tool, room: ROOM, agent: AGENT, params }),
-  });
-  const data = await res.json();
-  return truncateResult(JSON.stringify(data));
+function parseJsonSafe(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: "Invalid tool response" };
+  }
 }
 
-const server = new McpServer({
-  name: "bossmode",
-  version: "1.0.0",
-});
+export function createMcpHandler(_serverUrl: string) {
+  return async function handleMcp(
+    req: IncomingMessage,
+    res: ServerResponse,
+    roomId: string,
+    agentName: string,
+    members: string[],
+  ): Promise<void> {
+    const callbackTool = async (tool: string, params: Record<string, unknown>): Promise<string> => {
+      const internal = await import("../api/internal.js");
+      const data = await internal.handleToolCallback(tool, roomId, agentName, params);
+      return truncateResult(JSON.stringify(data));
+    };
 
-// Chat tool — with optional target and mentions
-const otherMembers = MEMBERS.filter((m) => m !== AGENT);
-server.tool(
-  "chat",
-  `Post a message. target="room" (default) sends to group chat visible to all. target="user" sends a private reply only the user sees. Optionally mention agents to activate them. Available agents: ${otherMembers.join(", ")}`,
-  {
-    message: z.string().describe("Message to post"),
-    target: z.string().optional().describe('"room" (default, everyone sees) or "user" (private reply)'),
-    mentions: z.array(z.string()).optional().describe("Agent names to mention and activate"),
-  },
-  async ({ message, target, mentions }) => {
-    await callbackTool("chat", { message, target, mentions });
-    const targetText = target === "user" ? "Private reply sent." : "Message sent to room.";
-    const mentionText = mentions?.length ? ` Mentioned: ${mentions.join(", ")}` : "";
-    return { content: [{ type: "text", text: `${targetText}${mentionText}` }] };
-  },
-);
+    const server = new McpServer({
+      name: "bossmode",
+      version: "1.0.0",
+    });
 
-// Query room messages — read chat history
-server.tool(
-  "query_room_messages",
-  "Read recent messages from the group chat room to understand the conversation context.",
-  {
-    limit: z.number().optional().describe("Number of messages to retrieve (default 50)"),
-  },
-  async ({ limit }) => {
-    const result = await callbackTool("query_room_messages", { limit });
-    return { content: [{ type: "text", text: result }] };
-  },
-);
+    const otherMembers = members.filter((m) => m !== agentName);
 
-// Save knowledge tool
-server.tool(
-  "save_knowledge",
-  "Save knowledge to the project knowledge base for future reference.",
-  {
-    title: z.string().describe("Title for the knowledge entry"),
-    content: z.string().describe("Content of the knowledge entry"),
-  },
-  async ({ title, content }) => {
-    await callbackTool("save_knowledge", { title, content });
-    return { content: [{ type: "text", text: `Knowledge saved: ${title}` }] };
-  },
-);
+    server.tool(
+      "chat",
+      `Post a message. target=\"room\" (default) sends to group chat visible to all. target=\"user\" sends a private reply only the user sees. Use mentions[] to activate agents — this is the only activation channel. @name in message text is treated as human-readable reference only. Available agents: ${otherMembers.join(", ")}`,
+      {
+        message: z.string().describe("Message to post"),
+        target: z.string().optional().describe('"room" (default, everyone sees) or "user" (private reply)'),
+        mentions: z.array(z.string()).optional().describe("Agent names to activate (authoritative activation channel)"),
+      },
+      async ({ message, target, mentions }) => {
+        const resultText = await callbackTool("chat", { message, target, mentions });
+        const result = parseJsonSafe(resultText);
+        const targetText = target === "user" ? "Private reply sent." : "Message sent to room.";
+        const mentionText = mentions?.length ? ` Mentioned: ${mentions.join(", ")}` : "";
+        const warningText = typeof result?.warning === "string" && result.warning.length > 0
+          ? ` Warning: ${result.warning}`
+          : "";
+        return { content: [{ type: "text", text: `${targetText}${mentionText}${warningText}` }] };
+      },
+    );
 
-// Query knowledge tool
-server.tool(
-  "query_knowledge",
-  "Query the project knowledge base. Without a query, returns entry summaries (titles + types). With a query, returns full content of matching entries.",
-  {
-    query: z.string().optional().describe("Search query to filter entries by title/content. Omit to list all entry summaries."),
-  },
-  async ({ query }) => {
-    const result = await callbackTool("query_knowledge", { query });
-    return { content: [{ type: "text", text: result }] };
-  },
-);
+    server.tool(
+      "query_room_messages",
+      "Read recent messages from the group chat room to understand the conversation context.",
+      {
+        limit: z.number().optional().describe("Number of messages to retrieve (default 50)"),
+      },
+      async ({ limit }) => {
+        const result = await callbackTool("query_room_messages", { limit });
+        return { content: [{ type: "text", text: result }] };
+      },
+    );
 
-// Update knowledge tool
-server.tool(
-  "update_knowledge",
-  "Update an existing knowledge entry in the project knowledge base. Use query_knowledge first to find entry IDs.",
-  {
-    entryId: z.string().describe("ID of the entry to update"),
-    title: z.string().describe("New title for the entry"),
-    content: z.string().describe("New content for the entry"),
-  },
-  async ({ entryId, title, content }) => {
-    const result = await callbackTool("update_knowledge", { entryId, title, content });
-    const data = JSON.parse(result);
-    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
-    return { content: [{ type: "text", text: `Knowledge updated: ${title}` }] };
-  },
-);
+    server.tool(
+      "save_knowledge",
+      "Create a new project document (Markdown file) in the knowledge base. Path is POSIX-style, relative to the docs root (e.g. 'architecture/overview.md'). If omitted, the doc is placed under 'misc/'. The .md extension is added if missing.",
+      {
+        title: z.string().describe("Human-readable document title"),
+        content: z.string().describe("Markdown body (frontmatter is generated automatically)"),
+        path: z.string().optional().describe("Target path, e.g. 'architecture/overview.md'"),
+      },
+      async ({ title, content, path }) => {
+        const result = await callbackTool("save_knowledge", { title, content, path });
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error || "unknown error"}` }] };
+        return { content: [{ type: "text", text: `Document saved at ${data.path}: ${data.title || title}` }] };
+      },
+    );
 
-// Delete knowledge tool
-server.tool(
-  "delete_knowledge",
-  "Delete a knowledge entry from the project knowledge base. Use query_knowledge first to find entry IDs.",
-  {
-    entryId: z.string().describe("ID of the entry to delete"),
-  },
-  async ({ entryId }) => {
-    const result = await callbackTool("delete_knowledge", { entryId });
-    const data = JSON.parse(result);
-    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
-    return { content: [{ type: "text", text: `Knowledge entry deleted.` }] };
-  },
-);
+    server.tool(
+      "query_knowledge",
+      "Explore or search the project document library. Without a query, returns directory tree + summary list (paths + titles). With a query, returns full content of documents whose title or body matches the substring (case-insensitive).",
+      {
+        query: z.string().optional().describe("Search substring. Omit to list everything as a tree."),
+      },
+      async ({ query }) => {
+        const result = await callbackTool("query_knowledge", { query });
+        return { content: [{ type: "text", text: result }] };
+      },
+    );
 
-// Write summary tool — used by summarizer agent to create topic summaries
-server.tool(
-  "write_summary",
-  "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
-  {
-    title: z.string().describe("Short topic title for this summary segment"),
-    summary: z.string().describe("1-3 sentence summary of the key content, decisions, and conclusions"),
-    from_id: z.string().describe("Message ID of the first message in this segment"),
-    to_id: z.string().describe("Message ID of the last message in this segment"),
-  },
-  async ({ title, summary, from_id, to_id }) => {
-    const result = await callbackTool("write_summary", { title, summary, from_id, to_id });
-    const data = JSON.parse(result);
-    if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
-    return { content: [{ type: "text", text: `Summary created: "${title}" (${data.coveredCount} messages)` }] };
-  },
-);
+    server.tool(
+      "read_knowledge",
+      "Read the full content of a specific document by path. Use query_knowledge first to discover available paths.",
+      {
+        path: z.string().describe("Document path relative to the docs root"),
+      },
+      async ({ path }) => {
+        const result = await callbackTool("read_knowledge", { path });
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error || "unknown error"}` }] };
+        return { content: [{ type: "text", text: `# ${data.title}\n\n${data.content}` }] };
+      },
+    );
 
-// Start stdio transport
-const transport = new StdioServerTransport();
-await server.connect(transport);
+    server.tool(
+      "update_knowledge",
+      "Overwrite an existing document's title and content.",
+      {
+        path: z.string().describe("Document path (e.g. 'architecture/overview.md')"),
+        title: z.string().describe("New title"),
+        content: z.string().describe("New markdown body"),
+      },
+      async ({ path, title, content }) => {
+        const result = await callbackTool("update_knowledge", { path, title, content });
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+        return { content: [{ type: "text", text: `Document updated at ${data.path || path}` }] };
+      },
+    );
+
+    server.tool(
+      "delete_knowledge",
+      "Delete a document by path.",
+      {
+        path: z.string().describe("Document path to delete (e.g. 'misc/obsolete.md')"),
+      },
+      async ({ path }) => {
+        const result = await callbackTool("delete_knowledge", { path });
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+        return { content: [{ type: "text", text: "Document deleted." }] };
+      },
+    );
+
+    server.tool(
+      "write_summary",
+      "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
+      {
+        title: z.string().describe("Short topic title for this summary segment"),
+        summary: z.string().describe("1-3 sentence summary of the key content, decisions, and conclusions"),
+        from_id: z.string().describe("Message ID of the first message in this segment"),
+        to_id: z.string().describe("Message ID of the last message in this segment"),
+      },
+      async ({ title, summary, from_id, to_id }) => {
+        const result = await callbackTool("write_summary", { title, summary, from_id, to_id });
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+        return { content: [{ type: "text", text: `Summary created: "${title}" (${data.coveredCount} messages)` }] };
+      },
+    );
+
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    } finally {
+      await server.close().catch(() => {});
+      await transport.close().catch(() => {});
+    }
+  };
+}

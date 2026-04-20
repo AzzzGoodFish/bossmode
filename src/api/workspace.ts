@@ -10,6 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentions } from "../communication/router.js";
 import { getRoomAgentStatuses, getAgentContextUsage } from "../engine/agent-manager.js";
+import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 
@@ -22,7 +23,8 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
 
 addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
-    name?: string; cwd?: string; members?: string[]; knowledgeBaseId?: string; ruleIds?: string[];
+    name?: string; cwd?: string; members?: string[];
+    ruleDocs?: string[];
   };
 
   if (!body.name || !body.cwd) {
@@ -36,7 +38,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
   }
 
   const members = body.members || [];
-  const room = roomStore.createRoom(body.name, body.cwd, members, body.knowledgeBaseId, body.ruleIds);
+  const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs);
   sendJson(res, 200, room);
 });
 
@@ -66,12 +68,23 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
-  const body = (await parseBody(req)) as { name?: string };
-  if (!body.name) {
-    sendJson(res, 400, { error: "name is required" });
+  const body = (await parseBody(req)) as {
+    name?: string;
+    ruleDocs?: string[];
+  };
+
+  let updated = room;
+  if (typeof body.name === "string" && body.name.length > 0) {
+    updated = roomStore.updateRoomName(params.id, body.name) || updated;
+  }
+  if (Array.isArray(body.ruleDocs)) {
+    updated = roomStore.updateRoomRuleDocs(params.id, body.ruleDocs) || updated;
+  }
+
+  if (updated === room) {
+    sendJson(res, 400, { error: "Nothing to update (provide name or ruleDocs)" });
     return;
   }
-  const updated = roomStore.updateRoomName(params.id, body.name);
   sendJson(res, 200, updated);
 });
 
@@ -147,16 +160,25 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
 
 // ── Agent Events & Steer ──
 
-import { getAgentEventHistory, steerAgent, abortAgent } from "../engine/agent-manager.js";
+import { getAgentEventHistory, steerAgent, abortAgent, resetAgentSession } from "../engine/agent-manager.js";
 
-addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (_req, res, params) => {
+addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
-  const events = getAgentEventHistory(params.id, params.agent);
-  sendJson(res, 200, events);
+  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const limit = parseInt(url.searchParams.get("limit") || "0");
+  if (limit > 0) {
+    const before = url.searchParams.get("before") ? parseInt(url.searchParams.get("before")!) : undefined;
+    const result = loadEventsPaginated(params.id, params.agent, limit, before);
+    sendJson(res, 200, result);
+  } else {
+    // Legacy: return all events (no pagination)
+    const events = getAgentEventHistory(params.id, params.agent);
+    sendJson(res, 200, events);
+  }
 });
 
 addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) => {
@@ -185,6 +207,25 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
   } catch (err: any) {
     sendJson(res, 500, { error: err.message });
   }
+});
+
+// ── Agent Abort ──
+
+addRoute("POST", "/api/rooms/:id/agents/:agent/reset-session", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  if (!room.members.includes(params.agent)) {
+    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
+    return;
+  }
+
+  const result = resetAgentSession(params.id, params.agent);
+  logger.info("api", "POST /api/rooms/:id/agents/:agent/reset-session", { agent: params.agent, roomId: params.id });
+  sendJson(res, 200, result);
 });
 
 // ── Agent Abort ──
@@ -220,9 +261,9 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, 
     return;
   }
 
-  const usage = await getAgentContextUsage(params.id, params.agent);
+  const usage = getAgentContextUsage(params.id, params.agent);
   if (usage === null) {
-    // No instance or query failed — runtime may support it, just no data yet
+    // Cache-only: no data yet (e.g. agent never reached idle)
     sendJson(res, 200, { supported: true, unavailable: true });
   } else {
     sendJson(res, 200, { supported: true, ...usage });

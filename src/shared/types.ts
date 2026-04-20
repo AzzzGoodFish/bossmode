@@ -19,6 +19,9 @@ export interface BossmodeConfig {
     threshold: number;  // message count to trigger auto-summary
     keepCount: number;  // keep latest N messages unsummarized
   };
+  runtime?: {
+    sessionResume: boolean;
+  };
 }
 
 // -- Agent Definition --
@@ -85,22 +88,37 @@ export interface LegacyMemberConfig {
 }
 
 // -- Knowledge --
-
-export interface KnowledgeBase {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: number;
-}
+//
+// 0.8.0: KnowledgeBase (per-project container) is removed. All documents live
+// in a single global tree: ~/.bossmode/knowledge/docs/. Users organize projects
+// by top-level folders (e.g. docs/bossmode/..., docs/freeu/...). Rooms pick
+// which docs to inject as rules via `ruleDocs: string[]`.
 
 export interface KnowledgeEntry {
+  /** Document path relative to KB docs root, e.g. "architecture/overview.md". Acts as stable ID. */
   id: string;
+  /** Human-readable title (from frontmatter, falls back to filename). */
   title: string;
+  /** Markdown body (frontmatter stripped). */
   content: string;
+  /** Creator identity (from frontmatter). Values: "user", agent name, etc. */
   source: string;
-  type: "rule" | "knowledge";
   createdAt: number;
   updatedAt: number;
+}
+
+/** Lightweight tree node for UI and agent context injection. */
+export interface KnowledgeTreeNode {
+  /** File or folder path relative to docs root. */
+  path: string;
+  /** Display name (filename or folder name). */
+  name: string;
+  /** "file" or "folder". */
+  kind: "file" | "folder";
+  /** Title for files (derived from frontmatter or filename). */
+  title?: string;
+  /** Children for folders. */
+  children?: KnowledgeTreeNode[];
 }
 
 // -- Room --
@@ -111,8 +129,11 @@ export interface Room {
   cwd: string;
   members: string[];
   createdAt: number;
-  knowledgeBaseId?: string;
-  ruleIds?: string[];
+  /**
+   * Document paths (relative to ~/.bossmode/knowledge/docs/) injected into
+   * agents' system prompts as rules.
+   */
+  ruleDocs?: string[];
 }
 
 // -- Message --
@@ -151,6 +172,13 @@ export interface AgentStatusInfo {
   roomId: string | null;
 }
 
+export interface ContextUsage {
+  totalTokens: number;
+  rawMaxTokens: number;
+  percentage: number;
+  model: string;
+}
+
 // -- Cursors --
 
 export type CursorMap = Record<string, string | null>; // agentName → last seen message id
@@ -169,7 +197,8 @@ export interface ArchiveSummary {
 export type WsServerEvent =
   | { type: "room:message"; roomId: string; message: RoomMessage }
   | { type: "agent:status"; roomId: string; agent: string; status: AgentStatus }
-  | { type: "agent:event"; roomId: string; agent: string; event: unknown };
+  | { type: "agent:event"; roomId: string; agent: string; event: unknown }
+  | { type: "agent:context_usage"; roomId: string; agent: string; usage: ContextUsage | null };
 
 // -- WebSocket Commands (client → server) --
 

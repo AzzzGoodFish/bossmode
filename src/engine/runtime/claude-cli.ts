@@ -1,6 +1,6 @@
 // Claude CLI Runtime — spawn claude --input-format stream-json, event mapping, MCP config
 import { spawn, execSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { writeFileSync, unlinkSync, readFileSync, existsSync, symlinkSync, mkdirSync } from "node:fs";
+import { writeFileSync, unlinkSync, existsSync, symlinkSync, mkdirSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
@@ -23,13 +23,16 @@ function mapThinkingToEffort(level: string): string {
 }
 
 // Map model IDs to Claude CLI aliases (full model IDs may not work with Claude Max)
+// Preserves [1m] suffix for 1M extended context window
 function mapModelToAlias(model: string): string | undefined {
   const m = model.toLowerCase();
-  if (m.includes("opus")) return "opus";
-  if (m.includes("sonnet")) return "sonnet";
-  if (m.includes("haiku")) return "haiku";
+  const suffix = m.includes("[1m]") ? "[1m]" : "";
+  const base = m.replace("[1m]", "");
+  if (base.includes("opus")) return "opus" + suffix;
+  if (base.includes("sonnet")) return "sonnet" + suffix;
+  if (base.includes("haiku")) return "haiku" + suffix;
   // Return as-is if it's already an alias or unknown
-  if (["opus", "sonnet", "haiku"].includes(m)) return m;
+  if (["opus", "sonnet", "haiku"].includes(base)) return base + suffix;
   return model; // Try as-is, may fail
 }
 
@@ -160,6 +163,8 @@ interface ClaudeParseState {
 // ClaudeCliAgentHandle
 // ============================================================================
 
+const CLAUDE_STDERR_TAIL_MAX = 1024;
+
 class ClaudeCliAgentHandle implements AgentHandle {
   private proc: ChildProcessWithoutNullStreams;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
@@ -167,19 +172,23 @@ class ClaudeCliAgentHandle implements AgentHandle {
   private idleResolvers: Array<() => void> = [];
   private promptRejecter: ((err: Error) => void) | null = null;
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
-  private sessionCallback: ((session: { sessionId?: string }) => void) | null = null;
+  private sessionChangeCallback: ((session: { sessionId?: string }) => void) | null = null;
   private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private destroyed = false;
+  private exitEmitted = false;
+  private stderrTail = "";
 
   readonly pid: number | undefined;
   readonly runtimeName = "claude-cli";
-  readonly spawnArgs: string;
+  readonly spawnArgs: string[];
   private buffer = "";
   private state: ClaudeParseState = { initialized: false, inMessage: false, toolNames: new Map() };
 
-  constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string) {
+  constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string[], initialStderr?: string) {
     this.proc = proc;
     this.pid = proc.pid;
-    this.spawnArgs = spawnArgs || "";
+    this.spawnArgs = spawnArgs || [];
+    if (initialStderr) this.appendStderr(initialStderr);
 
     proc.stdout.on("data", (data: Buffer) => {
       const text = data.toString();
@@ -199,12 +208,13 @@ class ClaudeCliAgentHandle implements AgentHandle {
       }
     });
 
-    proc.on("exit", (code) => {
+    proc.on("exit", (code, signal) => {
       this.clearActivityTimer();
       if (this._isWorking) {
         this._isWorking = false;
         this.emit({ type: "agent_end" });
       }
+      this.emitRuntimeExit(code, signal);
       this.resolveIdle();
     });
 
@@ -228,10 +238,29 @@ class ClaudeCliAgentHandle implements AgentHandle {
       logger.error("runtime:claude-cli", "stdin error", { pid: proc.pid, error: err.message });
     });
 
-    // Emit raw stderr for debugging
+    // Emit raw stderr for debugging, and feed stderrTail for runtime_exit.
     proc.stderr.on("data", (d: Buffer) => {
       const text = d.toString();
+      this.appendStderr(text);
       if (text.trim()) this.emit({ type: "cli:stderr", text });
+    });
+  }
+
+  private appendStderr(text: string): void {
+    if (!text) return;
+    this.stderrTail = (this.stderrTail + text).slice(-CLAUDE_STDERR_TAIL_MAX);
+  }
+
+  private emitRuntimeExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.exitEmitted) return;
+    this.exitEmitted = true;
+    const tail = this.stderrTail.trim();
+    this.emit({
+      type: "runtime_exit",
+      code,
+      signal: signal || null,
+      stderrTail: tail ? tail : undefined,
+      unexpected: !this.destroyed,
     });
   }
 
@@ -294,8 +323,8 @@ class ClaudeCliAgentHandle implements AgentHandle {
     return () => this.listeners.delete(fn);
   }
 
-  onSessionInfo(cb: (session: { sessionId?: string }) => void): void {
-    this.sessionCallback = cb;
+  onSessionChange(cb: (session: { sessionId?: string }) => void): void {
+    this.sessionChangeCallback = cb;
   }
 
   /** Send a control_request and wait for matching control_response */
@@ -315,22 +344,34 @@ class ClaudeCliAgentHandle implements AgentHandle {
     });
   }
 
+  private cachedContextUsage: ContextUsage | null = null;
+  private cachedContextUsageTs = 0;
+  private static CONTEXT_CACHE_TTL = 120_000; // 120s — return null only after this
+
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
-      const data = await this.sendControlRequest("get_context_usage", 5000);
-      return {
+      const data = await this.sendControlRequest("get_context_usage", 15000);
+      const usage: ContextUsage = {
         totalTokens: data.totalTokens ?? 0,
         rawMaxTokens: data.rawMaxTokens ?? 0,
         percentage: data.percentage ?? 0,
         model: data.model ?? "unknown",
       };
+      this.cachedContextUsage = usage;
+      this.cachedContextUsageTs = Date.now();
+      return usage;
     } catch (err) {
       logger.warn("runtime:claude-cli", "getContextUsage failed", { pid: this.pid, error: String(err) });
+      // Return cached value if still fresh
+      if (this.cachedContextUsage && (Date.now() - this.cachedContextUsageTs) < ClaudeCliAgentHandle.CONTEXT_CACHE_TTL) {
+        return this.cachedContextUsage;
+      }
       return null;
     }
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.clearActivityTimer();
     // Reject all pending control requests
     for (const [, pending] of this.pendingRequests) {
@@ -360,13 +401,20 @@ class ClaudeCliAgentHandle implements AgentHandle {
     // DEBUG: log every raw JSON line from Claude stdout
     logger.info("runtime:claude-cli", "raw", { type: raw.type, subtype: raw.subtype, keys: Object.keys(raw) });
 
-    if (raw.type === "system" && !this.state.initialized) {
-      this.state.initialized = true;
-      this.state.sessionId = raw.session_id;
-      logger.info("runtime:claude-cli", "init received", { sessionId: raw.session_id, pid: this.proc.pid });
-      if (this.sessionCallback) {
-        this.sessionCallback({ sessionId: raw.session_id });
-        this.sessionCallback = null;
+    if (raw.type === "system") {
+      const incomingSessionId = raw.session_id;
+      const prevSessionId = this.state.sessionId;
+
+      if (!this.state.initialized) {
+        this.state.initialized = true;
+        logger.info("runtime:claude-cli", "init received", { sessionId: incomingSessionId, pid: this.proc.pid });
+      }
+
+      if (incomingSessionId && incomingSessionId !== prevSessionId) {
+        this.state.sessionId = incomingSessionId;
+        if (this.sessionChangeCallback) {
+          this.sessionChangeCallback({ sessionId: incomingSessionId });
+        }
       }
     }
 
@@ -450,12 +498,30 @@ export class ClaudeCliRuntime implements AgentRuntime {
 
   private cliPath: string;
   private handles: ClaudeCliAgentHandle[] = [];
-  private mcpFiles: string[] = [];
   private serverPort: number;
+  private hookSettingsDir = "/tmp";
+  private hookSettingsFiles: string[] = [];
 
   constructor(cliPath?: string, serverPort: number = 8080) {
     this.cliPath = cliPath || "claude";
     this.serverPort = serverPort;
+    this.cleanupLegacyMcpTempFiles();
+  }
+
+  private cleanupLegacyMcpTempFiles(): void {
+    try {
+      const files = readdirSync(this.hookSettingsDir);
+      for (const file of files) {
+        if (!file.startsWith("bossmode-mcp-") || !file.endsWith(".json")) continue;
+        try {
+          unlinkSync(join(this.hookSettingsDir, file));
+        } catch {
+          // best effort cleanup
+        }
+      }
+    } catch {
+      // best effort cleanup
+    }
   }
 
   async detect(): Promise<RuntimeDetectResult> {
@@ -470,30 +536,40 @@ export class ClaudeCliRuntime implements AgentRuntime {
     }
   }
 
+  private resolveSessionHookForwarderPath(): string {
+    const distPath = join(import.meta.dirname, "../../scripts/session_hook_forwarder.cjs");
+    if (existsSync(distPath)) return distPath;
+    return join(import.meta.dirname, "../../../scripts/session_hook_forwarder.cjs");
+  }
+
   async createAgent(opts: CreateAgentOpts): Promise<AgentHandle> {
     const serverUrl = `http://127.0.0.1:${this.serverPort}`;
 
-    // Path to compiled MCP server
-    const mcpServerPath = join(import.meta.dirname, "../../server/mcp-server.js");
-
-    // Generate MCP config
-    const mcpConfigPath = `/tmp/bossmode-mcp-${opts.member.name}-${Date.now()}.json`;
     const mcpConfig = {
       mcpServers: {
         bossmode: {
-          command: "node",
-          args: [mcpServerPath],
-          env: {
-            BOSSMODE_SERVER: serverUrl,
-            BOSSMODE_ROOM: opts.roomId,
-            BOSSMODE_AGENT: opts.member.name,
-            BOSSMODE_MEMBERS: opts.roomMembers.join(","),
-          },
+          type: "http",
+          url: `${serverUrl}/mcp/${opts.roomId}/${opts.member.name}`,
         },
       },
     };
-    writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig), "utf-8");
-    this.mcpFiles.push(mcpConfigPath);
+    const mcpConfigJson = JSON.stringify(mcpConfig);
+
+    const hookSettingsPath = `${this.hookSettingsDir}/bossmode-hook-${opts.member.name}-${Date.now()}.json`;
+    const forwarderPath = this.resolveSessionHookForwarderPath();
+    const hookSettings = {
+      hooks: {
+        SessionStart: [{
+          matcher: "*",
+          hooks: [{
+            type: "command",
+            command: `node ${forwarderPath} ${this.serverPort} ${opts.roomId} ${opts.member.name}`,
+          }],
+        }],
+      },
+    };
+    writeFileSync(hookSettingsPath, JSON.stringify(hookSettings), "utf-8");
+    this.hookSettingsFiles.push(hookSettingsPath);
 
     // Symlink skills to ~/.claude/skills/ so Claude Code discovers them natively.
     // This replaces the old approach of inlining skill text into --system-prompt.
@@ -522,7 +598,8 @@ export class ClaudeCliRuntime implements AgentRuntime {
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
-      "--mcp-config", mcpConfigPath,
+      "--mcp-config", mcpConfigJson,
+      "--settings", hookSettingsPath,
       "--dangerously-skip-permissions",
     ];
 
@@ -582,7 +659,7 @@ export class ClaudeCliRuntime implements AgentRuntime {
         logger.info("runtime:claude-cli", "process exit", { agent: opts.member.name, code, signal, stderr: stderrBuf.slice(0, 500) || undefined });
       });
 
-      const handle = new ClaudeCliAgentHandle(proc, `${this.cliPath} ${spawnArgs.join(" ")}`);
+      const handle = new ClaudeCliAgentHandle(proc, [this.cliPath, ...spawnArgs]);
 
       // Quick check: wait 2s for early crashes
       await new Promise<void>((resolve) => {
@@ -614,10 +691,10 @@ export class ClaudeCliRuntime implements AgentRuntime {
       handle = await doSpawn(args);
     }
 
-    // Register session callback — will fire when init event arrives
-    if (opts.onSessionCreated) {
-      handle.onSessionInfo((session) => {
-        opts.onSessionCreated!({ sessionId: session.sessionId });
+    // Register session callback — can fire multiple times after compact/fork
+    if (opts.onSessionChanged) {
+      handle.onSessionChange((session) => {
+        opts.onSessionChanged!({ sessionId: session.sessionId });
       });
     }
 
@@ -638,10 +715,9 @@ export class ClaudeCliRuntime implements AgentRuntime {
     }
     this.handles = [];
 
-    // Clean up MCP config files
-    for (const f of this.mcpFiles) {
+    for (const f of this.hookSettingsFiles) {
       try { unlinkSync(f); } catch {}
     }
-    this.mcpFiles = [];
+    this.hookSettingsFiles = [];
   }
 }

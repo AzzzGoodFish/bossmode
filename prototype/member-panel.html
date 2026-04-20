@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MemberPanel — Context Progress Bar Prototype</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    @keyframes bar-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .bar-breathing { animation: bar-pulse 2s ease-in-out infinite; }
+
+    /* Custom scrollbar */
+    .panel-scroll::-webkit-scrollbar { width: 4px; }
+    .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+    .panel-scroll::-webkit-scrollbar-thumb { background: rgba(113,113,122,0.3); border-radius: 2px; }
+
+    /* Tooltip */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(100% + 6px);
+      background: #18181b;
+      color: #e4e4e7;
+      font-size: 11px;
+      font-family: 'IBM Plex Mono', monospace;
+      padding: 4px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      z-index: 50;
+      pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .light [data-tooltip]:hover::after {
+      background: #fafafa;
+      color: #27272a;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-sans min-h-screen flex items-center justify-center gap-12 p-8 transition-colors duration-300">
+
+  <!-- Theme toggle -->
+  <button id="themeToggle" class="fixed top-4 right-4 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors z-50 cursor-pointer">
+    Toggle Light/Dark
+  </button>
+
+  <!-- Label: Before -->
+  <div class="flex flex-col items-center gap-3">
+    <span class="text-xs font-semibold uppercase tracking-widest text-zinc-500">Before</span>
+    <!-- BEFORE: Current MemberPanel -->
+    <div class="w-48 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-lg" style="height: 420px;">
+      <div class="flex flex-col h-full">
+        <div class="p-3 border-b border-zinc-200 dark:border-zinc-800">
+          <span class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+            Members (6)
+          </span>
+        </div>
+        <div class="flex-1 overflow-y-auto py-1">
+          <!-- you -->
+          <div class="px-3 py-1.5 flex items-center gap-2">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">you</span>
+          </div>
+          <!-- pm - working -->
+          <button class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer text-left">
+            <span class="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">pm</span>
+            <span class="text-xs text-blue-500 ml-auto">working</span>
+            <span class="px-1.5 py-0.5 text-[10px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer">Interrupt</span>
+          </button>
+          <!-- architect - working -->
+          <button class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer text-left">
+            <span class="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">architect</span>
+            <span class="text-xs text-blue-500 ml-auto">working</span>
+            <span class="px-1.5 py-0.5 text-[10px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer">Interrupt</span>
+          </button>
+          <!-- developer - idle -->
+          <button class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer text-left">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">developer</span>
+          </button>
+          <!-- designer - idle -->
+          <button class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer text-left">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">designer</span>
+          </button>
+          <!-- qa - inactive -->
+          <button class="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer text-left">
+            <span class="inline-block w-2 h-2 rounded-full bg-zinc-400 dark:bg-zinc-600"></span>
+            <span class="text-sm text-zinc-700 dark:text-zinc-300">qa</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Label: After -->
+  <div class="flex flex-col items-center gap-3">
+    <span class="text-xs font-semibold uppercase tracking-widest text-zinc-500">After</span>
+    <!-- AFTER: New MemberPanel with Context Progress -->
+    <div class="w-48 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-lg" style="height: 420px;">
+      <div class="flex flex-col h-full">
+        <div class="p-3 border-b border-zinc-200 dark:border-zinc-800">
+          <span class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+            Members (6)
+          </span>
+        </div>
+        <div class="flex-1 overflow-y-auto py-1 panel-scroll" id="newPanel">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Label: States -->
+  <div class="flex flex-col items-center gap-3">
+    <span class="text-xs font-semibold uppercase tracking-widest text-zinc-500">All States</span>
+    <!-- ALL STATES showcase -->
+    <div class="w-48 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-lg" style="height: 420px;">
+      <div class="flex flex-col h-full">
+        <div class="p-3 border-b border-zinc-200 dark:border-zinc-800">
+          <span class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+            Edge Cases
+          </span>
+        </div>
+        <div class="flex-1 overflow-y-auto py-1 panel-scroll" id="statesPanel">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Data ──
+    const members = [
+      { name: "you", isUser: true },
+      { name: "pm",        status: "working", used: 90400, max: 200000 },
+      { name: "architect",  status: "working", used: 45200, max: 200000 },
+      { name: "developer",  status: "idle",    used: 12800, max: 200000 },
+      { name: "designer",   status: "idle",    used: 78000, max: 200000 },
+      { name: "qa",         status: "inactive", used: 0,    max: 0 },
+    ];
+
+    const edgeCases = [
+      { name: "fresh",      status: "idle",    used: 0,      max: 200000, label: "0%" },
+      { name: "low",        status: "idle",    used: 18000,  max: 200000, label: "9%" },
+      { name: "mid",        status: "working", used: 90000,  max: 200000, label: "45%" },
+      { name: "warning",    status: "working", used: 156000, max: 200000, label: "78%" },
+      { name: "danger",     status: "working", used: 186000, max: 200000, label: "93%" },
+      { name: "full",       status: "working", used: 200000, max: 200000, label: "100%" },
+      { name: "pi-agent",   status: "idle",    used: null,   max: null,   label: "no data" },
+      { name: "inactive",   status: "inactive", used: null,  max: null,   label: "inactive" },
+    ];
+
+    // ── Helpers ──
+    function formatK(n) {
+      if (n === null || n === undefined) return "—";
+      if (n < 1000) return String(n);
+      if (n >= 100000) return Math.round(n / 1000) + "k";
+      return (n / 1000).toFixed(1) + "k";
+    }
+
+    function pct(used, max) {
+      if (!max || used === null) return null;
+      return Math.round((used / max) * 100);
+    }
+
+    function barColor(percent, isDark) {
+      if (percent === null) return "transparent";
+      // Continuous color: green → amber → orange → red
+      if (percent <= 40)  return isDark ? "rgba(16,185,129,0.12)"  : "rgba(16,185,129,0.15)";
+      if (percent <= 70)  return isDark ? "rgba(245,158,11,0.14)"  : "rgba(245,158,11,0.18)";
+      if (percent <= 90)  return isDark ? "rgba(249,115,22,0.18)"  : "rgba(249,115,22,0.22)";
+      return isDark ? "rgba(239,68,68,0.22)" : "rgba(239,68,68,0.28)";
+    }
+
+    function renderMember(m, container) {
+      const p = pct(m.used, m.max);
+      const isDark = document.documentElement.classList.contains("dark");
+      const isWorking = m.status === "working";
+      const isDanger = p !== null && p > 90;
+      const barW = p !== null ? Math.max(p, 2) : 0; // min 2% visual width for 0%
+
+      const row = document.createElement("div");
+      row.className = "relative group cursor-pointer";
+      if (!m.isUser) {
+        row.addEventListener("mouseenter", () => row.classList.add("hovered"));
+        row.addEventListener("mouseleave", () => row.classList.remove("hovered"));
+      }
+
+      // ── Progress bar fill (bottom layer) ──
+      if (p !== null) {
+        const bar = document.createElement("div");
+        bar.className = "absolute inset-y-0 left-0 rounded-md transition-all duration-700 ease-out";
+        if (isWorking) bar.classList.add("bar-breathing");
+        bar.setAttribute("role", "progressbar");
+        bar.setAttribute("aria-valuenow", String(m.used));
+        bar.setAttribute("aria-valuemax", String(m.max));
+        bar.setAttribute("aria-label", `Context usage: ${p}%`);
+        bar.style.width = barW + "%";
+        bar.style.background = barColor(p, isDark);
+        // min-width for 0%
+        if (p === 0) bar.style.minWidth = "4px";
+        row.appendChild(bar);
+      }
+
+      // ── Content layer ──
+      const content = document.createElement("div");
+      content.className = "relative z-10 px-3 py-2 flex items-center gap-2";
+
+      // Status dot
+      const dot = document.createElement("span");
+      dot.className = "inline-block w-2 h-2 rounded-full shrink-0";
+      if (m.isUser) {
+        dot.classList.add("bg-emerald-500");
+      } else if (m.status === "working") {
+        dot.classList.add("bg-blue-500", "animate-pulse");
+      } else if (m.status === "idle") {
+        dot.classList.add("bg-emerald-500");
+      } else {
+        dot.classList.add("bg-zinc-400", "dark:bg-zinc-600");
+      }
+      content.appendChild(dot);
+
+      // Name
+      const name = document.createElement("span");
+      name.className = "text-sm font-medium truncate";
+      name.classList.add("text-zinc-800", "dark:text-zinc-200");
+      name.textContent = m.isUser ? "you" : m.name;
+      content.appendChild(name);
+
+      if (!m.isUser) {
+        // Spacer
+        const spacer = document.createElement("span");
+        spacer.className = "ml-auto flex items-center gap-1.5 shrink-0";
+
+        // Percentage text
+        const pctText = document.createElement("span");
+        pctText.className = "text-[11px] font-mono tabular-nums";
+        if (p !== null) {
+          pctText.textContent = p + "%";
+          if (isDanger) {
+            pctText.classList.add("text-red-600", "dark:text-red-400", "font-semibold");
+          } else {
+            pctText.classList.add("text-zinc-500", "dark:text-zinc-400");
+          }
+          // Tooltip with full data
+          pctText.setAttribute("data-tooltip", `${formatK(m.used)} / ${formatK(m.max)} (${p}%)`);
+        } else {
+          pctText.textContent = "—";
+          pctText.classList.add("text-zinc-400", "dark:text-zinc-600");
+        }
+        spacer.appendChild(pctText);
+
+        // Interrupt button (working only)
+        if (isWorking) {
+          const btn = document.createElement("button");
+          btn.className = "w-5 h-5 flex items-center justify-center text-[10px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer shrink-0";
+          btn.innerHTML = "&#9632;";
+          btn.title = `Interrupt ${m.name}`;
+          btn.onclick = (e) => e.stopPropagation();
+          spacer.appendChild(btn);
+        }
+
+        content.appendChild(spacer);
+      }
+
+      row.appendChild(content);
+
+      // Hover background (subtle, below progress bar visual)
+      row.innerHTML = row.innerHTML; // reset event listeners — redo properly:
+      // Actually let's use CSS for hover
+      if (!m.isUser) {
+        const style = document.createElement("style");
+        const id = "row-" + m.name + "-" + Math.random().toString(36).slice(2,6);
+        row.id = id;
+        style.textContent = `
+          #${id}:hover { background: ${isDark ? 'rgba(39,39,42,0.3)' : 'rgba(244,244,245,0.5)'}; border-radius: 6px; }
+        `;
+        row.appendChild(style);
+      }
+
+      container.appendChild(row);
+    }
+
+    // ── Render ──
+    function renderAll() {
+      const panel = document.getElementById("newPanel");
+      const states = document.getElementById("statesPanel");
+      panel.innerHTML = "";
+      states.innerHTML = "";
+      members.forEach(m => renderMember(m, panel));
+      edgeCases.forEach(m => renderMember(m, states));
+    }
+
+    renderAll();
+
+    // ── Theme toggle ──
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      document.documentElement.classList.toggle("dark");
+      document.body.classList.toggle("bg-zinc-950");
+      document.body.classList.toggle("bg-zinc-100");
+      document.body.classList.toggle("text-zinc-100");
+      document.body.classList.toggle("text-zinc-900");
+      renderAll();
+    });
+
+    // ── Live simulation: pm context grows ──
+    let pmUsed = 90400;
+    setInterval(() => {
+      pmUsed = Math.min(pmUsed + Math.floor(Math.random() * 2000 + 500), 200000);
+      const pm = members.find(m => m.name === "pm");
+      pm.used = pmUsed;
+      renderAll();
+    }, 3000);
+  </script>
+</body>
+</html>

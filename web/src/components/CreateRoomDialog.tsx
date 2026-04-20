@@ -1,11 +1,12 @@
-import { useState, useEffect, type FormEvent } from "react";
-import type { MemberInfo, RuntimeInfo, KnowledgeBaseInfo, KnowledgeEntryInfo } from "../api/client";
-import { getMembers, getRuntimes, getKnowledgeBases, getKnowledgeEntries, createMember } from "../api/client";
+import { useState, useEffect, useMemo, type FormEvent } from "react";
+import type { MemberInfo, RuntimeInfo, KnowledgeTreeNode } from "../api/client";
+import { getMembers, getRuntimes, getKnowledgeTree, createMember } from "../api/client";
 import { useDialog } from "./dialogs";
+import { Shield, Folder, FolderOpen, File as FileIcon, ChevronRight, ChevronDown } from "lucide-react";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
-  onSubmit: (name: string, cwd: string, members: string[], knowledgeBaseId?: string, ruleIds?: string[]) => void;
+  onSubmit: (name: string, cwd: string, members: string[], ruleDocs?: string[]) => void;
 }
 
 export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
@@ -15,11 +16,10 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
 
-  // Knowledge
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseInfo[]>([]);
-  const [selectedKbId, setSelectedKbId] = useState<string>("");
-  const [kbEntries, setKbEntries] = useState<KnowledgeEntryInfo[]>([]);
-  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(new Set());
+  // Knowledge tree for rules selection
+  const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
+  const [selectedRuleDocs, setSelectedRuleDocs] = useState<Set<string>>(new Set());
+  const [autoSelectApplied, setAutoSelectApplied] = useState(false);
 
   // Inline member creation
   const [creatingForAgent, setCreatingForAgent] = useState<string | null>(null);
@@ -29,25 +29,40 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   useEffect(() => {
     refreshMembers();
     getRuntimes().then(setRuntimes).catch(console.error);
-    getKnowledgeBases().then(setKnowledgeBases).catch(console.error);
+    getKnowledgeTree().then(setTree).catch(console.error);
   }, []);
 
-  // Load entries when KB changes
-  useEffect(() => {
-    if (selectedKbId) {
-      getKnowledgeEntries(selectedKbId).then((entries) => {
-        setKbEntries(entries);
-        // Auto-select all rules
-        const ruleIds = entries.filter((e) => e.type === "rule").map((e) => e.id);
-        setSelectedRuleIds(new Set(ruleIds));
-      }).catch(console.error);
-    } else {
-      setKbEntries([]);
-      setSelectedRuleIds(new Set());
-    }
-  }, [selectedKbId]);
+  // All markdown file paths in the tree (flat)
+  const allDocPaths = useMemo(() => {
+    if (!tree?.children) return [] as string[];
+    const out: string[] = [];
+    const walk = (nodes: KnowledgeTreeNode[]) => {
+      for (const n of nodes) {
+        if (n.kind === "file") out.push(n.path);
+        else if (n.children) walk(n.children);
+      }
+    };
+    walk(tree.children);
+    return out;
+  }, [tree]);
 
-  const rules = kbEntries.filter((e) => e.type === "rule");
+  // Heuristic auto-select: when user types a cwd, suggest rules/ docs under
+  // <cwd-basename>/ (e.g. "/home/fish/dev/llm/bossmode" → "bossmode/rules/*").
+  // Falls back to top-level "rules/*" if no project-specific rules exist.
+  useEffect(() => {
+    if (autoSelectApplied || allDocPaths.length === 0 || !cwd.trim()) return;
+    const basename = cwd.trim().replace(/\/+$/, "").split("/").pop() || "";
+    const candidates = basename
+      ? allDocPaths.filter((p) => p.startsWith(`${basename}/rules/`))
+      : [];
+    const fallback = candidates.length === 0
+      ? allDocPaths.filter((p) => p.startsWith("rules/"))
+      : candidates;
+    if (fallback.length > 0) {
+      setSelectedRuleDocs(new Set(fallback));
+      setAutoSelectApplied(true);
+    }
+  }, [cwd, allDocPaths, autoSelectApplied]);
 
   const toggleMember = (memberName: string) => {
     setSelectedMembers((prev) => {
@@ -57,12 +72,14 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     });
   };
 
-  const toggleRule = (ruleId: string) => {
-    setSelectedRuleIds((prev) => {
+  const toggleRuleDoc = (docPath: string) => {
+    setSelectedRuleDocs((prev) => {
       const next = new Set(prev);
-      next.has(ruleId) ? next.delete(ruleId) : next.add(ruleId);
+      next.has(docPath) ? next.delete(docPath) : next.add(docPath);
       return next;
     });
+    // Once the user manually touches the selection, disable auto-apply
+    setAutoSelectApplied(true);
   };
 
   const canSubmit = name.trim() && cwd.trim() && selectedMembers.size > 0;
@@ -74,8 +91,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
       name.trim(),
       cwd.trim(),
       Array.from(selectedMembers),
-      selectedKbId || undefined,
-      selectedRuleIds.size > 0 ? Array.from(selectedRuleIds) : undefined,
+      selectedRuleDocs.size > 0 ? Array.from(selectedRuleDocs) : undefined,
     );
   };
 
@@ -117,29 +133,25 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           </div>
         </div>
 
-        {/* Knowledge Base */}
-        {knowledgeBases.length > 0 && (
+        {/* Rules: pick from the knowledge tree */}
+        {allDocPaths.length > 0 && (
           <div>
-            <label className="block text-sm text-zinc-400 mb-1">Knowledge Base (optional)</label>
-            <select value={selectedKbId} onChange={(e) => setSelectedKbId(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-              <option value="">None</option>
-              {knowledgeBases.map((kb) => <option key={kb.id} value={kb.id}>{kb.name}</option>)}
-            </select>
-          </div>
-        )}
-
-        {/* Rules from selected KB */}
-        {selectedKbId && rules.length > 0 && (
-          <div>
-            <label className="block text-sm text-zinc-400 mb-2">Rules ({selectedRuleIds.size}/{rules.length} selected)</label>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {rules.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800 cursor-pointer">
-                  <input autoComplete="off" type="checkbox" checked={selectedRuleIds.has(r.id)} onChange={() => toggleRule(r.id)} />
-                  <span className="text-sm text-amber-400">{r.title}</span>
-                </label>
-              ))}
+            <label className="text-sm text-zinc-400 mb-1 flex items-center gap-1.5">
+              <Shield size={13} className="text-amber-500" />
+              Rules ({selectedRuleDocs.size} selected)
+            </label>
+            <p className="text-xs text-zinc-600 mb-2">
+              Selected documents are injected into every agent's system prompt.
+              Docs under <code>{"<cwd-basename>/rules/"}</code> or root <code>rules/</code> are preselected.
+            </p>
+            <div className="border border-zinc-800 rounded p-2 max-h-56 overflow-y-auto">
+              {tree?.children && (
+                <RulesTree
+                  nodes={tree.children}
+                  selected={selectedRuleDocs}
+                  onToggle={toggleRuleDoc}
+                />
+              )}
             </div>
           </div>
         )}
@@ -166,6 +178,76 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         />
       )}
     </div>
+  );
+}
+
+// -- Rules tree (dialog-embedded, compact) --
+
+function RulesTree({ nodes, selected, onToggle }: {
+  nodes: KnowledgeTreeNode[];
+  selected: Set<string>;
+  onToggle: (path: string) => void;
+}) {
+  return (
+    <ul className="text-sm">
+      {nodes.map((node) => (
+        <RulesTreeNode key={node.path} node={node} depth={0} selected={selected} onToggle={onToggle} />
+      ))}
+    </ul>
+  );
+}
+
+function RulesTreeNode({ node, depth, selected, onToggle }: {
+  node: KnowledgeTreeNode;
+  depth: number;
+  selected: Set<string>;
+  onToggle: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(depth < 1);
+  const indent = { paddingLeft: `${depth * 12 + 4}px` };
+
+  if (node.kind === "folder") {
+    return (
+      <li>
+        <div style={indent}
+          className="flex items-center gap-1 py-0.5 cursor-pointer text-zinc-300 hover:text-white"
+          onClick={() => setOpen(!open)}
+        >
+          {open ? <ChevronDown size={12} className="text-zinc-500 shrink-0" /> : <ChevronRight size={12} className="text-zinc-500 shrink-0" />}
+          {open ? <FolderOpen size={12} className="text-amber-500 shrink-0" /> : <Folder size={12} className="text-amber-500 shrink-0" />}
+          <span className="text-xs truncate">{node.name}</span>
+        </div>
+        {open && node.children && (
+          <ul>
+            {node.children.map((c) => (
+              <RulesTreeNode key={c.path} node={c} depth={depth + 1} selected={selected} onToggle={onToggle} />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  const isSelected = selected.has(node.path);
+  return (
+    <li>
+      <label style={indent}
+        className="flex items-center gap-1.5 py-0.5 cursor-pointer rounded hover:bg-zinc-800/60"
+      >
+        <span className="w-3 shrink-0" />
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggle(node.path)}
+          className="shrink-0"
+        />
+        <FileIcon size={11} className="text-zinc-500 shrink-0" />
+        <span className={`text-xs truncate ${isSelected ? "text-amber-400" : "text-zinc-300"}`}>
+          {node.title || node.name}
+        </span>
+        <span className="text-[10px] text-zinc-600 ml-auto font-mono truncate pl-2">{node.path}</span>
+      </label>
+    </li>
   );
 }
 

@@ -2,6 +2,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { requireAuth } from "./auth.js";
 import { logger } from "../foundation/logger.js";
+import { getRoom } from "../workspace/room-store.js";
+import { createMcpHandler } from "../server/mcp-server.js";
 
 // -- Route types --
 
@@ -69,6 +71,7 @@ export async function parseBody(req: IncomingMessage): Promise<unknown> {
 import { login } from "./auth.js";
 
 let routesRegistered = false;
+let mcpHandler: ReturnType<typeof createMcpHandler> | null = null;
 
 async function ensureRoutesRegistered(): Promise<void> {
   if (routesRegistered) return;
@@ -89,6 +92,20 @@ async function ensureRoutesRegistered(): Promise<void> {
     sendJson(res, 200, result);
   });
 
+  mcpHandler = createMcpHandler("http://127.0.0.1");
+  addRoute("POST", "/mcp/:room/:agent", async (req, res, params) => {
+    const room = getRoom(params.room);
+    if (!room) {
+      sendJson(res, 404, { error: "Room not found" });
+      return;
+    }
+    if (!room.members.includes(params.agent) && params.agent !== "summarizer") {
+      sendJson(res, 404, { error: "Agent not in room" });
+      return;
+    }
+    await mcpHandler!(req, res, params.room, params.agent, room.members);
+  });
+
   // Domain routes — dynamic import to avoid ESM hoisting issues
   await import("./workforce.js");
   await import("./workspace.js");
@@ -104,7 +121,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
   const rawUrl = req.url || "";
   const method = req.method || "GET";
 
-  if (!rawUrl.startsWith("/api/") && !rawUrl.startsWith("/internal/")) return false;
+  if (!rawUrl.startsWith("/api/") && !rawUrl.startsWith("/internal/") && !rawUrl.startsWith("/mcp/")) return false;
 
   // Strip query string for route matching
   const url = rawUrl.split("?")[0];
@@ -120,8 +137,8 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
     return true;
   }
 
-  // Auth check (skip login and internal endpoints)
-  if (url !== "/api/auth/login" && !url.startsWith("/internal/") && !requireAuth(req.headers)) {
+  // Auth check (skip login/internal/mcp endpoints)
+  if (url !== "/api/auth/login" && !url.startsWith("/internal/") && !url.startsWith("/mcp/") && !requireAuth(req.headers)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
   }

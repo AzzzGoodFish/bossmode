@@ -23,32 +23,31 @@ export function useRoom(roomId: string | null) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [contextUsage, setContextUsage] = useState<Record<string, ContextUsageData>>({});
 
-  // Track agents known to not support context usage (pi-cli, etc.)
+  // Track agents known to not support context usage
   const unsupportedAgents = useRef(new Set<string>());
 
-  // Fetch context usage for one or all members
-  const fetchContextUsage = useCallback(async (agentName?: string) => {
-    if (!roomId) return;
-    const r = room;
-    if (!r) return;
+  // Fetch context usage cache once (on room load / reload)
+  const fetchContextUsageCache = useCallback(async () => {
+    if (!roomId || !room) return;
 
-    const targets = agentName ? [agentName] : r.members;
     const results = await Promise.allSettled(
-      targets
+      room.members
         .filter((name) => !unsupportedAgents.current.has(name))
         .map(async (name) => {
           const data = await getAgentContextUsage(roomId, name);
           if (!data.supported) unsupportedAgents.current.add(name);
           return { name, data };
-        })
+        }),
     );
 
     const updates: Record<string, ContextUsageData> = {};
     for (const result of results) {
-      if (result.status === "fulfilled") {
-        updates[result.value.name] = result.value.data;
-      }
+      if (result.status !== "fulfilled") continue;
+      const { name, data } = result.value;
+      if (data.unavailable) continue;
+      updates[name] = data;
     }
+
     if (Object.keys(updates).length > 0) {
       setContextUsage((prev) => ({ ...prev, ...updates }));
     }
@@ -81,14 +80,10 @@ export function useRoom(roomId: string | null) {
       .finally(() => setLoading(false));
   }, [roomId]);
 
-  // Fetch context usage when room loads + periodic polling (30s)
+  // Fetch context usage cache once after room is loaded
   useEffect(() => {
-    if (room && roomId) {
-      fetchContextUsage();
-      const interval = setInterval(() => fetchContextUsage(), 30_000);
-      return () => clearInterval(interval);
-    }
-  }, [room, roomId, fetchContextUsage]);
+    fetchContextUsageCache().catch(console.error);
+  }, [fetchContextUsageCache]);
 
   // Load older messages (prepend)
   const loadOlder = useCallback(async (): Promise<void> => {
@@ -146,16 +141,17 @@ export function useRoom(roomId: string | null) {
           ...prev,
           [event.agent]: newStatus,
         }));
+      }
 
-        // Refresh context usage when agent starts work (show previous data) or finishes
-        if (newStatus === "working") {
-          fetchContextUsage(event.agent);
-        } else if (newStatus === "idle") {
-          setTimeout(() => fetchContextUsage(event.agent), 500);
-        }
+      if (event.type === "agent:context_usage" && event.roomId === roomId) {
+        if (!event.usage) return;
+        setContextUsage((prev) => ({
+          ...prev,
+          [event.agent]: { supported: true, ...event.usage },
+        }));
       }
     },
-    [roomId, fetchContextUsage, reloadRoom],
+    [roomId, reloadRoom],
   );
 
   const sendMessage = useCallback(

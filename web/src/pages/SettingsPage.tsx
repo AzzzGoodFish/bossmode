@@ -1,7 +1,13 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
 import type { RuntimeInfo, SummarySettings } from "../api/client";
-import { getRuntimes, getSummarySettings, updateSummarySettings } from "../api/client";
+import {
+  getRuntimes,
+  getSummarySettings,
+  updateSummarySettings,
+  getRuntimeSettings,
+  updateRuntimeSettings,
+} from "../api/client";
 
 export function SettingsPage() {
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
@@ -13,6 +19,9 @@ export function SettingsPage() {
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summarySaved, setSummarySaved] = useState(false);
+  const [sessionResume, setSessionResume] = useState(true);
+  const [sessionResumeSaving, setSessionResumeSaving] = useState(false);
+  const [sessionResumeSaved, setSessionResumeSaved] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -24,6 +33,7 @@ export function SettingsPage() {
   useEffect(() => {
     refresh();
     getSummarySettings().then(setSummarySettings).catch(console.error);
+    getRuntimeSettings().then((v) => setSessionResume(v.sessionResume)).catch(console.error);
   }, []);
 
   const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
@@ -41,9 +51,54 @@ export function SettingsPage() {
     }
   };
 
+  const handleSessionResumeToggle = async () => {
+    const next = !sessionResume;
+    setSessionResume(next);
+    setSessionResumeSaving(true);
+    try {
+      await updateRuntimeSettings(next);
+      setSessionResumeSaved(true);
+      setTimeout(() => setSessionResumeSaved(false), 2000);
+    } catch (err: any) {
+      console.error("Failed to save session resume setting:", err);
+      setSessionResume(!next);
+    } finally {
+      setSessionResumeSaving(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col p-6 overflow-y-auto">
       <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-6">Settings</h1>
+
+      {/* Session Resume */}
+      <div className="mb-8">
+        <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Runtime</h2>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-zinc-900 dark:text-white">Session Resume</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">When enabled, new agent instances resume prior runtime sessions. Turning off only affects newly started instances. Applies to all runtimes.</div>
+            </div>
+            <button
+              onClick={handleSessionResumeToggle}
+              disabled={sessionResumeSaving}
+              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
+                sessionResume ? "bg-violet-500" : "bg-zinc-300 dark:bg-zinc-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  sessionResume ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+          <div className="text-xs text-zinc-400 dark:text-zinc-500">
+            {sessionResumeSaved && <span className="text-emerald-500">Saved!</span>}
+          </div>
+        </div>
+      </div>
 
       {/* Auto-Summary */}
       <div className="mb-8">

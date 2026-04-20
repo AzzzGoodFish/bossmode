@@ -238,7 +238,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Thinking Level">
                 <select value={form.thinkingLevel || "off"} onChange={(e) => setForm({ ...form, thinkingLevel: e.target.value })} className={inputCls}>
-                  {["off", "minimal", "low", "medium", "high"].map((l) => <option key={l} value={l}>{l}</option>)}
+                  {["off", "minimal", "low", "medium", "high", "xhigh"].map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
               </Field>
               <Field label="Context Limit">
@@ -322,10 +322,10 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                       <span>{inst.runtime}</span>
                       {inst.pid && <><span className="text-zinc-300 dark:text-zinc-600">·</span><span>PID {inst.pid}</span></>}
                     </div>
-                    {inst.spawnArgs && (
+                    {inst.spawnArgs && inst.spawnArgs.length > 0 && (
                       <details className="mt-1.5">
                         <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">
-                          CLI args ({inst.spawnArgs.split(/\s--/).length} flags)
+                          CLI args ({inst.spawnArgs.filter((a) => a.startsWith("--")).length} flags)
                         </summary>
                         <pre className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono mt-1 whitespace-pre-wrap break-all leading-relaxed max-h-48 overflow-y-auto">
                           {formatSpawnArgs(inst.spawnArgs)}
@@ -344,17 +344,39 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
 }
 
 
-/** Format CLI spawn args: one --flag per line, truncate long values */
-function formatSpawnArgs(raw: string): string {
-  // Split on ` --` boundaries (preserving the --)
-  const parts = raw.split(/\s(?=--)/).map((p) => p.trim()).filter(Boolean);
-  return parts
-    .map((part) => {
-      // Truncate very long values (e.g. --system-prompt content)
-      if (part.length > 120) return part.slice(0, 117) + "...";
-      return part;
-    })
-    .join("\n");
+/** Format CLI spawn args array: group --flag + value pairs, truncate long values */
+function formatSpawnArgs(args: string[]): string {
+  const lines: string[] = [];
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+    if (arg.startsWith("--")) {
+      // Check if next arg is the value (not another flag)
+      const nextArg = i + 1 < args.length ? args[i + 1] : undefined;
+      if (nextArg !== undefined && !nextArg.startsWith("--")) {
+        // Flag with value — truncate long values
+        const maxLen = 80;
+        if (nextArg.length <= maxLen) {
+          lines.push(`${arg} ${nextArg.replace(/\n/g, " ")}`);
+        } else {
+          const sizeLabel = nextArg.length >= 1024
+            ? `${(nextArg.length / 1024).toFixed(1)}k`
+            : `${nextArg.length}`;
+          lines.push(`${arg} ${nextArg.slice(0, maxLen).replace(/\n/g, " ")}... [${sizeLabel} chars]`);
+        }
+        i += 2;
+      } else {
+        // Boolean flag (no value)
+        lines.push(arg);
+        i += 1;
+      }
+    } else {
+      // Standalone arg (e.g. binary path)
+      lines.push(arg);
+      i += 1;
+    }
+  }
+  return lines.join("\n");
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

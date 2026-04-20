@@ -4,6 +4,7 @@ import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
 import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates } from "../shared/config.js";
+import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
 import { initAutoSummary } from "../engine/summarizer.js";
@@ -41,6 +42,13 @@ export function startServer(opts: ServerOptions): Promise<void> {
   // Ensure dirs + seed templates on first run
   ensureBossmodeDir();
   seedTemplates(import.meta.dirname);
+
+  // Knowledge: migrate legacy JSON-entry KBs to filesystem-markdown layout (idempotent)
+  try {
+    runKnowledgeMigration();
+  } catch (err) {
+    logger.error("server", "knowledge migration failed", { error: String(err) });
+  }
 
   // Initialize runtime registry
   const registry = new RuntimeRegistry();

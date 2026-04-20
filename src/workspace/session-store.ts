@@ -20,3 +20,7 @@ export function saveSession(roomId: string, agentName: string, session: AgentSes
   sessions[agentName] = session;
   writeFileSync(sessionsPath(roomId), JSON.stringify(sessions, null, 2), "utf-8");
 }
+
+export function clearSession(roomId: string, agentName: string, runtime: string): void {
+  saveSession(roomId, agentName, { runtime });
+}

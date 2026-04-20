@@ -36,6 +36,20 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Per-room draft caching: save/restore input when switching rooms
+  const drafts = useRef<Map<string, string>>(new Map());
+  const prevRoomId = useRef<string | undefined>(roomId);
+  useEffect(() => {
+    if (prevRoomId.current !== roomId) {
+      // Save current draft for previous room
+      if (prevRoomId.current) drafts.current.set(prevRoomId.current, value);
+      // Restore draft for new room (or empty)
+      setValue(roomId ? (drafts.current.get(roomId) ?? "") : "");
+      prevRoomId.current = roomId;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
   const addFiles = useCallback((files: File[]) => {
     const newPending: PendingFile[] = files.map((file) => {
       const pending: PendingFile = { file };

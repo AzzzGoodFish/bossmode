@@ -31,21 +31,26 @@ export default function (pi) {
   pi.registerTool({
     name: "chat",
     label: "Chat",
-    description: "Post a message. target='room' (default) sends to group chat visible to all. target='user' sends a private reply only the user sees. Optionally mention agents to activate them. Room members: ${memberList}",
+    description: "Post a message. target='room' (default) sends to group chat visible to all. target='user' sends a private reply only the user sees. Use mentions[] to activate agents — this is the only activation channel. @name in message text is treated as human-readable reference only. Room members: ${memberList}",
     parameters: Type.Object({
       message: Type.String({ description: "Message to post" }),
       target: Type.Optional(Type.String({ description: "'room' (default, everyone sees) or 'user' (private reply)" })),
-      mentions: Type.Optional(Type.Array(Type.String(), { description: "Agent names to mention and activate" })),
+      mentions: Type.Optional(Type.Array(Type.String(), { description: "Agent names to activate (authoritative activation channel)" })),
     }),
     async execute(id, params) {
-      await fetch(SERVER + "/internal/tool-callback", {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tool: "chat", room: ROOM, agent: AGENT, params }),
       });
+      const data = await res.json().catch(() => ({}));
       const targetText = params.target === "user" ? "Private reply sent." : "Message sent to room.";
-      const mentionText = params.mentions?.length ? " Mentioned: " + params.mentions.join(", ") : "";
-      return { content: [{ type: "text", text: targetText + mentionText }], details: {} };
+      const explicit = Array.isArray(params.mentions) ? params.mentions : [];
+      const mentionText = explicit.length ? " Mentioned: " + explicit.join(", ") : "";
+      const warningText = typeof data.warning === "string" && data.warning.length > 0
+        ? " Warning: " + data.warning
+        : "";
+      return { content: [{ type: "text", text: targetText + mentionText + warningText }], details: {} };
     },
   });
 
@@ -73,27 +78,30 @@ export default function (pi) {
   pi.registerTool({
     name: "save_knowledge",
     label: "Save Knowledge",
-    description: "Save knowledge to the project knowledge base.",
+    description: "Create a new project document (Markdown file). Path is a POSIX-style path relative to the docs root (e.g. 'architecture/overview.md' or 'prds/smart-summary.md'). If path is omitted, the document is placed under 'misc/'. A .md extension is appended if missing.",
     parameters: Type.Object({
-      title: Type.String({ description: "Title" }),
-      content: Type.String({ description: "Content" }),
+      title: Type.String({ description: "Human-readable document title" }),
+      content: Type.String({ description: "Markdown body (frontmatter is generated automatically)" }),
+      path: Type.Optional(Type.String({ description: "Target path, e.g. 'architecture/overview.md'. Required unless you are fine with auto-placement under misc/." })),
     }),
     async execute(id, params) {
-      await fetch(SERVER + "/internal/tool-callback", {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tool: "save_knowledge", room: ROOM, agent: AGENT, params }),
       });
-      return { content: [{ type: "text", text: "Knowledge saved: " + params.title }], details: {} };
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + (data.error || "unknown error") }], details: {} };
+      return { content: [{ type: "text", text: "Document saved at " + data.path + ": " + (data.title || params.title) }], details: {} };
     },
   });
 
   pi.registerTool({
     name: "query_knowledge",
     label: "Query Knowledge",
-    description: "Query the project knowledge base. Without a query, returns entry summaries. With a query, returns full content of matching entries.",
+    description: "Explore or search the project document library. Without a query, returns the directory tree plus a summary list (titles + paths, no content). With a query, returns full content of documents whose title or body contains the query substring (case-insensitive).",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Search query to filter entries by title/content. Omit to list summaries." })),
+      query: Type.Optional(Type.String({ description: "Search substring. Omit to get the full tree + summaries." })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -101,10 +109,39 @@ export default function (pi) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tool: "query_knowledge", room: ROOM, agent: AGENT, params }),
       });
-      const entries = await res.json();
-      const text = entries.length === 0
-        ? "No knowledge entries found."
-        : entries.map(e => "## " + e.title + "\\n" + (e.content || e.contentPreview || "")).join("\\n---\\n");
+      const data = await res.json();
+      // Filtered-search returns an array of {id, title, content, ...}
+      if (Array.isArray(data)) {
+        if (data.length === 0) return { content: [{ type: "text", text: "No documents matched." }], details: {} };
+        const text = data.map(e => "## " + e.title + " (" + e.id + ")\\n" + (e.content || "")).join("\\n---\\n");
+        return { content: [{ type: "text", text: truncate(text) }], details: {} };
+      }
+      // Tree form
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (entries.length === 0) return { content: [{ type: "text", text: "Project document library is empty." }], details: {} };
+      const lines = ["Documents:"];
+      for (const e of entries) lines.push("- " + e.path + "  \u2014  " + e.title);
+      lines.push("", "Use read_knowledge(path) to read a specific document, or query_knowledge(query) to search.");
+      return { content: [{ type: "text", text: truncate(lines.join("\\n")) }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "read_knowledge",
+    label: "Read Knowledge",
+    description: "Read the full content of a specific document by its path (e.g. 'architecture/overview.md'). Use query_knowledge first to discover available paths.",
+    parameters: Type.Object({
+      path: Type.String({ description: "Document path relative to the docs root" }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "read_knowledge", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + (data.error || "unknown error") }], details: {} };
+      const text = "# " + data.title + "\\n\\n" + data.content;
       return { content: [{ type: "text", text: truncate(text) }], details: {} };
     },
   });
@@ -112,11 +149,11 @@ export default function (pi) {
   pi.registerTool({
     name: "update_knowledge",
     label: "Update Knowledge",
-    description: "Update an existing knowledge entry. Use query_knowledge first to find entry IDs.",
+    description: "Overwrite an existing document's title and content.",
     parameters: Type.Object({
-      entryId: Type.String({ description: "ID of the entry to update" }),
+      path: Type.String({ description: "Document path (e.g. 'architecture/overview.md')" }),
       title: Type.String({ description: "New title" }),
-      content: Type.String({ description: "New content" }),
+      content: Type.String({ description: "New markdown body" }),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -126,16 +163,16 @@ export default function (pi) {
       });
       const data = await res.json();
       if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
-      return { content: [{ type: "text", text: "Knowledge updated: " + params.title }], details: {} };
+      return { content: [{ type: "text", text: "Document updated at " + data.path }], details: {} };
     },
   });
 
   pi.registerTool({
     name: "delete_knowledge",
     label: "Delete Knowledge",
-    description: "Delete a knowledge entry. Use query_knowledge first to find entry IDs.",
+    description: "Delete a document by its path.",
     parameters: Type.Object({
-      entryId: Type.String({ description: "ID of the entry to delete" }),
+      path: Type.String({ description: "Document path to delete (e.g. 'misc/obsolete-notes.md')" }),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -145,7 +182,29 @@ export default function (pi) {
       });
       const data = await res.json();
       if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
-      return { content: [{ type: "text", text: "Knowledge entry deleted." }], details: {} };
+      return { content: [{ type: "text", text: "Document deleted." }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "write_summary",
+    label: "Write Summary",
+    description: "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
+    parameters: Type.Object({
+      title: Type.String({ description: "Short topic title for this summary segment" }),
+      summary: Type.String({ description: "1-3 sentence summary of the key content, decisions, and conclusions" }),
+      from_id: Type.String({ description: "Message ID of the first message in this segment" }),
+      to_id: Type.String({ description: "Message ID of the last message in this segment" }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "write_summary", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Summary created: \\"" + params.title + "\\" (" + data.coveredCount + " messages)" }], details: {} };
     },
   });
 }
@@ -212,6 +271,8 @@ function mapPiEvent(raw: any): AgentStreamEvent | null {
 // PiCliAgentHandle
 // ============================================================================
 
+const STDERR_TAIL_MAX = 1024;
+
 class PiCliAgentHandle implements AgentHandle {
   private proc: ChildProcessWithoutNullStreams;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
@@ -221,15 +282,19 @@ class PiCliAgentHandle implements AgentHandle {
   private buffer = "";
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private destroyed = false;
+  private exitEmitted = false;
+  private stderrTail = "";
 
   readonly pid: number | undefined;
   readonly runtimeName = "pi-cli";
-  readonly spawnArgs: string;
+  readonly spawnArgs: string[];
 
-  constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string) {
+  constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string[], initialStderr?: string) {
     this.proc = proc;
     this.pid = proc.pid;
-    this.spawnArgs = spawnArgs || "";
+    this.spawnArgs = spawnArgs || [];
+    if (initialStderr) this.appendStderr(initialStderr);
 
     // Parse stdout JSONL
     proc.stdout.on("data", (data: Buffer) => {
@@ -268,13 +333,32 @@ class PiCliAgentHandle implements AgentHandle {
     });
 
     // Handle process exit
-    proc.on("exit", (code) => {
+    proc.on("exit", (code, signal) => {
       this.clearActivityTimer();
       if (this._isWorking) {
         this._isWorking = false;
         this.emit({ type: "agent_end" });
       }
+      this.emitRuntimeExit(code, signal);
       this.resolveIdle();
+    });
+  }
+
+  private appendStderr(text: string): void {
+    if (!text) return;
+    this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX);
+  }
+
+  private emitRuntimeExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.exitEmitted) return;
+    this.exitEmitted = true;
+    const tail = this.stderrTail.trim();
+    this.emit({
+      type: "runtime_exit",
+      code,
+      signal: signal || null,
+      stderrTail: tail ? tail : undefined,
+      unexpected: !this.destroyed,
     });
   }
 
@@ -342,6 +426,7 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.clearActivityTimer();
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
@@ -421,6 +506,11 @@ class PiCliAgentHandle implements AgentHandle {
   /** Public emit for external callers (e.g. stderr handler wired after construction) */
   emitPublic(event: AgentStreamEvent): void {
     this.emit(event);
+  }
+
+  /** Append to the stderr tail captured for runtime_exit reporting. */
+  appendStderrPublic(text: string): void {
+    this.appendStderr(text);
   }
 
   private emit(event: AgentStreamEvent): void {
@@ -589,7 +679,6 @@ export class PiCliRuntime implements AgentRuntime {
         "--mode", "rpc",
         "--model", resolvedModel,
         "--thinking", opts.member.thinkingLevel || "off",
-        "--no-extensions",
         "--no-skills",
         "--extension", extPath,
         ...opts.skillPaths.filter((p) => existsSync(p)).flatMap((p) => ["--skill", p]),
@@ -640,16 +729,23 @@ export class PiCliRuntime implements AgentRuntime {
         proc.on("exit", (code) => {
           if (code !== null && code !== 0) {
             clearTimeout(timeout);
-            reject(new Error(`pi process exited with code ${code}`));
+            // Wait a tick so any final stderr chunk is flushed into stderrBuf.
+            setImmediate(() => {
+              const tail = stderrBuf.trim().slice(-800);
+              const detail = tail ? `: ${tail}` : "";
+              reject(new Error(`pi process exited with code ${code}${detail}`));
+            });
           }
         });
       });
 
-      const handle = new PiCliAgentHandle(proc, `${this.cliPath} ${args.join(" ")}`);
+      const handle = new PiCliAgentHandle(proc, [this.cliPath, ...args], stderrBuf);
 
       // Emit raw stderr for debugging (after handle creation so listeners exist)
+      // and also feed handle's stderrTail so runtime_exit carries it.
       proc.stderr.on("data", (d: Buffer) => {
         const text = d.toString();
+        handle.appendStderrPublic(text);
         if (text.trim()) handle.emitPublic({ type: "cli:stderr", text });
       });
 
@@ -672,9 +768,9 @@ export class PiCliRuntime implements AgentRuntime {
     }
 
     // Query session state and notify caller
-    if (opts.onSessionCreated) {
+    if (opts.onSessionChanged) {
       handle.onSessionInfo((session) => {
-        opts.onSessionCreated!(session);
+        opts.onSessionChanged!(session);
       });
       handle.querySessionState();
     }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type ClipboardEvent } from "react";
-import { Paperclip, X } from "lucide-react";
-import { getToken, getAgentEvents, abortAgent, uploadFile } from "../api/client";
+import { Paperclip, X, Loader2 } from "lucide-react";
+import { getToken, getAgentEventsPaginated, abortAgent, uploadFile, resetAgentSession } from "../api/client";
+import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 import { MessageBubble } from "./MessageBubble";
 
@@ -11,7 +12,7 @@ interface AgentEvent {
 
 // Committed events — finalized items in the stream
 export interface CommittedEvent {
-  type: "agent_start" | "agent_end" | "message" | "thinking" | "tool" | "user_steer" | "agent_reply";
+  type: "agent_start" | "agent_end" | "message" | "thinking" | "tool" | "user_steer" | "agent_reply" | "system";
   text?: string;
   thinking?: string;
   toolName?: string;
@@ -34,6 +35,14 @@ interface AgentTabProps {
 
 function now(): number { return Date.now(); }
 
+export function isResetSessionCommand(input: string): boolean {
+  return input.trim() === "/reset-session";
+}
+
+export function buildResetSessionConfirmMessage(roomId: string, agentName: string): string {
+  return `Reset session for @${agentName} in room ${roomId}?\n\nThis will:\n- clear the runtime session\n- set the agent cursor to null\n- keep room messages and activity history\n\nNext activation will start fresh from recent context.`;
+}
+
 // Convert raw server events to CommittedEvent(s)
 function rawToCommitted(event: AgentEvent): CommittedEvent[] {
   const ts = (event.ts as number) || now();
@@ -52,6 +61,8 @@ function rawToCommitted(event: AgentEvent): CommittedEvent[] {
       return [{ type: "user_steer", text: event.text as string, ts }];
     case "agent_reply":
       return [{ type: "agent_reply", text: event.text as string, ts }];
+    case "system":
+      return [{ type: "system", text: event.text as string, ts }];
     default: return [];
   }
 }
@@ -71,11 +82,52 @@ function buildFromHistory(events: AgentEvent[]): CommittedEvent[] {
   return result;
 }
 
+export function getAgentHistorySyncPlan(cachedEvents?: CommittedEvent[]): {
+  showCachedImmediately: boolean;
+  shouldFetchHistory: boolean;
+  initialLoading: boolean;
+} {
+  const hasCachedData = Boolean(cachedEvents && cachedEvents.length > 0);
+  return {
+    showCachedImmediately: hasCachedData,
+    shouldFetchHistory: true,
+    initialLoading: !hasCachedData,
+  };
+}
+
+export function buildAgentHistoryState(events: AgentEvent[]): {
+  committed: CommittedEvent[];
+  isWorking: boolean;
+} {
+  let isWorking = false;
+  for (const event of events) {
+    if (event.type === "agent_start") isWorking = true;
+    if (event.type === "agent_end") isWorking = false;
+  }
+  return {
+    committed: buildFromHistory(events),
+    isWorking,
+  };
+}
+
+export function getAgentTabHeaderControls(view: "chat" | "activity", isWorking: boolean): {
+  showActivityModeToggle: boolean;
+  showInterrupt: boolean;
+} {
+  return {
+    showActivityModeToggle: view === "activity",
+    showInterrupt: isWorking,
+  };
+}
+
 // ============================================================================
 // AgentTab — outer shell with Chat / Activity sub-views
 // ============================================================================
 
+const EVENTS_PAGE_SIZE = 100;
+
 export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, onEventsChange }: AgentTabProps) {
+  const { toast } = useDialog();
   const [view, setView] = useState<"chat" | "activity">("chat");
   const [activityMode, setActivityMode] = useState<"formatted" | "raw">("formatted");
   const [rawLines, setRawLines] = useState<Array<{ type: "stdout" | "stderr"; text: string; ts: number }>>([]);
@@ -86,8 +138,13 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   const [committed, setCommitted] = useState<CommittedEvent[]>(cachedEvents ?? []);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!cachedEvents || cachedEvents.length === 0);
+  const historySyncPlan = getAgentHistorySyncPlan(cachedEvents);
+  const [loading, setLoading] = useState(historySyncPlan.initialLoading);
   const [isWorking, setIsWorking] = useState(false);
+  // Pagination state for events history
+  const [hasMoreEvents, setHasMoreEvents] = useState(false);
+  const [loadingOlderEvents, setLoadingOlderEvents] = useState(false);
+  const oldestEventIndex = useRef<number | undefined>(undefined);
 
   // Refs for streaming state — avoids stale closure in WS handler
   const streamingTextRef = useRef<string | null>(null);
@@ -171,6 +228,9 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
       case "agent_reply":
         pushEvent({ type: "agent_reply", text: event.text as string, ts });
         break;
+      case "system":
+        pushEvent({ type: "system", text: event.text as string, ts });
+        break;
       case "cli:stdout":
       case "cli:stderr": {
         const lineType = event.type === "cli:stdout" ? "stdout" as const : "stderr" as const;
@@ -183,12 +243,33 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
     }
   };
 
+  // Load older events (prepend)
+  const loadOlderEvents = useCallback(async () => {
+    if (loadingOlderEvents || !hasMoreEvents || oldestEventIndex.current === undefined) return;
+    setLoadingOlderEvents(true);
+    try {
+      const result = await getAgentEventsPaginated(roomId, agentName, EVENTS_PAGE_SIZE, oldestEventIndex.current);
+      if (result.events.length > 0) {
+        const olderCommitted = buildFromHistory(result.events as AgentEvent[]);
+        eventsRef.current = [...olderCommitted, ...eventsRef.current];
+        flushEvents();
+        oldestEventIndex.current = Math.max(0, (oldestEventIndex.current ?? 0) - result.events.length);
+      }
+      setHasMoreEvents(result.hasMore);
+    } catch (err) {
+      console.error("Failed to load older events:", err);
+    } finally {
+      setLoadingOlderEvents(false);
+    }
+  }, [roomId, agentName, loadingOlderEvents, hasMoreEvents, flushEvents]);
+
   // WS + history — uses ref so WS always calls latest handler
   useEffect(() => {
     const token = getToken();
     if (!token) return;
     const pendingEvents: AgentEvent[] = [];
     let historyDone = false;
+    if (historySyncPlan.showCachedImmediately) setLoading(false);
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
     ws.onopen = () => { ws.send(JSON.stringify({ type: "subscribe:agent", roomId, agent: agentName })); };
@@ -201,19 +282,30 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
         }
       } catch {}
     };
-    // Always fetch full history from server (cache is only for initial render)
-    getAgentEvents(roomId, agentName)
-      .then((events) => { eventsRef.current = buildFromHistory(events as AgentEvent[]); flushEvents(); })
-      .catch(console.error)
-      .finally(() => {
-        historyDone = true;
-        setLoading(false);
-        for (const ev of pendingEvents) handleStreamEventRef.current(ev);
-        pendingEvents.length = 0;
-      });
+
+    if (historySyncPlan.shouldFetchHistory) {
+      getAgentEventsPaginated(roomId, agentName, EVENTS_PAGE_SIZE)
+        .then((result) => {
+          const historyState = buildAgentHistoryState(result.events as AgentEvent[]);
+          eventsRef.current = historyState.committed;
+          flushEvents();
+          setIsWorking(historyState.isWorking);
+          setHasMoreEvents(result.hasMore);
+          oldestEventIndex.current = result.hasMore ? result.total - result.events.length : 0;
+        })
+        .catch(console.error)
+        .finally(() => {
+          historyDone = true;
+          setLoading(false);
+          for (const ev of pendingEvents) handleStreamEventRef.current(ev);
+          pendingEvents.length = 0;
+        });
+    }
     return () => { ws.close(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, agentName]);
+
+  const headerControls = getAgentTabHeaderControls(view, isWorking);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -221,35 +313,39 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
       <div className="flex items-center border-b border-zinc-200 dark:border-zinc-800 px-4 gap-1 shrink-0">
         <SubTab label="Chat" active={view === "chat"} onClick={() => setView("chat")} />
         <SubTab label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
-        {isWorking && (
-          <button
-            onClick={() => { abortAgent(roomId, agentName).catch(console.error); }}
-            className="ml-auto px-2.5 py-1 text-[11px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer"
-            title={`Interrupt ${agentName}`}
-          >Interrupt</button>
-        )}
-        {view === "activity" && !isWorking && (
-          <div className="ml-auto inline-flex rounded-md border border-zinc-300 dark:border-zinc-700 overflow-hidden" role="radiogroup" aria-label="Output format">
-            <button
-              onClick={() => setActivityMode("formatted")}
-              role="radio"
-              aria-checked={activityMode === "formatted"}
-              className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
-                activityMode === "formatted"
-                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                  : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
-            >Formatted</button>
-            <button
-              onClick={() => setActivityMode("raw")}
-              role="radio"
-              aria-checked={activityMode === "raw"}
-              className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
-                activityMode === "raw"
-                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                  : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
-            >Raw</button>
+        {(headerControls.showActivityModeToggle || headerControls.showInterrupt) && (
+          <div className="ml-auto flex items-center gap-2">
+            {headerControls.showActivityModeToggle && (
+              <div className="inline-flex rounded-md border border-zinc-300 dark:border-zinc-700 overflow-hidden" role="radiogroup" aria-label="Output format">
+                <button
+                  onClick={() => setActivityMode("formatted")}
+                  role="radio"
+                  aria-checked={activityMode === "formatted"}
+                  className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                    activityMode === "formatted"
+                      ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
+                      : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                  }`}
+                >Formatted</button>
+                <button
+                  onClick={() => setActivityMode("raw")}
+                  role="radio"
+                  aria-checked={activityMode === "raw"}
+                  className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                    activityMode === "raw"
+                      ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
+                      : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                  }`}
+                >Raw</button>
+              </div>
+            )}
+            {headerControls.showInterrupt && (
+              <button
+                onClick={() => { abortAgent(roomId, agentName).catch(console.error); }}
+                className="px-2.5 py-1 text-[11px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer"
+                title={`Interrupt ${agentName}`}
+              >Interrupt</button>
+            )}
           </div>
         )}
       </div>
@@ -262,6 +358,11 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
             roomId={roomId}
             onSteer={onSteer}
             onSend={(text) => { onSteer(text); pushEvent({ type: "user_steer", text, ts: now() }); }}
+            onResetSessionSuccess={(message) => toast(message, "success")}
+            onResetSessionError={(message) => toast(message, "error")}
+            hasMore={hasMoreEvents}
+            loadingOlder={loadingOlderEvents}
+            onLoadOlder={loadOlderEvents}
           />
         : activityMode === "formatted"
           ? <AgentActivity
@@ -270,6 +371,9 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
               streamingThinking={streamingThinking}
               agentName={agentName}
               loading={loading}
+              hasMore={hasMoreEvents}
+              loadingOlder={loadingOlderEvents}
+              onLoadOlder={loadOlderEvents}
             />
           : <RawOutput lines={rawLines} />
       }
@@ -325,6 +429,11 @@ function AgentChat({
   roomId,
   onSteer,
   onSend,
+  hasMore,
+  loadingOlder,
+  onLoadOlder,
+  onResetSessionSuccess,
+  onResetSessionError,
 }: {
   committed: CommittedEvent[];
   isWorking: boolean;
@@ -332,21 +441,94 @@ function AgentChat({
   roomId: string;
   onSteer: (content: string) => void;
   onSend: (text: string) => void;
+  hasMore: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
+  onResetSessionSuccess: (message: string) => void;
+  onResetSessionError: (message: string) => void;
 }) {
+  const { confirm } = useDialog();
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isNearBottom = useRef(true);
+  const prevEventCount = useRef(0);
+  const prevScrollHeight = useRef(0);
+  const initialScrollDone = useRef(false);
+  const [newPrependCount, setNewPrependCount] = useState(0);
+  const prevCommittedLen = useRef(committed.length);
 
-  const COMMANDS = [{ name: "/compact", description: "Compress agent context" }];
+  const COMMANDS = [
+    { name: "/compact", description: "Compress agent context" },
+    { name: "/reset-session", description: "Reset runtime session and cursor" },
+  ];
 
-  const chatEvents = committed.filter((e) => e.type === "user_steer" || e.type === "agent_reply" || e.type === "message");
+  const chatEvents = committed.filter((e) => e.type === "user_steer" || e.type === "agent_reply" || e.type === "message" || e.type === "system");
+
+  // Initial scroll to bottom (instant, no animation)
+  useEffect(() => {
+    if (chatEvents.length > 0 && !initialScrollDone.current) {
+      bottomRef.current?.scrollIntoView();
+      initialScrollDone.current = true;
+      prevEventCount.current = chatEvents.length;
+    }
+  }, [chatEvents.length]);
+
+  // Auto-scroll on new messages (only if near bottom)
+  useEffect(() => {
+    const added = chatEvents.length - prevEventCount.current;
+    if (added > 0 && isNearBottom.current && initialScrollDone.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevEventCount.current = chatEvents.length;
+  }, [chatEvents.length]);
+
+  // Scroll position preservation when older events are prepended
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !loadingOlder) return;
+    prevScrollHeight.current = el.scrollHeight;
+  }, [loadingOlder]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatEvents.length, isWorking]);
+    if (loadingOlder === false && prevScrollHeight.current > 0) {
+      const el = containerRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight - prevScrollHeight.current;
+        prevScrollHeight.current = 0;
+      }
+      // Detect prepended events for slide-in animation
+      const prepended = committed.length - prevCommittedLen.current;
+      if (prepended > 0) {
+        setNewPrependCount(prepended);
+        setTimeout(() => setNewPrependCount(0), 600);
+      }
+    }
+    prevCommittedLen.current = committed.length;
+  }, [committed.length, loadingOlder]);
+
+  // Scroll handler — auto-load older (debounced at scrollTop=0) + track near-bottom
+  const loadOlderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (el.scrollTop === 0 && hasMore && !loadingOlder) {
+      if (!loadOlderTimer.current) {
+        loadOlderTimer.current = setTimeout(() => {
+          loadOlderTimer.current = null;
+          if (containerRef.current && containerRef.current.scrollTop === 0) onLoadOlder();
+        }, 300);
+      }
+    } else if (loadOlderTimer.current) {
+      clearTimeout(loadOlderTimer.current);
+      loadOlderTimer.current = null;
+    }
+  }, [hasMore, loadingOlder, onLoadOlder]);
 
   const addFiles = useCallback((files: File[]) => {
     setPendingFiles((prev) => [
@@ -390,6 +572,19 @@ function AgentChat({
       pendingFiles.forEach((pf) => { if (pf.preview) URL.revokeObjectURL(pf.preview); });
       setPendingFiles([]);
       setUploading(false);
+    }
+
+    if (isResetSessionCommand(content) && pendingFiles.length === 0) {
+      const ok = await confirm(buildResetSessionConfirmMessage(roomId, agentName));
+      if (!ok) return;
+      try {
+        const result = await resetAgentSession(roomId, agentName);
+        onResetSessionSuccess(result.message);
+        setInput("");
+      } catch (err: any) {
+        onResetSessionError(`Reset session failed: ${err.message}`);
+      }
+      return;
     }
 
     if (content) onSend(content);
@@ -448,22 +643,35 @@ function AgentChat({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm">
+      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
+        {hasMore === false && chatEvents.length > 0 && (
+          <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of conversation</div>
+        )}
+        {loadingOlder && (
+          <div className="flex items-center justify-center gap-1.5 py-2">
+            <Loader2 size={14} className="animate-spin text-zinc-400" />
+            <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
+          </div>
+        )}
         {chatEvents.length === 0 && !isWorking && (
           <div className="text-zinc-600 text-center py-8">
             Send a private instruction to {agentName}...
           </div>
         )}
-        {chatEvents.map((event, i) => (
-          <div key={i}>
+        {chatEvents.map((event, i) => {
+          const isNewPrepend = i < newPrependCount;
+          const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+          return (
+          <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
             <MessageBubble
-              sender={event.type === "user_steer" ? "user" : agentName}
+              sender={event.type === "user_steer" ? "user" : event.type === "system" ? "system" : agentName}
               content={event.text || ""}
               isMarkdown={event.type !== "user_steer"}
             />
             {event.ts && <div className="text-[10px] text-zinc-700 mt-0.5 px-1">{formatTime(event.ts)}</div>}
           </div>
-        ))}
+          );
+        })}
         {isWorking && (
           <div className="text-zinc-500 text-xs flex items-center gap-2 py-1">
             <span className="animate-pulse">●</span> {agentName} is working...
@@ -562,32 +770,124 @@ function AgentActivity({
   streamingThinking,
   agentName,
   loading,
+  hasMore,
+  loadingOlder,
+  onLoadOlder,
 }: {
   committed: CommittedEvent[];
   streamingText: string | null;
   streamingThinking: string | null;
   agentName: string;
   loading: boolean;
+  hasMore: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isNearBottom = useRef(true);
+  const prevEventCount = useRef(0);
+  const prevScrollHeight = useRef(0);
+  const initialScrollDone = useRef(false);
+  const [newPrependCount, setNewPrependCount] = useState(0);
+  const prevCommittedLen = useRef(committed.length);
   const hasVisibleContent = committed.some(
-    (e) => e.type === "message" || e.type === "tool" || e.type === "user_steer" || e.type === "thinking" || e.type === "agent_reply",
+    (e) => e.type === "message" || e.type === "tool" || e.type === "user_steer" || e.type === "thinking" || e.type === "agent_reply" || e.type === "system",
   );
 
+  // Initial scroll to bottom (instant)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [committed.length, streamingText, streamingThinking]);
+    if (committed.length > 0 && !initialScrollDone.current) {
+      bottomRef.current?.scrollIntoView();
+      initialScrollDone.current = true;
+      prevEventCount.current = committed.length;
+    }
+  }, [committed.length]);
+
+  // Auto-scroll on new events (only if near bottom)
+  useEffect(() => {
+    const added = committed.length - prevEventCount.current;
+    if (added > 0 && isNearBottom.current && initialScrollDone.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevEventCount.current = committed.length;
+  }, [committed.length]);
+
+  // Also scroll on streaming updates if near bottom
+  useEffect(() => {
+    if (isNearBottom.current && (streamingText || streamingThinking)) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [streamingText, streamingThinking]);
+
+  // Scroll position preservation when older events prepended
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !loadingOlder) return;
+    prevScrollHeight.current = el.scrollHeight;
+  }, [loadingOlder]);
+
+  useEffect(() => {
+    if (loadingOlder === false && prevScrollHeight.current > 0) {
+      const el = containerRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight - prevScrollHeight.current;
+        prevScrollHeight.current = 0;
+      }
+      // Detect prepended events for slide-in animation
+      const prepended = committed.length - prevCommittedLen.current;
+      if (prepended > 0) {
+        setNewPrependCount(prepended);
+        setTimeout(() => setNewPrependCount(0), 600);
+      }
+    }
+    prevCommittedLen.current = committed.length;
+  }, [committed.length, loadingOlder]);
+
+  // Scroll handler — auto-load older (debounced at scrollTop=0) + track near-bottom
+  const loadOlderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (el.scrollTop === 0 && hasMore && !loadingOlder) {
+      if (!loadOlderTimer.current) {
+        loadOlderTimer.current = setTimeout(() => {
+          loadOlderTimer.current = null;
+          if (containerRef.current && containerRef.current.scrollTop === 0) onLoadOlder();
+        }, 300);
+      }
+    } else if (loadOlderTimer.current) {
+      clearTimeout(loadOlderTimer.current);
+      loadOlderTimer.current = null;
+    }
+  }, [hasMore, loadingOlder, onLoadOlder]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm">
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
+      {hasMore === false && hasVisibleContent && (
+        <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of activity</div>
+      )}
+      {loadingOlder && (
+        <div className="flex items-center justify-center gap-1.5 py-2">
+          <Loader2 size={14} className="animate-spin text-zinc-400" />
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier events</span>
+        </div>
+      )}
       {!hasVisibleContent && streamingText === null && (
         <div className="text-zinc-600 text-center py-8">
           {loading ? "Loading history..." : "Waiting for agent activity..."}
         </div>
       )}
-      {committed.map((event, i) => (
-        <ActivityItem key={i} event={event} agentName={agentName} />
-      ))}
+      {committed.map((event, i) => {
+        const isNewPrepend = i < newPrependCount;
+        const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+        return (
+          <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
+            <ActivityItem event={event} agentName={agentName} />
+          </div>
+        );
+      })}
       {streamingThinking !== null && streamingThinking.length > 0 && (
         <ThinkingCard thinking={streamingThinking} isStreaming />
       )}
@@ -620,6 +920,8 @@ function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: 
       return <div><MessageBubble sender="user" content={event.text || ""} />{time}</div>;
     case "agent_reply":
       return <div><MessageCard text={event.text || ""} label="DM Reply" />{time}</div>;
+    case "system":
+      return <div><MessageBubble sender="system" content={event.text || ""} />{time}</div>;
     default:
       return null;
   }

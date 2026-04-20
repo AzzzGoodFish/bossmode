@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Loader2 } from "lucide-react";
 import type { RoomMessage } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
@@ -35,6 +36,10 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
     bottomRef.current?.scrollIntoView();
   }, [roomName]);
 
+  // Track newly prepended messages for slide-in animation
+  const [newPrependCount, setNewPrependCount] = useState(0);
+  const prevMsgIds = useRef<Set<string>>(new Set());
+
   // Scroll position preservation when older messages are prepended
   const prevScrollHeight = useRef(0);
   useEffect(() => {
@@ -47,24 +52,48 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
     if (loadingOlder === false && prevScrollHeight.current > 0) {
       const el = containerRef.current;
       if (el) {
-        const newHeight = el.scrollHeight;
-        el.scrollTop = newHeight - prevScrollHeight.current;
+        el.scrollTop = el.scrollHeight - prevScrollHeight.current;
         prevScrollHeight.current = 0;
       }
+      // Detect prepended messages
+      const currentIds = new Set(messages.map((m) => m.id));
+      let prepended = 0;
+      for (const msg of messages) {
+        if (!prevMsgIds.current.has(msg.id)) prepended++;
+        else break; // first known message = end of prepended block
+      }
+      if (prepended > 0) {
+        setNewPrependCount(prepended);
+        setTimeout(() => setNewPrependCount(0), 600); // clear after animation (250ms anim + 300ms max stagger)
+      }
+      prevMsgIds.current = currentIds;
     }
-  }, [messages.length, loadingOlder]);
+  }, [messages, loadingOlder]);
 
-  // Scroll handler — detect near-top for loading older, track near-bottom
+  // Keep prevMsgIds in sync on normal appends
+  useEffect(() => {
+    prevMsgIds.current = new Set(messages.map((m) => m.id));
+  }, [messages]);
+
+  // Scroll handler — detect near-top for loading older (debounced), track near-bottom
+  const loadOlderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    // Track if user is near bottom
     isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
 
-    // Load older when near top
-    if (el.scrollTop < 50 && hasMore && !loadingOlder && onLoadOlder) {
-      onLoadOlder();
+    // Load older when at top — debounced 300ms buffer
+    if (el.scrollTop === 0 && hasMore && !loadingOlder && onLoadOlder) {
+      if (!loadOlderTimer.current) {
+        loadOlderTimer.current = setTimeout(() => {
+          loadOlderTimer.current = null;
+          if (containerRef.current && containerRef.current.scrollTop === 0) onLoadOlder();
+        }, 300);
+      }
+    } else if (loadOlderTimer.current) {
+      clearTimeout(loadOlderTimer.current);
+      loadOlderTimer.current = null;
     }
   }, [hasMore, loadingOlder, onLoadOlder]);
 
@@ -75,7 +104,10 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-4">Beginning of conversation</div>
       )}
       {loadingOlder && (
-        <div className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-3 animate-pulse">Loading older messages...</div>
+        <div className="flex items-center justify-center gap-1.5 py-3">
+          <Loader2 size={14} className="animate-spin text-zinc-400" />
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
+        </div>
       )}
 
       {messages.length === 0 ? (
@@ -104,8 +136,11 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
               second: "2-digit",
             });
 
+            const isNewPrepend = i < newPrependCount;
+            const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+
             return (
-              <div key={msg.id}>
+              <div key={msg.id} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
                 {showDateSep && <DateSeparator ts={msg.ts} />}
                 {msg.type === "summary" ? (
                   <SummaryCard message={msg} roomId={roomId || ""} />

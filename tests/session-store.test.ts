@@ -1,0 +1,40 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+let tempDir: string;
+
+vi.mock("../src/shared/config.js", () => ({
+  getBossmodeDir: () => tempDir,
+}));
+
+describe("session-store", () => {
+  let roomStore: typeof import("../src/workspace/room-store.js");
+  let sessionStore: typeof import("../src/workspace/session-store.js");
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bossmode-session-test-"));
+    vi.resetModules();
+    roomStore = await import("../src/workspace/room-store.js");
+    sessionStore = await import("../src/workspace/session-store.js");
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("clearSession removes resume metadata and preserves runtime", () => {
+    const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+
+    sessionStore.saveSession(room.id, "pm", {
+      runtime: "claude-cli",
+      sessionId: "session-123",
+      sessionFile: "/tmp/session.json",
+    });
+
+    sessionStore.clearSession(room.id, "pm", "claude-cli");
+
+    expect(sessionStore.getSessions(room.id).pm).toEqual({ runtime: "claude-cli" });
+  });
+});

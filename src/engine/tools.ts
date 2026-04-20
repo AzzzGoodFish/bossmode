@@ -84,50 +84,63 @@ export async function handleToolCallback(
       }));
     }
     case "save_knowledge": {
-      const room = roomStore.getRoom(roomId);
-      if (room?.knowledgeBaseId) {
-        knowledgeStore.addEntry(room.knowledgeBaseId, params?.title || "", params?.content || "", agentName);
+      const title = String(params?.title || "").trim();
+      const content = String(params?.content || "");
+      if (!title) return { ok: false, error: "title is required" };
+      try {
+        const path = params?.path ? String(params.path) : undefined;
+        const entry = knowledgeStore.addEntry(title, content, agentName, path);
+        return { ok: true, path: entry.id, title: entry.title };
+      } catch (err: any) {
+        return { ok: false, error: String(err?.message || err) };
       }
-      return { ok: true };
     }
     case "update_knowledge": {
-      const room = roomStore.getRoom(roomId);
-      if (!room?.knowledgeBaseId) return { ok: false, error: "No knowledge base linked to this room" };
-      const entryId = params?.entryId;
-      if (!entryId) return { ok: false, error: "entryId is required" };
-      const updated = knowledgeStore.updateEntry(room.knowledgeBaseId, entryId, params?.title || "", params?.content || "");
-      if (!updated) return { ok: false, error: `Entry not found: ${entryId}` };
-      return { ok: true, entry: { id: updated.id, title: updated.title } };
+      // Accept either `path` (new) or `entryId` (legacy) to identify the document
+      const docPath: string | undefined = params?.path || params?.entryId;
+      if (!docPath) return { ok: false, error: "path is required" };
+      try {
+        const updated = knowledgeStore.updateEntry(docPath, params?.title || "", params?.content || "");
+        if (!updated) return { ok: false, error: `Document not found: ${docPath}` };
+        return { ok: true, path: updated.id, title: updated.title };
+      } catch (err: any) {
+        return { ok: false, error: String(err?.message || err) };
+      }
     }
     case "delete_knowledge": {
-      const room = roomStore.getRoom(roomId);
-      if (!room?.knowledgeBaseId) return { ok: false, error: "No knowledge base linked to this room" };
-      const entryId = params?.entryId;
-      if (!entryId) return { ok: false, error: "entryId is required" };
-      const deleted = knowledgeStore.deleteEntry(room.knowledgeBaseId, entryId);
-      if (!deleted) return { ok: false, error: `Entry not found: ${entryId}` };
-      return { ok: true };
+      const docPath: string | undefined = params?.path || params?.entryId;
+      if (!docPath) return { ok: false, error: "path is required" };
+      try {
+        const deleted = knowledgeStore.deleteEntry(docPath);
+        if (!deleted) return { ok: false, error: `Document not found: ${docPath}` };
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: String(err?.message || err) };
+      }
     }
     case "query_knowledge": {
-      const room = roomStore.getRoom(roomId);
-      if (room?.knowledgeBaseId) {
-        let entries = knowledgeStore.listEntries(room.knowledgeBaseId);
-        if (params?.query) {
-          // Filtered query — return full content of matching entries
-          const q = params.query.toLowerCase();
-          entries = entries.filter((e) => e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q));
-          return entries;
-        }
-        // No query — return summaries only (title + type + id) to avoid huge payloads
-        return entries.map((e) => ({
-          id: e.id,
-          title: e.title,
-          type: e.type,
-          source: e.source,
-          contentPreview: e.content.slice(0, 200) + (e.content.length > 200 ? "..." : ""),
-        }));
+      if (params?.query) {
+        // Filtered query — return full content of matching documents
+        const matches = knowledgeStore.searchEntries(String(params.query));
+        return matches;
       }
-      return [];
+      // No query — return tree + summary list (paths and titles, no content) to stay small
+      const tree = knowledgeStore.getDocumentTree();
+      const entries = knowledgeStore.listEntries().map((e) => ({
+        path: e.id,
+        title: e.title,
+        source: e.source,
+        updatedAt: e.updatedAt,
+      }));
+      return { tree, entries };
+    }
+    case "read_knowledge": {
+      // Return full content of a specific document
+      const docPath: string | undefined = params?.path;
+      if (!docPath) return { ok: false, error: "path is required" };
+      const entry = knowledgeStore.getEntry(docPath);
+      if (!entry) return { ok: false, error: `Document not found: ${docPath}` };
+      return { ok: true, path: entry.id, title: entry.title, content: entry.content, source: entry.source };
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool
