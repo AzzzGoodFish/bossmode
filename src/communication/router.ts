@@ -38,6 +38,7 @@ export function initRouter(
       onMentionAll(roomId);
     } else {
       for (const name of message.mentions) {
+        if (name === message.sender) continue;
         onMention(roomId, name);
       }
     }

@@ -28,7 +28,7 @@ export function getOrCreateSummarizerMember(): AgentMemberConfig {
   return saveMember({
     name: "summarizer",
     agent: "summarizer",
-    model: "haiku",
+    model: "sonnet",
     runtime: "claude-cli",
     thinkingLevel: "off",
   });
@@ -83,6 +83,8 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
     throw new Error(`Runtime "${member.runtime}" not available`);
   }
 
+  const startIdx = readAllMessages(roomId).length;
+
   summarizingRooms.add(roomId);
   postMessage(roomId, "system", `Summarizing ${messages.length} messages...`);
 
@@ -112,7 +114,20 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
     await handle.prompt(prompt);
     await handle.waitForIdle();
 
-    logger.info("summarizer", "summarization complete", { roomId, messageCount: messages.length });
+    const newMessages = readAllMessages(roomId).slice(startIdx);
+    const summaryCount = newMessages.filter((m) => m.type === "summary").length;
+
+    if (summaryCount === 0) {
+      postMessage(
+        roomId,
+        "system",
+        "Summarization produced no summaries. The model may have failed to call write_summary. Try again or switch to a stronger model (e.g. sonnet).",
+      );
+      logger.warn("summarizer", "zero summaries produced", { roomId, messageCount: messages.length });
+    } else {
+      postMessage(roomId, "system", `Summarization complete: ${messages.length} messages condensed into ${summaryCount} summaries.`);
+      logger.info("summarizer", "summarization complete", { roomId, messageCount: messages.length, summaryCount });
+    }
   } catch (err: any) {
     logger.error("summarizer", "summarization failed", { roomId, error: err.message || String(err) });
     postMessage(roomId, "system", `Summarization failed: ${err.message || String(err)}`);

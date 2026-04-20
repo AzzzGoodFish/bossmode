@@ -4,7 +4,8 @@ import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as knowledgeStore from "../knowledge/store.js";
-import { emitAgentReply, activateAgent } from "./agent-manager.js";
+import { parseMentions } from "../communication/router.js";
+import { emitAgentReply } from "./agent-manager.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 
@@ -31,31 +32,46 @@ export async function handleToolCallback(
     case "chat": {
       const mentions: string[] = Array.isArray(params?.mentions) ? params.mentions : [];
       const target = params?.target || "room";
+      const message = params?.message || "";
 
       if (target === "user") {
         // Private reply: emit as agent_reply event, don't write to room messages
-        emitAgentReply(roomId, agentName, params?.message || "");
+        // F11: no mention parsing/activation on private path
+        emitAgentReply(roomId, agentName, message);
         logger.info("callback", "agent_reply", { roomId, agent: agentName });
         return { ok: true, target: "user" };
-      } else {
-        // Room message via message-bus (writes + broadcasts + notifies listeners)
-        postMessage(roomId, agentName, params?.message || "", mentions);
-        // Activate mentioned agents
-        for (const t of mentions) {
-          activateAgent(roomId, t).catch((err) => {
-            logger.error("callback", "mention activate failed", { target: t, error: String(err) });
-          });
-        }
-        return { ok: true };
       }
+
+      // Room message via message-bus (writes + broadcasts + notifies listeners)
+      // Mention activation is handled by router listener via message-bus.
+      postMessage(roomId, agentName, message, mentions);
+
+      // Soft warning: content contains @mentions not listed in mentions[]
+      try {
+        const room = roomStore.getRoom(roomId);
+        if (!room) return { ok: true };
+
+        const contentMentions = parseMentions(message, room.members).filter((m) => m !== agentName);
+        const orphanMentions = contentMentions.filter((m) => !mentions.includes(m));
+        if (orphanMentions.length > 0) {
+          const mentionList = orphanMentions.map((m) => `@${m}`).join(", ");
+          const mentionArray = orphanMentions.map((m) => `"${m}"`).join(", ");
+          return {
+            ok: true,
+            warning: `Content contains ${mentionList} but mentions[] does not include them. If you meant to activate them, resend with mentions: [${mentionArray}]. If this was only a reference, no action needed.`,
+          };
+        }
+      } catch {
+        // Silent degrade on warning-analysis failure
+      }
+
+      return { ok: true };
     }
     case "mention": {
       // Legacy — redirect to chat with mentions
+      // Mention activation is handled by router listener.
       const target = params?.agent || "";
       postMessage(roomId, agentName, params?.message || "", [target]);
-      activateAgent(roomId, target).catch((err) => {
-        logger.error("callback", "mention activate failed", { target, error: String(err) });
-      });
       return { ok: true };
     }
     case "query_room_messages": {
