@@ -15,6 +15,20 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../communicat
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { buildAgentPrompt } from "./prompt-assembler.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
+import {
+  wrapPrivateMessage,
+  wrapRoomContextMessage,
+  wrapRoomMentionMessage,
+  resolveSenderRole,
+  ROOM_REPLY_FOOTER,
+  PRIVATE_REPLY_FOOTER,
+} from "./message-envelope.js";
+import {
+  setActivationSource,
+  clearActivationSource,
+  clearAllActivationSources,
+} from "./activation-context.js";
+import { USER_DISPLAY_NAME } from "../shared/user-identity.js";
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
@@ -52,16 +66,39 @@ function instanceKey(roomId: string, agentName: string): string {
 
 // -- Format messages --
 
-function formatMessagesForAgent(messages: RoomMessage[]): string {
+function formatMessagesForAgent(messages: RoomMessage[], receiver: string, roomName: string): string {
   if (messages.length === 0) return "";
-  return messages
-    .map((m) => {
-      // Summary messages already have agent-friendly content
-      if (m.type === "summary") return m.content;
-      const sender = m.sender === "user" ? "User" : m.sender;
-      return `[${sender}]: ${m.content}`;
-    })
-    .join("\n\n");
+
+  let triggerIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.type === "summary") continue;
+    if (Array.isArray(msg.mentions) && msg.mentions.includes(receiver)) {
+      triggerIdx = i;
+      break;
+    }
+  }
+
+  if (triggerIdx === -1) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type !== "summary") {
+        triggerIdx = i;
+        break;
+      }
+    }
+  }
+
+  const wrapped = messages.map((m, idx) => {
+    if (m.type === "summary") return m.content;
+    const senderRole = resolveSenderRole(m.sender);
+    if (idx === triggerIdx) {
+      return wrapRoomMentionMessage(m, roomName, senderRole, receiver);
+    }
+    return wrapRoomContextMessage(m, roomName, senderRole);
+  });
+
+  if (triggerIdx >= 0) wrapped.push(ROOM_REPLY_FOOTER);
+  return wrapped.join("\n\n");
 }
 
 // Resolve skills: member config > agent definition > empty
@@ -146,7 +183,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       }
     }
 
-    const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, memberName, tree, ruleDocPaths);
+    const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, room.name, memberName, tree, ruleDocPaths);
 
     // Resolve skills: member config takes precedence over agent definition
     const skills = resolveSkills(member, agentDef);
@@ -279,11 +316,13 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, cursorFrom: lastCursor });
 
-  const formattedMessages = formatMessagesForAgent(newMessages);
+  const formattedMessages = formatMessagesForAgent(newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
   instance.status = "working";
   logger.info("agent", "statusChange", { member: memberName, status: "working" });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "working" });
+
+  setActivationSource(roomId, memberName, "room_mention");
 
   if (instance.handle.isWorking) {
     instance.handle.steer(formattedMessages);
@@ -393,11 +432,13 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
   try { appendEventToDisk(roomId, agentName, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
 
   // Slash commands (e.g. /compact, /model) are transparently forwarded to the CLI runtime.
-  // Only regular text gets the [Private instruction] prefix wrapper.
+  // Only regular text gets wrapped with the private envelope + footer.
   const isSlashCommand = instruction.startsWith('/');
   const userMessage = isSlashCommand
     ? instruction
-    : `[Private instruction from user]: ${instruction}`;
+    : `${wrapPrivateMessage(instruction, USER_DISPLAY_NAME)}\n\n${PRIVATE_REPLY_FOOTER}`;
+
+  setActivationSource(roomId, agentName, isSlashCommand ? "system" : "private_instruction");
 
   if (instance.handle.isWorking) {
     instance.handle.steer(userMessage);
@@ -468,6 +509,7 @@ export function resetAgentSession(roomId: string, agentName: string): { ok: true
   const runtime = member?.runtime || sessions[agentName]?.runtime || instance?.handle.runtimeName || "pi-cli";
 
   destroyInstance(roomId, agentName);
+  clearActivationSource(roomId, agentName);
   sessionStore.clearSession(roomId, agentName, runtime);
   roomStore.setCursor(roomId, agentName, null);
 
@@ -486,6 +528,7 @@ export function destroyInstance(roomId: string, memberName: string): void {
     instance.unsubscribe();
     instances.delete(key);
     contextUsageCache.delete(key);
+    clearActivationSource(roomId, memberName);
     logger.info("agent", "instance destroyed", { member: memberName, roomId });
   }
   pendingCreations.delete(key);
@@ -502,6 +545,7 @@ export async function shutdownAll(): Promise<void> {
   instances.clear();
   pendingCreations.clear();
   contextUsageCache.clear();
+  clearAllActivationSources();
   if (registry) {
     for (const rt of registry.getAll()) {
       await rt.shutdownAll().catch((err) => {

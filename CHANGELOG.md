@@ -4,6 +4,19 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.1] — 2026-04-21
+
+### Changed
+- **Message envelope delivery for agent inputs** — incoming trigger messages are now wrapped with explicit source metadata (room/private + sender) and a single footer that tells the agent how to reply (`target="room"` or `target="user"`). Batch deliveries now wrap per-message, while `summary` messages remain pass-through.
+- **Layer 5 environment prompt slimmed down** — removed duplicated `Available Tools` / `Communication Rules` sections from system prompt; tool-usage rules now live with tool descriptions.
+- **Chat tool descriptions strengthened (MCP + pi-cli parity)** — `chat` now documents envelope-authoritative target routing, mentions semantics, and rewrite behavior consistently across runtimes.
+
+### Fixed
+- **Room-activated agents replying privately** — server now enforces target safety: when activation source is room mention and agent calls `chat(target="user")`, backend rewrites to `target="room"`, posts publicly, and returns a warning.
+- **Activation-source tracking for routing safety** — added per-agent latest activation source context (`room_mention` / `private_instruction` / `system` / `self_start`) with stale-read TTL and lifecycle cleanup, enabling deterministic target enforcement.
+- **Chat tool description drift** — unified pi-cli and MCP runtime descriptions through a shared `buildChatToolDescription()` source of truth (`src/shared/chat-tool-description.ts`), eliminating wording skew between runtimes.
+- **User display name consistency in envelopes** — both room and private envelopes now render the user as `@fish` via a shared `USER_DISPLAY_NAME` constant (`src/shared/user-identity.ts`), eliminating the prior drift where private envelopes hardcoded `"fish"` while room envelopes showed the raw internal sender id `"user"`.
+
 ## [0.8.0] — 2026-04-20
 
 ### Changed (breaking: knowledge namespace & room binding)

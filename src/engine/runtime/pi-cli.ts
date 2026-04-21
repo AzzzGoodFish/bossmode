@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
+import { buildChatToolDescription } from "../../shared/chat-tool-description.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
   RuntimeCapabilities, RuntimeDetectResult, TokenUsage, ContextUsage,
@@ -15,6 +16,7 @@ import type {
 
 function generateExtension(serverUrl: string, roomId: string, agentName: string, roomMembers: string[]): string {
   const memberList = roomMembers.filter((m) => m !== agentName).join(", ");
+  const chatDescription = JSON.stringify(buildChatToolDescription(memberList));
   return `
 import { Type } from "@sinclair/typebox";
 
@@ -31,10 +33,10 @@ export default function (pi) {
   pi.registerTool({
     name: "chat",
     label: "Chat",
-    description: "Post a message. target='room' (default) sends to group chat visible to all. target='user' sends a private reply only the user sees. Use mentions[] to activate agents — this is the only activation channel. @name in message text is treated as human-readable reference only. Room members: ${memberList}",
+    description: ${chatDescription},
     parameters: Type.Object({
       message: Type.String({ description: "Message to post" }),
-      target: Type.Optional(Type.String({ description: "'room' (default, everyone sees) or 'user' (private reply)" })),
+      target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
       mentions: Type.Optional(Type.Array(Type.String(), { description: "Agent names to activate (authoritative activation channel)" })),
     }),
     async execute(id, params) {
