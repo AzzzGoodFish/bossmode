@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAgentPrompt, buildEnvironmentPrompt } from "../src/engine/prompt-assembler.js";
+import { buildAgentPrompt } from "../src/engine/prompt-assembler.js";
 import type { AgentDefinition, KnowledgeEntry } from "../src/shared/types.js";
 
 describe("General Agent: prompt-assembler split (G3)", () => {
@@ -15,14 +15,13 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     title,
     content,
     source: "test",
-    type: "knowledge",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
 
   it("returns empty agentPrompt when agent systemPrompt is empty", () => {
     const agent = makeAgent("", "general");
-    const result = buildAgentPrompt(agent, [], ["general", "pm"]);
+    const result = buildAgentPrompt(agent, [], ["general", "pm"], "bossmode dev");
     expect(result.agentPrompt).toBe("");
     expect(result.envPrompt).toContain("Room members:");
     expect(result.envPrompt).toContain("general, pm");
@@ -31,13 +30,13 @@ describe("General Agent: prompt-assembler split (G3)", () => {
 
   it("returns empty agentPrompt when systemPrompt is only whitespace", () => {
     const agent = makeAgent("  \n  ", "general");
-    const result = buildAgentPrompt(agent, [], ["general"]);
+    const result = buildAgentPrompt(agent, [], ["general"], "bossmode dev");
     expect(result.agentPrompt).toBe("");
   });
 
   it("returns non-empty agentPrompt for normal agents", () => {
     const agent = makeAgent("You are the PM of this team.", "pm");
-    const result = buildAgentPrompt(agent, [], ["pm", "dev"]);
+    const result = buildAgentPrompt(agent, [], ["pm", "dev"], "bossmode dev");
     expect(result.agentPrompt).toContain("You are the PM of this team.");
     expect(result.envPrompt).toContain("Room members:");
     expect(result.fullPrompt).toContain("You are the PM of this team.");
@@ -47,7 +46,7 @@ describe("General Agent: prompt-assembler split (G3)", () => {
   it("includes knowledge titles in agentPrompt when present (on-demand content)", () => {
     const agent = makeAgent("You are the PM.", "pm");
     const entries = [makeEntry("Design Doc", "The system uses React")];
-    const result = buildAgentPrompt(agent, entries, ["pm"]);
+    const result = buildAgentPrompt(agent, entries, ["pm"], "bossmode dev");
     // Titles are injected as a lightweight document index
     expect(result.agentPrompt).toContain("Design Doc");
     // Full content is NOT injected (retrieved on-demand via query_knowledge)
@@ -58,22 +57,23 @@ describe("General Agent: prompt-assembler split (G3)", () => {
   it("empty systemPrompt + knowledge still produces non-empty agentPrompt", () => {
     const agent = makeAgent("", "general");
     const entries = [makeEntry("Design Doc", "The system uses React")];
-    const result = buildAgentPrompt(agent, entries, ["general"]);
+    const result = buildAgentPrompt(agent, entries, ["general"], "bossmode dev");
     // Knowledge goes in agentPrompt even if L1 is empty
     expect(result.agentPrompt).toContain("Design Doc");
   });
 
-  it("envPrompt always contains communication rules", () => {
+  it("envPrompt uses envelope guidance and no tool/rules sections", () => {
     const agent = makeAgent("", "general");
-    const result = buildAgentPrompt(agent, [], ["general"]);
-    expect(result.envPrompt).toContain("Available Tools");
-    expect(result.envPrompt).toContain("Communication Rules");
-    expect(result.envPrompt).toContain("chat");
+    const result = buildAgentPrompt(agent, [], ["general"], "bossmode dev");
+    expect(result.envPrompt).toContain('group chat room "bossmode dev"');
+    expect(result.envPrompt).toContain("wrapped in envelopes");
+    expect(result.envPrompt).not.toContain("Available Tools");
+    expect(result.envPrompt).not.toContain("Communication Rules");
   });
 
   it("fullPrompt equals agentPrompt + envPrompt when agentPrompt is non-empty", () => {
     const agent = makeAgent("You are the PM.", "pm");
-    const result = buildAgentPrompt(agent, [], ["pm"]);
+    const result = buildAgentPrompt(agent, [], ["pm"], "bossmode dev");
     expect(result.fullPrompt).toBe(result.agentPrompt + "\n" + result.envPrompt);
   });
 });

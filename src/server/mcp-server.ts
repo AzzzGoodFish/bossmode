@@ -2,6 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import {
+  buildChatToolDescription,
+  CHAT_MESSAGE_PARAM_DESCRIPTION,
+  CHAT_TARGET_PARAM_DESCRIPTION,
+  CHAT_MENTIONS_PARAM_DESCRIPTION,
+} from "../shared/chat-tool-description.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
 const MAX_RESULT_CHARS = 25_000;
@@ -43,11 +49,11 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "chat",
-      `Post a message. target=\"room\" (default) sends to group chat visible to all. target=\"user\" sends a private reply only the user sees. Use mentions[] to activate agents — this is the only activation channel. @name in message text is treated as human-readable reference only. Available agents: ${otherMembers.join(", ")}`,
+      buildChatToolDescription(otherMembers.join(", ")),
       {
-        message: z.string().describe("Message to post"),
-        target: z.string().optional().describe('"room" (default, everyone sees) or "user" (private reply)'),
-        mentions: z.array(z.string()).optional().describe("Agent names to activate (authoritative activation channel)"),
+        message: z.string().describe(CHAT_MESSAGE_PARAM_DESCRIPTION),
+        target: z.string().optional().describe(CHAT_TARGET_PARAM_DESCRIPTION),
+        mentions: z.array(z.string()).optional().describe(CHAT_MENTIONS_PARAM_DESCRIPTION),
       },
       async ({ message, target, mentions }) => {
         const resultText = await callbackTool("chat", { message, target, mentions });

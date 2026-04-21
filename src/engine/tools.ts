@@ -6,6 +6,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import { parseMentions } from "../communication/router.js";
 import { emitAgentReply } from "./agent-manager.js";
+import { getActivationSource } from "./activation-context.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 
@@ -31,15 +32,30 @@ export async function handleToolCallback(
   switch (tool) {
     case "chat": {
       const mentions: string[] = Array.isArray(params?.mentions) ? params.mentions : [];
-      const target = params?.target || "room";
+      let target = params?.target || "room";
       const message = params?.message || "";
+      const source = getActivationSource(roomId, agentName);
+
+      let warning: string | undefined;
+      if (target === "user" && source === "room_mention") {
+        target = "room";
+        warning = "target: \"user\" is not allowed when activated from a room @mention. Server rewrote to \"room\". Your message was posted to the room.";
+        logger.warn("callback", "target_rewrite", {
+          roomId,
+          agent: agentName,
+          originalTarget: "user",
+          rewrittenTo: "room",
+          reason: "activated_from_room_mention",
+          source,
+        });
+      }
 
       if (target === "user") {
         // Private reply: emit as agent_reply event, don't write to room messages
         // F11: no mention parsing/activation on private path
         emitAgentReply(roomId, agentName, message);
-        logger.info("callback", "agent_reply", { roomId, agent: agentName });
-        return { ok: true, target: "user" };
+        logger.info("callback", "agent_reply", { roomId, agent: agentName, source: source || "unknown" });
+        return warning ? { ok: true, target: "user", warning } : { ok: true, target: "user" };
       }
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
@@ -49,23 +65,24 @@ export async function handleToolCallback(
       // Soft warning: content contains @mentions not listed in mentions[]
       try {
         const room = roomStore.getRoom(roomId);
-        if (!room) return { ok: true };
+        if (!room) return warning ? { ok: true, warning } : { ok: true };
 
         const contentMentions = parseMentions(message, room.members).filter((m) => m !== agentName);
         const orphanMentions = contentMentions.filter((m) => !mentions.includes(m));
         if (orphanMentions.length > 0) {
           const mentionList = orphanMentions.map((m) => `@${m}`).join(", ");
           const mentionArray = orphanMentions.map((m) => `"${m}"`).join(", ");
+          const orphanWarning = `Content contains ${mentionList} but mentions[] does not include them. If you meant to activate them, resend with mentions: [${mentionArray}]. If this was only a reference, no action needed.`;
           return {
             ok: true,
-            warning: `Content contains ${mentionList} but mentions[] does not include them. If you meant to activate them, resend with mentions: [${mentionArray}]. If this was only a reference, no action needed.`,
+            warning: warning ? `${warning} ${orphanWarning}` : orphanWarning,
           };
         }
       } catch {
         // Silent degrade on warning-analysis failure
       }
 
-      return { ok: true };
+      return warning ? { ok: true, warning } : { ok: true };
     }
     case "mention": {
       // Legacy — redirect to chat with mentions

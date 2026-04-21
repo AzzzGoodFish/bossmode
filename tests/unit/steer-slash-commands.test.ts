@@ -9,13 +9,13 @@ function buildUserMessage(instruction: string): string {
   const isSlashCommand = instruction.startsWith('/');
   return isSlashCommand
     ? instruction
-    : `[Private instruction from user]: ${instruction}`;
+    : `[Private message from user @fish]\n\n${instruction}\n\n[Reply via chat: target="user". Do not include mentions. Do not post to the room.]`;
 }
 
 describe("steerAgent slash command passthrough", () => {
-  it("regular text gets [Private instruction] prefix", () => {
+  it("regular text gets private envelope + footer", () => {
     expect(buildUserMessage("please review the code"))
-      .toBe("[Private instruction from user]: please review the code");
+      .toBe("[Private message from user @fish]\n\nplease review the code\n\n[Reply via chat: target=\"user\". Do not include mentions. Do not post to the room.]");
   });
 
   it("/compact is passed through without prefix", () => {
@@ -41,10 +41,11 @@ describe("steerAgent slash command passthrough", () => {
 
   it("text with / in the middle is NOT a slash command", () => {
     expect(buildUserMessage("check the path/to/file"))
-      .toBe("[Private instruction from user]: check the path/to/file");
+      .toBe("[Private message from user @fish]\n\ncheck the path/to/file\n\n[Reply via chat: target=\"user\". Do not include mentions. Do not post to the room.]");
   });
 
-  it("empty string gets prefix", () => {
-    expect(buildUserMessage("")).toBe("[Private instruction from user]: ");
+  it("empty string still gets private envelope", () => {
+    expect(buildUserMessage(""))
+      .toBe("[Private message from user @fish]\n\n\n\n[Reply via chat: target=\"user\". Do not include mentions. Do not post to the room.]");
   });
 });
