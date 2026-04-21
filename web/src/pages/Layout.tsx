@@ -16,10 +16,12 @@ interface LayoutProps {
 
 // agent:event types that indicate meaningful content updates (not high-frequency streaming)
 const UNREAD_EVENT_TYPES = new Set(["message_end", "agent_end", "user_steer"]);
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "bossmode_sidebar_collapsed";
 
 export function Layout({ onLogout, username }: LayoutProps) {
   const [activePage, setActivePage] = useState<ActivePage>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
 
   // Rooms list — shared between Layout (for WS subscriptions) and Sidebar (for rendering)
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -38,6 +40,14 @@ export function Layout({ onLogout, username }: LayoutProps) {
   }, []);
 
   const refreshSidebar = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
+      return next;
+    });
+  }, []);
 
   const handleRoomCreated = useCallback((room: Room) => {
     setActivePage({ type: "room", id: room.id });
@@ -171,6 +181,8 @@ export function Layout({ onLogout, username }: LayoutProps) {
         refreshKey={refreshKey}
         unreadRoomIds={unreadRooms}
         onRoomsLoaded={handleRoomsLoaded}
+        collapsed={sidebarCollapsed}
+        onToggle={toggleSidebar}
       />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">

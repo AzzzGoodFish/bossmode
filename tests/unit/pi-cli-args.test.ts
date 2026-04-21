@@ -168,4 +168,52 @@ describe("PiCliRuntime spawn args", () => {
       sessionFile: "/tmp/test.jsonl",
     });
   });
+
+  it("does not emit agent_end or reject prompt on 90s stdout inactivity timeout", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    const handle = await p;
+
+    const events: any[] = [];
+    handle.subscribe((ev) => events.push(ev));
+
+    let promptState: "pending" | "resolved" | "rejected" = "pending";
+    const promptPromise = handle.prompt("long running task");
+    promptPromise.then(() => { promptState = "resolved"; }).catch(() => { promptState = "rejected"; });
+
+    await vi.advanceTimersByTimeAsync(90000);
+    await Promise.resolve();
+
+    expect(promptState).toBe("pending");
+    expect(events.filter((e) => e.type === "agent_end")).toHaveLength(0);
+
+    const proc = spawnMock.mock.results[0].value as any;
+    expect(proc.stdin.write).not.toHaveBeenCalledWith('{"type":"abort"}\n');
+
+    handle.destroy();
+  });
 });

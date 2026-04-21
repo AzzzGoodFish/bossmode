@@ -528,14 +528,7 @@ class PiCliAgentHandle implements AgentHandle {
     this.clearActivityTimer();
     if (!this._isWorking) return;
     this.activityTimer = setTimeout(() => {
-      logger.error("runtime:pi-cli", "activity timeout", { timeoutMs: 90000, pid: this.proc.pid });
-      this._isWorking = false;
-      this.emit({ type: "agent_end" });
-      if (this.promptRejecter) {
-        this.promptRejecter(new Error("Pi CLI activity timeout (90s no output)"));
-        this.promptRejecter = null;
-      }
-      this.resolveIdle();
+      logger.warn("runtime:pi-cli", "no stdout activity for 90s — agent may be stuck", { timeoutMs: 90000, pid: this.proc.pid });
     }, 90000);
   }
 

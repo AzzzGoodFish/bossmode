@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.3] — 2026-04-21
+
+### Changed
+- **Collapsible sidebar now uses icon-only compact mode** — sidebar collapse behavior changed from full hide to a persistent narrow icon rail (`w-12`), with section icon navigation, unread aggregation dot on Rooms, header in-rail expand control, and preserved width-transition animation.
+
+### Fixed
+- **Pi CLI activity-timeout state desync** — 90s no-stdout timer is now warning-only (no forced `_isWorking=false`, no synthetic `agent_end`, no prompt rejection), preventing false timeout/"already processing" split-brain between room status and runtime activity.
+
 ## [0.8.2] — 2026-04-21
 
 ### Fixed
