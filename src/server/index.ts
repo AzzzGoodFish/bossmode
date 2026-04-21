@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
-import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates } from "../shared/config.js";
+import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates, readConfig } from "../shared/config.js";
 import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -12,6 +12,7 @@ import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiCliRuntime } from "../engine/runtime/pi-cli.js";
 import { ClaudeCliRuntime } from "../engine/runtime/claude-cli.js";
 import { logger } from "../foundation/logger.js";
+import * as roomStore from "../workspace/room-store.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -55,6 +56,21 @@ export function startServer(opts: ServerOptions): Promise<void> {
   registry.register(new PiCliRuntime(undefined, opts.port));
   registry.register(new ClaudeCliRuntime(undefined, opts.port));
   initAgentManager(registry);
+
+  // Session-resume OFF means fresh runtime sessions; reset cursors so agents receive
+  // recent room context on next activation instead of an empty incremental window.
+  const config = readConfig();
+  if (config.runtime?.sessionResume === false) {
+    let resetCount = 0;
+    for (const room of roomStore.listRooms()) {
+      const cursors = roomStore.getCursors(room.id);
+      for (const agentName of Object.keys(cursors)) {
+        roomStore.setCursor(room.id, agentName, null);
+        resetCount += 1;
+      }
+    }
+    logger.info("server", "cursors reset — session resume disabled", { resetCount });
+  }
 
   // Initialize auto-summary listener
   const unsubscribeAutoSummary = initAutoSummary();

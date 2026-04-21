@@ -36,7 +36,7 @@ const components: Components = {
     if (isInline) {
       return (
         <code
-          className="bg-zinc-800 text-emerald-400 px-1.5 py-0.5 rounded text-[0.85em] font-mono"
+          className="bg-zinc-200 text-emerald-700 dark:bg-zinc-800 dark:text-emerald-400 px-1.5 py-0.5 rounded text-[0.85em] font-mono"
           {...props}
         >
           {children}
@@ -69,14 +69,17 @@ const components: Components = {
   h2: ({ children }) => <h2 className="text-base font-bold mb-1.5 mt-2">{children}</h2>,
   h3: ({ children }) => <h3 className="text-sm font-bold mb-1 mt-2">{children}</h3>,
   a: ({ href, children }) => (
-    <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+    <a href={href} className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-zinc-600 pl-3 text-zinc-400 my-2">
+    <blockquote className="border-l-2 border-zinc-300 dark:border-zinc-600 pl-3 text-zinc-500 dark:text-zinc-400 my-2">
       {children}
     </blockquote>
+  ),
+  pre: ({ children }) => (
+    <pre className="overflow-x-auto bg-zinc-100 dark:bg-zinc-800 rounded-md p-3 my-2 text-sm">{children}</pre>
   ),
   table: ({ children }) => (
     <div className="overflow-x-auto my-2">
@@ -84,13 +87,13 @@ const components: Components = {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-zinc-700 px-2 py-1 bg-zinc-800 text-left font-medium">{children}</th>
+    <th className="border border-zinc-300 dark:border-zinc-700 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 text-left font-medium">{children}</th>
   ),
   td: ({ children }) => (
-    <td className="border border-zinc-700 px-2 py-1">{children}</td>
+    <td className="border border-zinc-300 dark:border-zinc-700 px-2 py-1">{children}</td>
   ),
-  hr: () => <hr className="border-zinc-700 my-3" />,
-  del: ({ children }) => <del className="text-zinc-500">{children}</del>,
+  hr: () => <hr className="border-zinc-300 dark:border-zinc-700 my-3" />,
+  del: ({ children }) => <del className="text-zinc-400 dark:text-zinc-500">{children}</del>,
 };
 
 interface MarkdownProps {

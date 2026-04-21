@@ -4,6 +4,16 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.2] — 2026-04-21
+
+### Fixed
+- **pi-cli Session Resume state capture** — fixed `get_state` RPC response parsing in `src/engine/runtime/pi-cli.ts` (`raw.state` → `raw.data`), so `onSessionChanged` now receives `sessionId`/`sessionFile` correctly and subsequent restarts can resume with `--session <file>`.
+- **Resume-off cursor inconsistency on restart** — when `runtime.sessionResume=false`, server startup now resets all persisted agent cursors to `null`, ensuring fresh sessions receive recent room context instead of an empty incremental window.
+- **Markdown light-theme contrast issues** — updated Markdown renderer styles (`web/src/components/Markdown.tsx`) for dual-theme compatibility (`dark:` variants) across inline code, links, blockquotes, tables, `<hr>`, and `<del>` text.
+- **Markdown long-line overflow in unfenced-language code blocks** — added explicit `pre` renderer styles (`overflow-x-auto` + dual-theme background + spacing) so long lines no longer overflow message bubbles.
+- **Restart endpoint session wipe + delayed respawn** — fixed `POST /api/members/:id/restart` (`src/api/workforce.ts`) to preserve existing `sessionId`/`sessionFile` (removed runtime-only `saveSession` overwrite) and trigger immediate background re-activation (`activateAgent`) instead of waiting for next `@mention`.
+- **Regression coverage for get_state mapping** — added unit test to assert `{ command: "get_state", success: true, data: { ... } }` triggers `onSessionChanged` with the expected session payload; added startup test coverage for cursor reset when session resume is disabled.
+
 ## [0.8.1] — 2026-04-21
 
 ### Changed

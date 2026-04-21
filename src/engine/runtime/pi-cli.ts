@@ -467,10 +467,10 @@ class PiCliAgentHandle implements AgentHandle {
     }
 
     // get_state response — extract session info
-    if (raw.type === "response" && raw.command === "get_state" && raw.success && raw.state) {
+    if (raw.type === "response" && raw.command === "get_state" && raw.success && raw.data) {
       const session = {
-        sessionId: raw.state.sessionId,
-        sessionFile: raw.state.sessionFile,
+        sessionId: raw.data.sessionId,
+        sessionFile: raw.data.sessionFile,
       };
       if (this.sessionCallback) {
         this.sessionCallback(session);
