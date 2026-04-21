@@ -10,6 +10,8 @@ import { getRegistry } from "./agent-manager.js";
 import { readConfig } from "../shared/config.js";
 import type { AgentMemberConfig, RoomMessage } from "../shared/types.js";
 
+const SUMMARY_BATCH_SIZE = 100;
+
 // -- State tracking --
 
 const summarizingRooms = new Set<string>();
@@ -90,11 +92,6 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
 
   let handle: any = null;
   try {
-    // Format messages with IDs for the summarizer
-    const formattedMessages = messages
-      .map((m) => `[${m.id}] ${m.sender}: ${m.content}`)
-      .join("\n");
-
     handle = await runtime.createAgent({
       cwd: process.cwd(),
       roomId,
@@ -109,10 +106,30 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
       },
     });
 
-    const prompt = `Analyze the following messages and create topic-based summaries using the write_summary tool.\n\n${formattedMessages}`;
+    if (messages.length <= SUMMARY_BATCH_SIZE) {
+      const formattedMessages = messages
+        .map((m) => `[${m.id}] ${m.sender}: ${m.content}`)
+        .join("\n");
+      const prompt = `Analyze the following messages and create topic-based summaries using the write_summary tool.\n\n${formattedMessages}`;
+      await handle.prompt(prompt);
+      await handle.waitForIdle();
+    } else {
+      const batches: RoomMessage[][] = [];
+      for (let i = 0; i < messages.length; i += SUMMARY_BATCH_SIZE) {
+        batches.push(messages.slice(i, i + SUMMARY_BATCH_SIZE));
+      }
 
-    await handle.prompt(prompt);
-    await handle.waitForIdle();
+      for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        postMessage(roomId, "system", `Summarizing batch ${b + 1}/${batches.length} (${batch.length} messages)...`);
+        const formattedMessages = batch
+          .map((m) => `[${m.id}] ${m.sender}: ${m.content}`)
+          .join("\n");
+        const prompt = `Analyze the following messages and create topic-based summaries using the write_summary tool.\n\n${formattedMessages}`;
+        await handle.prompt(prompt);
+        await handle.waitForIdle();
+      }
+    }
 
     const newMessages = readAllMessages(roomId).slice(startIdx);
     const summaryCount = newMessages.filter((m) => m.type === "summary").length;

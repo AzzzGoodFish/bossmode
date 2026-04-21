@@ -11,6 +11,8 @@ All notable changes to Bossmode are documented here.
 
 ### Fixed
 - **Pi CLI activity-timeout state desync** — 90s no-stdout timer is now warning-only (no forced `_isWorking=false`, no synthetic `agent_end`, no prompt rejection), preventing false timeout/"already processing" split-brain between room status and runtime activity.
+- **Claude CLI activity-timeout state desync** — aligned with Pi CLI: 90s no-stdout is warning-only (no forced state reset / synthetic `agent_end` / prompt rejection), so long-running summarize jobs no longer fail from false inactivity timeout.
+- **Summarizer large-input reliability** — added automatic batching for large rooms (`>100` messages, batch size 100) with per-batch progress messages (`Summarizing batch x/y`), improving tool-call success rate on large histories.
 
 ## [0.8.2] — 2026-04-21
 

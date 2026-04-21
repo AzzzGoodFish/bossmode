@@ -159,4 +159,51 @@ describe("summarizer completion messaging", () => {
     expect(String(zeroSummaryCall?.[2])).toContain("Try again");
     expect(successCall).toBeUndefined();
   });
+
+  it("splits large summarize jobs into batches and posts batch progress", async () => {
+    mocks.state.roomMessages = [];
+    mocks.state.unsummarized = Array.from({ length: 254 }, (_, i) => ({
+      id: `msg-${i + 1}`,
+      sender: "user",
+      content: `content ${i + 1}`,
+      mentions: [],
+      ts: i + 1,
+    }));
+
+    const handle = {
+      prompt: vi.fn(async () => {
+        const idx = handle.prompt.mock.calls.length;
+        mocks.state.roomMessages.push({
+          id: `sum-${idx}`,
+          sender: "summarizer",
+          content: `summary ${idx}`,
+          mentions: [],
+          ts: Date.now(),
+          type: "summary",
+          summary_meta: {
+            title: `topic ${idx}`,
+            covered_range: { from_id: "msg-1", to_id: "msg-1", count: 1 },
+            time_range: { from: 1, to: 1 },
+            participants: ["user"],
+          },
+        });
+      }),
+      waitForIdle: vi.fn(async () => {}),
+      destroy: vi.fn(),
+    };
+    mocks.createAgent.mockResolvedValueOnce(handle);
+
+    await summarizeRoom("room-1", 0);
+
+    expect(handle.prompt).toHaveBeenCalledTimes(3);
+
+    const batchProgress = mocks.postMessage.mock.calls
+      .map((c) => String(c[2]))
+      .filter((text) => text.startsWith("Summarizing batch"));
+    expect(batchProgress).toEqual([
+      "Summarizing batch 1/3 (100 messages)...",
+      "Summarizing batch 2/3 (100 messages)...",
+      "Summarizing batch 3/3 (54 messages)...",
+    ]);
+  });
 });
