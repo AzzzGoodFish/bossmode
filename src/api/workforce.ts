@@ -12,8 +12,7 @@ import {
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
-import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
-import * as sessionStore from "../workspace/session-store.js";
+import { getMemberInstances, destroyInstance, activateAgent } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 
 // ── Agent CRUD ──
@@ -237,6 +236,11 @@ addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
   const member = getMember(params.id);
   if (!member || !roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
   destroyInstance(roomId, member.name);
-  sessionStore.saveSession(roomId, member.name, { runtime: member.runtime });
-  sendJson(res, 200, { ok: true, message: "Instance destroyed. Will restart on next activation." });
+  sendJson(res, 200, { ok: true, message: "Instance restarting." });
+  activateAgent(roomId, member.name).catch((err) => {
+    logger.error("api", "restart activation failed", {
+      member: member.name,
+      error: String((err as Error)?.message || err),
+    });
+  });
 });

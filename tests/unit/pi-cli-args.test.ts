@@ -124,4 +124,48 @@ describe("PiCliRuntime spawn args", () => {
     expect(extensionContent).toContain('Summary created: \\"');
     expect(extensionContent).not.toMatch(/Summary created: ""/);
   });
+
+  it("maps get_state response data to onSessionChanged callback", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const onSessionChanged = vi.fn();
+
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      onSessionChanged,
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await p;
+
+    const proc = spawnMock.mock.results[0].value as any;
+    expect(proc.stdin.write).toHaveBeenCalledWith('{"type":"get_state"}\n');
+
+    proc.stdout.emit("data", Buffer.from('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"test-id","sessionFile":"/tmp/test.jsonl"}}\n'));
+
+    expect(onSessionChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionChanged).toHaveBeenCalledWith({
+      sessionId: "test-id",
+      sessionFile: "/tmp/test.jsonl",
+    });
+  });
 });
