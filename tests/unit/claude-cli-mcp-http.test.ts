@@ -164,4 +164,49 @@ describe("ClaudeCliRuntime MCP HTTP + session callback", () => {
     expect(onSessionChanged.mock.calls[0][0]).toEqual({ sessionId: "s1" });
     expect(onSessionChanged.mock.calls[1][0]).toEqual({ sessionId: "s2" });
   });
+
+  it("does not emit agent_end or reject prompt on 90s stdout inactivity timeout", async () => {
+    const { ClaudeCliRuntime } = await import("../../src/engine/runtime/claude-cli.js");
+
+    const runtime = new ClaudeCliRuntime("claude", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "claude-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    const handle = await p;
+
+    const events: any[] = [];
+    handle.subscribe((ev) => events.push(ev));
+
+    let promptState: "pending" | "resolved" | "rejected" = "pending";
+    const promptPromise = handle.prompt("summarize large room");
+    promptPromise.then(() => { promptState = "resolved"; }).catch(() => { promptState = "rejected"; });
+
+    await vi.advanceTimersByTimeAsync(90000);
+    await Promise.resolve();
+
+    expect(promptState).toBe("pending");
+    expect(events.filter((e) => e.type === "agent_end")).toHaveLength(0);
+
+    handle.destroy();
+  });
 });
