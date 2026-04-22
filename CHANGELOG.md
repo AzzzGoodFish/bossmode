@@ -4,6 +4,19 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.8] — 2026-04-22
+
+### Added
+- **Homepage room-card hub replaces empty welcome state** — the default no-selection view now shows a focused "Your Rooms" home with clickable room cards (unread indicator, cwd tail, member count, per-room working badge) plus a dashed `New Room` action; empty installations now show a `Get started` variant.
+
+### Fixed
+- **Sidebar item icon language unified** — removed per-item icons for Members/Agents/Skills and eliminated emoji usage in list rows, keeping only Room `#` markers and section-level icons for clearer hierarchy and consistent visual rhythm.
+- **Sidebar section spacing consistency** — removed extra internal divider between Members and Agents so section spacing follows one consistent pattern.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `feat: homepage room card list replaces empty welcome state; fix: unified sidebar item icons (remove emoji, remove per-item icons for members/agents/skills)`.
+
 ## [0.8.7] — 2026-04-22
 
 ### Refactor
