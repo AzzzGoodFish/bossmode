@@ -76,7 +76,6 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
 
   const agentItems: SidebarItem[] = agents.map((a) => ({
     id: a.name,
-    icon: <span className="text-base">{a.avatar || "🤖"}</span>,
     label: a.name,
     sublabel: a.description?.slice(0, 40),
   }));
@@ -243,7 +242,6 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               onCreate={() => onNavigate({ type: "member", id: null })}
             />
 
-            <div className="border-t border-zinc-200 dark:border-zinc-800/50 mt-1 pt-1" />
             <SidebarSection
               icon={<Bot size={14} />}
               label="Agents"

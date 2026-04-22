@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { Plus } from "lucide-react";
 import type { Room } from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { Main } from "./Main";
@@ -268,15 +269,95 @@ export function Layout({ onLogout, username }: LayoutProps) {
         {/* Settings */}
         {activePage?.type === "settings" && <SettingsPage />}
 
-        {/* Empty state */}
+        {/* Home */}
         {!activePage && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-zinc-400 dark:text-zinc-500 text-lg">Welcome to Bossmode</p>
-              <p className="text-zinc-400 dark:text-zinc-600 text-sm mt-1">Select an item from the sidebar</p>
-            </div>
-          </div>
+          <HomePage
+            rooms={rooms}
+            unreadRoomIds={unreadRooms}
+            onSelectRoom={(id) => setActivePage({ type: "room", id })}
+            onCreateRoom={() => setActivePage({ type: "room", id: "__new__" })}
+          />
         )}
+      </div>
+    </div>
+  );
+}
+
+interface HomePageProps {
+  rooms: Room[];
+  unreadRoomIds?: Set<string>;
+  onSelectRoom: (id: string) => void;
+  onCreateRoom: () => void;
+}
+
+function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePageProps) {
+  const hasRooms = rooms.length > 0;
+
+  return (
+    <div className="flex-1 flex flex-col items-center overflow-y-auto">
+      <div className="w-full max-w-2xl px-6 pt-20 pb-12">
+        {hasRooms ? (
+          <>
+            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Your Rooms</h1>
+            <p className="text-sm text-zinc-500 mb-8">Pick up where you left off, or start something new.</p>
+          </>
+        ) : (
+          <>
+            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Get started</h1>
+            <p className="text-sm text-zinc-500 mb-8">Create your first room to begin.</p>
+          </>
+        )}
+
+        <div className="space-y-2">
+          {rooms.map((room) => {
+            const workingCount = room.agentStatuses
+              ? Object.values(room.agentStatuses).filter((s) => s === "working").length
+              : 0;
+
+            return (
+              <button
+                key={room.id}
+                onClick={() => onSelectRoom(room.id)}
+                className="w-full text-left group rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all px-4 py-3.5 cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 group-hover:text-black dark:group-hover:text-white transition-colors">
+                        {room.name}
+                      </span>
+                      {unreadRoomIds?.has(room.id) && (
+                        <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                      <span className="font-mono truncate">{room.cwd.split("/").slice(-2).join("/")}</span>
+                      <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                      <span>{room.members.length} member{room.members.length !== 1 ? "s" : ""}</span>
+                    </div>
+                  </div>
+
+                  {workingCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5 shrink-0 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+                      {workingCount} working
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+
+          <button
+            onClick={onCreateRoom}
+            className="w-full text-left group rounded-lg border border-dashed border-zinc-300 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-900/30 transition-all px-4 py-3.5 cursor-pointer"
+          >
+            <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors">
+              <Plus size={14} />
+              <span className="text-sm">New Room</span>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );
