@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
+import { BaseCliAgentHandle } from "./base-cli-handle.js";
 import { buildChatToolDescription } from "../../shared/chat-tool-description.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
@@ -273,111 +274,28 @@ function mapPiEvent(raw: any): AgentStreamEvent | null {
 // PiCliAgentHandle
 // ============================================================================
 
-const STDERR_TAIL_MAX = 1024;
-
-class PiCliAgentHandle implements AgentHandle {
-  private proc: ChildProcessWithoutNullStreams;
-  private listeners = new Set<(event: AgentStreamEvent) => void>();
-  private _isWorking = false;
-  private idleResolvers: Array<() => void> = [];
-  private promptRejecter: ((err: Error) => void) | null = null;
-  private buffer = "";
-  private activityTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  private destroyed = false;
-  private exitEmitted = false;
-  private stderrTail = "";
-
-  readonly pid: number | undefined;
+class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
-  readonly spawnArgs: string[];
 
   constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string[], initialStderr?: string) {
-    this.proc = proc;
-    this.pid = proc.pid;
-    this.spawnArgs = spawnArgs || [];
-    if (initialStderr) this.appendStderr(initialStderr);
-
-    // Parse stdout JSONL
-    proc.stdout.on("data", (data: Buffer) => {
-      this.resetActivityTimer();
-      const text = data.toString();
-      // Emit raw stdout for debugging
-      this.emit({ type: "cli:stdout", text });
-      this.buffer += text;
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const raw = JSON.parse(line);
-          this.handleRawEvent(raw);
-        } catch { /* skip non-JSON */ }
-      }
-    });
-
-    // Handle process errors
-    proc.on("error", (err) => {
-      logger.error("runtime:pi-cli", "process error", { pid: this.pid, error: err.message });
-      if (this._isWorking) {
-        this._isWorking = false;
-        this.emit({ type: "agent_end" });
-      }
-      if (this.promptRejecter) {
-        this.promptRejecter(new Error(`Pi CLI process error: ${err.message}`));
-        this.promptRejecter = null;
-      }
-      this.resolveIdle();
-    });
-
-    proc.stdin.on("error", (err) => {
-      logger.error("runtime:pi-cli", "stdin error", { pid: this.pid, error: err.message });
-    });
-
-    // Handle process exit
-    proc.on("exit", (code, signal) => {
-      this.clearActivityTimer();
-      if (this._isWorking) {
-        this._isWorking = false;
-        this.emit({ type: "agent_end" });
-      }
-      this.emitRuntimeExit(code, signal);
-      this.resolveIdle();
-    });
+    super(proc, { spawnArgs, initialStderr });
   }
 
-  private appendStderr(text: string): void {
-    if (!text) return;
-    this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX);
+  protected get logScope(): string {
+    return "runtime:pi-cli";
   }
 
-  private emitRuntimeExit(code: number | null, signal: NodeJS.Signals | null): void {
-    if (this.exitEmitted) return;
-    this.exitEmitted = true;
-    const tail = this.stderrTail.trim();
-    this.emit({
-      type: "runtime_exit",
-      code,
-      signal: signal || null,
-      stderrTail: tail ? tail : undefined,
-      unexpected: !this.destroyed,
-    });
-  }
-
-  get isWorking(): boolean {
-    return this._isWorking;
+  protected get runtimeDisplayName(): string {
+    return "Pi CLI";
   }
 
   async prompt(message: string): Promise<void> {
-    // Intercept /compact — translate to RPC compact command
     if (message === "/compact") {
       return this.handleCompactCommand();
     }
-    const cmd = { type: "prompt", message };
     this._isWorking = true;
-    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify({ type: "prompt", message }) + "\n");
     this.resetActivityTimer();
-    // Wait for agent_end or RPC error response
     return new Promise<void>((resolve, reject) => {
       this.idleResolvers.push(resolve);
       this.promptRejecter = reject;
@@ -385,36 +303,20 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   steer(message: string): void {
-    // Intercept /compact — translate to RPC compact command
     if (message === "/compact") {
       this.handleCompactCommand().catch((err) => {
         logger.error("runtime:pi-cli", "compact failed in steer", { error: err.message });
       });
       return;
     }
-    const cmd = { type: "steer", message };
-    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify({ type: "steer", message }) + "\n");
   }
 
   abort(): void {
-    const cmd = { type: "abort" };
-    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
-  }
-
-  waitForIdle(): Promise<void> {
-    if (!this._isWorking) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      this.idleResolvers.push(resolve);
-    });
-  }
-
-  subscribe(fn: (event: AgentStreamEvent) => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    this.safeStdinWrite(JSON.stringify({ type: "abort" }) + "\n");
   }
 
   setModel(model: string): void {
-    // Parse "provider/modelId" format
     const parts = model.split("/");
     const cmd = parts.length >= 2
       ? { type: "set_model", provider: parts[0], modelId: parts.slice(1).join("/") }
@@ -423,27 +325,11 @@ class PiCliAgentHandle implements AgentHandle {
   }
 
   setThinkingLevel(level: string): void {
-    const cmd = { type: "set_thinking_level", level };
-    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify({ type: "set_thinking_level", level }) + "\n");
   }
 
-  destroy(): void {
-    this.destroyed = true;
-    this.clearActivityTimer();
-    for (const [, pending] of this.pendingRequests) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("Agent destroyed"));
-    }
-    this.pendingRequests.clear();
-    try { this.proc.kill(); } catch {}
-    this.listeners.clear();
-    this.resolveIdle();
-  }
-
-  // Query session state from pi RPC
   querySessionState(): void {
-    const cmd = { type: "get_state" };
-    this.safeStdinWrite(JSON.stringify(cmd) + "\n");
+    this.safeStdinWrite(JSON.stringify({ type: "get_state" }) + "\n");
   }
 
   private sessionCallback: ((session: { sessionId?: string; sessionFile?: string }) => void) | null = null;
@@ -452,21 +338,13 @@ class PiCliAgentHandle implements AgentHandle {
     this.sessionCallback = cb;
   }
 
-  private handleRawEvent(raw: any): void {
-    // Generic RPC response routing — match pending requests by id
-    if (raw.type === "response" && raw.id && this.pendingRequests.has(raw.id)) {
-      const pending = this.pendingRequests.get(raw.id)!;
-      this.pendingRequests.delete(raw.id);
-      clearTimeout(pending.timer);
-      if (raw.success) {
-        pending.resolve(raw.data ?? {});
-      } else {
-        pending.reject(new Error(raw.error || `RPC ${raw.command} failed`));
+  protected handleParsedLine(raw: any): void {
+    if (raw.type === "response" && raw.id) {
+      if (this.resolveRequest(raw.id, !!raw.success, raw.data, raw.error || `RPC ${raw.command} failed`)) {
+        return;
       }
-      return;
     }
 
-    // get_state response — extract session info
     if (raw.type === "response" && raw.command === "get_state" && raw.success && raw.data) {
       const session = {
         sessionId: raw.data.sessionId,
@@ -478,7 +356,6 @@ class PiCliAgentHandle implements AgentHandle {
       }
     }
 
-    // RPC error response — prompt failed (e.g. no API key, invalid model)
     if (raw.type === "response" && raw.command === "prompt" && !raw.success) {
       const errorMsg = raw.error || "prompt failed";
       logger.error("runtime:pi-cli", "prompt RPC failed", { error: errorMsg });
@@ -492,12 +369,11 @@ class PiCliAgentHandle implements AgentHandle {
       return;
     }
 
-    // Track working state
     if (raw.type === "agent_start") this._isWorking = true;
     if (raw.type === "agent_end") {
       this.clearActivityTimer();
       this._isWorking = false;
-      this.promptRejecter = null; // Clear — succeeded
+      this.promptRejecter = null;
       this.resolveIdle();
     }
 
@@ -505,57 +381,21 @@ class PiCliAgentHandle implements AgentHandle {
     if (mapped) this.emit(mapped);
   }
 
-  /** Public emit for external callers (e.g. stderr handler wired after construction) */
+  protected buildRequestPayload(id: string, type: string, params?: Record<string, unknown>): unknown {
+    return { type, id, ...(params || {}) };
+  }
+
   emitPublic(event: AgentStreamEvent): void {
     this.emit(event);
   }
 
-  /** Append to the stderr tail captured for runtime_exit reporting. */
   appendStderrPublic(text: string): void {
     this.appendStderr(text);
   }
 
-  private emit(event: AgentStreamEvent): void {
-    for (const fn of this.listeners) fn(event);
-  }
-
-  private resolveIdle(): void {
-    for (const resolve of this.idleResolvers) resolve();
-    this.idleResolvers = [];
-  }
-
-  private resetActivityTimer(): void {
-    this.clearActivityTimer();
-    if (!this._isWorking) return;
-    this.activityTimer = setTimeout(() => {
-      logger.warn("runtime:pi-cli", "no stdout activity for 90s — agent may be stuck", { timeoutMs: 90000, pid: this.proc.pid });
-    }, 90000);
-  }
-
-  private clearActivityTimer(): void {
-    if (this.activityTimer) {
-      clearTimeout(this.activityTimer);
-      this.activityTimer = null;
-    }
-  }
-
-  // -- RPC request/response matching --
-
-  private sendRpcCommand(type: string, params?: Record<string, unknown>, timeoutMs = 10000): Promise<any> {
-    const id = Math.random().toString(36).substring(2, 15);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`RPC "${type}" timed out (${timeoutMs}ms)`));
-      }, timeoutMs);
-      this.pendingRequests.set(id, { resolve, reject, timer });
-      this.safeStdinWrite(JSON.stringify({ type, id, ...params }) + "\n");
-    });
-  }
-
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
-      const stats = await this.sendRpcCommand("get_session_stats", {}, 5000);
+      const stats = await this.sendRequest("get_session_stats", {}, 5000, "RPC");
       const cu = stats?.contextUsage;
       if (!cu) return null;
       return {
@@ -576,7 +416,7 @@ class PiCliAgentHandle implements AgentHandle {
     this.emit({ type: "message_start" });
 
     try {
-      const result = await this.sendRpcCommand("compact", {}, 30000);
+      const result = await this.sendRequest("compact", {}, 30000, "RPC");
       const tokensBefore = result?.tokensBefore ?? "unknown";
       const summary = (result?.summary ?? "No summary").slice(0, 300);
       this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
@@ -587,18 +427,6 @@ class PiCliAgentHandle implements AgentHandle {
     this._isWorking = false;
     this.emit({ type: "agent_end" });
     this.resolveIdle();
-  }
-
-  private safeStdinWrite(data: string): void {
-    try {
-      if (this.proc.stdin.writable && !this.proc.killed) {
-        this.proc.stdin.write(data);
-      } else {
-        logger.error("runtime:pi-cli", "stdin not writable", { pid: this.pid, killed: this.proc.killed });
-      }
-    } catch (err: any) {
-      logger.error("runtime:pi-cli", "stdin write failed", { pid: this.pid, error: err.message });
-    }
   }
 }
 

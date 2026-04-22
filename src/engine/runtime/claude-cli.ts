@@ -5,6 +5,7 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
+import { BaseCliAgentHandle } from "./base-cli-handle.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
   RuntimeCapabilities, RuntimeDetectResult, TokenUsage, ContextUsage,
@@ -163,127 +164,50 @@ interface ClaudeParseState {
 // ClaudeCliAgentHandle
 // ============================================================================
 
-const CLAUDE_STDERR_TAIL_MAX = 1024;
-
-class ClaudeCliAgentHandle implements AgentHandle {
-  private proc: ChildProcessWithoutNullStreams;
-  private listeners = new Set<(event: AgentStreamEvent) => void>();
-  private _isWorking = false;
-  private idleResolvers: Array<() => void> = [];
-  private promptRejecter: ((err: Error) => void) | null = null;
-  private activityTimer: ReturnType<typeof setTimeout> | null = null;
-  private sessionChangeCallback: ((session: { sessionId?: string }) => void) | null = null;
-  private pendingRequests = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  private destroyed = false;
-  private exitEmitted = false;
-  private stderrTail = "";
-
-  readonly pid: number | undefined;
+class ClaudeCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
   readonly runtimeName = "claude-cli";
-  readonly spawnArgs: string[];
-  private buffer = "";
+  private sessionChangeCallback: ((session: { sessionId?: string }) => void) | null = null;
   private state: ClaudeParseState = { initialized: false, inMessage: false, toolNames: new Map() };
+  private cachedContextUsage: ContextUsage | null = null;
+  private cachedContextUsageTs = 0;
+  private static CONTEXT_CACHE_TTL = 120_000;
 
   constructor(proc: ChildProcessWithoutNullStreams, spawnArgs?: string[], initialStderr?: string) {
-    this.proc = proc;
-    this.pid = proc.pid;
-    this.spawnArgs = spawnArgs || [];
-    if (initialStderr) this.appendStderr(initialStderr);
-
-    proc.stdout.on("data", (data: Buffer) => {
-      const text = data.toString();
-      // Any stdout activity resets the timeout (not just valid JSON)
-      this.resetActivityTimer();
-      // Emit raw stdout for debugging (cli:stdout)
-      this.emit({ type: "cli:stdout", text });
-      this.buffer += text;
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const raw = JSON.parse(line);
-          this.handleRaw(raw);
-        } catch (err) { logger.warn("runtime:claude-cli", "stdout JSON parse failed", { line: line.substring(0, 200), error: String(err) }); }
-      }
-    });
-
-    proc.on("exit", (code, signal) => {
-      this.clearActivityTimer();
-      if (this._isWorking) {
-        this._isWorking = false;
-        this.emit({ type: "agent_end" });
-      }
-      this.emitRuntimeExit(code, signal);
-      this.resolveIdle();
-    });
-
-    // FIX: Handle spawn/process errors to prevent unhandled exceptions
-    proc.on("error", (err) => {
-      logger.error("runtime:claude-cli", "process error", { pid: proc.pid, error: err.message });
-      this.clearActivityTimer();
-      if (this._isWorking) {
-        this._isWorking = false;
-        this.emit({ type: "agent_end" });
-      }
-      if (this.promptRejecter) {
-        this.promptRejecter(new Error(`Claude CLI process error: ${err.message}`));
-        this.promptRejecter = null;
-      }
-      this.resolveIdle();
-    });
-
-    // FIX: Prevent unhandled errors on stdin when process exits
-    proc.stdin.on("error", (err) => {
-      logger.error("runtime:claude-cli", "stdin error", { pid: proc.pid, error: err.message });
-    });
-
-    // Emit raw stderr for debugging, and feed stderrTail for runtime_exit.
-    proc.stderr.on("data", (d: Buffer) => {
-      const text = d.toString();
-      this.appendStderr(text);
-      if (text.trim()) this.emit({ type: "cli:stderr", text });
+    super(proc, {
+      spawnArgs,
+      initialStderr,
+      captureStderr: true,
+      emitStderrEvents: true,
     });
   }
 
-  private appendStderr(text: string): void {
-    if (!text) return;
-    this.stderrTail = (this.stderrTail + text).slice(-CLAUDE_STDERR_TAIL_MAX);
+  protected get logScope(): string {
+    return "runtime:claude-cli";
   }
 
-  private emitRuntimeExit(code: number | null, signal: NodeJS.Signals | null): void {
-    if (this.exitEmitted) return;
-    this.exitEmitted = true;
-    const tail = this.stderrTail.trim();
-    this.emit({
-      type: "runtime_exit",
-      code,
-      signal: signal || null,
-      stderrTail: tail ? tail : undefined,
-      unexpected: !this.destroyed,
+  protected get runtimeDisplayName(): string {
+    return "Claude CLI";
+  }
+
+  protected onStdoutParseError(line: string, err: unknown): void {
+    logger.warn("runtime:claude-cli", "stdout JSON parse failed", {
+      line: line.substring(0, 200),
+      error: String(err),
     });
-  }
-
-  get isWorking(): boolean {
-    return this._isWorking;
   }
 
   async prompt(message: string): Promise<void> {
-    // Don't wait for init — Claude needs stdin input before it initializes.
-    // Send the message immediately; Claude will init then process it.
     this._isWorking = true;
     this.emit({ type: "agent_start" });
 
-    const userMsg = {
+    this.safeStdinWrite(JSON.stringify({
       type: "user",
       message: {
         role: "user",
         content: [{ type: "text", text: message }],
       },
-    };
-    this.safeStdinWrite(JSON.stringify(userMsg) + "\n");
+    }) + "\n");
 
-    // Activity timeout: if no stdout output within 90s, reject
     return new Promise<void>((resolve, reject) => {
       this.idleResolvers.push(resolve);
       this.promptRejecter = reject;
@@ -292,14 +216,13 @@ class ClaudeCliAgentHandle implements AgentHandle {
   }
 
   steer(message: string): void {
-    const userMsg = {
+    this.safeStdinWrite(JSON.stringify({
       type: "user",
       message: {
         role: "user",
         content: [{ type: "text", text: message }],
       },
-    };
-    this.safeStdinWrite(JSON.stringify(userMsg) + "\n");
+    }) + "\n");
   }
 
   abort(): void {
@@ -311,46 +234,21 @@ class ClaudeCliAgentHandle implements AgentHandle {
     }) + "\n");
   }
 
-  waitForIdle(): Promise<void> {
-    if (!this._isWorking) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      this.idleResolvers.push(resolve);
-    });
-  }
-
-  subscribe(fn: (event: AgentStreamEvent) => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
-
   onSessionChange(cb: (session: { sessionId?: string }) => void): void {
     this.sessionChangeCallback = cb;
   }
 
-  /** Send a control_request and wait for matching control_response */
-  private sendControlRequest(subtype: string, timeoutMs = 5000): Promise<any> {
-    const requestId = Math.random().toString(36).substring(2, 15);
-    return new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new Error(`control_request "${subtype}" timed out (${timeoutMs}ms)`));
-      }, timeoutMs);
-      this.pendingRequests.set(requestId, { resolve, reject, timer });
-      this.safeStdinWrite(JSON.stringify({
-        type: "control_request",
-        request: { subtype },
-        request_id: requestId,
-      }) + "\n");
-    });
+  protected buildRequestPayload(id: string, type: string): unknown {
+    return {
+      type: "control_request",
+      request: { subtype: type },
+      request_id: id,
+    };
   }
-
-  private cachedContextUsage: ContextUsage | null = null;
-  private cachedContextUsageTs = 0;
-  private static CONTEXT_CACHE_TTL = 120_000; // 120s — return null only after this
 
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
-      const data = await this.sendControlRequest("get_context_usage", 15000);
+      const data = await this.sendRequest("get_context_usage", {}, 15000, "control_request");
       const usage: ContextUsage = {
         totalTokens: data.totalTokens ?? 0,
         rawMaxTokens: data.rawMaxTokens ?? 0,
@@ -362,7 +260,6 @@ class ClaudeCliAgentHandle implements AgentHandle {
       return usage;
     } catch (err) {
       logger.warn("runtime:claude-cli", "getContextUsage failed", { pid: this.pid, error: String(err) });
-      // Return cached value if still fresh
       if (this.cachedContextUsage && (Date.now() - this.cachedContextUsageTs) < ClaudeCliAgentHandle.CONTEXT_CACHE_TTL) {
         return this.cachedContextUsage;
       }
@@ -370,35 +267,7 @@ class ClaudeCliAgentHandle implements AgentHandle {
     }
   }
 
-  destroy(): void {
-    this.destroyed = true;
-    this.clearActivityTimer();
-    // Reject all pending control requests
-    for (const [, pending] of this.pendingRequests) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("Agent destroyed"));
-    }
-    this.pendingRequests.clear();
-    try { this.proc.kill(); } catch {}
-    this.listeners.clear();
-    this.resolveIdle();
-  }
-
-  /** Write to stdin with safety checks — avoids crashes when process is gone */
-  private safeStdinWrite(data: string): void {
-    try {
-      if (this.proc.stdin.writable && !this.proc.killed) {
-        this.proc.stdin.write(data);
-      } else {
-        logger.error("runtime:claude-cli", "stdin not writable", { pid: this.pid, killed: this.proc.killed });
-      }
-    } catch (err: any) {
-      logger.error("runtime:claude-cli", "stdin write failed", { pid: this.pid, error: err.message });
-    }
-  }
-
-  private handleRaw(raw: any): void {
-    // DEBUG: log every raw JSON line from Claude stdout
+  protected handleParsedLine(raw: any): void {
     logger.info("runtime:claude-cli", "raw", { type: raw.type, subtype: raw.subtype, keys: Object.keys(raw) });
 
     if (raw.type === "system") {
@@ -407,7 +276,7 @@ class ClaudeCliAgentHandle implements AgentHandle {
 
       if (!this.state.initialized) {
         this.state.initialized = true;
-        logger.info("runtime:claude-cli", "init received", { sessionId: incomingSessionId, pid: this.proc.pid });
+        logger.info("runtime:claude-cli", "init received", { sessionId: incomingSessionId, pid: this.pid });
       }
 
       if (incomingSessionId && incomingSessionId !== prevSessionId) {
@@ -418,19 +287,10 @@ class ClaudeCliAgentHandle implements AgentHandle {
       }
     }
 
-    // Route control_response to pending request callbacks
     if (raw.type === "control_response" && raw.response) {
       const reqId = raw.response.request_id;
-      if (reqId && this.pendingRequests.has(reqId)) {
-        const pending = this.pendingRequests.get(reqId)!;
-        this.pendingRequests.delete(reqId);
-        clearTimeout(pending.timer);
-        if (raw.response.subtype === "success") {
-          pending.resolve(raw.response.response ?? {});
-        } else {
-          pending.reject(new Error(`control_request failed: ${raw.response.subtype}`));
-        }
-        return; // handled, don't pass to mapClaudeEvent
+      if (reqId && this.resolveRequest(reqId, raw.response.subtype === "success", raw.response.response, `control_request failed: ${raw.response.subtype}`)) {
+        return;
       }
     }
 
@@ -444,30 +304,6 @@ class ClaudeCliAgentHandle implements AgentHandle {
       }
       this.emit(event);
     }
-  }
-
-  private resetActivityTimer(): void {
-    this.clearActivityTimer();
-    if (!this._isWorking) return;
-    this.activityTimer = setTimeout(() => {
-      logger.warn("runtime:claude-cli", "no stdout activity for 90s — agent may be stuck", { timeoutMs: 90000, pid: this.proc.pid });
-    }, 90000);
-  }
-
-  private clearActivityTimer(): void {
-    if (this.activityTimer) {
-      clearTimeout(this.activityTimer);
-      this.activityTimer = null;
-    }
-  }
-
-  private emit(event: AgentStreamEvent): void {
-    for (const fn of this.listeners) fn(event);
-  }
-
-  private resolveIdle(): void {
-    for (const resolve of this.idleResolvers) resolve();
-    this.idleResolvers = [];
   }
 }
 

@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.4] — 2026-04-22
+
+### Changed
+- **Runtime handle internals refactored** — extracted `BaseCliAgentHandle` to consolidate shared lifecycle/state/request logic across `pi-cli` and `claude-cli` runtimes, eliminating duplicated implementation patterns while preserving runtime-specific protocol behavior.
+
+### Refactor
+- **Extracted base class for runtime common logic** — `refactor: extract BaseCliAgentHandle to eliminate runtime code duplication`.
+
 ## [0.8.3] — 2026-04-21
 
 ### Changed
