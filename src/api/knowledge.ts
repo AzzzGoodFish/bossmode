@@ -15,6 +15,8 @@
 
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
+import * as roomStore from "../workspace/room-store.js";
+import { logger } from "../foundation/logger.js";
 
 // -- Tree + flat list --
 
@@ -93,6 +95,10 @@ addRoute("DELETE", "/api/knowledge/entry", async (req, res) => {
       sendJson(res, 404, { error: "Document not found" });
       return;
     }
+    const affected = roomStore.updateRuleDocPaths(path);
+    if (affected > 0) {
+      logger.info("knowledge-api", "updated room ruleDocs refs after delete", { path, affectedRooms: affected });
+    }
     sendJson(res, 200, { ok: true });
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });
@@ -110,6 +116,14 @@ addRoute("POST", "/api/knowledge/move", async (req, res) => {
   try {
     const moved = knowledgeStore.moveEntry(body.from, body.to);
     if (!moved) { sendJson(res, 404, { error: "Source not found or destination conflicts" }); return; }
+    const affected = roomStore.updateRuleDocPaths(body.from, moved.id);
+    if (affected > 0) {
+      logger.info("knowledge-api", "updated room ruleDocs refs after move", {
+        from: body.from,
+        to: moved.id,
+        affectedRooms: affected,
+      });
+    }
     sendJson(res, 200, moved);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });

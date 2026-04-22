@@ -154,5 +154,57 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
       const room = JSON.parse(res.body);
       expect(room.ruleDocs).toBeUndefined();
     });
+
+    it("POST /api/knowledge/move cascades room.ruleDocs path updates", async () => {
+      const oldPath = `rules/move-${Date.now()}.md`;
+      const newPath = `rules/move-${Date.now()}-renamed.md`;
+
+      await jsonRequest(ts.port, "POST", "/api/knowledge/entries", {
+        token,
+        body: { title: "Movable rule", content: "v1", path: oldPath, source: "user" },
+      });
+
+      const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: uid("room-move"), cwd: "/tmp", members: ["pm"], ruleDocs: [oldPath] },
+      });
+      expect(roomRes.status).toBe(200);
+      const room = JSON.parse(roomRes.body) as { id: string; ruleDocs?: string[] };
+
+      const moveRes = await jsonRequest(ts.port, "POST", "/api/knowledge/move", {
+        token,
+        body: { from: oldPath, to: newPath },
+      });
+      expect(moveRes.status).toBe(200);
+
+      const updatedRoomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
+      expect(updatedRoomRes.status).toBe(200);
+      const updatedRoom = JSON.parse(updatedRoomRes.body) as { ruleDocs?: string[] };
+      expect(updatedRoom.ruleDocs).toEqual([newPath]);
+    });
+
+    it("DELETE /api/knowledge/entry cascades room.ruleDocs removal", async () => {
+      const rulePath = `rules/delete-${Date.now()}.md`;
+
+      await jsonRequest(ts.port, "POST", "/api/knowledge/entries", {
+        token,
+        body: { title: "Delete rule", content: "v1", path: rulePath, source: "user" },
+      });
+
+      const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: uid("room-delete"), cwd: "/tmp", members: ["pm"], ruleDocs: [rulePath] },
+      });
+      expect(roomRes.status).toBe(200);
+      const room = JSON.parse(roomRes.body) as { id: string };
+
+      const delRes = await jsonRequest(ts.port, "DELETE", `/api/knowledge/entry?path=${encodeURIComponent(rulePath)}`, { token });
+      expect(delRes.status).toBe(200);
+
+      const updatedRoomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
+      expect(updatedRoomRes.status).toBe(200);
+      const updatedRoom = JSON.parse(updatedRoomRes.body) as { ruleDocs?: string[] };
+      expect(updatedRoom.ruleDocs).toBeUndefined();
+    });
   });
 });

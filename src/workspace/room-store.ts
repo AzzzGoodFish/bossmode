@@ -118,6 +118,44 @@ export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | n
   return room;
 }
 
+/**
+ * Cascade update room.ruleDocs references when a knowledge doc path changes.
+ * - Move: oldPath -> newPath
+ * - Delete: remove oldPath when newPath is undefined
+ *
+ * Returns number of affected rooms.
+ */
+export function updateRuleDocPaths(oldPath: string, newPath?: string): number {
+  if (!oldPath) return 0;
+  const rooms = listRooms();
+  let affected = 0;
+
+  for (const room of rooms) {
+    const current = room.ruleDocs;
+    if (!current || current.length === 0 || !current.includes(oldPath)) continue;
+
+    let next: string[];
+    if (newPath) {
+      next = current.map((p) => (p === oldPath ? newPath : p));
+      // Deduplicate in case both oldPath and newPath existed.
+      next = Array.from(new Set(next));
+    } else {
+      next = current.filter((p) => p !== oldPath);
+    }
+
+    if (next.length > 0) {
+      room.ruleDocs = next;
+    } else {
+      delete room.ruleDocs;
+    }
+
+    writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+    affected += 1;
+  }
+
+  return affected;
+}
+
 export function listRooms(): Room[] {
   ensureRoomsDir();
 

@@ -4,6 +4,19 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.6] — 2026-04-22
+
+### Fixed
+- **RuleDocs reference cascading on knowledge changes** — moving a knowledge doc now automatically rewrites matching `room.ruleDocs` paths, and deleting a knowledge doc now removes stale `room.ruleDocs` references.
+- **Room Settings phantom-rule selection mismatch** — Room Settings now filters out non-existent rule paths when loading selection state, so selected counts and checkboxes only reflect valid documents.
+
+### API
+- **Knowledge move/delete now coordinate room bindings** — `POST /api/knowledge/move` and `DELETE /api/knowledge/entry` now trigger room-level `ruleDocs` reference reconciliation.
+
+### Tests
+- Added acceptance coverage for room `ruleDocs` cascade behavior after knowledge move and delete operations.
+- **Release note**: `fix: cascade room ruleDocs refs on knowledge move/delete; filter phantom paths in settings UI`.
+
 ## [0.8.5] — 2026-04-22
 
 ### Added
