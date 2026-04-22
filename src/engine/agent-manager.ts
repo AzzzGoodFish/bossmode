@@ -347,6 +347,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
     logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
     try {
       await instance.handle.prompt(formattedMessages);
+      transition(instance, roomId, memberName, "idle", "activate_prompt_resolved");
     } catch (err: any) {
       logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
       postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
@@ -462,6 +463,7 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
     transition(instance, roomId, agentName, "working", "steer");
     try {
       await instance.handle.prompt(userMessage);
+      transition(instance, roomId, agentName, "idle", "steer_prompt_resolved");
     } catch (err: any) {
       logger.error("agent", "steer error", { agent: agentName, error: err.message || String(err) });
       transition(instance, roomId, agentName, "idle", "steer_prompt_error");
