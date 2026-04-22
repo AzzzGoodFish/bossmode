@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.9] — 2026-04-22
+
+### Fixed
+- **Defensive idle transition after prompt resolve** — added post-`prompt()` fallback state recovery in `activateAgent` and idle-path `steerAgent` so `WORKING → IDLE` transition is guaranteed even for handle implementations that do not emit `agent_end` events (e.g. mock/test handles).
+
+### Tests
+- Revalidated member state machine acceptance coverage (SM-1/SM-2) and private-steer working-path behavior.
+- **Release note**: `fix: defensive idle transition after prompt resolve ensures WORKING→IDLE state change for all handle types`.
+
 ## [0.8.8] — 2026-04-22
 
 ### Added

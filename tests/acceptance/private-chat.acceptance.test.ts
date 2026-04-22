@@ -21,7 +21,7 @@ import type { Room, RoomMessage } from "../../src/shared/types.js";
 
 // ── Mock runtime ──
 
-import { mockPromptFn, mockSteerFn, resetMocks, setMockIsWorking } from "../helpers/mock-runtime.js";
+import { mockPromptFn, mockSteerFn, resetMocks, setMockIsWorking, setMockPromptFn } from "../helpers/mock-runtime.js";
 
 vi.mock("../../src/workforce/member-store.js", () => ({
   getMemberByName: vi.fn().mockImplementation((name: string) => ({
@@ -201,12 +201,16 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
     it("steer on working agent uses steer() not prompt()", async () => {
       const room = await createRoom("t45-test", ["pm"]);
 
-      // First activate pm via @mention (makes it "working")
+      let releasePrompt: (() => void) | null = null;
+      setMockPromptFn(async () => {
+        await new Promise<void>((resolve) => {
+          releasePrompt = resolve;
+        });
+      });
+
+      // First activate pm via @mention (keeps agent in working state)
       await sendMessage(room.id, "@pm start working");
       await new Promise((r) => setTimeout(r, 200));
-
-      // Now pm is working — set mock to reflect that
-      setMockIsWorking(true);
 
       // Steer while working
       await steer(room.id, "pm", "change direction, focus on security");
@@ -215,6 +219,9 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       // steer() should have been called (not a new prompt())
       // The mock tracks this — steer is the injection path
       expect(mockSteerFn).toHaveBeenCalled();
+
+      // Cleanup blocked prompt
+      releasePrompt?.();
     });
   });
 
