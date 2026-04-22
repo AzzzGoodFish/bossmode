@@ -4,6 +4,7 @@ import type { Room, AgentInfo, MemberInfo, SkillInfo } from "../api/client";
 import { getRooms, getAgents, getMembers, getSkills } from "../api/client";
 import { SidebarSection, type SidebarItem } from "./SidebarSection";
 import { RoomMenu } from "./RoomMenu";
+import { RoomSettingsDialog } from "./RoomSettingsDialog";
 import { useDialog } from "./dialogs";
 
 export type ActivePage =
@@ -33,6 +34,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
 
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
@@ -86,6 +88,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   }));
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
+  const settingsRoom = settingsRoomId ? rooms.find((r) => r.id === settingsRoomId) || null : null;
 
   const toggleTheme = () => {
     const isDark = document.documentElement.classList.toggle("dark");
@@ -207,11 +210,12 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
                     const newName = await prompt("New room name:");
                     if (!newName) return;
                     try {
-                      const { renameRoom } = await import("../api/client");
-                      await renameRoom(id, newName);
+                      const { updateRoomSettings } = await import("../api/client");
+                      await updateRoomSettings(id, { name: newName });
                       refresh();
                     } catch (err: any) { toast(err.message, "error"); }
                   }}
+                  onSettings={() => setSettingsRoomId(id)}
                   onDelete={async () => {
                     if (!(await confirm("Delete this room?"))) return;
                     try {
@@ -347,6 +351,19 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
             </div>
           </div>
         </div>
+      )}
+
+      {settingsRoom && (
+        <RoomSettingsDialog
+          room={settingsRoom}
+          open={!!settingsRoom}
+          onClose={() => setSettingsRoomId(null)}
+          onSaved={(updatedRoom) => {
+            setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
+            setSettingsRoomId(null);
+            refresh();
+          }}
+        />
       )}
     </div>
   );

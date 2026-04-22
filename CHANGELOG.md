@@ -4,6 +4,29 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.5] — 2026-04-22
+
+### Added
+- **Room Settings panel** — new Room menu entry (`Settings`) opens a unified dialog for room-level configuration.
+
+### Changed
+- **Room configuration editing unified** — room name, working directory (`cwd`), and rule document bindings can now be edited in one save flow from the Room Settings dialog.
+- **Shared rules tree component** — extracted reusable `RulesTree` and reused it across Create Room and Room Settings dialogs.
+- **Room menu theme parity** — RoomMenu now supports consistent light/dark theme styling.
+
+### API
+- **Room PATCH supports cwd updates** — `PATCH /api/rooms/:id` now accepts `cwd` along with `name` and `ruleDocs`.
+- **Client API unified patch helper** — added `updateRoomSettings(id, { name?, cwd?, ruleDocs? })`.
+
+### Validation & UX
+- **cwd existence validation** — backend rejects non-existent directories with `400 Directory does not exist`.
+- **cwd change warning** — UI warns that running agents must be restarted for new working directory to take effect.
+- **Save-state guards** — save disabled when no effective changes or invalid name.
+
+### Tests
+- Added acceptance coverage for room settings PATCH updates (`name/cwd/ruleDocs`) and invalid-cwd rejection.
+- **Release note**: `feat: Room Settings panel (rule docs selector, name & cwd editing)`.
+
 ## [0.8.4] — 2026-04-22
 
 ### Changed

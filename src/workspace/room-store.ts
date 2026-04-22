@@ -94,6 +94,14 @@ export function updateRoomName(roomId: string, name: string): Room | null {
   return room;
 }
 
+export function updateRoomCwd(roomId: string, cwd: string): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  room.cwd = cwd;
+  writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
+  return room;
+}
+
 /** Update the room's rule document paths (replaces any prior value). */
 export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
   const room = getRoom(roomId);

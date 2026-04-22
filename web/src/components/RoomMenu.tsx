@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Settings, Trash2 } from "lucide-react";
 
 interface RoomMenuProps {
   onRename: () => void;
+  onSettings: () => void;
   onDelete: () => void;
 }
 
-export function RoomMenu({ onRename, onDelete }: RoomMenuProps) {
+export function RoomMenu({ onRename, onSettings, onDelete }: RoomMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -35,14 +36,14 @@ export function RoomMenu({ onRename, onDelete }: RoomMenuProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-36 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden z-50">
           <button
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
               onRename();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
           >
             <Pencil size={14} />
             Rename
@@ -51,9 +52,20 @@ export function RoomMenu({ onRename, onDelete }: RoomMenuProps) {
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
+              onSettings();
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+          >
+            <Settings size={14} />
+            Settings
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
               onDelete();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-zinc-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
           >
             <Trash2 size={14} />
             Delete

@@ -70,19 +70,40 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   }
   const body = (await parseBody(req)) as {
     name?: string;
+    cwd?: string;
     ruleDocs?: string[];
   };
 
+  let changed = false;
   let updated = room;
-  if (typeof body.name === "string" && body.name.length > 0) {
+
+  if (typeof body.name === "string" && body.name.length > 0 && body.name !== room.name) {
     updated = roomStore.updateRoomName(params.id, body.name) || updated;
-  }
-  if (Array.isArray(body.ruleDocs)) {
-    updated = roomStore.updateRoomRuleDocs(params.id, body.ruleDocs) || updated;
+    changed = true;
   }
 
-  if (updated === room) {
-    sendJson(res, 400, { error: "Nothing to update (provide name or ruleDocs)" });
+  if (typeof body.cwd === "string" && body.cwd.length > 0 && body.cwd !== room.cwd) {
+    if (!existsSync(body.cwd)) {
+      sendJson(res, 400, { error: "Directory does not exist" });
+      return;
+    }
+    updated = roomStore.updateRoomCwd(params.id, body.cwd) || updated;
+    changed = true;
+  }
+
+  if (Array.isArray(body.ruleDocs)) {
+    const current = room.ruleDocs || [];
+    const next = body.ruleDocs;
+    const sameLength = current.length === next.length;
+    const sameItems = sameLength && current.every((v, i) => v === next[i]);
+    if (!sameItems) {
+      updated = roomStore.updateRoomRuleDocs(params.id, body.ruleDocs) || updated;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, or ruleDocs)" });
     return;
   }
   sendJson(res, 200, updated);

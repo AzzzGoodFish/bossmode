@@ -1,0 +1,188 @@
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Shield } from "lucide-react";
+import type { Room, KnowledgeTreeNode } from "../api/client";
+import { getKnowledgeTree, updateRoomSettings } from "../api/client";
+import { useDialog } from "./dialogs";
+import { RulesTree } from "./RulesTree";
+
+interface RoomSettingsDialogProps {
+  room: Room;
+  open: boolean;
+  onClose: () => void;
+  onSaved: (room: Room) => void;
+}
+
+export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSettingsDialogProps) {
+  const { toast } = useDialog();
+  const [name, setName] = useState(room.name);
+  const [cwd, setCwd] = useState(room.cwd);
+  const [selectedRuleDocs, setSelectedRuleDocs] = useState<Set<string>>(new Set(room.ruleDocs || []));
+  const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(room.name);
+    setCwd(room.cwd);
+    setSelectedRuleDocs(new Set(room.ruleDocs || []));
+    setError(null);
+    getKnowledgeTree().then(setTree).catch((err: any) => {
+      toast(err.message || "Failed to load knowledge tree", "error");
+    });
+  }, [open, room, toast]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  const hasChanges = useMemo(() => {
+    if (name.trim() !== room.name) return true;
+    if (cwd.trim() !== room.cwd) return true;
+    const current = room.ruleDocs || [];
+    const next = Array.from(selectedRuleDocs);
+    if (current.length !== next.length) return true;
+    return current.some((v, i) => v !== next[i]);
+  }, [name, cwd, selectedRuleDocs, room]);
+
+  const cwdChanged = cwd.trim() !== room.cwd;
+  const canSave = name.trim().length > 0 && hasChanges && !saving;
+
+  const toggleRuleDoc = (docPath: string) => {
+    setSelectedRuleDocs((prev) => {
+      const next = new Set(prev);
+      next.has(docPath) ? next.delete(docPath) : next.add(docPath);
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const patch: { name?: string; cwd?: string; ruleDocs?: string[] } = {};
+      if (name.trim() !== room.name) patch.name = name.trim();
+      if (cwd.trim() !== room.cwd) patch.cwd = cwd.trim();
+      const nextRuleDocs = Array.from(selectedRuleDocs);
+      const currentRuleDocs = room.ruleDocs || [];
+      if (nextRuleDocs.length !== currentRuleDocs.length || currentRuleDocs.some((v, i) => v !== nextRuleDocs[i])) {
+        patch.ruleDocs = nextRuleDocs;
+      }
+
+      const updated = await updateRoomSettings(room.id, patch);
+      onSaved(updated);
+      toast("Room settings saved", "success");
+      if (patch.cwd) {
+        toast("Running agents need restart to use new directory", "info");
+      }
+      onClose();
+    } catch (err: any) {
+      const msg = err.message || "Failed to save room settings";
+      setError(msg);
+      toast(msg, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Room Settings</h2>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-white text-lg transition-colors cursor-pointer"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-1">Room Name</label>
+            <input
+              autoFocus
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={`w-full bg-zinc-50 dark:bg-zinc-800 border rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 ${
+                name.trim().length === 0
+                  ? "border-red-400 dark:border-red-500"
+                  : "border-zinc-200 dark:border-zinc-700"
+              }`}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-1">Working Directory</label>
+            <input
+              type="text"
+              value={cwd}
+              onChange={(e) => setCwd(e.target.value)}
+              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+            />
+            {cwdChanged && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                <AlertCircle size={12} />
+                Running agents need restart to use new directory
+              </p>
+            )}
+            {error === "Directory does not exist" && (
+              <p className="text-xs text-red-500 dark:text-red-400 mt-1">Directory does not exist</p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 mb-1 flex items-center gap-1.5">
+              <Shield size={13} className="text-amber-500" />
+              Rule Documents ({selectedRuleDocs.size} selected)
+            </label>
+            <p className="text-xs text-zinc-500 dark:text-zinc-600 mb-2">
+              Selected docs are injected into every agent's system prompt.
+            </p>
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded p-2 max-h-56 overflow-y-auto">
+              {tree?.children && tree.children.length > 0 ? (
+                <RulesTree nodes={tree.children} selected={selectedRuleDocs} onToggle={toggleRuleDoc} />
+              ) : (
+                <p className="text-xs text-zinc-500 dark:text-zinc-600 py-4 text-center">No knowledge documents found</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end pt-3 border-t border-zinc-100 dark:border-zinc-800/50 mt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={handleSave}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

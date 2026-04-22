@@ -310,6 +310,16 @@ export async function updateRoomBindings(
   });
 }
 
+export async function updateRoomSettings(
+  id: string,
+  patch: { name?: string; cwd?: string; ruleDocs?: string[] },
+): Promise<Room> {
+  return apiFetch(`/api/rooms/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
 export async function getRoom(id: string): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`);
 }
