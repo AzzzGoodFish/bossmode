@@ -27,7 +27,19 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
     setCwd(room.cwd);
     setSelectedRuleDocs(new Set(room.ruleDocs || []));
     setError(null);
-    getKnowledgeTree().then(setTree).catch((err: any) => {
+    getKnowledgeTree().then((loadedTree) => {
+      setTree(loadedTree);
+
+      const validPaths = new Set<string>();
+      const collectPaths = (node: KnowledgeTreeNode) => {
+        if (node.kind === "file") validPaths.add(node.path);
+        node.children?.forEach(collectPaths);
+      };
+      loadedTree.children?.forEach(collectPaths);
+
+      const filtered = (room.ruleDocs || []).filter((p) => validPaths.has(p));
+      setSelectedRuleDocs(new Set(filtered));
+    }).catch((err: any) => {
       toast(err.message || "Failed to load knowledge tree", "error");
     });
   }, [open, room, toast]);
