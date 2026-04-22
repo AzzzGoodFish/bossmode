@@ -36,8 +36,7 @@ class TestHandle extends BaseCliAgentHandle {
   }
 
   async prompt(_message: string): Promise<void> {
-    this._isWorking = true;
-    return Promise.resolve();
+    return this.startWork({ type: "prompt", message: _message });
   }
 
   steer(_message: string): void {}
@@ -61,6 +60,18 @@ class TestHandle extends BaseCliAgentHandle {
 
   public resolve(id: string, success: boolean, data?: any, error?: string): boolean {
     return this.resolveRequest(id, success, data, error);
+  }
+
+  public begin(payload: unknown): Promise<void> {
+    return this.startWork(payload);
+  }
+
+  public finish(): void {
+    this.endWork();
+  }
+
+  public fail(error: string): void {
+    this.failWork(error);
   }
 }
 
@@ -103,6 +114,39 @@ describe("BaseCliAgentHandle", () => {
     await vi.advanceTimersByTimeAsync(11);
     await assertion;
     vi.useRealTimers();
+  });
+
+  it("startWork emits agent_start and resolves after endWork", async () => {
+    const proc = createFakeProc();
+    const handle = new TestHandle(proc);
+    const events: AgentStreamEvent[] = [];
+    handle.subscribe((e) => events.push(e));
+
+    let done = false;
+    const p = handle.begin({ type: "prompt", message: "hi" }).then(() => {
+      done = true;
+    });
+
+    expect(proc.stdin.write).toHaveBeenCalledWith('{"type":"prompt","message":"hi"}\n');
+    expect(events.some((e) => e.type === "agent_start")).toBe(true);
+    expect(done).toBe(false);
+
+    handle.finish();
+    await p;
+    expect(done).toBe(true);
+  });
+
+  it("failWork rejects pending prompt and emits agent_end", async () => {
+    const proc = createFakeProc();
+    const handle = new TestHandle(proc);
+    const events: AgentStreamEvent[] = [];
+    handle.subscribe((e) => events.push(e));
+
+    const p = handle.begin({ type: "prompt", message: "boom" });
+    handle.fail("boom");
+
+    await expect(p).rejects.toThrow("boom");
+    expect(events.some((e) => e.type === "agent_end")).toBe(true);
   });
 
   it("destroy rejects pending requests", async () => {

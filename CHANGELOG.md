@@ -4,6 +4,22 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.7] — 2026-04-22
+
+### Refactor
+- **Unified member state machine transitions** — centralized agent status transitions (`inactive`/`idle`/`working`) through `agent-manager.transition()`, removing scattered state writes and reducing runtime status drift risk.
+- **Runtime prompt flow templated in base class** — consolidated shared work lifecycle primitives (`startWork`, `sendCommand`, `endWork`, `failWork`) in `BaseCliAgentHandle`, reducing duplication across `pi-cli` and `claude-cli` runtimes.
+
+### Fixed
+- **Compact timeout false-failure eliminated** — `pi-cli` compact now runs as fire-and-forget command flow and completes via async response handling, removing the previous 30s RPC-timeout mismatch that could report failure despite successful compaction.
+
+### Added
+- **Summarizer timeout protection** — added 5-minute per-batch idle timeout guard in summarization flow to prevent stuck runs from hanging indefinitely.
+
+### Tests
+- Added/updated unit coverage for base runtime work lifecycle helpers and `pi-cli` compact fire-and-forget async completion path.
+- **Release note**: `refactor: unified member state machine; fix: compact fire-and-forget eliminates timeout; feat: summarizer 5min timeout protection`.
+
 ## [0.8.6] — 2026-04-22
 
 ### Fixed

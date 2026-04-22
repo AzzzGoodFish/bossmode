@@ -99,8 +99,37 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
   protected abstract get logScope(): string;
   protected abstract get runtimeDisplayName(): string;
 
-  get isWorking(): boolean {
-    return this._isWorking;
+  protected startWork(stdinPayload: unknown): Promise<void> {
+    this._isWorking = true;
+    this.emit({ type: "agent_start" });
+    this.safeStdinWrite(JSON.stringify(stdinPayload) + "\n");
+    this.resetActivityTimer();
+    return new Promise<void>((resolve, reject) => {
+      this.idleResolvers.push(resolve);
+      this.promptRejecter = reject;
+    });
+  }
+
+  protected sendCommand(payload: unknown): void {
+    this.safeStdinWrite(JSON.stringify(payload) + "\n");
+  }
+
+  protected endWork(): void {
+    this._isWorking = false;
+    this.promptRejecter = null;
+    this.clearActivityTimer();
+    this.resolveIdle();
+  }
+
+  protected failWork(error: string): void {
+    this._isWorking = false;
+    this.clearActivityTimer();
+    if (this.promptRejecter) {
+      this.promptRejecter(new Error(error));
+      this.promptRejecter = null;
+    }
+    this.emit({ type: "agent_end" });
+    this.resolveIdle();
   }
 
   waitForIdle(): Promise<void> {

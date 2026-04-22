@@ -169,6 +169,59 @@ describe("PiCliRuntime spawn args", () => {
     });
   });
 
+  it("handles /compact as fire-and-forget and resolves on async compact response", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    const handle = await p;
+    const proc = spawnMock.mock.results[0].value as any;
+
+    const events: any[] = [];
+    handle.subscribe((ev) => events.push(ev));
+
+    let compactResolved = false;
+    const compactPromise = handle.prompt("/compact").then(() => {
+      compactResolved = true;
+    });
+
+    expect(proc.stdin.write).toHaveBeenCalledWith('{"type":"compact"}\n');
+
+    await vi.advanceTimersByTimeAsync(31000);
+    expect(compactResolved).toBe(false);
+
+    proc.stdout.emit("data", Buffer.from('{"type":"response","command":"compact","success":true,"data":{"tokensBefore":1234,"summary":"trimmed"}}\n'));
+    await compactPromise;
+
+    expect(events.some((e) => e.type === "message_update" && e.text === "Compacting context...")).toBe(true);
+    expect(events.some((e) => e.type === "message_end" && String(e.text).includes("Tokens before: 1234"))).toBe(true);
+    expect(events.some((e) => e.type === "agent_end")).toBe(true);
+
+    handle.destroy();
+  });
+
   it("does not emit agent_end or reject prompt on 90s stdout inactivity timeout", async () => {
     const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
 

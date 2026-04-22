@@ -64,6 +64,20 @@ function instanceKey(roomId: string, agentName: string): string {
   return `${roomId}:${agentName}`;
 }
 
+function transition(
+  instance: AgentInstance,
+  roomId: string,
+  memberName: string,
+  newStatus: AgentStatus,
+  trigger: string,
+): void {
+  if (instance.status === newStatus) return;
+  const prev = instance.status;
+  instance.status = newStatus;
+  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
+  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: newStatus });
+}
+
 // -- Format messages --
 
 function formatMessagesForAgent(messages: RoomMessage[], receiver: string, roomName: string): string {
@@ -259,9 +273,13 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
         const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer);
-        if (newStatus) instance.status = newStatus;
-        // Unexpected CLI exit: drop the dead instance so the next mention respawns.
+        if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
+
+        // Unexpected CLI exit: notify room and drop dead instance so next mention respawns.
         if (event.type === "runtime_exit" && event.unexpected) {
+          const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
+          const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
+          postMessage(roomId, "system", `Member "${memberName}" CLI ${codeStr} unexpectedly.${detail}`);
           logger.warn("agent", "instance removed after unexpected exit", {
             member: memberName, roomId, code: event.code, signal: event.signal,
           });
@@ -318,13 +336,12 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   const formattedMessages = formatMessagesForAgent(newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
-  instance.status = "working";
-  logger.info("agent", "statusChange", { member: memberName, status: "working" });
-  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "working" });
+  const wasWorking = instance.status === "working";
+  transition(instance, roomId, memberName, "working", "activate");
 
   setActivationSource(roomId, memberName, "room_mention");
 
-  if (instance.handle.isWorking) {
+  if (wasWorking) {
     instance.handle.steer(formattedMessages);
   } else {
     logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
@@ -333,8 +350,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
     } catch (err: any) {
       logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
       postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
-      instance.status = "idle";
-      broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "idle" });
+      transition(instance, roomId, memberName, "idle", "activate_prompt_error");
     }
   }
 }
@@ -440,17 +456,15 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
 
   setActivationSource(roomId, agentName, isSlashCommand ? "system" : "private_instruction");
 
-  if (instance.handle.isWorking) {
+  if (instance.status === "working") {
     instance.handle.steer(userMessage);
   } else {
-    instance.status = "working";
-    broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "working" });
+    transition(instance, roomId, agentName, "working", "steer");
     try {
       await instance.handle.prompt(userMessage);
     } catch (err: any) {
       logger.error("agent", "steer error", { agent: agentName, error: err.message || String(err) });
-      instance.status = "idle";
-      broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
+      transition(instance, roomId, agentName, "idle", "steer_prompt_error");
     }
   }
 }
@@ -465,10 +479,8 @@ export function abortAgent(roomId: string, memberName: string): { ok: boolean; a
 
   // Abort via stdin protocol (both pi-cli and claude-cli), keep instance alive
   instance.handle.abort();
-  instance.status = "idle";
+  transition(instance, roomId, memberName, "idle", "abort");
   logger.info("agent", "aborted", { member: memberName, roomId });
-
-  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "idle" });
   return { ok: true, action: "aborted" };
 }
 
@@ -523,7 +535,7 @@ export function destroyInstance(roomId: string, memberName: string): void {
   const key = instanceKey(roomId, memberName);
   const instance = instances.get(key);
   if (instance) {
-    if (instance.handle.isWorking) instance.handle.abort();
+    instance.handle.abort();
     instance.handle.destroy();
     instance.unsubscribe();
     instances.delete(key);
