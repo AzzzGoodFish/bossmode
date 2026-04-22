@@ -95,6 +95,51 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     });
   });
 
+  // ── Room settings patch ──
+
+  describe("Room settings PATCH", () => {
+    it("PATCH /api/rooms/:id updates name, cwd, and ruleDocs", async () => {
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "settings-room", cwd: "/tmp", members: ["pm"] },
+      });
+      if (createRes.status === 501) return;
+      const room: Room = JSON.parse(createRes.body);
+
+      const patchRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}`, {
+        token,
+        body: {
+          name: "settings-room-renamed",
+          cwd: "/",
+          ruleDocs: ["bossmode/rules/dev-team-protocol.md"],
+        },
+      });
+
+      expect(patchRes.status).toBe(200);
+      const updated: Room = JSON.parse(patchRes.body);
+      expect(updated.name).toBe("settings-room-renamed");
+      expect(updated.cwd).toBe("/");
+      expect(updated.ruleDocs).toEqual(["bossmode/rules/dev-team-protocol.md"]);
+    });
+
+    it("PATCH /api/rooms/:id rejects nonexistent cwd", async () => {
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "settings-room-2", cwd: "/tmp", members: ["pm"] },
+      });
+      if (createRes.status === 501) return;
+      const room: Room = JSON.parse(createRes.body);
+
+      const patchRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}`, {
+        token,
+        body: { cwd: "/definitely-not-a-real-dir" },
+      });
+
+      expect(patchRes.status).toBe(400);
+      expect(JSON.parse(patchRes.body).error).toContain("Directory does not exist");
+    });
+  });
+
   // ── T2.7: Room list ──
 
   describe("T2.7: Room list (F17)", () => {
