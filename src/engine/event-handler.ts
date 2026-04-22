@@ -2,10 +2,9 @@
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
+import { broadcastToAgentSubscribers } from "../communication/ws.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { refreshContextUsageOnIdle } from "./agent-manager.js";
-import { postMessage } from "../communication/message-bus.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 
@@ -102,10 +101,6 @@ export function handleAgentEvent(
       type: "agent:event", roomId, agent: agentName, event,
     });
     if (event.unexpected) {
-      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
-      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
-      postMessage(roomId, "system", `Member "${agentName}" CLI ${codeStr} unexpectedly.${detail}`);
-      broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "inactive" });
       return "inactive";
     }
     return undefined;
@@ -153,7 +148,6 @@ export function handleAgentEvent(
   // Status change on agent_end
   if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
-    broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "idle" });
     // Proactively refresh context usage cache while agent is idle (responsive to control_request)
     refreshContextUsageOnIdle(roomId, agentName);
     return "idle";

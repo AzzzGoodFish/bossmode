@@ -75,7 +75,6 @@ export interface AgentHandle {
   destroy(): void;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
-  readonly isWorking: boolean;
 
   // Metadata for status reporting
   readonly pid?: number;

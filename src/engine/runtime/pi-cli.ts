@@ -293,13 +293,7 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
     if (message === "/compact") {
       return this.handleCompactCommand();
     }
-    this._isWorking = true;
-    this.safeStdinWrite(JSON.stringify({ type: "prompt", message }) + "\n");
-    this.resetActivityTimer();
-    return new Promise<void>((resolve, reject) => {
-      this.idleResolvers.push(resolve);
-      this.promptRejecter = reject;
-    });
+    return this.startWork({ type: "prompt", message });
   }
 
   steer(message: string): void {
@@ -356,25 +350,29 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
       }
     }
 
+    if (raw.type === "response" && raw.command === "compact") {
+      if (raw.success) {
+        const tokensBefore = raw.data?.tokensBefore ?? "unknown";
+        const summary = (raw.data?.summary ?? "No summary").slice(0, 300);
+        this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
+      } else {
+        this.emit({ type: "message_end", text: `Compaction failed: ${raw.error || "unknown error"}` });
+      }
+      this.endWork();
+      this.emit({ type: "agent_end" });
+      return;
+    }
+
     if (raw.type === "response" && raw.command === "prompt" && !raw.success) {
       const errorMsg = raw.error || "prompt failed";
       logger.error("runtime:pi-cli", "prompt RPC failed", { error: errorMsg });
-      this._isWorking = false;
-      this.emit({ type: "agent_end" });
-      if (this.promptRejecter) {
-        this.promptRejecter(new Error(errorMsg));
-        this.promptRejecter = null;
-      }
-      this.resolveIdle();
+      this.failWork(errorMsg);
       return;
     }
 
     if (raw.type === "agent_start") this._isWorking = true;
     if (raw.type === "agent_end") {
-      this.clearActivityTimer();
-      this._isWorking = false;
-      this.promptRejecter = null;
-      this.resolveIdle();
+      this.endWork();
     }
 
     const mapped = mapPiEvent(raw);
@@ -395,7 +393,7 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
 
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
-      const stats = await this.sendRequest("get_session_stats", {}, 5000, "RPC");
+      const stats = await this.sendRequest("get_session_stats", {}, 10000, "RPC");
       const cu = stats?.contextUsage;
       if (!cu) return null;
       return {
@@ -410,23 +408,16 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
     }
   }
 
-  private async handleCompactCommand(): Promise<void> {
+  private handleCompactCommand(): Promise<void> {
     this._isWorking = true;
     this.emit({ type: "agent_start" });
     this.emit({ type: "message_start" });
-
-    try {
-      const result = await this.sendRequest("compact", {}, 30000, "RPC");
-      const tokensBefore = result?.tokensBefore ?? "unknown";
-      const summary = (result?.summary ?? "No summary").slice(0, 300);
-      this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
-    } catch (err: any) {
-      this.emit({ type: "message_end", text: `Compaction failed: ${err.message}` });
-    }
-
-    this._isWorking = false;
-    this.emit({ type: "agent_end" });
-    this.resolveIdle();
+    this.emit({ type: "message_update", text: "Compacting context..." });
+    this.resetActivityTimer();
+    this.sendCommand({ type: "compact" });
+    return new Promise<void>((resolve) => {
+      this.idleResolvers.push(resolve);
+    });
   }
 }
 
@@ -604,13 +595,11 @@ export class PiCliRuntime implements AgentRuntime {
 
   async shutdownAll(): Promise<void> {
     for (const handle of this.handles) {
-      if (handle.isWorking) {
-        handle.abort();
-        await Promise.race([
-          handle.waitForIdle(),
-          new Promise<void>((r) => setTimeout(r, 5000)),
-        ]);
-      }
+      handle.abort();
+      await Promise.race([
+        handle.waitForIdle(),
+        new Promise<void>((r) => setTimeout(r, 5000)),
+      ]);
       handle.destroy();
     }
     this.handles = [];

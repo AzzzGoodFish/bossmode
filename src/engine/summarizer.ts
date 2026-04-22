@@ -11,6 +11,7 @@ import { readConfig } from "../shared/config.js";
 import type { AgentMemberConfig, RoomMessage } from "../shared/types.js";
 
 const SUMMARY_BATCH_SIZE = 100;
+const SUMMARIZER_TIMEOUT_MS = 300_000;
 
 // -- State tracking --
 
@@ -58,6 +59,13 @@ export function getSummarizePreview(roomId: string, keepCount: number = 50): {
 }
 
 // -- Core summarize flow --
+
+async function waitWithTimeout(handle: { waitForIdle: () => Promise<void> }, label: string): Promise<void> {
+  await Promise.race([
+    handle.waitForIdle(),
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error(`Summarizer ${label} timed out (5min)`)), SUMMARIZER_TIMEOUT_MS)),
+  ]);
+}
 
 export async function summarizeRoom(roomId: string, keepCount: number = 50): Promise<void> {
   if (summarizingRooms.has(roomId)) {
@@ -112,7 +120,7 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
         .join("\n");
       const prompt = `Analyze the following messages and create topic-based summaries using the write_summary tool.\n\n${formattedMessages}`;
       await handle.prompt(prompt);
-      await handle.waitForIdle();
+      await waitWithTimeout(handle, "summarize");
     } else {
       const batches: RoomMessage[][] = [];
       for (let i = 0; i < messages.length; i += SUMMARY_BATCH_SIZE) {
@@ -127,7 +135,7 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
           .join("\n");
         const prompt = `Analyze the following messages and create topic-based summaries using the write_summary tool.\n\n${formattedMessages}`;
         await handle.prompt(prompt);
-        await handle.waitForIdle();
+        await waitWithTimeout(handle, `batch ${b + 1}/${batches.length}`);
       }
     }
 

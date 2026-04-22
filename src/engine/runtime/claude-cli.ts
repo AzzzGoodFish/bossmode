@@ -197,21 +197,12 @@ class ClaudeCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
   }
 
   async prompt(message: string): Promise<void> {
-    this._isWorking = true;
-    this.emit({ type: "agent_start" });
-
-    this.safeStdinWrite(JSON.stringify({
+    return this.startWork({
       type: "user",
       message: {
         role: "user",
         content: [{ type: "text", text: message }],
       },
-    }) + "\n");
-
-    return new Promise<void>((resolve, reject) => {
-      this.idleResolvers.push(resolve);
-      this.promptRejecter = reject;
-      this.resetActivityTimer();
     });
   }
 
@@ -297,10 +288,7 @@ class ClaudeCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
     const mapped = mapClaudeEvent(raw, this.state);
     for (const event of mapped) {
       if (event.type === "agent_end") {
-        this._isWorking = false;
-        this.promptRejecter = null;
-        this.clearActivityTimer();
-        this.resolveIdle();
+        this.endWork();
       }
       this.emit(event);
     }
@@ -533,13 +521,11 @@ export class ClaudeCliRuntime implements AgentRuntime {
 
   async shutdownAll(): Promise<void> {
     for (const handle of this.handles) {
-      if (handle.isWorking) {
-        handle.abort();
-        await Promise.race([
-          handle.waitForIdle(),
-          new Promise<void>((r) => setTimeout(r, 5000)),
-        ]);
-      }
+      handle.abort();
+      await Promise.race([
+        handle.waitForIdle(),
+        new Promise<void>((r) => setTimeout(r, 5000)),
+      ]);
       handle.destroy();
     }
     this.handles = [];
