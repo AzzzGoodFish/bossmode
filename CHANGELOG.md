@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.11] — 2026-04-23
+
+### Added
+- **Agent prompt governance overhaul** — upgraded core role prompts with stronger collaboration contracts: PM coordination-first behavior and no code-based root-cause work, Architect root-cause depth evaluation (surface patch vs proper fix), Developer problem-escalation thresholds, Designer visual-code delivery model, and QA adversarial testing + test-gap audit expectations.
+- **Team protocol v2** — expanded Dev Team collaboration rules with explicit role boundaries, dedicated Bug Fix / UI Fix / Release workflows, onboarding responsibilities, and knowledge-discipline structure guidance.
+- **Universal agent principles rule** — introduced cross-role rule document with three default execution principles: *Act First, Ask Second*; *See It Through*; *Be Concise*.
+- **Team template seeding generalization** — rule seed logic now scans all team templates under `templates/teams/` instead of hardcoding a single file.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `feat: agent prompt governance — role boundaries, root cause investigation, problem escalation, designer code delivery, adversarial QA; team protocol v2 with bug fix/UI fix/release workflows, onboarding, knowledge discipline; universal agent principles rule (act first, see it through, be concise); seed logic scans all team templates`.
+
 ## [0.8.10] — 2026-04-23
 
 ### Fixed
