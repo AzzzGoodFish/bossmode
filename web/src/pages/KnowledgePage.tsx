@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Plus, Trash2, Pencil, FolderPlus, File as FileIcon,
   Folder, FolderOpen, ChevronRight, ChevronDown,
@@ -19,7 +19,11 @@ const DEFAULT_WIDTH = 260;
 const MIN_WIDTH = 160;
 const MAX_WIDTH_RATIO = 0.5;
 
-export function KnowledgePage() {
+interface KnowledgePageProps {
+  initialPath?: string;
+}
+
+export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
   const { toast, confirm, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -56,6 +60,29 @@ export function KnowledgePage() {
   useEffect(() => { refreshTree(); }, [refreshTree]);
 
   useEffect(() => {
+    if (!initialPath || initialPath === "__new__") return;
+    const topLevel = initialPath.split("/")[0];
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.add(topLevel);
+      return next;
+    });
+    if (initialPath.endsWith(".md")) {
+      setSelectedPath(initialPath);
+    } else {
+      setSelectedPath(null);
+    }
+  }, [initialPath]);
+
+  const lastCreateTriggerRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialPath !== "__new__") return;
+    if (lastCreateTriggerRef.current === initialPath) return;
+    lastCreateTriggerRef.current = initialPath;
+    handleCreateDoc("");
+  }, [initialPath]);
+
+  useEffect(() => {
     if (!selectedPath) { setCurrentDoc(null); return; }
     getKnowledgeEntry(selectedPath).then((doc) => {
       setCurrentDoc(doc);
@@ -67,6 +94,24 @@ export function KnowledgePage() {
       setCurrentDoc(null);
     });
   }, [selectedPath, toast]);
+
+  const folderNode = useMemo(() => {
+    if (!tree || !initialPath || initialPath === "__new__") return null;
+    if (initialPath.endsWith(".md")) return null;
+    if (selectedPath) return null;
+    return findNodeByPath(tree, initialPath);
+  }, [tree, initialPath, selectedPath]);
+
+  useEffect(() => {
+    if (!initialPath || initialPath === "__new__" || initialPath.endsWith(".md")) return;
+    const topLevel = initialPath.split("/")[0];
+    const el = document.querySelector(`[data-folder-path="${topLevel}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el.classList.add("folder-pulse");
+    const timer = setTimeout(() => el.classList.remove("folder-pulse"), 1000);
+    return () => clearTimeout(timer);
+  }, [initialPath, tree]);
 
   const toggleExpanded = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -271,6 +316,13 @@ export function KnowledgePage() {
                 </div>
               </div>
             )
+          ) : folderNode ? (
+            <FolderOverview
+              node={folderNode}
+              onSelectDoc={(path) => setSelectedPath(path)}
+              onCreateDoc={() => handleCreateDoc(folderNode.path)}
+              onCreateFolder={() => handleCreateFolder(folderNode.path)}
+            />
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-zinc-400">
               Select a document from the tree to view it.
@@ -330,6 +382,7 @@ function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onC
     return (
       <li>
         <div style={indent}
+          data-folder-path={node.path}
           className="group flex items-center justify-between py-1 pr-1 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 cursor-pointer"
           onClick={() => onToggle(node.path)}
         >
@@ -391,4 +444,144 @@ function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onC
       </div>
     </li>
   );
+}
+
+function FolderOverview({
+  node,
+  onSelectDoc,
+  onCreateDoc,
+  onCreateFolder,
+}: {
+  node: KnowledgeTreeNode;
+  onSelectDoc: (path: string) => void;
+  onCreateDoc: () => void;
+  onCreateFolder: () => void;
+}) {
+  const children = node.children ?? [];
+  const subfolders = children.filter((c) => c.kind === "folder");
+  const rootDocs = children.filter((c) => c.kind === "file");
+  const totalDocs = useMemo(() => countDocs(node), [node]);
+
+  return (
+    <div className="p-6 max-w-3xl">
+      <div className="flex items-start justify-between mb-6">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <Folder size={20} className="text-zinc-500 shrink-0" />
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white truncate">{node.name}</h2>
+          </div>
+          <div className="text-xs text-zinc-500">
+            {totalDocs} document{totalDocs !== 1 ? "s" : ""}
+            {subfolders.length > 0 && ` · ${subfolders.length} subfolder${subfolders.length !== 1 ? "s" : ""}`}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={onCreateFolder}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer"
+          >
+            <FolderPlus size={14} /> New folder
+          </button>
+          <button
+            onClick={onCreateDoc}
+            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded cursor-pointer"
+          >
+            <Plus size={14} /> New document
+          </button>
+        </div>
+      </div>
+
+      {rootDocs.length > 0 && (
+        <div className="mb-6">
+          <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Documents</div>
+          <div className="space-y-1">
+            {rootDocs.map((doc) => (
+              <DocRow key={doc.path} node={doc} onClick={() => onSelectDoc(doc.path)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {subfolders.map((sub) => (
+        <FolderGroup key={sub.path} node={sub} onSelectDoc={onSelectDoc} />
+      ))}
+
+      {totalDocs === 0 && subfolders.length === 0 && (
+        <div className="text-center py-12 text-sm text-zinc-400">
+          This folder is empty. Click "New document" to add one.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FolderGroup({ node, onSelectDoc }: { node: KnowledgeTreeNode; onSelectDoc: (path: string) => void }) {
+  const [expanded, setExpanded] = useState(true);
+  const docs = collectDocs(node);
+  const COLLAPSED_THRESHOLD = 5;
+  const shouldCollapse = docs.length > COLLAPSED_THRESHOLD;
+  const visible = !shouldCollapse || expanded ? docs : docs.slice(0, 3);
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{node.name}</div>
+        <span className="text-[10px] text-zinc-400 tabular-nums">{docs.length}</span>
+      </div>
+      <div className="space-y-1">
+        {visible.map((doc) => (
+          <DocRow key={doc.path} node={doc} onClick={() => onSelectDoc(doc.path)} />
+        ))}
+        {shouldCollapse && !expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 px-3 py-1.5 cursor-pointer"
+          >
+            Show {docs.length - 3} more…
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DocRow({ node, onClick }: { node: KnowledgeTreeNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer group"
+    >
+      <FileIcon size={14} className="text-zinc-400 dark:text-zinc-600 shrink-0" />
+      <span className="text-sm text-zinc-800 dark:text-zinc-300 group-hover:text-zinc-900 dark:group-hover:text-white truncate">
+        {node.title || node.name.replace(/\.md$/i, "")}
+      </span>
+    </button>
+  );
+}
+
+function collectDocs(node: KnowledgeTreeNode): KnowledgeTreeNode[] {
+  const out: KnowledgeTreeNode[] = [];
+  for (const c of node.children ?? []) {
+    if (c.kind === "file") out.push(c);
+    else out.push(...collectDocs(c));
+  }
+  return out;
+}
+
+function countDocs(node: KnowledgeTreeNode): number {
+  let n = 0;
+  for (const c of node.children ?? []) {
+    if (c.kind === "file") n++;
+    else n += countDocs(c);
+  }
+  return n;
+}
+
+function findNodeByPath(root: KnowledgeTreeNode, path: string): KnowledgeTreeNode | null {
+  if (root.path === path) return root;
+  for (const child of root.children ?? []) {
+    const found = findNodeByPath(child, path);
+    if (found) return found;
+  }
+  return null;
 }

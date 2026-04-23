@@ -515,6 +515,26 @@ export interface RuntimeSettings {
   sessionResume: boolean;
 }
 
+export interface TeamUpdateCandidate {
+  category: "agent" | "skill" | "rule";
+  relativePath: string;
+  name: string;
+  status: "new" | "updated" | "modified";
+}
+
+export interface TeamUpdateCheckResult {
+  hasUpdates: boolean;
+  currentVersion: string;
+  installedVersion: string;
+  candidates: TeamUpdateCandidate[];
+  dismissed: boolean;
+}
+
+export interface TeamUpdateSettings {
+  dismissPermanent: boolean;
+  installedVersion: string;
+}
+
 export async function getSummarySettings(): Promise<SummarySettings> {
   return apiFetch("/api/settings/summary");
 }
@@ -534,5 +554,36 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
   return apiFetch("/api/settings/runtime", {
     method: "PUT",
     body: JSON.stringify({ sessionResume }),
+  });
+}
+
+// -- Built-in Team Updates --
+
+export async function checkTeamUpdates(): Promise<TeamUpdateCheckResult> {
+  return apiFetch("/api/team-updates/check");
+}
+
+export async function applyTeamUpdates(paths: string[]): Promise<{ applied: string[]; skipped: string[]; errors: string[] }> {
+  return apiFetch("/api/team-updates/apply", {
+    method: "POST",
+    body: JSON.stringify({ paths }),
+  });
+}
+
+export async function dismissTeamUpdate(type: "version" | "permanent", version?: string): Promise<void> {
+  await apiFetch("/api/team-updates/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ type, version }),
+  });
+}
+
+export async function getTeamUpdateSettings(): Promise<TeamUpdateSettings> {
+  return apiFetch("/api/team-updates/settings");
+}
+
+export async function updateTeamUpdateSettings(dismissPermanent: boolean): Promise<TeamUpdateSettings> {
+  return apiFetch("/api/team-updates/settings", {
+    method: "POST",
+    body: JSON.stringify({ dismissPermanent }),
   });
 }

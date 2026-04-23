@@ -52,3 +52,11 @@ textarea::-webkit-scrollbar {
 .msg-enter {
   animation: slide-in-top 250ms ease-out both;
 }
+
+@keyframes folder-pulse {
+  0%, 100% { background-color: transparent; }
+  30% { background-color: rgb(59 130 246 / 0.15); }
+}
+.folder-pulse {
+  animation: folder-pulse 900ms ease-out;
+}

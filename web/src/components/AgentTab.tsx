@@ -453,6 +453,7 @@ function AgentChat({
   const [uploading, setUploading] = useState(false);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isNearBottom = useRef(true);
@@ -529,6 +530,29 @@ function AgentChat({
       loadOlderTimer.current = null;
     }
   }, [hasMore, loadingOlder, onLoadOlder]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const stickToBottomIfNeeded = () => {
+      if (isNearBottom.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    };
+
+    const contentRO = new ResizeObserver(stickToBottomIfNeeded);
+    contentRO.observe(content);
+
+    const containerRO = new ResizeObserver(stickToBottomIfNeeded);
+    containerRO.observe(container);
+
+    return () => {
+      contentRO.disconnect();
+      containerRO.disconnect();
+    };
+  }, []);
 
   const addFiles = useCallback((files: File[]) => {
     setPendingFiles((prev) => [
@@ -644,41 +668,43 @@ function AgentChat({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
-        {hasMore === false && chatEvents.length > 0 && (
-          <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of conversation</div>
-        )}
-        {loadingOlder && (
-          <div className="flex items-center justify-center gap-1.5 py-2">
-            <Loader2 size={14} className="animate-spin text-zinc-400" />
-            <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
-          </div>
-        )}
-        {chatEvents.length === 0 && !isWorking && (
-          <div className="text-zinc-600 text-center py-8">
-            Send a private instruction to {agentName}...
-          </div>
-        )}
-        {chatEvents.map((event, i) => {
-          const isNewPrepend = i < newPrependCount;
-          const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
-          return (
-          <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
-            <MessageBubble
-              sender={event.type === "user_steer" ? "user" : event.type === "system" ? "system" : agentName}
-              content={event.text || ""}
-              isMarkdown={event.type !== "user_steer"}
-              time={event.ts ? formatTime(event.ts) : undefined}
-              fullTime={event.ts ? new Date(event.ts).toLocaleString() : undefined}
-            />
-          </div>
-          );
-        })}
-        {isWorking && (
-          <div className="text-zinc-500 text-xs flex items-center gap-2 py-1">
-            <span className="animate-pulse">●</span> {agentName} is working...
-          </div>
-        )}
-        <div ref={bottomRef} />
+        <div ref={contentRef}>
+          {hasMore === false && chatEvents.length > 0 && (
+            <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of conversation</div>
+          )}
+          {loadingOlder && (
+            <div className="flex items-center justify-center gap-1.5 py-2">
+              <Loader2 size={14} className="animate-spin text-zinc-400" />
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
+            </div>
+          )}
+          {chatEvents.length === 0 && !isWorking && (
+            <div className="text-zinc-600 text-center py-8">
+              Send a private instruction to {agentName}...
+            </div>
+          )}
+          {chatEvents.map((event, i) => {
+            const isNewPrepend = i < newPrependCount;
+            const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+            return (
+            <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
+              <MessageBubble
+                sender={event.type === "user_steer" ? "user" : event.type === "system" ? "system" : agentName}
+                content={event.text || ""}
+                isMarkdown={event.type !== "user_steer"}
+                time={event.ts ? formatTime(event.ts) : undefined}
+                fullTime={event.ts ? new Date(event.ts).toLocaleString() : undefined}
+              />
+            </div>
+            );
+          })}
+          {isWorking && (
+            <div className="text-zinc-500 text-xs flex items-center gap-2 py-1">
+              <span className="animate-pulse">●</span> {agentName} is working...
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {/* File preview */}
@@ -785,6 +811,7 @@ function AgentActivity({
   onLoadOlder: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true);
   const prevEventCount = useRef(0);
@@ -864,41 +891,66 @@ function AgentActivity({
     }
   }, [hasMore, loadingOlder, onLoadOlder]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const stickToBottomIfNeeded = () => {
+      if (isNearBottom.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    };
+
+    const contentRO = new ResizeObserver(stickToBottomIfNeeded);
+    contentRO.observe(content);
+
+    const containerRO = new ResizeObserver(stickToBottomIfNeeded);
+    containerRO.observe(container);
+
+    return () => {
+      contentRO.disconnect();
+      containerRO.disconnect();
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
-      {hasMore === false && hasVisibleContent && (
-        <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of activity</div>
-      )}
-      {loadingOlder && (
-        <div className="flex items-center justify-center gap-1.5 py-2">
-          <Loader2 size={14} className="animate-spin text-zinc-400" />
-          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier events</span>
-        </div>
-      )}
-      {!hasVisibleContent && streamingText === null && (
-        <div className="text-zinc-600 text-center py-8">
-          {loading ? "Loading history..." : "Waiting for agent activity..."}
-        </div>
-      )}
-      {committed.map((event, i) => {
-        const isNewPrepend = i < newPrependCount;
-        const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
-        return (
-          <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
-            <ActivityItem event={event} agentName={agentName} />
+      <div ref={contentRef}>
+        {hasMore === false && hasVisibleContent && (
+          <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of activity</div>
+        )}
+        {loadingOlder && (
+          <div className="flex items-center justify-center gap-1.5 py-2">
+            <Loader2 size={14} className="animate-spin text-zinc-400" />
+            <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier events</span>
           </div>
-        );
-      })}
-      {streamingThinking !== null && streamingThinking.length > 0 && (
-        <ThinkingCard thinking={streamingThinking} isStreaming />
-      )}
-      {streamingText !== null && streamingText.length > 0 && (
-        <div className="text-zinc-300 whitespace-pre-wrap">
-          {streamingText}
-          <span className="text-zinc-600 animate-pulse">▊</span>
-        </div>
-      )}
-      <div ref={bottomRef} />
+        )}
+        {!hasVisibleContent && streamingText === null && (
+          <div className="text-zinc-600 text-center py-8">
+            {loading ? "Loading history..." : "Waiting for agent activity..."}
+          </div>
+        )}
+        {committed.map((event, i) => {
+          const isNewPrepend = i < newPrependCount;
+          const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+          return (
+            <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
+              <ActivityItem event={event} agentName={agentName} />
+            </div>
+          );
+        })}
+        {streamingThinking !== null && streamingThinking.length > 0 && (
+          <ThinkingCard thinking={streamingThinking} isStreaming />
+        )}
+        {streamingText !== null && streamingText.length > 0 && (
+          <div className="text-zinc-300 whitespace-pre-wrap">
+            {streamingText}
+            <span className="text-zinc-600 animate-pulse">▊</span>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 }
