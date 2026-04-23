@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.8.10] — 2026-04-23
+
+### Fixed
+- **Unified timestamp style across chat surfaces** — aligned timestamp typography and placement across room chat, private chat, and activity views (`11px`, `tabular-nums`, consistent inline positioning next to sender/header labels).
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: unified timestamp style across room chat, private chat, and activity views (11px, tabular-nums, consistent positioning)`.
+
 ## [0.8.9] — 2026-04-22
 
 ### Fixed

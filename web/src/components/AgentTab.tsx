@@ -667,8 +667,9 @@ function AgentChat({
               sender={event.type === "user_steer" ? "user" : event.type === "system" ? "system" : agentName}
               content={event.text || ""}
               isMarkdown={event.type !== "user_steer"}
+              time={event.ts ? formatTime(event.ts) : undefined}
+              fullTime={event.ts ? new Date(event.ts).toLocaleString() : undefined}
             />
-            {event.ts && <div className="text-[10px] text-zinc-700 mt-0.5 px-1">{formatTime(event.ts)}</div>}
           </div>
           );
         })}
@@ -902,26 +903,30 @@ function AgentActivity({
   );
 }
 
+const TS_CLS = "text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums";
+
 function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: string }) {
-  const time = event.ts ? <span className="text-[10px] text-zinc-700 ml-2">{formatTime(event.ts)}</span> : null;
+  const ts = event.ts ? formatTime(event.ts) : undefined;
+  const fullTs = event.ts ? new Date(event.ts).toLocaleString() : undefined;
+  const inlineTs = ts ? <span className={`${TS_CLS} ml-2`} title={fullTs}>{ts}</span> : null;
 
   switch (event.type) {
     case "agent_start":
-      return <div className="text-[10px] text-zinc-600 flex items-center gap-1">▶ Agent started {time}</div>;
+      return <div className="text-[11px] text-zinc-500 flex items-center gap-1">▶ Agent started {inlineTs}</div>;
     case "agent_end":
-      return <div className="text-[10px] text-zinc-600 flex items-center gap-1">■ Agent finished {time}</div>;
+      return <div className="text-[11px] text-zinc-500 flex items-center gap-1">■ Agent finished {inlineTs}</div>;
     case "thinking":
-      return <div><ThinkingCard thinking={event.thinking || ""} />{time}</div>;
+      return <ThinkingCard thinking={event.thinking || ""} time={ts} fullTime={fullTs} />;
     case "message":
-      return <div><MessageCard text={event.text || ""} />{time}</div>;
+      return <MessageCard text={event.text || ""} time={ts} fullTime={fullTs} />;
     case "tool":
-      return <div><ToolCard event={event} />{time}</div>;
+      return <ToolCard event={event} time={ts} fullTime={fullTs} />;
     case "user_steer":
-      return <div><MessageBubble sender="user" content={event.text || ""} />{time}</div>;
+      return <MessageBubble sender="user" content={event.text || ""} time={ts} fullTime={fullTs} />;
     case "agent_reply":
-      return <div><MessageCard text={event.text || ""} label="DM Reply" />{time}</div>;
+      return <MessageCard text={event.text || ""} label="DM Reply" time={ts} fullTime={fullTs} />;
     case "system":
-      return <div><MessageBubble sender="system" content={event.text || ""} />{time}</div>;
+      return <MessageBubble sender="system" content={event.text || ""} time={ts} fullTime={fullTs} />;
     default:
       return null;
   }
@@ -931,7 +936,7 @@ function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: 
 // Shared UI components
 // ============================================================================
 
-function MessageCard({ text, label }: { text: string; label?: string }) {
+function MessageCard({ text, label, time, fullTime }: { text: string; label?: string; time?: string; fullTime?: string }) {
   const [expanded, setExpanded] = useState(false);
   const preview = text.length > 80 ? text.slice(0, 80) + "..." : text;
   return (
@@ -943,7 +948,8 @@ function MessageCard({ text, label }: { text: string; label?: string }) {
         <span className="text-blue-400">💬</span>
         {label && <span className="text-blue-500 font-medium shrink-0">{label}</span>}
         <span className="text-zinc-400 truncate max-w-md">{preview}</span>
-        <span className="ml-auto text-zinc-700">{expanded ? "▼" : "▶"}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
         <div className="px-3 py-2 border-t border-zinc-800 text-sm text-zinc-300">
@@ -954,7 +960,7 @@ function MessageCard({ text, label }: { text: string; label?: string }) {
   );
 }
 
-function ThinkingCard({ thinking, isStreaming }: { thinking: string; isStreaming?: boolean }) {
+function ThinkingCard({ thinking, isStreaming, time, fullTime }: { thinking: string; isStreaming?: boolean; time?: string; fullTime?: string }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
@@ -964,7 +970,8 @@ function ThinkingCard({ thinking, isStreaming }: { thinking: string; isStreaming
       >
         <span className={isStreaming ? "animate-pulse" : ""}>💭</span>
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
-        <span className="ml-auto text-zinc-700">{expanded ? "▼" : "▶"}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
         <div className="px-3 py-2 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 whitespace-pre-wrap max-h-40 overflow-y-auto">
@@ -976,7 +983,7 @@ function ThinkingCard({ thinking, isStreaming }: { thinking: string; isStreaming
   );
 }
 
-function ToolCard({ event }: { event: CommittedEvent }) {
+function ToolCard({ event, time, fullTime }: { event: CommittedEvent; time?: string; fullTime?: string }) {
   const [expanded, setExpanded] = useState(false);
   const isDone = event.result !== undefined;
   const statusColor = !isDone ? "text-amber-500" : event.isError ? "text-red-400" : "text-emerald-400";
@@ -990,7 +997,8 @@ function ToolCard({ event }: { event: CommittedEvent }) {
         <span className={statusColor}>{statusIcon}</span>
         <span className="text-zinc-400 font-mono">{event.toolName}</span>
         <span className="text-zinc-600 truncate max-w-48">{truncateArgs(event.args)}</span>
-        <span className="ml-auto text-zinc-700">{expanded ? "▼" : "▶"}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
         <div className="border-t border-zinc-200 dark:border-zinc-800 text-xs">

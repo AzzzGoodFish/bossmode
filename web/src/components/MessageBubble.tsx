@@ -76,8 +76,9 @@ export function MessageBubble({
 
   if (isSystem) {
     return (
-      <div className="text-xs text-zinc-500 italic py-1 px-1">
-        {content}
+      <div className="text-xs text-zinc-500 italic py-1 px-1 flex items-center gap-2">
+        <span>{content}</span>
+        {time && <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums ml-auto" title={fullTime}>{time}</span>}
       </div>
     );
   }
@@ -104,7 +105,7 @@ export function MessageBubble({
         {!grouped && (
           <div className="flex items-baseline gap-2 mb-1">
             <span className={`text-sm font-semibold ${nameColor}`}>{displayName}</span>
-            {time && <span className="text-xs text-zinc-400 dark:text-zinc-600">{time}</span>}
+            {time && <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums">{time}</span>}
           </div>
         )}
 
@@ -119,7 +120,7 @@ export function MessageBubble({
         )}
 
         {grouped && (
-          <span className="text-[10px] text-zinc-400 dark:text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity ml-2" title={fullTime}>
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity ml-2" title={fullTime}>
             {time}
           </span>
         )}
