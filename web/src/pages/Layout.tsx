@@ -1,6 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Plus } from "lucide-react";
-import type { Room } from "../api/client";
+import { Plus, RefreshCw, X } from "lucide-react";
+import {
+  type Room,
+  type TeamUpdateCandidate,
+  type TeamUpdateCheckResult,
+  checkTeamUpdates,
+  applyTeamUpdates,
+  dismissTeamUpdate,
+} from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { Main } from "./Main";
 import { AgentDetailPage } from "./AgentDetailPage";
@@ -253,7 +260,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
         {/* Knowledge */}
         {activePage?.type === "knowledge" && (
-          <KnowledgePage />
+          <KnowledgePage initialPath={activePage.path} />
         )}
 
         {/* Members */}
@@ -292,6 +299,20 @@ interface HomePageProps {
 
 function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePageProps) {
   const hasRooms = rooms.length > 0;
+  const [updateCheck, setUpdateCheck] = useState<TeamUpdateCheckResult | null>(null);
+  const [dismissedSession, setDismissedSession] = useState(false);
+  const [showReview, setShowReview] = useState(false);
+  const [updateResultNote, setUpdateResultNote] = useState<string | null>(null);
+
+  const refreshUpdateCheck = useCallback(() => {
+    checkTeamUpdates().then(setUpdateCheck).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    refreshUpdateCheck();
+  }, [refreshUpdateCheck]);
+
+  const showBanner = !!(updateCheck?.hasUpdates && !updateCheck.dismissed && !dismissedSession);
 
   return (
     <div className="flex-1 flex flex-col items-center overflow-y-auto">
@@ -306,6 +327,37 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePage
             <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Get started</h1>
             <p className="text-sm text-zinc-500 mb-8">Create your first room to begin.</p>
           </>
+        )}
+
+        {showBanner && updateCheck && (
+          <UpdateBanner
+            check={updateCheck}
+            onReview={() => setShowReview(true)}
+            onDismiss={() => setDismissedSession(true)}
+            onDismissVersion={async () => {
+              await dismissTeamUpdate("version", updateCheck.currentVersion);
+              await refreshUpdateCheck();
+            }}
+            onDismissPermanent={async () => {
+              await dismissTeamUpdate("permanent");
+              await refreshUpdateCheck();
+            }}
+            onUpdateAll={async () => {
+              const paths = updateCheck.candidates.filter((c) => c.status !== "modified").map((c) => c.relativePath);
+              const result = await applyTeamUpdates(paths);
+              const skippedModified = updateCheck.candidates.filter((c) => c.status === "modified").length;
+              setUpdateResultNote(
+                skippedModified > 0
+                  ? `Updated ${result.applied.length} files. Skipped ${skippedModified} modified file${skippedModified === 1 ? "" : "s"} (use Review to update individually).`
+                  : `Updated ${result.applied.length} files.`,
+              );
+              await refreshUpdateCheck();
+            }}
+          />
+        )}
+
+        {updateResultNote && (
+          <div className="mb-3 text-xs text-emerald-600 dark:text-emerald-400">{updateResultNote}</div>
         )}
 
         <div className="space-y-2">
@@ -357,6 +409,144 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePage
               <span className="text-sm">New Room</span>
             </div>
           </button>
+        </div>
+      </div>
+
+      {showReview && updateCheck && (
+        <ReviewDialog
+          check={updateCheck}
+          onClose={() => setShowReview(false)}
+          onApply={async (paths) => {
+            const result = await applyTeamUpdates(paths);
+            setUpdateResultNote(`Updated ${result.applied.length} selected file${result.applied.length === 1 ? "" : "s"}.`);
+            setShowReview(false);
+            await refreshUpdateCheck();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function buildSummaryText(candidates: TeamUpdateCandidate[]): string {
+  const bucket = new Map<string, number>();
+  for (const c of candidates) {
+    const key = `${c.category}:${c.status}`;
+    bucket.set(key, (bucket.get(key) || 0) + 1);
+  }
+  const parts: string[] = [];
+  for (const [k, count] of bucket.entries()) {
+    const [category, status] = k.split(":") as [string, string];
+    parts.push(`${count} ${category}${count > 1 ? "s" : ""} ${status}`);
+  }
+  return parts.join(", ");
+}
+
+function UpdateBanner({
+  check,
+  onDismiss,
+  onDismissVersion,
+  onDismissPermanent,
+  onReview,
+  onUpdateAll,
+}: {
+  check: TeamUpdateCheckResult;
+  onDismiss: () => void;
+  onDismissVersion: () => Promise<void>;
+  onDismissPermanent: () => Promise<void>;
+  onReview: () => void;
+  onUpdateAll: () => Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <div className="mb-4 rounded-lg border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-950/30 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <RefreshCw size={14} className="text-blue-500 shrink-0" />
+            <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
+              Built-in team update available ({check.installedVersion} → {check.currentVersion})
+            </span>
+          </div>
+          <p className="text-xs text-blue-600 dark:text-blue-400">{buildSummaryText(check.candidates)}</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={onReview} className="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">Review</button>
+          <button onClick={() => void onUpdateAll()} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded cursor-pointer">Update All</button>
+          <div className="relative">
+            <button onClick={() => setMenuOpen((v) => !v)} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer">Dismiss ▾</button>
+            {menuOpen && (
+              <div className="absolute right-0 top-6 z-20 w-48 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1">
+                <button onClick={() => { onDismiss(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Dismiss</button>
+                <button onClick={() => { void onDismissVersion(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Skip this version</button>
+                <button onClick={() => { void onDismissPermanent(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Don't check for updates</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewDialog({
+  check,
+  onClose,
+  onApply,
+}: {
+  check: TeamUpdateCheckResult;
+  onClose: () => void;
+  onApply: (paths: string[]) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(check.candidates.filter((c) => c.status !== "modified").map((c) => c.relativePath)),
+  );
+
+  const toggle = (path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const groups: Array<{ key: TeamUpdateCandidate["category"]; label: string }> = [
+    { key: "agent", label: "Agents" },
+    { key: "skill", label: "Skills" },
+    { key: "rule", label: "Rules" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xl">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold">Review Updates</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer"><X size={14} /></button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-4 space-y-4">
+          {groups.map((g) => {
+            const items = check.candidates.filter((c) => c.category === g.key);
+            if (items.length === 0) return null;
+            return (
+              <div key={g.key}>
+                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">{g.label}</div>
+                <div className="space-y-2">
+                  {items.map((c) => (
+                    <label key={c.relativePath} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selected.has(c.relativePath)} onChange={() => toggle(c.relativePath)} className="cursor-pointer" />
+                      <span className="flex-1 truncate">{c.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.status === "new" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400" : c.status === "updated" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"}`}>{c.status}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer">Cancel</button>
+          <button onClick={() => void onApply([...selected])} className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">Apply {selected.size} selected</button>
         </div>
       </div>
     </div>

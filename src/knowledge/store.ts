@@ -34,7 +34,7 @@ import {
   rmdirSync, unlinkSync, renameSync, statSync,
   type Dirent,
 } from "node:fs";
-import { join, dirname, sep, posix, basename } from "node:path";
+import { join, dirname, sep, posix } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
@@ -236,6 +236,15 @@ export function getEntry(entryId: string): KnowledgeEntry | null {
   } catch { return null; }
 }
 
+export function entryExists(docPath: string): boolean {
+  try {
+    const rel = normalizeDocPath(docPath);
+    return existsSync(absDocPath(rel));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Write/overwrite a document. If no extension provided, `.md` is appended.
  * Creates intermediate directories.
@@ -245,6 +254,7 @@ export function addEntry(
   content: string,
   source: string,
   path?: string,
+  extraFrontmatter?: Record<string, string>,
 ): KnowledgeEntry {
   ensureDocsRoot();
 
@@ -261,6 +271,7 @@ export function addEntry(
     created: now,
     updated: now,
   };
+  if (extraFrontmatter) Object.assign(fm, extraFrontmatter);
   writeFileSync(abs, serializeFrontmatter(fm, content), "utf-8");
 
   return { id: rel, title, content, source, createdAt: now, updatedAt: now };
@@ -270,6 +281,7 @@ export function updateEntry(
   entryId: string,
   title: string,
   content: string,
+  extraFrontmatter?: Record<string, string>,
 ): KnowledgeEntry | null {
   let rel: string;
   try { rel = normalizeDocPath(entryId); } catch { return null; }
@@ -281,6 +293,7 @@ export function updateEntry(
   frontmatter.title = title;
   frontmatter.updated = now;
   if (!frontmatter.created) frontmatter.created = now;
+  if (extraFrontmatter) Object.assign(frontmatter, extraFrontmatter);
   writeFileSync(abs, serializeFrontmatter(frontmatter, content), "utf-8");
   return {
     id: rel,
@@ -357,110 +370,6 @@ export function slugify(input: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80) || `doc-${Date.now()}`;
-}
-
-/**
- * Seed built-in team rules into `rules/*.md` — but only on fresh installs
- * (empty docs tree). Migrated installs keep their existing project-scoped
- * rules (e.g. `bossmode/rules/dev-team-protocol.md`) so we don't clutter the
- * root with duplicate content.
- */
-export function seedDefaultRulesIfMissing(): void {
-  ensureDocsRoot();
-
-  // Only seed when the tree is empty. If any top-level folder already exists,
-  // assume the user has their own structure and skip.
-  try {
-    const topLevel = readdirSync(docsRoot(), { withFileTypes: true });
-    const hasAny = topLevel.some((e) => !e.name.startsWith("."));
-    if (hasAny) return;
-  } catch { /* docs/ doesn't exist yet — fall through and seed */ }
-
-  const teamsDir = findTeamsTemplateDir();
-  if (!teamsDir) {
-    logger.info("knowledge-store", "teams templates not found, skipping seed");
-    return;
-  }
-
-  const templates = collectTeamRuleTemplates(teamsDir);
-  if (templates.length === 0) {
-    logger.info("knowledge-store", "no team rule templates found, skipping seed", { teamsDir });
-    return;
-  }
-
-  let seeded = 0;
-  for (const tpl of templates) {
-    if (existsSync(absDocPath(tpl.rulePath))) continue;
-    let body = readFileSync(tpl.templatePath, "utf-8");
-    const h1Match = body.match(/^#\s+(.+)\n/);
-    let title = tpl.defaultTitle;
-    if (h1Match) {
-      title = h1Match[1].trim();
-      body = body.slice(h1Match[0].length).trimStart();
-    }
-    addEntry(title, body, "builtin", tpl.rulePath);
-    seeded += 1;
-  }
-
-  if (seeded > 0) {
-    logger.info("knowledge-store", "seeded team rule templates", { seeded });
-  }
-}
-
-function findTeamsTemplateDir(): string | null {
-  const candidates = [
-    join(process.cwd(), "templates", "teams"),
-    join(process.cwd(), "..", "templates", "teams"),
-  ];
-  try {
-    const here = new URL(".", import.meta.url).pathname;
-    candidates.push(join(here, "..", "..", "templates", "teams"));
-    candidates.push(join(here, "..", "..", "..", "templates", "teams"));
-  } catch { /* ignore */ }
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  return null;
-}
-
-function collectTeamRuleTemplates(teamsDir: string): Array<{ templatePath: string; rulePath: string; defaultTitle: string }> {
-  const out: Array<{ templatePath: string; rulePath: string; defaultTitle: string }> = [];
-
-  const walk = (dir: string, relDir = ""): void => {
-    let entries: Dirent[];
-    try { entries = readdirSync(dir, { withFileTypes: true }) as Dirent[]; } catch { return; }
-    for (const e of entries) {
-      if (e.name.startsWith(".")) continue;
-      const abs = join(dir, e.name);
-      const rel = relDir ? `${relDir}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        walk(abs, rel);
-        continue;
-      }
-      if (!e.isFile() || !e.name.toLowerCase().endsWith(".md")) continue;
-
-      const rulePath = toRulePath(rel);
-      const stem = basename(rulePath, ".md");
-      const defaultTitle = stem.replace(/[-_]/g, " ");
-      out.push({ templatePath: abs, rulePath, defaultTitle });
-    }
-  };
-
-  walk(teamsDir);
-  out.sort((a, b) => a.rulePath.localeCompare(b.rulePath));
-  return out;
-}
-
-function toRulePath(relTemplatePath: string): string {
-  const rel = relTemplatePath.replace(/\\/g, "/");
-  if (rel === "dev-team/team-prompt.md") return "rules/dev-team-protocol.md";
-  if (rel.endsWith("/team-prompt.md")) {
-    const parts = rel.split("/");
-    const teamName = parts[parts.length - 2];
-    return `rules/${teamName}-protocol.md`;
-  }
-  const fileName = rel.split("/").pop()!;
-  return `rules/${fileName}`;
 }
 
 /** Re-export path helpers for migration / external callers. */

@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
-import type { RuntimeInfo, SummarySettings } from "../api/client";
+import type { RuntimeInfo, SummarySettings, TeamUpdateSettings } from "../api/client";
 import {
   getRuntimes,
   getSummarySettings,
   updateSummarySettings,
   getRuntimeSettings,
   updateRuntimeSettings,
+  getTeamUpdateSettings,
+  updateTeamUpdateSettings,
+  checkTeamUpdates,
 } from "../api/client";
 
 export function SettingsPage() {
@@ -22,6 +25,8 @@ export function SettingsPage() {
   const [sessionResume, setSessionResume] = useState(true);
   const [sessionResumeSaving, setSessionResumeSaving] = useState(false);
   const [sessionResumeSaved, setSessionResumeSaved] = useState(false);
+  const [teamUpdateSettings, setTeamUpdateSettings] = useState<TeamUpdateSettings | null>(null);
+  const [checkingTeamUpdates, setCheckingTeamUpdates] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -34,6 +39,7 @@ export function SettingsPage() {
     refresh();
     getSummarySettings().then(setSummarySettings).catch(console.error);
     getRuntimeSettings().then((v) => setSessionResume(v.sessionResume)).catch(console.error);
+    getTeamUpdateSettings().then(setTeamUpdateSettings).catch(console.error);
   }, []);
 
   const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
@@ -64,6 +70,28 @@ export function SettingsPage() {
       setSessionResume(!next);
     } finally {
       setSessionResumeSaving(false);
+    }
+  };
+
+  const handleTeamUpdateToggle = async () => {
+    if (!teamUpdateSettings) return;
+    try {
+      const next = await updateTeamUpdateSettings(!teamUpdateSettings.dismissPermanent);
+      setTeamUpdateSettings(next);
+    } catch (err) {
+      console.error("Failed to update team update settings", err);
+    }
+  };
+
+  const handleCheckTeamUpdates = async () => {
+    setCheckingTeamUpdates(true);
+    try {
+      const result = await checkTeamUpdates();
+      console.info("team updates check", result);
+    } catch (err) {
+      console.error("Failed to check team updates", err);
+    } finally {
+      setCheckingTeamUpdates(false);
     }
   };
 
@@ -150,6 +178,36 @@ export function SettingsPage() {
             Summarizer's model and runtime can be configured in the Members page.
             {summarySaved && <span className="ml-2 text-emerald-500">Saved!</span>}
           </div>
+        </div>
+      </div>
+
+      {/* Built-in Team Updates */}
+      <div className="mb-8">
+        <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Built-in Team Updates</h2>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-zinc-900 dark:text-white">Check for updates automatically</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Installed version: {teamUpdateSettings?.installedVersion || "—"}</div>
+            </div>
+            <button
+              onClick={handleTeamUpdateToggle}
+              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${
+                teamUpdateSettings?.dismissPermanent ? "bg-zinc-300 dark:bg-zinc-700" : "bg-violet-500"
+              }`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                teamUpdateSettings?.dismissPermanent ? "translate-x-0" : "translate-x-5"
+              }`} />
+            </button>
+          </div>
+          <button
+            onClick={handleCheckTeamUpdates}
+            disabled={checkingTeamUpdates}
+            className="px-3 py-1.5 text-xs border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer disabled:opacity-60"
+          >
+            {checkingTeamUpdates ? "Checking..." : "Check now"}
+          </button>
         </div>
       </div>
 

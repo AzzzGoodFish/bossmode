@@ -24,7 +24,7 @@ import {
 import { join, dirname } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
-import { slugify, seedDefaultRulesIfMissing } from "./store.js";
+import { slugify } from "./store.js";
 
 function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
 function docsRootDir(): string { return join(knowledgeDir(), "docs"); }
@@ -405,9 +405,7 @@ export function runKnowledgeMigration(): void {
     logger.error("knowledge-migration", "room field migration failed", { error: String(err) });
   }
 
-  // Ensure the default rules are available on fresh installs (no-op if present).
-  try { seedDefaultRulesIfMissing(); }
-  catch (err) { logger.error("knowledge-migration", "seed default rules failed", { error: String(err) }); }
+  // Built-in team seeding is handled by seedBuiltinTeam() in server startup.
 }
 
 // Silence the unused-import warnings for functions that might later be needed

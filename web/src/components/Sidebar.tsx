@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import type { Room, AgentInfo, MemberInfo, SkillInfo } from "../api/client";
-import { getRooms, getAgents, getMembers, getSkills } from "../api/client";
+import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
+import { getRooms, getAgents, getMembers, getSkills, getKnowledgeTree } from "../api/client";
 import { SidebarSection, type SidebarItem } from "./SidebarSection";
 import { RoomMenu } from "./RoomMenu";
 import { RoomSettingsDialog } from "./RoomSettingsDialog";
@@ -34,6 +34,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
 
   const refresh = () => {
@@ -41,6 +42,12 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
     getAgents().then(setAgents).catch(console.error);
     getMembers().then(setMembers).catch(console.error);
     getSkills().then(setSkills).catch(console.error);
+    getKnowledgeTree()
+      .then((root) => {
+        const folders = (root.children ?? []).filter((c) => c.kind === "folder");
+        setKnowledgeFolders(folders);
+      })
+      .catch(console.error);
   };
 
   useEffect(() => { refresh(); }, [refreshKey]);
@@ -58,6 +65,10 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
   const isKnowledgeActive = activePage?.type === "knowledge";
+  const selectedKnowledgeFolder =
+    activePage?.type === "knowledge" && activePage.path
+      ? activePage.path.split("/")[0]
+      : null;
 
   // Map data to SidebarItems
   const roomItems: SidebarItem[] = rooms.map((r) => ({
@@ -84,6 +95,11 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
     id: s.name,
     label: s.name,
     sublabel: s.description?.slice(0, 40),
+  }));
+
+  const knowledgeItems: SidebarItem[] = knowledgeFolders.map((f) => ({
+    id: f.path,
+    label: f.name,
   }));
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
@@ -266,17 +282,17 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               onCreate={() => onNavigate({ type: "skill", name: null })}
             />
 
-            <button
-              onClick={() => onNavigate({ type: "knowledge" })}
-              className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
-                isKnowledgeActive
-                  ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white"
-                  : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300"
-              }`}
-            >
-              <BookOpen size={14} className="text-zinc-500" />
-              <span>Knowledge</span>
-            </button>
+            <SidebarSection
+              icon={<BookOpen size={14} />}
+              label="Knowledge"
+              count={knowledgeFolders.length}
+              items={knowledgeItems}
+              selectedId={selectedKnowledgeFolder}
+              storageKey="knowledge"
+              defaultOpen={false}
+              onSelect={(path) => onNavigate({ type: "knowledge", path })}
+              onCreate={() => onNavigate({ type: "knowledge", path: "__new__" })}
+            />
           </div>
         </div>
       )}

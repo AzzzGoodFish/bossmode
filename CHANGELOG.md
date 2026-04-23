@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.0] — 2026-04-23
+
+### Added
+- **Built-in team versioning** — added end-to-end update management for built-in agents/skills/rules: update detection, review flow, selective apply, three-level dismiss, and Settings toggle.
+- **Knowledge folder overview + sidebar navigation** — clicking top-level Knowledge folders now opens an immediate folder landing/index view with consistent sidebar-linked navigation feedback.
+
+### Fixed
+- **Chat auto-scroll reliability** — multi-line input growth and private-chat working indicator now keep timelines pinned to latest content when user is near bottom.
+- **Markdown image rendering for attachment-style paths** — improved rendering path consistency for image content in chat flows.
+
+### Tests
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit` passed.
+- **Release note**: `feat: built-in team versioning — auto-detect updates, review changes, three-level dismiss, Settings toggle; feat: knowledge folder overview with sidebar navigation; fix: chat auto-scroll on multi-line input and private chat working indicator; fix: markdown image rendering with attachment URL resolution`.
+
 ## [0.8.11] — 2026-04-23
 
 ### Added

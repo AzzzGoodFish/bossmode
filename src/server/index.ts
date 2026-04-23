@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
-import { removePidFile, writePidFile, ensureBossmodeDir, seedTemplates, readConfig } from "../shared/config.js";
+import { removePidFile, writePidFile, ensureBossmodeDir, readConfig } from "../shared/config.js";
 import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -13,6 +13,7 @@ import { PiCliRuntime } from "../engine/runtime/pi-cli.js";
 import { ClaudeCliRuntime } from "../engine/runtime/claude-cli.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
+import { seedBuiltinTeam } from "../workforce/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -40,9 +41,9 @@ export interface ServerOptions {
 }
 
 export function startServer(opts: ServerOptions): Promise<void> {
-  // Ensure dirs + seed templates on first run
+  // Ensure dirs + seed builtin team files on first run
   ensureBossmodeDir();
-  seedTemplates(import.meta.dirname);
+  seedBuiltinTeam();
 
   // Knowledge: migrate legacy JSON-entry KBs to filesystem-markdown layout (idempotent)
   try {

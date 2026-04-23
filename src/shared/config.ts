@@ -1,9 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BossmodeConfig } from "./types.js";
-import { logger } from "../foundation/logger.js";
 
 const BOSSMODE_DIR = process.env.BOSSMODE_DIR || join(homedir(), ".bossmode");
 const CONFIG_PATH = join(BOSSMODE_DIR, "config.json");
@@ -19,53 +18,6 @@ export function getConfigPath(): string {
 export function ensureBossmodeDir(): void {
   if (!existsSync(BOSSMODE_DIR)) {
     mkdirSync(BOSSMODE_DIR, { recursive: true });
-  }
-}
-
-// Seed from templates on first run
-export function seedTemplates(distDir: string): void {
-  // distDir is e.g. dist/server — templates live at repo root
-  let templatesDir = join(distDir, "../templates");
-  if (!existsSync(templatesDir)) {
-    templatesDir = join(distDir, "../../templates");
-  }
-  if (!existsSync(templatesDir)) return;
-
-  const agentsDir = join(BOSSMODE_DIR, "agents");
-  const skillsDir = join(BOSSMODE_DIR, "skills");
-
-  // Agents: per-file check — skip existing, seed missing
-  const agentsSrc = join(templatesDir, "agents");
-  if (existsSync(agentsSrc)) {
-    mkdirSync(agentsDir, { recursive: true });
-    let seeded = 0;
-    for (const f of readdirSync(agentsSrc).filter((f) => f.endsWith(".md"))) {
-      const dest = join(agentsDir, f);
-      if (!existsSync(dest)) {
-        copyFileSync(join(agentsSrc, f), dest);
-        seeded++;
-      }
-    }
-    if (seeded > 0) {
-      logger.info("seed", `seeded ${seeded} missing agent template(s)`);
-    }
-  }
-
-  // Skills: per-directory check — skip existing, seed missing
-  const skillsSrc = join(templatesDir, "skills");
-  if (existsSync(skillsSrc)) {
-    mkdirSync(skillsDir, { recursive: true });
-    let seeded = 0;
-    for (const d of readdirSync(skillsSrc)) {
-      const dest = join(skillsDir, d);
-      if (!existsSync(dest)) {
-        cpSync(join(skillsSrc, d), dest, { recursive: true });
-        seeded++;
-      }
-    }
-    if (seeded > 0) {
-      logger.info("seed", `seeded ${seeded} missing skill template(s)`);
-    }
   }
 }
 
