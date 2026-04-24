@@ -31,7 +31,7 @@
 
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
-  rmdirSync, unlinkSync, renameSync, statSync,
+  rmdirSync, unlinkSync, renameSync, statSync, rmSync,
   type Dirent,
 } from "node:fs";
 import { join, dirname, sep, posix } from "node:path";
@@ -313,17 +313,7 @@ export function deleteEntry(entryId: string): boolean {
   const abs = absDocPath(rel);
   if (!existsSync(abs)) return false;
   unlinkSync(abs);
-  // Clean up empty parent directories (best-effort)
-  try {
-    const root = docsRoot();
-    let d = dirname(abs);
-    while (d !== root && d !== dirname(d)) {
-      const remaining = readdirSync(d);
-      if (remaining.length > 0) break;
-      rmdirSync(d);
-      d = dirname(d);
-    }
-  } catch { /* ignore */ }
+  cleanupEmptyParentDirs(dirname(abs));
   return true;
 }
 
@@ -340,7 +330,69 @@ export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
   if (existsSync(toAbs) && fromRel !== toRel) return null; // don't overwrite
   mkdirSync(dirname(toAbs), { recursive: true });
   renameSync(fromAbs, toAbs);
+  cleanupEmptyParentDirs(dirname(fromAbs));
   return getEntry(toRel);
+}
+
+export function moveFolder(
+  fromPath: string,
+  toPath: string,
+): { ok: boolean; movedFiles: Array<[string, string]>; error?: string } {
+  let fromRel: string, toRel: string;
+  try {
+    fromRel = normalizeDocPath(fromPath);
+    toRel = normalizeDocPath(toPath);
+  } catch (err: any) {
+    return { ok: false, movedFiles: [], error: String(err?.message || err) };
+  }
+
+  if (toRel === fromRel || toRel.startsWith(`${fromRel}/`)) {
+    return { ok: false, movedFiles: [], error: "Cannot move folder into itself or its subfolder" };
+  }
+
+  const fromAbs = absDocPath(fromRel);
+  const toAbs = absDocPath(toRel);
+  if (!existsSync(fromAbs) || !statSync(fromAbs).isDirectory()) {
+    return { ok: false, movedFiles: [], error: "Source folder not found" };
+  }
+  if (existsSync(toAbs)) {
+    return { ok: false, movedFiles: [], error: "Destination already exists" };
+  }
+
+  mkdirSync(dirname(toAbs), { recursive: true });
+  renameSync(fromAbs, toAbs);
+
+  const movedFiles: Array<[string, string]> = [];
+  for (const newPath of collectDocPathsInFolder(toAbs, toRel)) {
+    const suffix = newPath.startsWith(`${toRel}/`) ? newPath.slice(toRel.length + 1) : "";
+    const oldPath = suffix ? `${fromRel}/${suffix}` : fromRel;
+    movedFiles.push([oldPath, newPath]);
+  }
+
+  cleanupEmptyParentDirs(dirname(fromAbs));
+  return { ok: true, movedFiles };
+}
+
+export function deleteFolder(
+  folderPath: string,
+): { ok: boolean; deletedCount: number; deletedPaths: string[] } {
+  let rel: string;
+  try {
+    rel = normalizeDocPath(folderPath);
+  } catch {
+    return { ok: false, deletedCount: 0, deletedPaths: [] };
+  }
+
+  const abs = absDocPath(rel);
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+    return { ok: false, deletedCount: 0, deletedPaths: [] };
+  }
+
+  const deletedPaths = collectDocPathsInFolder(abs, rel);
+  rmSync(abs, { recursive: true, force: true });
+  cleanupEmptyParentDirs(dirname(abs));
+
+  return { ok: true, deletedCount: deletedPaths.length, deletedPaths };
 }
 
 /**
@@ -359,6 +411,47 @@ export function searchEntries(query: string): KnowledgeEntry[] {
 function ensureMdExtension(path: string): string {
   if (path.toLowerCase().endsWith(".md")) return path;
   return `${path}.md`;
+}
+
+function cleanupEmptyParentDirs(startDir: string): void {
+  try {
+    const root = docsRoot();
+    let d = startDir;
+    while (d !== root && d !== dirname(d)) {
+      const remaining = readdirSync(d);
+      if (remaining.length > 0) break;
+      rmdirSync(d);
+      d = dirname(d);
+    }
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
+function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
+  const out: string[] = [];
+  const walk = (absDir: string, relDir: string): void => {
+    let entries: Dirent[] = [];
+    try {
+      entries = readdirSync(absDir, { withFileTypes: true }) as Dirent[];
+    } catch {
+      return;
+    }
+
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const childAbs = join(absDir, e.name);
+      const childRel = relDir ? `${relDir}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(childAbs, childRel);
+      } else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
+        out.push(toPosix(childRel));
+      }
+    }
+  };
+
+  walk(absFolder, relPrefix);
+  return out;
 }
 
 export function slugify(input: string): string {

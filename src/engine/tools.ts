@@ -1,9 +1,8 @@
-// Agent tool callback handler — business logic for chat/knowledge/messages tools
+// Agent tool callback handler — business logic for chat/messages/summary tools
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
-import * as knowledgeStore from "../knowledge/store.js";
 import { parseMentions } from "../communication/router.js";
 import { emitAgentReply } from "./agent-manager.js";
 import { getActivationSource } from "./activation-context.js";
@@ -99,65 +98,6 @@ export async function handleToolCallback(
         content: m.content,
         ts: m.ts,
       }));
-    }
-    case "save_knowledge": {
-      const title = String(params?.title || "").trim();
-      const content = String(params?.content || "");
-      if (!title) return { ok: false, error: "title is required" };
-      try {
-        const path = params?.path ? String(params.path) : undefined;
-        const entry = knowledgeStore.addEntry(title, content, agentName, path);
-        return { ok: true, path: entry.id, title: entry.title };
-      } catch (err: any) {
-        return { ok: false, error: String(err?.message || err) };
-      }
-    }
-    case "update_knowledge": {
-      // Accept either `path` (new) or `entryId` (legacy) to identify the document
-      const docPath: string | undefined = params?.path || params?.entryId;
-      if (!docPath) return { ok: false, error: "path is required" };
-      try {
-        const updated = knowledgeStore.updateEntry(docPath, params?.title || "", params?.content || "");
-        if (!updated) return { ok: false, error: `Document not found: ${docPath}` };
-        return { ok: true, path: updated.id, title: updated.title };
-      } catch (err: any) {
-        return { ok: false, error: String(err?.message || err) };
-      }
-    }
-    case "delete_knowledge": {
-      const docPath: string | undefined = params?.path || params?.entryId;
-      if (!docPath) return { ok: false, error: "path is required" };
-      try {
-        const deleted = knowledgeStore.deleteEntry(docPath);
-        if (!deleted) return { ok: false, error: `Document not found: ${docPath}` };
-        return { ok: true };
-      } catch (err: any) {
-        return { ok: false, error: String(err?.message || err) };
-      }
-    }
-    case "query_knowledge": {
-      if (params?.query) {
-        // Filtered query — return full content of matching documents
-        const matches = knowledgeStore.searchEntries(String(params.query));
-        return matches;
-      }
-      // No query — return tree + summary list (paths and titles, no content) to stay small
-      const tree = knowledgeStore.getDocumentTree();
-      const entries = knowledgeStore.listEntries().map((e) => ({
-        path: e.id,
-        title: e.title,
-        source: e.source,
-        updatedAt: e.updatedAt,
-      }));
-      return { tree, entries };
-    }
-    case "read_knowledge": {
-      // Return full content of a specific document
-      const docPath: string | undefined = params?.path;
-      if (!docPath) return { ok: false, error: "path is required" };
-      const entry = knowledgeStore.getEntry(docPath);
-      if (!entry) return { ok: false, error: `Document not found: ${docPath}` };
-      return { ok: true, path: entry.id, title: entry.title, content: entry.content, source: entry.source };
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool

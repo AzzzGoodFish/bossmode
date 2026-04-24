@@ -197,7 +197,8 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       }
     }
 
-    const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, room.name, memberName, tree, ruleDocPaths);
+    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, room.name, memberName, tree, ruleDocPaths, docsRootPath);
 
     // Resolve skills: member config takes precedence over agent definition
     const skills = resolveSkills(member, agentDef);
@@ -247,15 +248,6 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
           onMention: async (targetMember: string, message: string) => {
             // Mention activation is handled by router listener via message-bus.
             postMessage(roomId, memberName, message, [targetMember]);
-          },
-          onSaveKnowledge: async (title, content) => {
-            knowledgeStore.addEntry(title, content, memberName);
-          },
-          onQueryKnowledge: async (query) => {
-            const entries = knowledgeStore.listEntries();
-            if (!query) return entries;
-            const q = query.toLowerCase();
-            return entries.filter((e) => e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q));
           },
         },
       });

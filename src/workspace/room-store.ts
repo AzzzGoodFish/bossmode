@@ -156,6 +156,39 @@ export function updateRuleDocPaths(oldPath: string, newPath?: string): number {
   return affected;
 }
 
+/**
+ * Cascade update for folder move: replace ruleDocs path prefix.
+ * Example: oldPrefix="rules/dev", newPrefix="rules/protocols"
+ *   rules/dev/a.md -> rules/protocols/a.md
+ */
+export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string): number {
+  if (!oldPrefix || !newPrefix) return 0;
+  const needle = `${oldPrefix}/`;
+  const rooms = listRooms();
+  let affected = 0;
+
+  for (const room of rooms) {
+    const current = room.ruleDocs;
+    if (!current || current.length === 0) continue;
+
+    let touched = false;
+    const next = current.map((p) => {
+      if (p === oldPrefix || p.startsWith(needle)) {
+        touched = true;
+        return `${newPrefix}${p.slice(oldPrefix.length)}`;
+      }
+      return p;
+    });
+
+    if (!touched) continue;
+    room.ruleDocs = Array.from(new Set(next));
+    writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+    affected += 1;
+  }
+
+  return affected;
+}
+
 export function listRooms(): Room[] {
   ensureRoomsDir();
 

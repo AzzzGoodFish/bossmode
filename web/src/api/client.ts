@@ -264,10 +264,35 @@ export async function deleteKnowledgeEntry(path: string): Promise<void> {
   await apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }
 
-export async function moveKnowledgeEntry(from: string, to: string): Promise<KnowledgeEntry> {
+export interface MoveKnowledgeResult {
+  ok: boolean;
+  from: string;
+  to: string;
+  type: "file" | "folder";
+}
+
+export async function moveKnowledgeEntry(from: string, to: string): Promise<MoveKnowledgeResult> {
   return apiFetch(`/api/knowledge/move`, {
     method: "POST",
     body: JSON.stringify({ from, to }),
+  });
+}
+
+export async function deleteKnowledgeFolder(path: string): Promise<void> {
+  await apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+}
+
+export async function batchMoveKnowledge(paths: string[], destination: string): Promise<{ moved: number; failed: string[] }> {
+  return apiFetch(`/api/knowledge/batch-move`, {
+    method: "POST",
+    body: JSON.stringify({ paths, destination }),
+  });
+}
+
+export async function batchDeleteKnowledge(paths: string[]): Promise<{ deleted: number; failed: string[] }> {
+  return apiFetch(`/api/knowledge/batch-delete`, {
+    method: "POST",
+    body: JSON.stringify({ paths }),
   });
 }
 

@@ -21,6 +21,7 @@ export function buildAgentPrompt(
   memberName?: string,
   tree?: KnowledgeTreeNode | null,
   activeRuleDocs?: string[],
+  docsRoot?: string,
 ): AssembledPrompt {
   const agentParts: string[] = [];
 
@@ -30,7 +31,7 @@ export function buildAgentPrompt(
   }
 
   // Layer 4: Project documents index — directory tree of available docs.
-  // Agents read specific documents on demand via query_knowledge / read_knowledge.
+  // Agents read specific documents on demand via filesystem tools.
   // Only the INDEX is injected to keep the system prompt small (<10KB typical).
   if (tree && tree.children && tree.children.length > 0) {
     agentParts.push("---\n\n# Project Documents\n");
@@ -41,12 +42,17 @@ export function buildAgentPrompt(
     agentParts.push("docs/");
     renderTree(tree.children, "", agentParts, new Set(activeRuleDocs || []));
     agentParts.push("```\n");
+    const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
     agentParts.push(
-      "Tools:",
-      "- `query_knowledge()` — returns the full tree plus doc summaries (no content).",
-      "- `query_knowledge(query: \"keywords\")` — searches document titles and bodies.",
-      "- `read_knowledge(path: \"folder/file.md\")` — returns a specific doc's full content.",
-      "- `save_knowledge(path, title, content)` / `update_knowledge(path, title, content)` / `delete_knowledge(path)`.",
+      `Documents are stored at \`${docsPath}/\`. Use the read tool to load a document by path. Use write/edit tools to create or update documents.`,
+      "",
+      "When creating documents, include YAML frontmatter with at least a title:",
+      "",
+      "```",
+      "---",
+      "title: Document Title",
+      "---",
+      "```",
     );
     if (activeRuleDocs && activeRuleDocs.length > 0) {
       agentParts.push(
@@ -57,7 +63,8 @@ export function buildAgentPrompt(
     // Fallback (should be rare): flat list when tree is unavailable
     agentParts.push("---\n\n# Project Documents\n");
     for (const entry of knowledgeEntries) agentParts.push(`- **${entry.title}**`);
-    agentParts.push("\nUse `query_knowledge(\"keywords\")` to read them.");
+    const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
+    agentParts.push(`\nDocuments are stored at \`${docsPath}/\`. Use the read tool to load a document by path.`);
   }
 
   const agentPrompt = agentParts.join("\n");

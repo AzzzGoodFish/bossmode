@@ -4,6 +4,19 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.1] — 2026-04-24
+
+### Added
+- **Knowledge agent tools retired** — removed agent-facing knowledge CRUD/search tools; agents now operate directly on filesystem documents with preserved project document tree index injection in prompts.
+- **Knowledge UI file management** — added context menu actions (move/rename/delete), Move-to dialog, inline rename, drag-and-drop move, multi-select with batch operations, plus backend support for folder move/delete.
+
+### Fixed
+- **Agent activity card spacing** — restored consistent spacing between activity cards after prior scroll-container wrapper change.
+
+### Tests
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit` passed.
+- **Release note**: `feat: knowledge agent tools retired — agents now use filesystem directly with document tree index injection; feat: knowledge UI file management — context menu (move/rename/delete), move-to dialog, inline rename, drag-and-drop, multi-select with batch operations, folder move/delete support; fix: agent activity card spacing`.
+
 ## [0.9.0] — 2026-04-23
 
 ### Added

@@ -28,7 +28,7 @@ export default function (pi) {
   const MAX_RESULT_CHARS = 25000;
   function truncate(text) {
     if (text.length <= MAX_RESULT_CHARS) return text;
-    return text.slice(0, MAX_RESULT_CHARS) + "\\n\\n--- Result truncated (" + text.length + " chars). Use a more specific query. ---";
+    return text.slice(0, MAX_RESULT_CHARS) + "\n\n--- Result truncated (" + text.length + " chars). Use a more specific query. ---";
   }
 
   pi.registerTool({
@@ -73,119 +73,8 @@ export default function (pi) {
       const messages = await res.json();
       const text = messages.length === 0
         ? "No messages in room."
-        : messages.map(m => "[" + m.sender + "]: " + m.content).join("\\n\\n");
+        : messages.map(m => "[" + m.sender + "]: " + m.content).join("\n\n");
       return { content: [{ type: "text", text: truncate(text) }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "save_knowledge",
-    label: "Save Knowledge",
-    description: "Create a new project document (Markdown file). Path is a POSIX-style path relative to the docs root (e.g. 'architecture/overview.md' or 'prds/smart-summary.md'). If path is omitted, the document is placed under 'misc/'. A .md extension is appended if missing.",
-    parameters: Type.Object({
-      title: Type.String({ description: "Human-readable document title" }),
-      content: Type.String({ description: "Markdown body (frontmatter is generated automatically)" }),
-      path: Type.Optional(Type.String({ description: "Target path, e.g. 'architecture/overview.md'. Required unless you are fine with auto-placement under misc/." })),
-    }),
-    async execute(id, params) {
-      const res = await fetch(SERVER + "/internal/tool-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: "save_knowledge", room: ROOM, agent: AGENT, params }),
-      });
-      const data = await res.json();
-      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + (data.error || "unknown error") }], details: {} };
-      return { content: [{ type: "text", text: "Document saved at " + data.path + ": " + (data.title || params.title) }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "query_knowledge",
-    label: "Query Knowledge",
-    description: "Explore or search the project document library. Without a query, returns the directory tree plus a summary list (titles + paths, no content). With a query, returns full content of documents whose title or body contains the query substring (case-insensitive).",
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Search substring. Omit to get the full tree + summaries." })),
-    }),
-    async execute(id, params) {
-      const res = await fetch(SERVER + "/internal/tool-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: "query_knowledge", room: ROOM, agent: AGENT, params }),
-      });
-      const data = await res.json();
-      // Filtered-search returns an array of {id, title, content, ...}
-      if (Array.isArray(data)) {
-        if (data.length === 0) return { content: [{ type: "text", text: "No documents matched." }], details: {} };
-        const text = data.map(e => "## " + e.title + " (" + e.id + ")\\n" + (e.content || "")).join("\\n---\\n");
-        return { content: [{ type: "text", text: truncate(text) }], details: {} };
-      }
-      // Tree form
-      const entries = Array.isArray(data.entries) ? data.entries : [];
-      if (entries.length === 0) return { content: [{ type: "text", text: "Project document library is empty." }], details: {} };
-      const lines = ["Documents:"];
-      for (const e of entries) lines.push("- " + e.path + "  \u2014  " + e.title);
-      lines.push("", "Use read_knowledge(path) to read a specific document, or query_knowledge(query) to search.");
-      return { content: [{ type: "text", text: truncate(lines.join("\\n")) }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "read_knowledge",
-    label: "Read Knowledge",
-    description: "Read the full content of a specific document by its path (e.g. 'architecture/overview.md'). Use query_knowledge first to discover available paths.",
-    parameters: Type.Object({
-      path: Type.String({ description: "Document path relative to the docs root" }),
-    }),
-    async execute(id, params) {
-      const res = await fetch(SERVER + "/internal/tool-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: "read_knowledge", room: ROOM, agent: AGENT, params }),
-      });
-      const data = await res.json();
-      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + (data.error || "unknown error") }], details: {} };
-      const text = "# " + data.title + "\\n\\n" + data.content;
-      return { content: [{ type: "text", text: truncate(text) }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "update_knowledge",
-    label: "Update Knowledge",
-    description: "Overwrite an existing document's title and content.",
-    parameters: Type.Object({
-      path: Type.String({ description: "Document path (e.g. 'architecture/overview.md')" }),
-      title: Type.String({ description: "New title" }),
-      content: Type.String({ description: "New markdown body" }),
-    }),
-    async execute(id, params) {
-      const res = await fetch(SERVER + "/internal/tool-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: "update_knowledge", room: ROOM, agent: AGENT, params }),
-      });
-      const data = await res.json();
-      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
-      return { content: [{ type: "text", text: "Document updated at " + data.path }], details: {} };
-    },
-  });
-
-  pi.registerTool({
-    name: "delete_knowledge",
-    label: "Delete Knowledge",
-    description: "Delete a document by its path.",
-    parameters: Type.Object({
-      path: Type.String({ description: "Document path to delete (e.g. 'misc/obsolete-notes.md')" }),
-    }),
-    async execute(id, params) {
-      const res = await fetch(SERVER + "/internal/tool-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: "delete_knowledge", room: ROOM, agent: AGENT, params }),
-      });
-      const data = await res.json();
-      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
-      return { content: [{ type: "text", text: "Document deleted." }], details: {} };
     },
   });
 

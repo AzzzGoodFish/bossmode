@@ -2,7 +2,7 @@
 // Agent Runtime Abstraction Layer V2 — CLI-Only Design
 // ============================================================================
 
-import type { KnowledgeEntry, AgentMemberConfig } from "../../shared/types.js";
+import type { AgentMemberConfig } from "../../shared/types.js";
 
 // Re-export AgentMemberConfig as the member config type for runtimes
 export type { AgentMemberConfig };
@@ -62,8 +62,6 @@ export interface CreateAgentOpts {
 export interface AgentCallbacks {
   onChat: (message: string) => Promise<void>;
   onMention: (target: string, message: string) => Promise<void>;
-  onSaveKnowledge?: (title: string, content: string) => Promise<void>;
-  onQueryKnowledge?: (query?: string) => Promise<KnowledgeEntry[]>;
 }
 
 // -- Agent handle --
