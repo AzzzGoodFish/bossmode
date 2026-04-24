@@ -667,8 +667,8 @@ function AgentChat({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
-        <div ref={contentRef}>
+      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 text-sm" onScroll={handleScroll}>
+        <div ref={contentRef} className="space-y-2">
           {hasMore === false && chatEvents.length > 0 && (
             <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of conversation</div>
           )}
@@ -915,8 +915,8 @@ function AgentActivity({
   }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm" onScroll={handleScroll}>
-      <div ref={contentRef}>
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 text-sm" onScroll={handleScroll}>
+      <div ref={contentRef} className="space-y-2">
         {hasMore === false && hasVisibleContent && (
           <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of activity</div>
         )}

@@ -125,6 +125,35 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     expect(getEntry("archive/z.md")).not.toBeNull();
   });
 
+  it("moveFolder renames directory and returns moved file mappings", async () => {
+    const { addEntry, moveFolder, getEntry } = await import("../../src/knowledge/store.js");
+    addEntry("A", "a", "user", "bossmode/rules/a.md");
+    addEntry("B", "b", "user", "bossmode/rules/sub/b.md");
+
+    const moved = moveFolder("bossmode/rules", "bossmode/protocols");
+    expect(moved.ok).toBe(true);
+    expect(moved.movedFiles).toContainEqual(["bossmode/rules/a.md", "bossmode/protocols/a.md"]);
+    expect(moved.movedFiles).toContainEqual(["bossmode/rules/sub/b.md", "bossmode/protocols/sub/b.md"]);
+
+    expect(getEntry("bossmode/rules/a.md")).toBeNull();
+    expect(getEntry("bossmode/protocols/a.md")).not.toBeNull();
+  });
+
+  it("deleteFolder removes recursively and returns deleted paths", async () => {
+    const { addEntry, deleteFolder, getEntry } = await import("../../src/knowledge/store.js");
+    addEntry("A", "a", "user", "bossmode/rules/a.md");
+    addEntry("B", "b", "user", "bossmode/rules/sub/b.md");
+
+    const deleted = deleteFolder("bossmode/rules");
+    expect(deleted.ok).toBe(true);
+    expect(deleted.deletedCount).toBe(2);
+    expect(deleted.deletedPaths).toContain("bossmode/rules/a.md");
+    expect(deleted.deletedPaths).toContain("bossmode/rules/sub/b.md");
+
+    expect(getEntry("bossmode/rules/a.md")).toBeNull();
+    expect(getEntry("bossmode/rules/sub/b.md")).toBeNull();
+  });
+
   it("listEntries parses pre-existing markdown files with frontmatter", async () => {
     const { listEntries } = await import("../../src/knowledge/store.js");
     const docsRoot = join(tmpDir, "knowledge", "docs", "manual");

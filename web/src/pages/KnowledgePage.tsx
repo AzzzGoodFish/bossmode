@@ -2,14 +2,18 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Plus, Trash2, Pencil, FolderPlus, File as FileIcon,
   Folder, FolderOpen, ChevronRight, ChevronDown,
+  FolderInput, CheckSquare, X,
 } from "lucide-react";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../api/client";
 import {
   getKnowledgeTree, getKnowledgeEntry,
-  addKnowledgeEntry, updateKnowledgeEntry, deleteKnowledgeEntry as apiDeleteEntry,
+  addKnowledgeEntry, updateKnowledgeEntry,
+  deleteKnowledgeEntry as apiDeleteEntry,
+  moveKnowledgeEntry, batchMoveKnowledge, batchDeleteKnowledge,
 } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { useDialog } from "../components/dialogs";
+import { MoveToDialog } from "../components/MoveToDialog";
 
 const inputCls = "w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600";
 
@@ -24,13 +28,29 @@ interface KnowledgePageProps {
 }
 
 export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
-  const { toast, confirm, prompt } = useDialog();
+  const { toast, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const lastClickedRef = useRef<string | null>(null);
+
   const [currentDoc, setCurrentDoc] = useState<KnowledgeEntry | null>(null);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: KnowledgeTreeNode } | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const cancelRenameRef = useRef(false);
+
+  const [moveDialog, setMoveDialog] = useState<{ open: boolean; paths: string[]; currentPath?: string }>({
+    open: false,
+    paths: [],
+  });
+  const [dangerConfirmState, setDangerConfirmState] = useState<{ message: string; resolve: (ok: boolean) => void } | null>(null);
+
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [draggingPaths, setDraggingPaths] = useState<Set<string>>(new Set());
 
   // Resizable sidebar width (px). Persisted in localStorage.
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -69,6 +89,7 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
     });
     if (initialPath.endsWith(".md")) {
       setSelectedPath(initialPath);
+      setSelectedPaths(new Set());
     } else {
       setSelectedPath(null);
     }
@@ -113,6 +134,22 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
     return () => clearTimeout(timer);
   }, [initialPath, tree]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onClose = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("mousedown", onClose);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClose);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
   const toggleExpanded = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -120,6 +157,18 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
       return next;
     });
   }, []);
+
+  const visiblePaths = useMemo(() => {
+    const out: string[] = [];
+    const walk = (nodes: KnowledgeTreeNode[]) => {
+      for (const n of nodes) {
+        out.push(n.path);
+        if (n.kind === "folder" && expanded.has(n.path) && n.children) walk(n.children);
+      }
+    };
+    if (tree?.children) walk(tree.children);
+    return out;
+  }, [tree, expanded]);
 
   const handleCreateDoc = async (parentPath: string) => {
     const title = await prompt("New document title", "");
@@ -129,14 +178,13 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
     try {
       await addKnowledgeEntry(title, "", path);
       refreshTree();
-      // Auto-expand parent
       if (parentPath) setExpanded((prev) => new Set(prev).add(parentPath));
       setSelectedPath(path);
+      setSelectedPaths(new Set());
     } catch (err: any) { toast(err.message, "error"); }
   };
 
   const handleCreateFolder = async (parentPath: string) => {
-    // Folders are materialized by creating a placeholder doc inside them.
     const name = await prompt("New folder name", "");
     if (!name) return;
     const safeName = name.toLowerCase().replace(/\s+/g, "-").replace(/[^\w\-\u4e00-\u9fff]/gu, "");
@@ -154,14 +202,34 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
     } catch (err: any) { toast(err.message, "error"); }
   };
 
+  const confirmDanger = (message: string): Promise<boolean> => new Promise((resolve) => {
+    setDangerConfirmState({ message, resolve });
+  });
+
   const handleDeleteDoc = async () => {
     if (!currentDoc) return;
-    if (!(await confirm(`Delete "${currentDoc.title}"?`))) return;
+    if (!(await confirmDanger(`Delete "${currentDoc.title}"?`))) return;
     try {
       await apiDeleteEntry(currentDoc.id);
       refreshTree();
       setSelectedPath(null);
     } catch (err: any) { toast(err.message, "error"); }
+  };
+
+  const handleDeletePath = async (path: string) => {
+    if (!(await confirmDanger(`Delete "${path}"?`))) return;
+    try {
+      await apiDeleteEntry(path);
+      refreshTree();
+      if (selectedPath === path || selectedPath?.startsWith(`${path}/`)) setSelectedPath(null);
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } catch (err: any) {
+      toast(String(err?.message || err), "error");
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -172,6 +240,202 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
       setEditing(false);
       refreshTree();
     } catch (err: any) { toast(err.message, "error"); }
+  };
+
+  const moveSingle = useCallback(async (fromPath: string, destination: string) => {
+    const base = fromPath.split("/").pop() || fromPath;
+    const to = destination ? `${destination}/${base}` : base;
+    if (to === fromPath) return;
+    const moved = await moveKnowledgeEntry(fromPath, to);
+
+    if (selectedPath === fromPath) {
+      setSelectedPath(moved.to);
+    } else if (selectedPath?.startsWith(`${fromPath}/`)) {
+      setSelectedPath(moved.to + selectedPath.slice(fromPath.length));
+    }
+  }, [selectedPath]);
+
+  const openMoveDialogFor = (paths: string[], currentPath?: string) => {
+    setMoveDialog({ open: true, paths, currentPath });
+  };
+
+  const handleMoveConfirm = async (destination: string) => {
+    const paths = moveDialog.paths;
+    if (paths.length === 0) {
+      setMoveDialog({ open: false, paths: [] });
+      return;
+    }
+
+    const valid = paths.filter((p) => destination !== p && !destination.startsWith(`${p}/`));
+    if (valid.length === 0) {
+      setMoveDialog({ open: false, paths: [] });
+      return;
+    }
+
+    try {
+      if (valid.length === 1) {
+        await moveSingle(valid[0], destination);
+      } else {
+        const result = await batchMoveKnowledge(valid, destination);
+        if (result.failed.length > 0) {
+          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "warning");
+        }
+      }
+      setSelectedPaths(new Set());
+      setMoveDialog({ open: false, paths: [] });
+      refreshTree();
+    } catch (err: any) {
+      toast(String(err?.message || err), "error");
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const paths = [...selectedPaths];
+    if (paths.length === 0) return;
+    if (!(await confirmDanger(`Delete ${paths.length} selected item(s)?`))) return;
+    try {
+      const result = await batchDeleteKnowledge(paths);
+      if (result.failed.length > 0) {
+        toast(`Deleted ${result.deleted}. Failed ${result.failed.length}.`, "warning");
+      }
+      setSelectedPaths(new Set());
+      setSelectedPath((prev) => (prev && paths.some((p) => prev === p || prev.startsWith(`${p}/`)) ? null : prev));
+      refreshTree();
+    } catch (err: any) {
+      toast(String(err?.message || err), "error");
+    }
+  };
+
+  const handleStartRename = (path: string | null) => {
+    setRenamingPath(path);
+    setContextMenu(null);
+  };
+
+  const handleConfirmRename = async (node: KnowledgeTreeNode, rawName: string) => {
+    const newName = rawName.trim();
+    if (!newName) {
+      setRenamingPath(null);
+      return;
+    }
+
+    const oldPath = node.path;
+    const parts = oldPath.split("/");
+    const oldBase = parts.pop() || "";
+    const parent = parts.join("/");
+    const finalBase = node.kind === "file"
+      ? (newName.toLowerCase().endsWith(".md") ? newName : `${newName}.md`)
+      : newName;
+
+    if (finalBase === oldBase) {
+      setRenamingPath(null);
+      return;
+    }
+
+    const nextPath = parent ? `${parent}/${finalBase}` : finalBase;
+    try {
+      const moved = await moveKnowledgeEntry(oldPath, nextPath);
+      setRenamingPath(null);
+      if (selectedPath === oldPath) {
+        setSelectedPath(moved.to);
+      } else if (selectedPath?.startsWith(`${oldPath}/`)) {
+        setSelectedPath(moved.to + selectedPath.slice(oldPath.length));
+      }
+      refreshTree();
+    } catch (err: any) {
+      toast(String(err?.message || err), "error");
+      setRenamingPath(null);
+    }
+  };
+
+  const toggleSelectPath = (path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const rangeSelect = (fromPath: string, toPath: string) => {
+    const a = visiblePaths.indexOf(fromPath);
+    const b = visiblePaths.indexOf(toPath);
+    if (a < 0 || b < 0) return;
+    const [start, end] = a <= b ? [a, b] : [b, a];
+    const selection = new Set(selectedPaths);
+    for (let i = start; i <= end; i++) selection.add(visiblePaths[i]);
+    setSelectedPaths(selection);
+  };
+
+  const handleNodeClick = (e: React.MouseEvent, node: KnowledgeTreeNode) => {
+    const multiMode = e.ctrlKey || e.metaKey || e.shiftKey;
+
+    if (node.kind === "folder") {
+      if (!multiMode) {
+        toggleExpanded(node.path);
+        return;
+      }
+    }
+
+    if (e.shiftKey && lastClickedRef.current) {
+      rangeSelect(lastClickedRef.current, node.path);
+    } else if (e.ctrlKey || e.metaKey) {
+      toggleSelectPath(node.path);
+    } else {
+      setSelectedPaths(new Set());
+      if (node.kind === "file") setSelectedPath(node.path);
+    }
+
+    lastClickedRef.current = node.path;
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, node: KnowledgeTreeNode) => {
+    e.preventDefault();
+    const menuW = 180;
+    const menuH = 128;
+    const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+    setContextMenu({ x, y, node });
+  };
+
+  const handleDragStart = (e: React.DragEvent, node: KnowledgeTreeNode) => {
+    const paths = selectedPaths.size > 0 && selectedPaths.has(node.path)
+      ? [...selectedPaths]
+      : [node.path];
+    setDraggingPaths(new Set(paths));
+    e.dataTransfer.setData("application/json", JSON.stringify(paths));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetFolder: KnowledgeTreeNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+    setDraggingPaths(new Set());
+
+    let paths: string[] = [];
+    try {
+      paths = JSON.parse(e.dataTransfer.getData("application/json"));
+    } catch {
+      return;
+    }
+
+    const valid = paths.filter((p) => p !== targetFolder.path && !targetFolder.path.startsWith(`${p}/`));
+    if (valid.length === 0) return;
+
+    try {
+      if (valid.length === 1) {
+        await moveSingle(valid[0], targetFolder.path);
+      } else {
+        const result = await batchMoveKnowledge(valid, targetFolder.path);
+        if (result.failed.length > 0) {
+          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "warning");
+        }
+      }
+      setSelectedPaths(new Set());
+      refreshTree();
+    } catch (err: any) {
+      toast(String(err?.message || err), "error");
+    }
   };
 
   // Drag-to-resize handler
@@ -197,16 +461,16 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
     document.body.style.userSelect = "";
     window.removeEventListener("mousemove", onDragMove);
     window.removeEventListener("mouseup", onDragEnd);
-    // Persist
     setSidebarWidth((w) => {
       localStorage.setItem(WIDTH_STORAGE_KEY, String(w));
       return w;
     });
   };
 
+  const excludePaths = moveDialog.paths;
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
         <div>
           <h1 className="text-lg font-bold text-zinc-900 dark:text-white">Knowledge</h1>
@@ -217,7 +481,6 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* File tree pane */}
         <aside
           style={{ width: `${sidebarWidth}px` }}
           className="shrink-0 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col"
@@ -235,15 +498,61 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
               </button>
             </div>
           </div>
+
+          {selectedPaths.size > 0 && (
+            <div className="px-3 py-2 border-y border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/50 flex items-center justify-between text-xs">
+              <span className="text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-1">
+                <CheckSquare size={12} /> {selectedPaths.size} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => openMoveDialogFor([...selectedPaths])} className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white cursor-pointer">
+                  Move to...
+                </button>
+                <button onClick={handleBatchDelete} className="text-red-500 hover:text-red-400 cursor-pointer">
+                  Delete
+                </button>
+                <button onClick={() => setSelectedPaths(new Set())} className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer">
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {tree && tree.children && tree.children.length > 0 ? (
             <TreeView
               nodes={tree.children}
               selectedPath={selectedPath}
+              selectedPaths={selectedPaths}
               expanded={expanded}
+              renamingPath={renamingPath}
+              draggingPaths={draggingPaths}
+              dragOverPath={dragOverPath}
               onToggle={toggleExpanded}
-              onSelect={setSelectedPath}
+              onNodeClick={handleNodeClick}
               onCreateDoc={handleCreateDoc}
               onCreateFolder={handleCreateFolder}
+              onContextMenu={handleContextMenu}
+              onStartRename={handleStartRename}
+              onConfirmRename={handleConfirmRename}
+              onDeletePath={handleDeletePath}
+              onDragStart={handleDragStart}
+              onDragOver={(e, node) => {
+                if (node.kind !== "folder") return;
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverPath(node.path);
+              }}
+              onDragLeave={(e, node) => {
+                if (node.kind !== "folder") return;
+                e.stopPropagation();
+                if (dragOverPath === node.path) setDragOverPath(null);
+              }}
+              onDrop={handleDrop}
+              onDragEnd={() => {
+                setDraggingPaths(new Set());
+                setDragOverPath(null);
+              }}
+              cancelRenameRef={cancelRenameRef}
             />
           ) : (
             <div className="px-3 py-8 text-center text-xs text-zinc-400">
@@ -254,14 +563,12 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
           )}
         </aside>
 
-        {/* Drag handle */}
         <div
           onMouseDown={onDragStart}
           className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
           title="Drag to resize"
         />
 
-        {/* Main: document viewer/editor */}
         <main className="flex-1 overflow-y-auto">
           {currentDoc ? (
             editing ? (
@@ -319,7 +626,10 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
           ) : folderNode ? (
             <FolderOverview
               node={folderNode}
-              onSelectDoc={(path) => setSelectedPath(path)}
+              onSelectDoc={(path) => {
+                setSelectedPaths(new Set());
+                setSelectedPath(path);
+              }}
               onCreateDoc={() => handleCreateDoc(folderNode.path)}
               onCreateFolder={() => handleCreateFolder(folderNode.path)}
             />
@@ -330,20 +640,116 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
           )}
         </main>
       </div>
+
+      {contextMenu && (
+        <ContextMenuOverlay x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)}>
+          <ContextMenuItem icon={<FolderInput size={14} />} label="Move to..." onClick={() => {
+            const path = contextMenu.node.path;
+            const parent = path.split("/").slice(0, -1).join("/");
+            openMoveDialogFor([path], parent);
+            setContextMenu(null);
+          }} />
+          <ContextMenuItem icon={<Pencil size={14} />} label="Rename" onClick={() => handleStartRename(contextMenu.node.path)} />
+          <div className="h-px my-1 bg-zinc-200 dark:bg-zinc-700" />
+          <ContextMenuItem icon={<Trash2 size={14} />} label="Delete" danger onClick={() => {
+            void handleDeletePath(contextMenu.node.path);
+            setContextMenu(null);
+          }} />
+        </ContextMenuOverlay>
+      )}
+
+      <MoveToDialog
+        open={moveDialog.open}
+        tree={tree}
+        itemCount={moveDialog.paths.length}
+        currentPath={moveDialog.currentPath}
+        excludePaths={excludePaths}
+        onConfirm={handleMoveConfirm}
+        onCancel={() => setMoveDialog({ open: false, paths: [] })}
+      />
+
+      {dangerConfirmState && (
+        <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center" onClick={() => {
+          dangerConfirmState.resolve(false);
+          setDangerConfirmState(null);
+        }}>
+          <div
+            className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-5 whitespace-pre-wrap">{dangerConfirmState.message}</p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  dangerConfirmState.resolve(false);
+                  setDangerConfirmState(null);
+                }}
+                className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                autoFocus
+                onClick={() => {
+                  dangerConfirmState.resolve(true);
+                  setDangerConfirmState(null);
+                }}
+                className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-500 cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// -- File tree view --
-
-function TreeView({ nodes, selectedPath, expanded, onToggle, onSelect, onCreateDoc, onCreateFolder }: {
+function TreeView({
+  nodes,
+  selectedPath,
+  selectedPaths,
+  expanded,
+  renamingPath,
+  draggingPaths,
+  dragOverPath,
+  onToggle,
+  onNodeClick,
+  onCreateDoc,
+  onCreateFolder,
+  onContextMenu,
+  onStartRename,
+  onConfirmRename,
+  onDeletePath,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  cancelRenameRef,
+}: {
   nodes: KnowledgeTreeNode[];
   selectedPath: string | null;
+  selectedPaths: Set<string>;
   expanded: Set<string>;
+  renamingPath: string | null;
+  draggingPaths: Set<string>;
+  dragOverPath: string | null;
   onToggle: (path: string) => void;
-  onSelect: (path: string) => void;
+  onNodeClick: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
   onCreateDoc: (parentPath: string) => void;
   onCreateFolder: (parentPath: string) => void;
+  onContextMenu: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
+  onStartRename: (path: string | null) => void;
+  onConfirmRename: (node: KnowledgeTreeNode, rawName: string) => void;
+  onDeletePath: (path: string) => void;
+  onDragStart: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDragOver: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDragLeave: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDrop: (e: React.DragEvent, targetFolder: KnowledgeTreeNode) => void;
+  onDragEnd: () => void;
+  cancelRenameRef: React.MutableRefObject<boolean>;
 }) {
   return (
     <ul className="text-sm pb-4">
@@ -353,29 +759,91 @@ function TreeView({ nodes, selectedPath, expanded, onToggle, onSelect, onCreateD
           node={node}
           depth={0}
           selectedPath={selectedPath}
+          selectedPaths={selectedPaths}
           expanded={expanded}
+          renamingPath={renamingPath}
+          draggingPaths={draggingPaths}
+          dragOverPath={dragOverPath}
           onToggle={onToggle}
-          onSelect={onSelect}
+          onNodeClick={onNodeClick}
           onCreateDoc={onCreateDoc}
           onCreateFolder={onCreateFolder}
+          onContextMenu={onContextMenu}
+          onStartRename={onStartRename}
+          onConfirmRename={onConfirmRename}
+          onDeletePath={onDeletePath}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
+          cancelRenameRef={cancelRenameRef}
         />
       ))}
     </ul>
   );
 }
 
-function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onCreateDoc, onCreateFolder }: {
+function TreeNode({
+  node,
+  depth,
+  selectedPath,
+  selectedPaths,
+  expanded,
+  renamingPath,
+  draggingPaths,
+  dragOverPath,
+  onToggle,
+  onNodeClick,
+  onCreateDoc,
+  onCreateFolder,
+  onContextMenu,
+  onStartRename,
+  onConfirmRename,
+  onDeletePath,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  cancelRenameRef,
+}: {
   node: KnowledgeTreeNode;
   depth: number;
   selectedPath: string | null;
+  selectedPaths: Set<string>;
   expanded: Set<string>;
+  renamingPath: string | null;
+  draggingPaths: Set<string>;
+  dragOverPath: string | null;
   onToggle: (path: string) => void;
-  onSelect: (path: string) => void;
+  onNodeClick: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
   onCreateDoc: (parentPath: string) => void;
   onCreateFolder: (parentPath: string) => void;
+  onContextMenu: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
+  onStartRename: (path: string | null) => void;
+  onConfirmRename: (node: KnowledgeTreeNode, rawName: string) => void;
+  onDeletePath: (path: string) => void;
+  onDragStart: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDragOver: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDragLeave: (e: React.DragEvent, node: KnowledgeTreeNode) => void;
+  onDrop: (e: React.DragEvent, targetFolder: KnowledgeTreeNode) => void;
+  onDragEnd: () => void;
+  cancelRenameRef: React.MutableRefObject<boolean>;
 }) {
   const indent = { paddingLeft: `${depth * 12 + 8}px` };
-  const isSelected = selectedPath === node.path;
+  const openedSelected = selectedPath === node.path;
+  const multiSelected = selectedPaths.has(node.path);
+  const isDragging = draggingPaths.has(node.path);
+  const isDropTarget = dragOverPath === node.path;
+
+  const rowBase = "group relative flex items-center justify-between py-1 pr-1 cursor-pointer";
+  const rowSelect = openedSelected
+    ? "bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-300"
+    : multiSelected
+      ? "bg-blue-50 dark:bg-blue-900/20 text-zinc-800 dark:text-zinc-200 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-blue-500"
+      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
+  const dropCls = isDropTarget ? "outline outline-2 outline-blue-500 outline-offset-[-1px] bg-blue-50 dark:bg-blue-900/20" : "";
 
   if (node.kind === "folder") {
     const isOpen = expanded.has(node.path);
@@ -383,23 +851,58 @@ function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onC
       <li>
         <div style={indent}
           data-folder-path={node.path}
-          className="group flex items-center justify-between py-1 pr-1 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 cursor-pointer"
-          onClick={() => onToggle(node.path)}
+          draggable
+          onDragStart={(e) => onDragStart(e, node)}
+          onDragEnd={onDragEnd}
+          onDragOver={(e) => onDragOver(e, node)}
+          onDragLeave={(e) => onDragLeave(e, node)}
+          onDrop={(e) => onDrop(e, node)}
+          onContextMenu={(e) => onContextMenu(e, node)}
+          onClick={(e) => onNodeClick(e, node)}
+          className={`${rowBase} ${rowSelect} ${dropCls} ${isDragging ? "opacity-40" : ""}`}
         >
           <span className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300 min-w-0">
             {isOpen ? <ChevronDown size={12} className="text-zinc-400 shrink-0" /> : <ChevronRight size={12} className="text-zinc-400 shrink-0" />}
             {isOpen
               ? <FolderOpen size={13} className="text-amber-500 shrink-0" />
               : <Folder size={13} className="text-amber-500 shrink-0" />}
-            <span className="font-medium text-xs truncate">{node.name}</span>
+            {renamingPath === node.path ? (
+              <input
+                autoFocus
+                defaultValue={node.name}
+                onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.stopPropagation()}
+                onBlur={(e) => {
+                  if (cancelRenameRef.current) {
+                    cancelRenameRef.current = false;
+                    return;
+                  }
+                  onConfirmRename(node, e.currentTarget.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelRenameRef.current = true;
+                    onStartRename(null);
+                  }
+                }}
+                className="text-xs bg-transparent border border-blue-500 rounded px-1 py-0.5 outline-none w-full min-w-0"
+              />
+            ) : (
+              <span className="font-medium text-xs truncate" onDoubleClick={() => onStartRename(node.path)}>{node.name}</span>
+            )}
           </span>
           <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
             <button title="New folder" onClick={(e) => { e.stopPropagation(); onCreateFolder(node.path); }}
-              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
               <FolderPlus size={12} />
             </button>
             <button title="New document" onClick={(e) => { e.stopPropagation(); onCreateDoc(node.path); }}
-              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
               <Plus size={12} />
             </button>
           </span>
@@ -412,11 +915,25 @@ function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onC
                 node={child}
                 depth={depth + 1}
                 selectedPath={selectedPath}
+                selectedPaths={selectedPaths}
                 expanded={expanded}
+                renamingPath={renamingPath}
+                draggingPaths={draggingPaths}
+                dragOverPath={dragOverPath}
                 onToggle={onToggle}
-                onSelect={onSelect}
+                onNodeClick={onNodeClick}
                 onCreateDoc={onCreateDoc}
                 onCreateFolder={onCreateFolder}
+                onContextMenu={onContextMenu}
+                onStartRename={onStartRename}
+                onConfirmRename={onConfirmRename}
+                onDeletePath={onDeletePath}
+                onDragStart={onDragStart}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                onDragEnd={onDragEnd}
+                cancelRenameRef={cancelRenameRef}
               />
             ))}
           </ul>
@@ -428,21 +945,78 @@ function TreeNode({ node, depth, selectedPath, expanded, onToggle, onSelect, onC
   return (
     <li>
       <div style={indent}
-        onClick={() => onSelect(node.path)}
-        className={`flex items-center gap-1.5 py-1 pr-1 cursor-pointer ${
-          isSelected
-            ? "bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-300"
-            : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
-        }`}
+        draggable
+        onDragStart={(e) => onDragStart(e, node)}
+        onDragEnd={onDragEnd}
+        onContextMenu={(e) => onContextMenu(e, node)}
+        onClick={(e) => onNodeClick(e, node)}
+        className={`${rowBase} ${rowSelect} ${isDragging ? "opacity-40" : ""}`}
       >
-        {/* Spacer to align with chevron width on folder rows */}
-        <span className="w-3 shrink-0" />
-        <FileIcon size={12} className="text-zinc-400 shrink-0" />
-        <span className="text-xs truncate" title={node.title || node.name}>
-          {node.title || node.name}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="w-3 shrink-0" />
+          <FileIcon size={12} className="text-zinc-400 dark:text-zinc-600 shrink-0" />
+          {renamingPath === node.path ? (
+            <input
+              autoFocus
+              defaultValue={(node.name || "").replace(/\.md$/i, "")}
+              onFocus={(e) => e.currentTarget.select()}
+              onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                if (cancelRenameRef.current) {
+                  cancelRenameRef.current = false;
+                  return;
+                }
+                onConfirmRename(node, e.currentTarget.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelRenameRef.current = true;
+                  onStartRename(null);
+                }
+              }}
+              className="text-xs bg-transparent border border-blue-500 rounded px-1 py-0.5 outline-none w-full min-w-0"
+            />
+          ) : (
+            <span className="text-xs truncate" title={node.title || node.name} onDoubleClick={() => onStartRename(node.path)}>
+              {node.title || node.name}
+            </span>
+          )}
         </span>
       </div>
     </li>
+  );
+}
+
+function ContextMenuOverlay({ x, y, onClose, children }: { x: number; y: number; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-40" onMouseDown={onClose}>
+      <div
+        className="absolute min-w-[170px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg p-1"
+        style={{ left: `${x}px`, top: `${y}px` }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ContextMenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded cursor-pointer ${danger
+        ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+        : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
