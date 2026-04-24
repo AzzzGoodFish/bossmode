@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.2] — 2026-04-24
+
+### Fixed
+- **Message envelope footer now action-required** — changed reply footer wording to explicit command style to reduce agent bare-text output and enforce chat tool usage.
+
+### Tests
+- **Release validation**: `npm run build` passed; focused unit coverage for envelope/footer behavior passed.
+- **Release note**: `fix: message envelope footer changed to action-required command style to prevent agents from outputting bare text instead of calling chat tool`.
+
 ## [0.9.1] — 2026-04-24
 
 ### Added
