@@ -3,8 +3,8 @@ import { USER_DISPLAY_NAME } from "../shared/user-identity.js";
 
 export type SenderRole = "user" | "member";
 
-export const ROOM_REPLY_FOOTER = "[Reply via chat: target=\"room\". Include mentions=[...] only for agents you need to activate next.]";
-export const PRIVATE_REPLY_FOOTER = "[Reply via chat: target=\"user\". Do not include mentions. Do not post to the room.]";
+export const ROOM_REPLY_FOOTER = "[ACTION REQUIRED: Call chat tool with target=\"room\". Bare text will NOT be delivered. Include mentions=[...] only for agents you need to activate next.]";
+export const PRIVATE_REPLY_FOOTER = "[ACTION REQUIRED: Call chat tool with target=\"user\". Bare text will NOT be delivered. Do not include mentions. Do not post to the room.]";
 
 function escapeLabel(text: string): string {
   return String(text).replace(/"/g, "\\\"");
