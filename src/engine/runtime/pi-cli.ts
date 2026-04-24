@@ -28,7 +28,7 @@ export default function (pi) {
   const MAX_RESULT_CHARS = 25000;
   function truncate(text) {
     if (text.length <= MAX_RESULT_CHARS) return text;
-    return text.slice(0, MAX_RESULT_CHARS) + "\n\n--- Result truncated (" + text.length + " chars). Use a more specific query. ---";
+    return text.slice(0, MAX_RESULT_CHARS) + "\\n\\n--- Result truncated (" + text.length + " chars). Use a more specific query. ---";
   }
 
   pi.registerTool({
@@ -73,7 +73,7 @@ export default function (pi) {
       const messages = await res.json();
       const text = messages.length === 0
         ? "No messages in room."
-        : messages.map(m => "[" + m.sender + "]: " + m.content).join("\n\n");
+        : messages.map(m => "[" + m.sender + "]: " + m.content).join("\\n\\n");
       return { content: [{ type: "text", text: truncate(text) }], details: {} };
     },
   });

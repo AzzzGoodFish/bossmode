@@ -123,6 +123,16 @@ describe("PiCliRuntime spawn args", () => {
     // Correct form is `\\"` so the output file contains `\"`.
     expect(extensionContent).toContain('Summary created: \\"');
     expect(extensionContent).not.toMatch(/Summary created: ""/);
+
+    // Regression guard: newline escaping in the generated extension.
+    // Template strings inside the extension must use \\n (double-escaped) so
+    // the emitted .ts file contains a literal \n character sequence, not an
+    // actual newline that would split a string literal and cause a ParseError.
+    // Specifically validate the two places that previously regressed:
+    //   1. truncate() trailing text
+    //   2. query_room_messages join separator
+    expect(extensionContent).toContain('+ "\\n\\n--- Result truncated');
+    expect(extensionContent).toContain('.join("\\n\\n")');
   });
 
   it("maps get_state response data to onSessionChanged callback", async () => {

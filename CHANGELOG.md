@@ -4,6 +4,16 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.3] — 2026-04-24
+
+### Fixed
+- **pi-cli extension generation escape regression** — two `\\n\\n` sequences in the generated extension template were erroneously simplified to `\n\n` (literal newlines) in 0.9.1, causing a `ParseError: Unterminated string constant` crash on agent startup after restart.
+
+### Tests
+- Added regression guards to `pi-cli-args.test.ts`: asserts `\\n\\n` is present in the generated extension output (both `truncate()` helper and `query_room_messages` join separator).
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit/pi-cli-args.test.ts` passed.
+- **Release note**: `fix: pi-cli extension generation escape regression introduced in 0.9.1 that caused ParseError on agent startup`.
+
 ## [0.9.2] — 2026-04-24
 
 ### Fixed
