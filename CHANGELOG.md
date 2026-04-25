@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.8] — 2026-04-25
+
+### Fixed
+- **Folder picker fails on first open** — `~` path was not expanded to the actual home directory, causing a 404 error on initial open. Backend now normalizes tilde paths; frontend no longer sends literal `~`.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: folder picker fails on first open — tilde path not expanded to home directory`.
+
 ## [0.9.7] — 2026-04-25
 
 ### Added

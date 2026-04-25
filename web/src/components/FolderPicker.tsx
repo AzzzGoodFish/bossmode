@@ -27,7 +27,7 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
 
   useEffect(() => {
     if (!open) return;
-    navigate(initialPath || "~");
+    navigate(initialPath || "");
   }, [open, initialPath, navigate]);
 
   if (!open) return null;

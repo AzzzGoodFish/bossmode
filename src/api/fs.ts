@@ -46,7 +46,7 @@ function buildSegments(absPath: string): Array<{ name: string; path: string }> {
 
 addRoute("GET", "/api/fs/list-dirs", async (req, res) => {
   const url = new URL(req.url || "", "http://localhost");
-  const rawPath = url.searchParams.get("path") || HOME;
+  const rawPath = (url.searchParams.get("path") || HOME).replace(/^~(\/|$)/, HOME + "$1");
 
   // Resolve to absolute and validate it's inside home
   const absPath = resolve(rawPath);
