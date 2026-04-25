@@ -582,6 +582,25 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
   });
 }
 
+// -- Filesystem --
+
+export interface FsDirEntry {
+  name: string;
+  path: string;
+}
+
+export interface FsListDirsResult {
+  path: string;
+  parent: string | null;
+  segments: FsDirEntry[];
+  dirs: FsDirEntry[];
+  truncated: boolean;
+}
+
+export async function listDirs(path: string): Promise<FsListDirsResult> {
+  return apiFetch(`/api/fs/list-dirs?path=${encodeURIComponent(path)}`);
+}
+
 // -- Built-in Team Updates --
 
 export async function checkTeamUpdates(): Promise<TeamUpdateCheckResult> {
