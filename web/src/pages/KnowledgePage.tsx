@@ -47,11 +47,6 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const cancelRenameRef = useRef(false);
   const isMobile = useIsMobile();
-  const mobileModeRef = useRef<"tree" | "doc">("tree");
-  const mobileView = useMemo(() => {
-    if (!isMobile) return "both";
-    return (currentDoc || folderNode) ? "doc" : "tree";
-  }, [isMobile, currentDoc, folderNode]);
 
   const [moveDialog, setMoveDialog] = useState<{ open: boolean; paths: string[]; currentPath?: string }>({
     open: false,
@@ -132,6 +127,12 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     if (selectedPath) return null;
     return findNodeByPath(tree, initialPath);
   }, [tree, initialPath, selectedPath]);
+
+  // mobileView must be declared AFTER folderNode (dependency order — avoids TDZ)
+  const mobileView = useMemo(() => {
+    if (!isMobile) return "both";
+    return (currentDoc || folderNode) ? "doc" : "tree";
+  }, [isMobile, currentDoc, folderNode]);
 
   useEffect(() => {
     if (!initialPath || initialPath === "__new__" || initialPath.endsWith(".md")) return;
@@ -288,7 +289,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       } else {
         const result = await batchMoveKnowledge(valid, destination);
         if (result.failed.length > 0) {
-          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "warning");
+          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "info");
         }
       }
       setSelectedPaths(new Set());
@@ -306,7 +307,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     try {
       const result = await batchDeleteKnowledge(paths);
       if (result.failed.length > 0) {
-        toast(`Deleted ${result.deleted}. Failed ${result.failed.length}.`, "warning");
+        toast(`Deleted ${result.deleted}. Failed ${result.failed.length}.`, "info");
       }
       setSelectedPaths(new Set());
       setSelectedPath((prev) => (prev && paths.some((p) => prev === p || prev.startsWith(`${p}/`)) ? null : prev));
@@ -438,7 +439,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       } else {
         const result = await batchMoveKnowledge(valid, targetFolder.path);
         if (result.failed.length > 0) {
-          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "warning");
+          toast(`Moved ${result.moved}. Failed ${result.failed.length}.`, "info");
         }
       }
       setSelectedPaths(new Set());

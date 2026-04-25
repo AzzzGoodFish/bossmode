@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type ClipboardEvent } from "react";
+import { useDraft } from "../hooks/useDraft";
 import { Paperclip, X, Loader2 } from "lucide-react";
 import { getToken, getAgentEventsPaginated, abortAgent, uploadFile, resetAgentSession } from "../api/client";
 import { useDialog } from "./dialogs";
@@ -448,7 +449,7 @@ function AgentChat({
   onResetSessionError: (message: string) => void;
 }) {
   const { confirm } = useDialog();
-  const [input, setInput] = useState("");
+  const [input, setInput, clearInput] = useDraft(`agent:${roomId}:${agentName}`);
   const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
@@ -604,7 +605,7 @@ function AgentChat({
       try {
         const result = await resetAgentSession(roomId, agentName);
         onResetSessionSuccess(result.message);
-        setInput("");
+        clearInput();
       } catch (err: any) {
         onResetSessionError(`Reset session failed: ${err.message}`);
       }
@@ -612,7 +613,7 @@ function AgentChat({
     }
 
     if (content) onSend(content);
-    setInput("");
+    clearInput();
   };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
