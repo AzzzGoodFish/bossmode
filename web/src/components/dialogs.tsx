@@ -160,7 +160,7 @@ function PromptDialog({ state, onClose }: { state: PromptState; onClose: (value:
   };
 
   return (
-    <Sheet open onClose={() => onClose(null)} size="sm">
+    <Sheet open onClose={() => onClose(null)} size="sm" closeOnOverlayClick={false}>
       <div className="p-5">
         <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-3">{state.message}</p>
         <input

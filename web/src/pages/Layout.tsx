@@ -551,7 +551,7 @@ function ReviewDialog({
   ];
 
   return (
-    <Sheet open onClose={onClose} size="xl">
+    <Sheet open onClose={onClose} size="xl" closeOnOverlayClick={false}>
       <div>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
           <h3 className="text-sm font-semibold">Review Updates</h3>

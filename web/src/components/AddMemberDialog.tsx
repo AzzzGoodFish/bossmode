@@ -26,7 +26,7 @@ export function AddMemberDialog({ currentMembers, onAdd, onClose }: AddMemberDia
   };
 
   return (
-    <Sheet open onClose={onClose} size="sm">
+    <Sheet open onClose={onClose} size="sm" closeOnOverlayClick={false}>
       <div className="p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white">Add Member</h2>

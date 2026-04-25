@@ -69,6 +69,18 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  // Overlay click guard: only close when mousedown AND mouseup both on overlay itself
+  // (prevents accidental close when user drags-to-select inside panel and releases on overlay)
+  const overlayMouseDownRef = useRef(false);
+  const handleOverlayMouseDown = (e: React.MouseEvent) => {
+    overlayMouseDownRef.current = e.target === e.currentTarget;
+  };
+  const handleOverlayMouseUp = (e: React.MouseEvent) => {
+    const wasOverlay = overlayMouseDownRef.current && e.target === e.currentTarget;
+    overlayMouseDownRef.current = false;
+    if (closeOnOverlayClick && wasOverlay) onClose();
+  };
+
   // Swipe-to-dismiss (mobile only)
   const swipeStartY = useRef<number | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
@@ -88,14 +100,15 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
     return (
       <div
         className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-        onClick={closeOnOverlayClick ? onClose : undefined}
+        onMouseDown={handleOverlayMouseDown}
+        onMouseUp={handleOverlayMouseUp}
       >
         <div
           ref={panelRef}
           aria-modal="true"
           role="dialog"
           className={`w-full ${SIZE_CLS[size]} bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl max-h-[80vh] overflow-y-auto`}
-          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {children}
         </div>
@@ -109,7 +122,8 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
       {/* Overlay */}
       <div
         className="absolute inset-0 bg-black/50"
-        onClick={closeOnOverlayClick ? onClose : undefined}
+        onMouseDown={handleOverlayMouseDown}
+        onMouseUp={handleOverlayMouseUp}
       />
       {/* Panel */}
       <div
@@ -120,7 +134,7 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
                    animate-sheet-up pb-[env(safe-area-inset-bottom)]"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-1 shrink-0">

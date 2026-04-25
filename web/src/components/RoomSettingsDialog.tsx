@@ -107,7 +107,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
   if (!open) return null;
 
   return (
-    <Sheet open={open} onClose={onClose} size="lg">
+    <Sheet open={open} onClose={onClose} size="lg" closeOnOverlayClick={false}>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Room Settings</h2>
