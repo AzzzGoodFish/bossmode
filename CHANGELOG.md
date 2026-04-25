@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.5] — 2026-04-24
+
+### Fixed
+- **Sidebar collapse button hidden on mobile** — the collapse/expand toggle no longer appears on mobile where it had no visible effect (sidebar is drawer-mode, collapsed is forced false) and would silently pollute the desktop collapsed state in localStorage.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: hide sidebar collapse button on mobile (no effect in drawer mode, polluted desktop state)`.
+
 ## [0.9.4] — 2026-04-24
 
 ### Added

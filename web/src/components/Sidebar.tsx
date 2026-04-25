@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
 import { getRooms, getAgents, getMembers, getSkills, getKnowledgeTree } from "../api/client";
 import { SidebarSection, type SidebarItem } from "./SidebarSection";
@@ -29,6 +30,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey, unreadRoomIds, onRoomsLoaded, collapsed, onToggle }: SidebarProps) {
+  const isMobile = useIsMobile();
   const { toast, confirm, prompt } = useDialog();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -135,14 +137,16 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
         ) : (
           <div className="h-full flex items-center justify-between px-4">
             <span className="font-bold text-sm text-zinc-900 dark:text-white tracking-tight whitespace-nowrap">Bossmode</span>
-            <button
-              onClick={onToggle}
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-              className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            >
-              <PanelLeftClose size={16} />
-            </button>
+            {!isMobile && (
+              <button
+                onClick={onToggle}
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            )}
           </div>
         )}
       </div>
