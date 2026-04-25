@@ -1,6 +1,6 @@
 {
   "name": "bossmode",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "Discord-style AI team chat room",
   "type": "module",
   "license": "ISC",

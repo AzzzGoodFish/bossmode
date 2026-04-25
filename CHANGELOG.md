@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.10] — 2026-04-25
+
+### Fixed
+- **Knowledge page white screen on first visit** — `mobileView` useMemo referenced `folderNode` before its declaration (TDZ error), crashing the component on every mount. Regression introduced in v0.9.4.
+- **Room and private chat draft persistence** — new `useDraft` hook backs input with localStorage so draft text survives page switches, tab changes, and browser refresh. MessageInput and AgentChat both upgraded.
+
+### Build
+- **TypeScript type checking added to build** — `tsc --noEmit` now runs before `vite build`, preventing type errors from shipping silently.
+
+### Tests
+- Added 7 unit tests for `useDraft` localStorage persistence contract.
+- **Release validation**: `npm run build` passed (including tsc); `npm test -- tests/unit` passed (229/229).
+- **Release note**: `fix: knowledge page white screen on first visit (TDZ error from v0.9.4); feat: draft persistence for room and private chat input (survives page switch and refresh); build: add tsc type checking to prevent type errors from shipping`.
+
 ## [0.9.9] — 2026-04-25
 
 ### Added

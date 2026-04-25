@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type DragEvent, type ClipboardEvent } from "react";
 import { Paperclip, X } from "lucide-react";
 import { uploadFile } from "../api/client";
+import { useDraft } from "../hooks/useDraft";
 
 interface PendingFile {
   file: File;
@@ -27,7 +28,7 @@ function isImageFile(file: File): boolean {
 }
 
 export function MessageInput({ onSend, members, disabled, roomId }: MessageInputProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue, clearDraft] = useDraft(roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -35,20 +36,6 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Per-room draft caching: save/restore input when switching rooms
-  const drafts = useRef<Map<string, string>>(new Map());
-  const prevRoomId = useRef<string | undefined>(roomId);
-  useEffect(() => {
-    if (prevRoomId.current !== roomId) {
-      // Save current draft for previous room
-      if (prevRoomId.current) drafts.current.set(prevRoomId.current, value);
-      // Restore draft for new room (or empty)
-      setValue(roomId ? (drafts.current.get(roomId) ?? "") : "");
-      prevRoomId.current = roomId;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
 
   const addFiles = useCallback((files: File[]) => {
     const newPending: PendingFile[] = files.map((file) => {
@@ -135,7 +122,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
     if (content) {
       onSend(content);
     }
-    setValue("");
+    clearDraft();
     setShowMentions(false);
   };
 
