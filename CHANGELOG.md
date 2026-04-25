@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.11] — 2026-04-25
+
+### Added
+- **"User Intent is Supreme" universal agent principle** — all agents now recognize user commands as the highest priority. When user instructions conflict with team rules, agents briefly flag the conflict once, then execute upon confirmation without repeated questioning.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `feat: add "User Intent is Supreme" to universal agent principles — user commands take highest priority over team rules with single confirmation`.
+
 ## [0.9.10] — 2026-04-25
 
 ### Fixed
