@@ -60,9 +60,14 @@ export default function (pi) {
   pi.registerTool({
     name: "query_room_messages",
     label: "Query Room Messages",
-    description: "Read recent messages from the group chat room to understand the conversation context.",
+    description: "Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.",
     parameters: Type.Object({
-      limit: Type.Optional(Type.Number({ description: "Number of messages to retrieve (default 50)" })),
+      query: Type.Optional(Type.String({ description: "Case-insensitive substring to search in message content" })),
+      from: Type.Optional(Type.String({ description: "Filter by sender name (exact match, e.g. 'fish' or 'developer')" })),
+      after: Type.Optional(Type.String({ description: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')" })),
+      before: Type.Optional(Type.String({ description: "Only messages before this time: same format as 'after'" })),
+      limit: Type.Optional(Type.Number({ description: "Max messages to return (default 50, max 500)" })),
+      output: Type.Optional(Type.String({ description: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it" })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -70,9 +75,14 @@ export default function (pi) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tool: "query_room_messages", room: ROOM, agent: AGENT, params }),
       });
-      const messages = await res.json();
+      const data = await res.json();
+      // File output mode: return path
+      if (data && typeof data === "object" && "path" in data) {
+        return { content: [{ type: "text", text: "Messages written to: " + data.path + " (count: " + data.count + ")" }], details: {} };
+      }
+      const messages = Array.isArray(data) ? data : [];
       const text = messages.length === 0
-        ? "No messages in room."
+        ? "No messages found."
         : messages.map(m => "[" + m.sender + "]: " + m.content).join("\\n\\n");
       return { content: [{ type: "text", text: truncate(text) }], details: {} };
     },

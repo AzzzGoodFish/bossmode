@@ -4,6 +4,17 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.0] — 2026-04-25
+
+### Added
+- **Message search** — keyword, sender, and time range filtering in room chat. Accessible via the search icon in the room header or Ctrl/Cmd+F. Results show in real-time with keyword highlighting and click-to-jump navigation.
+- **query_room_messages enhanced** — agent tool now supports `query`, `from`, `after`, `before` search filter params and an `output: "file"` mode that writes results to a temp markdown file, bypassing the 25K truncation limit for large result sets.
+
+### Tests
+- Added 10 unit tests for message search logic.
+- **Release validation**: `npm run build` passed (tsc zero errors); `npm test -- tests/unit` passed (239/239).
+- **Release note**: `feat: message search — keyword, sender, and time range filtering in room chat; agent tool query_room_messages enhanced with search filters and file output mode for large result sets; search UI with real-time results, keyword highlighting, and click-to-jump`.
+
 ## [0.9.11] — 2026-04-25
 
 ### Added

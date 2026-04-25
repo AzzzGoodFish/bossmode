@@ -187,3 +187,43 @@ export function getUnsummarizedMessages(roomId: string, keepCount: number): Room
   if (unsummarized.length <= keepCount) return [];
   return unsummarized.slice(0, unsummarized.length - keepCount);
 }
+
+// -- Message search --
+
+export interface SearchOptions {
+  query?: string;    // case-insensitive substring on content
+  from?: string;     // sender filter (exact match)
+  after?: number;    // ts >= after (epoch ms)
+  before?: number;   // ts < before (epoch ms)
+  limit?: number;    // default 50, max 500
+  offset?: number;   // default 0
+}
+
+export interface SearchResult {
+  total: number;
+  messages: RoomMessage[];
+}
+
+export function searchMessages(roomId: string, opts: SearchOptions = {}): SearchResult {
+  const all = mergeWithSummaries(readAllMessages(roomId));
+  const q = opts.query?.toLowerCase();
+
+  const filtered = all.filter((m) => {
+    if (q && !m.content.toLowerCase().includes(q)) return false;
+    if (opts.from && m.sender !== opts.from) return false;
+    if (opts.after !== undefined && m.ts < opts.after) return false;
+    if (opts.before !== undefined && m.ts >= opts.before) return false;
+    return true;
+  });
+
+  // Newest first for UI/agent priority
+  filtered.sort((a, b) => b.ts - a.ts);
+
+  const limit = Math.max(1, Math.min(opts.limit ?? 50, 500));
+  const offset = Math.max(0, opts.offset ?? 0);
+
+  return {
+    total: filtered.length,
+    messages: filtered.slice(offset, offset + limit),
+  };
+}

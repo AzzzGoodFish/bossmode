@@ -69,12 +69,17 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "query_room_messages",
-      "Read recent messages from the group chat room to understand the conversation context.",
+      "Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search filtered by sender and time range.",
       {
-        limit: z.number().optional().describe("Number of messages to retrieve (default 50)"),
+        query: z.string().optional().describe("Case-insensitive substring to search in message content"),
+        from: z.string().optional().describe("Filter by sender name (exact match, e.g. 'fish' or 'developer')"),
+        after: z.string().optional().describe("Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')"),
+        before: z.string().optional().describe("Only messages before this time: same format as 'after'"),
+        limit: z.number().optional().describe("Max messages to return (default 50, max 500)"),
+        output: z.enum(["text", "file"]).optional().describe("'text' returns inline (default, may be truncated). 'file' writes to a temp markdown file and returns the path — use this for large result sets and read the file with the Read tool"),
       },
-      async ({ limit }) => {
-        const result = await callbackTool("query_room_messages", { limit });
+      async (args) => {
+        const result = await callbackTool("query_room_messages", args);
         return { content: [{ type: "text", text: result }] };
       },
     );

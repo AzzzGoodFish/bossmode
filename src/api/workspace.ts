@@ -331,6 +331,24 @@ addRoute("POST", "/api/rooms/:id/summarize", async (req, res, params) => {
 
 // ── Message Range (for expanding summaries) ──
 
+addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+
+  const url = new URL(req.url || "", "http://localhost");
+  const opts: messageStore.SearchOptions = {
+    query: url.searchParams.get("query") || undefined,
+    from: url.searchParams.get("from") || undefined,
+    after: url.searchParams.get("after") ? parseInt(url.searchParams.get("after")!, 10) : undefined,
+    before: url.searchParams.get("before") ? parseInt(url.searchParams.get("before")!, 10) : undefined,
+    limit: url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined,
+    offset: url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!, 10) : undefined,
+  };
+
+  const result = messageStore.searchMessages(params.id, opts);
+  sendJson(res, 200, result);
+});
+
 addRoute("GET", "/api/rooms/:id/messages/range", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {

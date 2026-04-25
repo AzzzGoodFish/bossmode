@@ -78,3 +78,13 @@ textarea::-webkit-scrollbar {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Message search: jump-to-message highlight pulse */
+@keyframes message-pulse {
+  0%, 100% { background-color: transparent; }
+  20%, 60% { background-color: rgb(250 204 21 / 0.20); }
+}
+.message-pulse {
+  animation: message-pulse 1500ms ease-out;
+  border-radius: 0.375rem;
+}
