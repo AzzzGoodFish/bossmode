@@ -60,3 +60,21 @@ textarea::-webkit-scrollbar {
 .folder-pulse {
   animation: folder-pulse 900ms ease-out;
 }
+
+/* Mobile: Sheet slide-up animation */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-sheet-up {
+  animation: sheet-up 280ms ease-out;
+}
+
+/* Scrollbar hide utility for tab overflow */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

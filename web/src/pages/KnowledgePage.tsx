@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useLongPress } from "../hooks/useLongPress";
+import { MobileTopBar } from "../components/MobileTopBar";
 import {
   Plus, Trash2, Pencil, FolderPlus, File as FileIcon,
   Folder, FolderOpen, ChevronRight, ChevronDown,
@@ -25,9 +28,10 @@ const MAX_WIDTH_RATIO = 0.5;
 
 interface KnowledgePageProps {
   initialPath?: string;
+  onOpenMobileSidebar?: () => void;
 }
 
-export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
+export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePageProps = {}) {
   const { toast, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -42,6 +46,12 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: KnowledgeTreeNode } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const cancelRenameRef = useRef(false);
+  const isMobile = useIsMobile();
+  const mobileModeRef = useRef<"tree" | "doc">("tree");
+  const mobileView = useMemo(() => {
+    if (!isMobile) return "both";
+    return (currentDoc || folderNode) ? "doc" : "tree";
+  }, [isMobile, currentDoc, folderNode]);
 
   const [moveDialog, setMoveDialog] = useState<{ open: boolean; paths: string[]; currentPath?: string }>({
     open: false,
@@ -471,7 +481,8 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
+      <MobileTopBar title="Knowledge" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
         <div>
           <h1 className="text-lg font-bold text-zinc-900 dark:text-white">Knowledge</h1>
           <p className="text-xs text-zinc-500 mt-0.5">
@@ -482,8 +493,8 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
 
       <div className="flex-1 flex overflow-hidden">
         <aside
-          style={{ width: `${sidebarWidth}px` }}
-          className="shrink-0 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col"
+          style={{ width: isMobile ? undefined : `${sidebarWidth}px` }}
+          className={`${isMobile ? (mobileView === "tree" ? "flex-1" : "hidden") : "shrink-0"} border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col`}
         >
           <div className="px-3 pt-3 pb-2 flex items-center justify-between sticky top-0 bg-zinc-50/90 dark:bg-zinc-900/90 backdrop-blur-sm z-10">
             <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Documents</span>
@@ -527,6 +538,7 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
               renamingPath={renamingPath}
               draggingPaths={draggingPaths}
               dragOverPath={dragOverPath}
+              isMobile={isMobile}
               onToggle={toggleExpanded}
               onNodeClick={handleNodeClick}
               onCreateDoc={handleCreateDoc}
@@ -563,13 +575,23 @@ export function KnowledgePage({ initialPath }: KnowledgePageProps = {}) {
           )}
         </aside>
 
-        <div
-          onMouseDown={onDragStart}
-          className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
-          title="Drag to resize"
-        />
+        {!isMobile && (
+          <div
+            onMouseDown={onDragStart}
+            className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
+            title="Drag to resize"
+          />
+        )}
 
-        <main className="flex-1 overflow-y-auto">
+        <main className={`${isMobile ? (mobileView === "doc" ? "flex-1" : "hidden") : "flex-1"} overflow-y-auto`}>
+          {isMobile && mobileView === "doc" && (
+            <button
+              onClick={() => { setSelectedPath(null); setCurrentDoc(null); }}
+              className="md:hidden flex items-center gap-1 px-4 py-2.5 text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white border-b border-zinc-200 dark:border-zinc-800 w-full cursor-pointer"
+            >
+              ← Back
+            </button>
+          )}
           {currentDoc ? (
             editing ? (
               <div className="p-6">
@@ -714,6 +736,7 @@ function TreeView({
   renamingPath,
   draggingPaths,
   dragOverPath,
+  isMobile,
   onToggle,
   onNodeClick,
   onCreateDoc,
@@ -736,6 +759,7 @@ function TreeView({
   renamingPath: string | null;
   draggingPaths: Set<string>;
   dragOverPath: string | null;
+  isMobile: boolean;
   onToggle: (path: string) => void;
   onNodeClick: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
   onCreateDoc: (parentPath: string) => void;
@@ -764,6 +788,7 @@ function TreeView({
           renamingPath={renamingPath}
           draggingPaths={draggingPaths}
           dragOverPath={dragOverPath}
+          isMobile={isMobile}
           onToggle={onToggle}
           onNodeClick={onNodeClick}
           onCreateDoc={onCreateDoc}
@@ -793,6 +818,7 @@ function TreeNode({
   renamingPath,
   draggingPaths,
   dragOverPath,
+  isMobile,
   onToggle,
   onNodeClick,
   onCreateDoc,
@@ -816,6 +842,7 @@ function TreeNode({
   renamingPath: string | null;
   draggingPaths: Set<string>;
   dragOverPath: string | null;
+  isMobile: boolean;
   onToggle: (path: string) => void;
   onNodeClick: (e: React.MouseEvent, node: KnowledgeTreeNode) => void;
   onCreateDoc: (parentPath: string) => void;
@@ -837,7 +864,15 @@ function TreeNode({
   const isDragging = draggingPaths.has(node.path);
   const isDropTarget = dragOverPath === node.path;
 
-  const rowBase = "group relative flex items-center justify-between py-1 pr-1 cursor-pointer";
+  // Mobile: long press opens context menu (right-click replacement)
+  const lp = useLongPress({
+    onLongPress: (e: React.TouchEvent) => {
+      const touch = e.touches[0];
+      onContextMenu({ clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => {} } as unknown as React.MouseEvent, node);
+    },
+  });
+
+  const rowBase = "group relative flex items-center justify-between py-2.5 md:py-1 pr-1 cursor-pointer";
   const rowSelect = openedSelected
     ? "bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-300"
     : multiSelected
@@ -851,14 +886,15 @@ function TreeNode({
       <li>
         <div style={indent}
           data-folder-path={node.path}
-          draggable
-          onDragStart={(e) => onDragStart(e, node)}
-          onDragEnd={onDragEnd}
-          onDragOver={(e) => onDragOver(e, node)}
-          onDragLeave={(e) => onDragLeave(e, node)}
-          onDrop={(e) => onDrop(e, node)}
+          draggable={!isMobile}
+          onDragStart={isMobile ? undefined : (e) => onDragStart(e, node)}
+          onDragEnd={isMobile ? undefined : onDragEnd}
+          onDragOver={isMobile ? undefined : (e) => onDragOver(e, node)}
+          onDragLeave={isMobile ? undefined : (e) => onDragLeave(e, node)}
+          onDrop={isMobile ? undefined : (e) => onDrop(e, node)}
           onContextMenu={(e) => onContextMenu(e, node)}
           onClick={(e) => onNodeClick(e, node)}
+          {...(isMobile ? lp : {})}
           className={`${rowBase} ${rowSelect} ${dropCls} ${isDragging ? "opacity-40" : ""}`}
         >
           <span className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300 min-w-0">
@@ -920,6 +956,7 @@ function TreeNode({
                 renamingPath={renamingPath}
                 draggingPaths={draggingPaths}
                 dragOverPath={dragOverPath}
+                isMobile={isMobile}
                 onToggle={onToggle}
                 onNodeClick={onNodeClick}
                 onCreateDoc={onCreateDoc}
@@ -945,11 +982,12 @@ function TreeNode({
   return (
     <li>
       <div style={indent}
-        draggable
-        onDragStart={(e) => onDragStart(e, node)}
-        onDragEnd={onDragEnd}
+        draggable={!isMobile}
+        onDragStart={isMobile ? undefined : (e) => onDragStart(e, node)}
+        onDragEnd={isMobile ? undefined : onDragEnd}
         onContextMenu={(e) => onContextMenu(e, node)}
         onClick={(e) => onNodeClick(e, node)}
+        {...(isMobile ? lp : {})}
         className={`${rowBase} ${rowSelect} ${isDragging ? "opacity-40" : ""}`}
       >
         <span className="flex items-center gap-1.5 min-w-0">

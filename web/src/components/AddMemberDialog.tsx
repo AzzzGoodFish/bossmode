@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { MemberInfo } from "../api/client";
+import { Sheet } from "./Sheet";
 import { getMembers } from "../api/client";
 
 interface AddMemberDialogProps {
@@ -25,8 +26,8 @@ export function AddMemberDialog({ currentMembers, onAdd, onClose }: AddMemberDia
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 w-full max-w-sm">
+    <Sheet open onClose={onClose} size="sm">
+      <div className="p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white">Add Member</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-white text-lg transition-colors cursor-pointer">×</button>
@@ -61,6 +62,6 @@ export function AddMemberDialog({ currentMembers, onAdd, onClose }: AddMemberDia
           )}
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }

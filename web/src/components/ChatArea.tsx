@@ -122,7 +122,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3" onScroll={handleScroll}>
+    <div ref={containerRef} className="flex-1 overflow-y-auto min-w-0 px-4 py-3" onScroll={handleScroll}>
       <div ref={contentRef}>
         {/* Top indicator */}
         {hasMore === false && messages.length > 0 && (

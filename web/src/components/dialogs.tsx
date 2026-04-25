@@ -10,6 +10,7 @@
  */
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { AlertCircle, CheckCircle, Info, X } from "lucide-react";
+import { Sheet } from "./Sheet";
 
 // ── Types ──
 
@@ -96,9 +97,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
       {/* Confirm dialog */}
       {confirmState && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90]" onClick={() => handleConfirm(false)}>
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 w-full max-w-sm shadow-xl"
-            onClick={(e) => e.stopPropagation()}>
+        <Sheet open={!!confirmState} onClose={() => handleConfirm(false)} size="sm">
+          <div className="p-5">
             <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => handleConfirm(false)}
@@ -111,7 +111,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               </button>
             </div>
           </div>
-        </div>
+        </Sheet>
       )}
 
       {/* Prompt dialog */}
@@ -160,16 +160,15 @@ function PromptDialog({ state, onClose }: { state: PromptState; onClose: (value:
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90]" onClick={() => onClose(null)}>
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 w-full max-w-sm shadow-xl"
-        onClick={(e) => e.stopPropagation()}>
+    <Sheet open onClose={() => onClose(null)} size="sm">
+      <div className="p-5">
         <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-3">{state.message}</p>
         <input
           ref={inputRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onClose(null); }}
-          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 mb-4"
+          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 mb-4"
         />
         <div className="flex gap-2 justify-end">
           <button onClick={() => onClose(null)}
@@ -182,6 +181,6 @@ function PromptDialog({ state, onClose }: { state: PromptState; onClose: (value:
           </button>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }

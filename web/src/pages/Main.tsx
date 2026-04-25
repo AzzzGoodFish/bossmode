@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Room, SummarizeStatus } from "../api/client";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
+import { MobileDrawer } from "../components/MobileDrawer";
+import { MobileTopBar } from "../components/MobileTopBar";
+import { Sheet } from "../components/Sheet";
 import {
   createRoom as apiCreateRoom,
   steerAgent as apiSteerAgent,
@@ -37,6 +42,7 @@ interface MainProps {
   unreadTabs: Set<string> | null;
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
+  onOpenMobileSidebar?: () => void;
 }
 
 export function Main({
@@ -44,10 +50,15 @@ export function Main({
   externalShowCreateRoom, onCreateRoomShown,
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
+  onOpenMobileSidebar,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  useEdgeSwipe({ side: "right", onTrigger: useCallback(() => setMobileMembersOpen(true), []) });
 
   // Open dialog when triggered from sidebar + button
   useEffect(() => {
@@ -265,8 +276,18 @@ export function Main({
 
   return (
     <>
+      {/* Mobile top bar */}
+      {room && (
+        <MobileTopBar
+          title={room.name}
+          onOpenSidebar={onOpenMobileSidebar || (() => {})}
+          showMembers
+          onOpenMembers={() => setMobileMembersOpen(true)}
+        />
+      )}
+
       {/* Tab bar */}
-      <div className="h-9 border-b border-zinc-200 dark:border-zinc-800 flex items-end px-2 shrink-0 gap-0.5">
+      <div className="h-9 border-b border-zinc-200 dark:border-zinc-800 flex items-end px-2 shrink-0 gap-0.5 overflow-x-auto scrollbar-hide">
         {tabs.map((tab, idx) => {
           const isActive = idx === activeTabIdx;
           const label = tab.type === "room" ? `# ${room.name}` : tab.agentName!;
@@ -335,7 +356,8 @@ export function Main({
         </div>
 
         {/* Member panel */}
-        <div className="w-48 border-l border-zinc-200 dark:border-zinc-800 shrink-0">
+        {/* Desktop member panel */}
+        <div className="hidden md:block w-48 border-l border-zinc-200 dark:border-zinc-800 shrink-0">
           <MemberPanel
             members={room.members}
             agentStatus={agentStatus}
@@ -344,6 +366,19 @@ export function Main({
             onOpenPrivateChat={openAgentTab}
           />
         </div>
+
+        {/* Mobile member drawer */}
+        {isMobile && (
+          <MobileDrawer open={mobileMembersOpen} side="right" onClose={() => setMobileMembersOpen(false)} width="w-72">
+            <MemberPanel
+              members={room.members}
+              agentStatus={agentStatus}
+              contextUsage={contextUsage}
+              roomId={room.id}
+              onOpenPrivateChat={(name) => { openAgentTab(name); setMobileMembersOpen(false); }}
+            />
+          </MobileDrawer>
+        )}
       </div>
 
       {showCreateRoom && (
@@ -353,9 +388,8 @@ export function Main({
         <AddMemberDialog currentMembers={room.members} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
       )}
       {summarizeDialog && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[90]" onClick={() => setSummarizeDialog(null)}>
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 w-full max-w-sm shadow-xl"
-            onClick={(e) => e.stopPropagation()}>
+        <Sheet open={!!summarizeDialog} onClose={() => setSummarizeDialog(null)} size="sm">
+          <div className="p-5">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-3">Summarize Messages</h3>
             <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">
               {summarizeKeepCount === 0
@@ -397,7 +431,7 @@ export function Main({
               </button>
             </div>
           </div>
-        </div>
+        </Sheet>
       )}
     </>
   );

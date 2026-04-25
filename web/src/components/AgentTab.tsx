@@ -960,7 +960,7 @@ const TS_CLS = "text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums";
 function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: string }) {
   const ts = event.ts ? formatTime(event.ts) : undefined;
   const fullTs = event.ts ? new Date(event.ts).toLocaleString() : undefined;
-  const inlineTs = ts ? <span className={`${TS_CLS} ml-2`} title={fullTs}>{ts}</span> : null;
+  const inlineTs = ts ? <span className={`${TS_CLS} ml-2 hidden md:inline`} title={fullTs}>{ts}</span> : null;
 
   switch (event.type) {
     case "agent_start":
@@ -995,12 +995,12 @@ function MessageCard({ text, label, time, fullTime }: { text: string; label?: st
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
       >
         <span className="text-blue-400">💬</span>
         {label && <span className="text-blue-500 font-medium shrink-0">{label}</span>}
-        <span className="text-zinc-400 truncate max-w-md">{preview}</span>
-        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        <span className="text-zinc-400 truncate max-w-[160px] md:max-w-md">{preview}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
         <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
@@ -1018,11 +1018,11 @@ function ThinkingCard({ thinking, isStreaming, time, fullTime }: { thinking: str
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
       >
         <span className={isStreaming ? "animate-pulse" : ""}>💭</span>
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
-        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
         <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
@@ -1044,12 +1044,12 @@ function ToolCard({ event, time, fullTime }: { event: CommittedEvent; time?: str
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
       >
         <span className={statusColor}>{statusIcon}</span>
         <span className="text-zinc-400 font-mono">{event.toolName}</span>
-        <span className="text-zinc-600 truncate max-w-48">{truncateArgs(event.args)}</span>
-        {time && <span className={`${TS_CLS} ml-auto shrink-0`} title={fullTime}>{time}</span>}
+        <span className="text-zinc-600 truncate max-w-[80px] md:max-w-48">{truncateArgs(event.args)}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
         <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
