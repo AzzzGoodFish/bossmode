@@ -1,4 +1,8 @@
 // Agent tool callback handler — business logic for chat/messages/summary tools
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
@@ -91,13 +95,34 @@ export async function handleToolCallback(
       return { ok: true };
     }
     case "query_room_messages": {
-      const limit = params?.limit || 50;
-      const messages = messageStore.getMessages(roomId, { limit });
-      return messages.map((m) => ({
-        sender: m.sender,
-        content: m.content,
-        ts: m.ts,
-      }));
+      const limit = Math.max(1, Math.min(params?.limit ?? 50, 500));
+      const searchOpts: messageStore.SearchOptions = {
+        query: params?.query ? String(params.query) : undefined,
+        from: params?.from ? String(params.from) : undefined,
+        after: params?.after !== undefined ? parseTimeArg(String(params.after)) : undefined,
+        before: params?.before !== undefined ? parseTimeArg(String(params.before)) : undefined,
+        limit,
+      };
+
+      // No search filters — keep original fast path (latest N messages)
+      const hasFilter = searchOpts.query || searchOpts.from ||
+        searchOpts.after !== undefined || searchOpts.before !== undefined;
+
+      const messages: RoomMessage[] = hasFilter
+        ? messageStore.searchMessages(roomId, searchOpts).messages
+        : messageStore.getMessages(roomId, { limit });
+
+      // File output mode: write markdown file and return path (avoids 25K truncation)
+      if (params?.output === "file") {
+        const filePath = join(tmpdir(), `bossmode-search-${roomId.slice(0, 8)}-${randomUUID().slice(0, 8)}.md`);
+        const content = renderMessagesAsMarkdown(messages, searchOpts);
+        writeFileSync(filePath, content, "utf-8");
+        logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
+        return { ok: true, path: filePath, count: messages.length, format: "markdown" };
+      }
+
+      // Default: inline text (may be truncated by MAX_RESULT_CHARS)
+      return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts }));
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool
@@ -150,4 +175,46 @@ export async function handleToolCallback(
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
+}
+
+// -- Tool helpers --
+
+function parseTimeArg(input: string): number | undefined {
+  if (!input) return undefined;
+
+  // Relative: "today", "yesterday", "Nh", "Nd"
+  const now = Date.now();
+  if (input === "today") {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
+  }
+  if (input === "yesterday") {
+    const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 1); return d.getTime();
+  }
+  const hMatch = input.match(/^(\d+)h$/);
+  if (hMatch) return now - parseInt(hMatch[1], 10) * 3600_000;
+  const dMatch = input.match(/^(\d+)d$/);
+  if (dMatch) return now - parseInt(dMatch[1], 10) * 86400_000;
+
+  // ISO or numeric
+  const num = typeof input === "string" ? Number(input) : NaN;
+  if (!Number.isNaN(num) && num > 0) return num;
+  const parsed = Date.parse(input);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.SearchOptions): string {
+  const header = [
+    "# Message Search Results\n",
+    opts.query ? `**Query**: \`${opts.query}\`  ` : "",
+    opts.from ? `**From**: \`${opts.from}\`  ` : "",
+    `**Count**: ${messages.length}`,
+    "\n---\n",
+  ].filter(Boolean).join("\n");
+
+  const body = messages.map((m) => {
+    const time = new Date(m.ts).toISOString();
+    return `## [${m.sender}] ${time}\n\n${m.content}`;
+  }).join("\n\n---\n\n");
+
+  return header + "\n" + body;
 }

@@ -5,6 +5,7 @@ import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
+import { Search } from "lucide-react";
 import {
   createRoom as apiCreateRoom,
   steerAgent as apiSteerAgent,
@@ -195,6 +196,7 @@ export function Main({
     }
   }, [tabs, activeTabIdx]);
 
+  const [searchOpen, setSearchOpen] = useState(false);
   const [summarizeDialog, setSummarizeDialog] = useState<{ status: SummarizeStatus; totalMessages: number } | null>(null);
   const [summarizeKeepCount, setSummarizeKeepCount] = useState(50);
 
@@ -240,6 +242,18 @@ export function Main({
     } : null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summarizeKeepCount]);
+
+  // Ctrl/Cmd+F keyboard shortcut for search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   const handleAddMember = useCallback(async (agentName: string) => {
     if (!selectedRoomId) return;
@@ -330,6 +344,9 @@ export function Main({
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setShowAddMember(true)} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">+ Member</button>
             <button onClick={handleSummarize} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">Summarize</button>
+            <button onClick={() => setSearchOpen((v) => !v)} title="Search messages (Ctrl+F)" className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">
+              <Search size={13} />
+            </button>
           </div>
         </div>
       )}
@@ -339,7 +356,7 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {activeTab?.type === "room" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
           ) : activeTab?.type === "agent" && selectedRoomId ? (

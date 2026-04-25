@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import type { RoomMessage } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
+import { MessageSearchBar } from "./MessageSearchBar";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
@@ -11,16 +12,33 @@ interface ChatAreaProps {
   hasMore?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => Promise<void>;
+  searchOpen?: boolean;
+  onCloseSearch?: () => void;
+  members?: string[];
 }
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(messages.length);
   const isNearBottom = useRef(true);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(messageId);
+      setTimeout(() => setHighlightedId(null), 1500);
+    } else {
+      // Message not in current loaded range — user needs to load more
+      // (future: auto-load; for now show a visual hint via bottomRef)
+    }
+    onCloseSearch?.();
+  }, [onCloseSearch]);
 
   // Auto-scroll to bottom on new messages (only if user was near bottom)
   useEffect(() => {
@@ -122,7 +140,16 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto min-w-0 px-4 py-3" onScroll={handleScroll}>
+    <div className="flex-1 flex flex-col min-h-0 min-w-0">
+      {searchOpen && roomId && (
+        <MessageSearchBar
+          roomId={roomId}
+          members={members ?? []}
+          onJumpToMessage={scrollToMessage}
+          onClose={() => onCloseSearch?.()}
+        />
+      )}
+      <div ref={containerRef} className="flex-1 overflow-y-auto min-w-0 px-4 py-3" onScroll={handleScroll}>
       <div ref={contentRef}>
         {/* Top indicator */}
         {hasMore === false && messages.length > 0 && (
@@ -165,7 +192,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
               const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
 
               return (
-                <div key={msg.id} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
+                <div key={msg.id} data-message-id={msg.id} className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`} style={animDelay ? { animationDelay: animDelay } : undefined}>
                   {showDateSep && <DateSeparator ts={msg.ts} />}
                   {msg.type === "summary" ? (
                     <SummaryCard message={msg} roomId={roomId || ""} />
@@ -186,6 +213,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         )}
         <div ref={bottomRef} />
       </div>
+    </div>
     </div>
   );
 }

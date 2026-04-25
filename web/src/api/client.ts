@@ -386,6 +386,25 @@ export interface RoomMessage {
   summary_meta?: SummaryMeta;
 }
 
+export interface MessageSearchResult {
+  total: number;
+  messages: RoomMessage[];
+}
+
+export async function searchMessages(
+  roomId: string,
+  opts: { query?: string; from?: string; after?: number; before?: number; limit?: number; offset?: number },
+): Promise<MessageSearchResult> {
+  const qs = new URLSearchParams();
+  if (opts.query) qs.set("query", opts.query);
+  if (opts.from) qs.set("from", opts.from);
+  if (opts.after !== undefined) qs.set("after", String(opts.after));
+  if (opts.before !== undefined) qs.set("before", String(opts.before));
+  if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
+  return apiFetch(`/api/rooms/${roomId}/messages/search?${qs}`);
+}
+
 export async function getMessages(
   roomId: string,
   opts?: { limit?: number; before?: string },
