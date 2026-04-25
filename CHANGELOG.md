@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.9] — 2026-04-25
+
+### Added
+- **VS Code-style folder picker** — redesigned FolderPicker with editable PathBar (direct path input + OK button + Home icon), keyboard navigation (↑↓ navigate, Enter open, Cmd+Enter select, Backspace up, Esc cancel), blue selected state, hidden folder dimming; breadcrumbs removed for cleaner UI.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `feat: VS Code-style folder picker with PathBar, keyboard navigation, blue selection; remove breadcrumbs`.
+
 ## [0.9.8] — 2026-04-25
 
 ### Fixed
