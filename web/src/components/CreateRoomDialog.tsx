@@ -98,7 +98,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   };
 
   return (
-    <Sheet open onClose={onClose} size="lg">
+    <Sheet open onClose={onClose} size="lg" closeOnOverlayClick={false}>
       <form onSubmit={handleSubmit} className="bg-zinc-900 rounded-lg p-6 w-full space-y-4">
         <h2 className="text-lg font-semibold text-white">Create Room</h2>
 
@@ -125,7 +125,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
             {members.length === 0 && (
               <p className="text-xs text-zinc-600">No members configured. Go to Members page to create them.</p>
             )}
-            {members.map((m) => (
+            {members.filter((m) => m.name !== "summarizer").map((m) => (
               <label key={m.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800 cursor-pointer">
                 <input autoComplete="off" type="checkbox" checked={selectedMembers.has(m.name)} onChange={() => toggleMember(m.name)} />
                 <span className="text-sm text-zinc-300">{m.name}</span>
@@ -204,7 +204,7 @@ function InlineCreateMember({
   };
 
   return (
-    <Sheet open onClose={onClose} size="sm">
+    <Sheet open onClose={onClose} size="sm" closeOnOverlayClick={false}>
       <div className="bg-zinc-900 rounded-lg p-5 w-full space-y-3">
         <h3 className="text-sm font-semibold text-white">Create Member for "{agentName}"</h3>
         <div>

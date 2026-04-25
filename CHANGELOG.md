@@ -4,6 +4,17 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.6] — 2026-04-25
+
+### Fixed
+- **Context usage state leaking across rooms** — switching rooms no longer carries over context usage data from the previous room (useRoom now resets all state on every roomId change, not just on null).
+- **Summarizer hidden from create room member list** — the summarizer system member is no longer shown in the CreateRoomDialog member selector.
+- **Input dialogs no longer close on overlay click** — dialogs with user input (CreateRoom, RoomSettings, AddMember, prompt, ReviewDialog) now require explicit Cancel/Esc to close; click-outside prevention via Sheet `closeOnOverlayClick=false` + mousedown/mouseup origin check.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: context usage state leaking across rooms when switching; fix: hide summarizer from create room member list; fix: prevent input dialogs from closing on overlay click`.
+
 ## [0.9.5] — 2026-04-24
 
 ### Fixed

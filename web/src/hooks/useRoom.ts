@@ -55,15 +55,16 @@ export function useRoom(roomId: string | null) {
 
   // Load room details and initial messages (newest N)
   useEffect(() => {
-    if (!roomId) {
-      setRoom(null);
-      setMessages([]);
-      setAgentStatus({});
-      setHasMore(true);
-      setContextUsage({});
-      unsupportedAgents.current.clear();
-      return;
-    }
+    // Reset all state on EVERY roomId change (including null)
+    // to prevent cross-room state leakage (e.g. context usage from previous room)
+    setRoom(null);
+    setMessages([]);
+    setAgentStatus({});
+    setHasMore(true);
+    setContextUsage({});
+    unsupportedAgents.current.clear();
+
+    if (!roomId) return;
 
     setLoading(true);
 
