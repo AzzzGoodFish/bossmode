@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import { MobileTopBar } from "../components/MobileTopBar";
 import type { RuntimeInfo, SummarySettings, TeamUpdateSettings } from "../api/client";
 import {
   getRuntimes,
@@ -12,7 +13,11 @@ import {
   checkTeamUpdates,
 } from "../api/client";
 
-export function SettingsPage() {
+interface SettingsPageProps {
+  onOpenMobileSidebar?: () => void;
+}
+
+export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [summarySettings, setSummarySettings] = useState<SummarySettings>({
@@ -96,7 +101,9 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <MobileTopBar title="Settings" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 flex flex-col p-6 overflow-y-auto">
       <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-6">Settings</h1>
 
       {/* Session Resume */}
@@ -251,6 +258,7 @@ export function SettingsPage() {
           ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }

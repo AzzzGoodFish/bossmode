@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2, Pencil, X } from "lucide-react";
+import { MobileTopBar } from "../components/MobileTopBar";
 import { getAgent, updateAgent, deleteAgent, createAgent } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { useDialog } from "../components/dialogs";
@@ -9,11 +10,12 @@ interface AgentDetailPageProps {
   onBack: () => void;
   isCreate?: boolean;
   onCreated?: (name: string) => void;
+  onOpenMobileSidebar?: () => void;
 }
 
 const editBtnCls = "px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer transition-colors";
 
-export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDetailPageProps) {
+export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobileSidebar }: AgentDetailPageProps) {
   const { toast, confirm } = useDialog();
   const [agentName, setAgentName] = useState(name);
   const [agentData, setAgentData] = useState<any>(null);
@@ -78,7 +80,9 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500">Loading...</div>;
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <MobileTopBar title={isCreate ? "New Agent" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 flex flex-col p-6 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div className="flex items-center gap-3">
@@ -189,10 +193,11 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated }: AgentDeta
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-800 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 overflow-y-auto"
+          className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-base md:text-sm text-zinc-800 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 overflow-y-auto"
           spellCheck={false}
         />
       )}
+    </div>
     </div>
   );
 }

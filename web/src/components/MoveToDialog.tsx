@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { Sheet } from "./Sheet";
 import type { KnowledgeTreeNode } from "../api/client";
 
 interface MoveToDialogProps {
@@ -45,9 +46,8 @@ export function MoveToDialog({
   const folders = (tree?.children || []).filter((n) => n.kind === "folder");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={onCancel} />
-      <div className="relative w-[420px] max-w-[92vw] h-[70vh] max-h-[70vh] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg flex flex-col overflow-hidden">
+    <Sheet open={open} onClose={onCancel} size="md">
+      <div className="flex flex-col min-h-[50vh] max-h-[70vh]">
         <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Move to...</h3>
           <p className="text-xs text-zinc-500 mt-0.5">Move {itemCount} item{itemCount === 1 ? "" : "s"} to selected folder</p>
@@ -102,7 +102,7 @@ export function MoveToDialog({
           </button>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }
 

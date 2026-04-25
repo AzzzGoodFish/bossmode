@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.4] — 2026-04-24
+
+### Added
+- **Mobile responsive adaptation** — complete mobile/desktop dual-layout: Sidebar/Members drawer navigation, MobileTopBar, touch targets ≥44px, Sheet dialogs, long-press context menu, edge swipe gestures, Activity card simplification, safe-area inset, iOS Safari input zoom prevention, viewport-fit=cover, 100dvh support.
+
+### Refactor
+- **Agent prompt positive principles** — all 5 agent templates and team protocol refactored from NEVER/ALWAYS constraint style to positive Working Principles, giving models clear guidance on best behavior rather than restriction lists.
+
+### Tests
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit` passed.
+- **Release note**: `feat: mobile responsive adaptation — drawer navigation, touch targets, Sheet dialogs, long-press context menu, edge swipe gestures, activity card simplification, safe-area inset, iOS Safari input zoom prevention; refactor: agent prompt governance — replace NEVER/ALWAYS constraints with positive Working Principles across all 5 agent templates and team protocol`.
+
 ## [0.9.3] — 2026-04-24
 
 ### Fixed

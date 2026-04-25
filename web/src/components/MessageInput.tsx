@@ -229,7 +229,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
 
   return (
     <div
-      className={`relative border-t border-zinc-200 dark:border-zinc-800 p-3 ${dragOver ? "bg-blue-50 dark:bg-blue-900/20 border-blue-400 dark:border-blue-600" : ""}`}
+      className={`relative border-t border-zinc-200 dark:border-zinc-800 p-3 pb-[max(12px,env(safe-area-inset-bottom))] ${dragOver ? "bg-blue-50 dark:bg-blue-900/20 border-blue-400 dark:border-blue-600" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -292,7 +292,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || uploading}
-          className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
         >
           <Paperclip size={18} />
@@ -314,14 +314,14 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
           disabled={disabled || uploading}
           placeholder={uploading ? "Uploading..." : "Type a message... (@ to mention, Ctrl+V to paste image)"}
           rows={1}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-white
+          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
                      resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent
                      placeholder:text-zinc-400 dark:placeholder:text-zinc-600 disabled:opacity-50 max-h-[200px]"
         />
         <button
           onClick={handleSend}
           disabled={disabled || uploading || (!value.trim() && !hasPending)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
+          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
                      text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
         >
           {uploading ? "..." : "Send"}

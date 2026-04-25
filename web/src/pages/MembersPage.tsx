@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Search, ArrowLeft, Save, Trash2, X, RefreshCw } from "lucide-react";
+import { MobileTopBar } from "../components/MobileTopBar";
 import type { MemberInfo, AgentInfo, RuntimeInfo, MemberInstanceInfo } from "../api/client";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
@@ -12,9 +13,10 @@ interface MembersPageProps {
   onSelect?: (id: string | null) => void;
   onRefresh?: () => void;
   onNavigateAgent?: (name: string) => void;
+  onOpenMobileSidebar?: () => void;
 }
 
-export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, onNavigateAgent }: MembersPageProps) {
+export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, onNavigateAgent, onOpenMobileSidebar }: MembersPageProps) {
   const { toast, confirm } = useDialog();
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [search, setSearch] = useState("");
@@ -53,7 +55,9 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
   }
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <MobileTopBar title="Members" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 flex flex-col p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-lg font-bold text-white">Members</h1>
@@ -96,6 +100,7 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
         ))}
       </div>
 
+    </div>
     </div>
   );
 }

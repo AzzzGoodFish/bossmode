@@ -1,5 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
+import { MobileDrawer } from "../components/MobileDrawer";
+import { MobileTopBar } from "../components/MobileTopBar";
+import { Sheet } from "../components/Sheet";
 import {
   type Room,
   type TeamUpdateCandidate,
@@ -30,6 +35,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
   const [activePage, setActivePage] = useState<ActivePage>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  useEdgeSwipe({ side: "left", onTrigger: useCallback(() => setMobileSidebarOpen(true), []) });
 
   // Rooms list — shared between Layout (for WS subscriptions) and Sidebar (for rendering)
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -179,19 +188,31 @@ export function Layout({ onLogout, username }: LayoutProps) {
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
   const currentRoomUnreadTabs = selectedRoomId ? unreadTabs.get(selectedRoomId) ?? null : null;
 
+  const sidebarEl = (
+    <Sidebar
+      activePage={activePage}
+      username={username}
+      onNavigate={(p) => { handleNavigate(p); if (isMobile) setMobileSidebarOpen(false); }}
+      onLogout={onLogout}
+      refreshKey={refreshKey}
+      unreadRoomIds={unreadRooms}
+      onRoomsLoaded={handleRoomsLoaded}
+      collapsed={isMobile ? false : sidebarCollapsed}
+      onToggle={toggleSidebar}
+    />
+  );
+
   return (
-    <div className="h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex" data-1p-ignore>
-      <Sidebar
-        activePage={activePage}
-        username={username}
-        onNavigate={handleNavigate}
-        onLogout={onLogout}
-        refreshKey={refreshKey}
-        unreadRoomIds={unreadRooms}
-        onRoomsLoaded={handleRoomsLoaded}
-        collapsed={sidebarCollapsed}
-        onToggle={toggleSidebar}
-      />
+    <div className="h-[100dvh] bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex" data-1p-ignore>
+      {/* Desktop sidebar */}
+      <div className="hidden md:flex">{sidebarEl}</div>
+
+      {/* Mobile sidebar drawer */}
+      {isMobile && (
+        <MobileDrawer open={mobileSidebarOpen} side="left" onClose={() => setMobileSidebarOpen(false)} width="w-72">
+          {sidebarEl}
+        </MobileDrawer>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Room view */}
@@ -207,6 +228,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             unreadTabs={currentRoomUnreadTabs}
             onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
@@ -223,6 +245,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             unreadTabs={null}
             onClearUnreadTab={() => {}}
             onActiveTabKeyChange={() => {}}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
@@ -231,6 +254,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <AgentDetailPage
             name={activePage.name}
             onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
         {activePage?.type === "agent" && activePage.name === null && (
@@ -239,6 +263,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             isCreate
             onBack={() => refreshSidebar()}
             onCreated={(name) => { setActivePage({ type: "agent", name }); refreshSidebar(); }}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
@@ -247,6 +272,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <SkillDetailPage
             name={activePage.name}
             onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
         {activePage?.type === "skill" && activePage.name === null && (
@@ -255,12 +281,13 @@ export function Layout({ onLogout, username }: LayoutProps) {
             isCreate
             onBack={() => refreshSidebar()}
             onCreated={(name) => { setActivePage({ type: "skill", name }); refreshSidebar(); }}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
         {/* Knowledge */}
         {activePage?.type === "knowledge" && (
-          <KnowledgePage initialPath={activePage.path} />
+          <KnowledgePage initialPath={activePage.path} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
         )}
 
         {/* Members */}
@@ -270,11 +297,12 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onSelect={(id) => setActivePage({ type: "member", id })}
             onRefresh={refreshSidebar}
             onNavigateAgent={(name) => setActivePage({ type: "agent", name })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
         {/* Settings */}
-        {activePage?.type === "settings" && <SettingsPage />}
+        {activePage?.type === "settings" && <SettingsPage onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />}
 
         {/* Home */}
         {!activePage && (
@@ -283,6 +311,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             unreadRoomIds={unreadRooms}
             onSelectRoom={(id) => setActivePage({ type: "room", id })}
             onCreateRoom={() => setActivePage({ type: "room", id: "__new__" })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
       </div>
@@ -295,9 +324,10 @@ interface HomePageProps {
   unreadRoomIds?: Set<string>;
   onSelectRoom: (id: string) => void;
   onCreateRoom: () => void;
+  onOpenMobileSidebar?: () => void;
 }
 
-function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePageProps) {
+function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobileSidebar }: HomePageProps) {
   const hasRooms = rooms.length > 0;
   const [updateCheck, setUpdateCheck] = useState<TeamUpdateCheckResult | null>(null);
   const [dismissedSession, setDismissedSession] = useState(false);
@@ -315,7 +345,9 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePage
   const showBanner = !!(updateCheck?.hasUpdates && !updateCheck.dismissed && !dismissedSession);
 
   return (
-    <div className="flex-1 flex flex-col items-center overflow-y-auto">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <MobileTopBar title="Home" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 flex flex-col items-center overflow-y-auto">
       <div className="w-full max-w-2xl px-6 pt-20 pb-12">
         {hasRooms ? (
           <>
@@ -425,6 +457,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom }: HomePage
         />
       )}
     </div>
+    </div>
   );
 }
 
@@ -518,8 +551,8 @@ function ReviewDialog({
   ];
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xl">
+    <Sheet open onClose={onClose} size="xl">
+      <div>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
           <h3 className="text-sm font-semibold">Review Updates</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer"><X size={14} /></button>
@@ -549,6 +582,6 @@ function ReviewDialog({
           <button onClick={() => void onApply([...selected])} className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">Apply {selected.size} selected</button>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }

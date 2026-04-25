@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
 import type { MemberInfo, RuntimeInfo, KnowledgeTreeNode } from "../api/client";
+import { Sheet } from "./Sheet";
 import { getMembers, getRuntimes, getKnowledgeTree, createMember } from "../api/client";
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
@@ -97,8 +98,8 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 w-full max-w-lg space-y-4 max-h-[85vh] overflow-y-auto">
+    <Sheet open onClose={onClose} size="lg">
+      <form onSubmit={handleSubmit} className="bg-zinc-900 rounded-lg p-6 w-full space-y-4">
         <h2 className="text-lg font-semibold text-white">Create Room</h2>
 
         <div>
@@ -178,7 +179,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           onClose={() => setCreatingForAgent(null)}
         />
       )}
-    </div>
+    </Sheet>
   );
 }
 
@@ -203,8 +204,8 @@ function InlineCreateMember({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 w-full max-w-sm space-y-3">
+    <Sheet open onClose={onClose} size="sm">
+      <div className="bg-zinc-900 rounded-lg p-5 w-full space-y-3">
         <h3 className="text-sm font-semibold text-white">Create Member for "{agentName}"</h3>
         <div>
           <label className="block text-xs text-zinc-400 mb-1">Name</label>
@@ -231,6 +232,6 @@ function InlineCreateMember({
           </button>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Shield } from "lucide-react";
+import { Sheet } from "./Sheet";
 import type { Room, KnowledgeTreeNode } from "../api/client";
 import { getKnowledgeTree, updateRoomSettings } from "../api/client";
 import { useDialog } from "./dialogs";
@@ -106,13 +107,8 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto">
+    <Sheet open={open} onClose={onClose} size="lg">
+      <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Room Settings</h2>
           <button
@@ -195,6 +191,6 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
           </button>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }
