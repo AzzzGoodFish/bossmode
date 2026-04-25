@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
 import type { MemberInfo, RuntimeInfo, KnowledgeTreeNode } from "../api/client";
 import { Sheet } from "./Sheet";
+import { FolderPicker } from "./FolderPicker";
 import { getMembers, getRuntimes, getKnowledgeTree, createMember } from "../api/client";
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
-import { Shield } from "lucide-react";
+import { Shield, FolderOpen } from "lucide-react";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ interface CreateRoomDialogProps {
 export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
@@ -111,9 +113,19 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
 
         <div>
           <label className="block text-sm text-zinc-400 mb-1">Working Directory</label>
-          <input autoComplete="off" type="text" value={cwd} onChange={(e) => setCwd(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
-            placeholder="/path/to/your/project" required />
+          <div className="flex items-center gap-2">
+            <input autoComplete="off" type="text" value={cwd} onChange={(e) => setCwd(e.target.value)}
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+              placeholder="/path/to/your/project" required />
+            <button
+              type="button"
+              title="Browse folders"
+              onClick={() => setShowFolderPicker(true)}
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-200 bg-zinc-800 border border-zinc-700 rounded transition-colors cursor-pointer"
+            >
+              <FolderOpen size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Members */}
@@ -177,6 +189,15 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
             setSelectedMembers((prev) => new Set([...prev, newMember.name]));
           }}
           onClose={() => setCreatingForAgent(null)}
+        />
+      )}
+
+      {showFolderPicker && (
+        <FolderPicker
+          open={showFolderPicker}
+          initialPath={cwd || undefined}
+          onConfirm={(path) => { setCwd(path); setShowFolderPicker(false); }}
+          onCancel={() => setShowFolderPicker(false)}
         />
       )}
     </Sheet>

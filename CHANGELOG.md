@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.9.7] — 2026-04-25
+
+### Added
+- **Folder picker for room working directory** — the Create Room dialog now has a folder-browse button next to the cwd input. Users can navigate their home directory tree and select a folder visually instead of typing paths manually. Manual input is still supported alongside the picker.
+
+### Tests
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit` passed.
+- **Release note**: `feat: folder picker for room working directory — browse and select folders visually instead of typing paths manually`.
+
 ## [0.9.6] — 2026-04-25
 
 ### Fixed
