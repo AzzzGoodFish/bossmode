@@ -158,8 +158,9 @@ export interface RoomMessage {
   content: string;
   mentions: string[];
   ts: number;
-  type?: "summary";
+  type?: "summary" | "task_event";
   summary_meta?: SummaryMeta;
+  task_event_meta?: TaskEventMeta;
 }
 
 // -- Agent Status --
@@ -192,13 +193,42 @@ export interface ArchiveSummary {
   ts: number;
 }
 
+// -- Task Board --
+
+export type TaskStatus = "todo" | "in-progress" | "done";
+export type TaskPriority = "P0" | "P1" | "P2";
+
+export interface Task {
+  id: string;
+  roomId: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee?: string;       // member name
+  description?: string;   // markdown
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TaskEventMeta {
+  action: "created" | "updated" | "status_changed" | "deleted";
+  taskId: string;
+  taskTitle: string;
+  newStatus?: TaskStatus;
+  actor: string;
+}
+
 // -- WebSocket Events (server → client) --
 
 export type WsServerEvent =
   | { type: "room:message"; roomId: string; message: RoomMessage }
   | { type: "agent:status"; roomId: string; agent: string; status: AgentStatus }
   | { type: "agent:event"; roomId: string; agent: string; event: unknown }
-  | { type: "agent:context_usage"; roomId: string; agent: string; usage: ContextUsage | null };
+  | { type: "agent:context_usage"; roomId: string; agent: string; usage: ContextUsage | null }
+  | { type: "task:created"; roomId: string; task: Task }
+  | { type: "task:updated"; roomId: string; task: Task }
+  | { type: "task:deleted"; roomId: string; taskId: string };
 
 // -- WebSocket Commands (client → server) --
 

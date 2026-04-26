@@ -89,6 +89,75 @@ export default function (pi) {
   });
 
   pi.registerTool({
+    name: "create_task",
+    label: "Create Task",
+    description: "Create a task in the current room.",
+    parameters: Type.Object({
+      title: Type.String({ description: "Task title" }),
+      description: Type.Optional(Type.String({ description: "Task description (markdown)" })),
+      status: Type.Optional(Type.String({ description: "todo | in-progress | done (default: todo)" })),
+      priority: Type.Optional(Type.String({ description: "P0 | P1 | P2 (default: P1)" })),
+      assignee: Type.Optional(Type.String({ description: "Member name to assign" })),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "create_task", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Task created: " + data.taskId + " \u2014 " + data.title }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "update_task",
+    label: "Update Task",
+    description: "Update an existing task in the current room.",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID to update" }),
+      title: Type.Optional(Type.String({ description: "New title" })),
+      status: Type.Optional(Type.String({ description: "todo | in-progress | done" })),
+      priority: Type.Optional(Type.String({ description: "P0 | P1 | P2" })),
+      assignee: Type.Optional(Type.String({ description: "New assignee, empty to unassign" })),
+      description: Type.Optional(Type.String({ description: "New description" })),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "update_task", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Task updated: " + data.taskId + " \u2014 status: " + data.status }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "list_tasks",
+    label: "List Tasks",
+    description: "List tasks in the current room. Optionally filter by status or assignee.",
+    parameters: Type.Object({
+      status: Type.Optional(Type.String({ description: "Filter: todo | in-progress | done" })),
+      assignee: Type.Optional(Type.String({ description: "Filter by assignee name" })),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "list_tasks", room: ROOM, agent: AGENT, params }),
+      });
+      const tasks = await res.json();
+      if (!Array.isArray(tasks)) return { content: [{ type: "text", text: "Failed to load tasks." }], details: {} };
+      if (tasks.length === 0) return { content: [{ type: "text", text: "No tasks found." }], details: {} };
+      const text = tasks.map(t => "[" + t.status + "] " + t.priority + " " + t.title + (t.assignee ? " (@" + t.assignee + ")" : "") + " id:" + t.id).join("\\n");
+      return { content: [{ type: "text", text: text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
     name: "write_summary",
     label: "Write Summary",
     description: "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",

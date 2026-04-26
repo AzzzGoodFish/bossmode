@@ -86,6 +86,56 @@ export function createMcpHandler(_serverUrl: string) {
 
 
     server.tool(
+      "create_task",
+      "Create a task in the current room. Returns the created task ID.",
+      {
+        title: z.string().describe("Task title"),
+        description: z.string().optional().describe("Task description (markdown)"),
+        status: z.enum(["todo", "in-progress", "done"]).optional().describe("Initial status (default: todo)"),
+        priority: z.enum(["P0", "P1", "P2"]).optional().describe("Priority (default: P1)"),
+        assignee: z.string().optional().describe("Member name to assign the task to"),
+      },
+      async (args) => {
+        const result = await callbackTool("create_task", args);
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+        return { content: [{ type: "text", text: `Task created: ${data.taskId} — ${data.title}` }] };
+      },
+    );
+
+    server.tool(
+      "update_task",
+      "Update an existing task in the current room (status, title, priority, assignee, description).",
+      {
+        taskId: z.string().describe("Task ID to update"),
+        title: z.string().optional().describe("New title"),
+        status: z.enum(["todo", "in-progress", "done"]).optional().describe("New status"),
+        priority: z.enum(["P0", "P1", "P2"]).optional().describe("New priority"),
+        assignee: z.string().optional().describe("New assignee (member name), empty string to unassign"),
+        description: z.string().optional().describe("New description"),
+      },
+      async (args) => {
+        const result = await callbackTool("update_task", args);
+        const data = parseJsonSafe(result);
+        if (!data.ok) return { content: [{ type: "text", text: `Failed: ${data.error}` }] };
+        return { content: [{ type: "text", text: `Task updated: ${data.taskId} — status: ${data.status}` }] };
+      },
+    );
+
+    server.tool(
+      "list_tasks",
+      "List tasks in the current room. Optionally filter by status or assignee.",
+      {
+        status: z.enum(["todo", "in-progress", "done"]).optional().describe("Filter by status"),
+        assignee: z.string().optional().describe("Filter by assignee name"),
+      },
+      async (args) => {
+        const result = await callbackTool("list_tasks", args);
+        return { content: [{ type: "text", text: result }] };
+      },
+    );
+
+    server.tool(
       "write_summary",
       "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
       {

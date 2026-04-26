@@ -20,6 +20,8 @@ import { SkillDetailPage } from "./SkillDetailPage";
 import { KnowledgePage } from "./KnowledgePage";
 import { MembersPage } from "./MembersPage";
 import { SettingsPage } from "./SettingsPage";
+import { AllTasksPage } from "./AllTasksPage";
+import { TaskDetailPage } from "./TaskDetailPage";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
 
 interface LayoutProps {
@@ -229,6 +231,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+            onNavigateToTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId })}
           />
         )}
 
@@ -303,6 +306,22 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
         {/* Settings */}
         {activePage?.type === "settings" && <SettingsPage onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />}
+        {activePage?.type === "all-tasks" && (
+          <AllTasksPage
+            onSelectTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+          />
+        )}
+        {activePage?.type === "task" && (
+          <TaskDetailPage
+            roomId={activePage.roomId}
+            taskId={activePage.taskId}
+            onBack={() => {
+              sessionStorage.setItem("bossmode_main_restore_tab", "tasks");
+              setActivePage({ type: "room", id: activePage.roomId });
+            }}
+          />
+        )}
 
         {/* Home */}
         {!activePage && (

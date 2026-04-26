@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon, PanelLeftClose, PanelLeftOpen, CheckSquare } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
 import { getRooms, getAgents, getMembers, getSkills, getKnowledgeTree } from "../api/client";
@@ -15,6 +15,8 @@ export type ActivePage =
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
   | { type: "settings" }
+  | { type: "all-tasks" }
+  | { type: "task"; roomId: string; taskId: string }
   | null;
 
 interface SidebarProps {
@@ -342,6 +344,15 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
         </div>
       ) : (
         <div className="border-t border-zinc-200 dark:border-zinc-800 shrink-0">
+          <button
+            onClick={() => onNavigate({ type: "all-tasks" })}
+            className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
+              activePage?.type === "all-tasks" || activePage?.type === "task" ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300"
+            }`}
+          >
+            <CheckSquare size={14} className="text-zinc-500" />
+            <span>All Tasks</span>
+          </button>
           <button
             onClick={() => onNavigate({ type: "settings" })}
             className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
