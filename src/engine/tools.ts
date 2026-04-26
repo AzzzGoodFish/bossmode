@@ -7,6 +7,9 @@ import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import * as taskStore from "../workspace/task-store.js";
+import { emitTaskEvent } from "../api/tasks.js";
+import type { TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
 import { emitAgentReply } from "./agent-manager.js";
 import { getActivationSource } from "./activation-context.js";
@@ -123,6 +126,46 @@ export async function handleToolCallback(
 
       // Default: inline text (may be truncated by MAX_RESULT_CHARS)
       return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts }));
+    }
+    case "create_task": {
+      const title = params?.title ? String(params.title).trim() : "";
+      if (!title) return { ok: false, error: "title is required" };
+      const task = taskStore.createTask(roomId, {
+        title,
+        createdBy: agentName,
+        status: (params?.status as TaskStatus) || "todo",
+        priority: (params?.priority as TaskPriority) || "P1",
+        assignee: params?.assignee ? String(params.assignee) : undefined,
+        description: params?.description ? String(params.description) : undefined,
+      });
+      emitTaskEvent(roomId, "created", task, agentName);
+      return { ok: true, taskId: task.id, title: task.title, status: task.status };
+    }
+    case "update_task": {
+      const taskId = params?.taskId ? String(params.taskId) : "";
+      if (!taskId) return { ok: false, error: "taskId is required" };
+      const before = taskStore.getTask(roomId, taskId);
+      if (!before) return { ok: false, error: `Task not found: ${taskId}` };
+      const patch: Parameters<typeof taskStore.updateTask>[2] = {};
+      if (params?.title !== undefined) patch.title = String(params.title);
+      if (params?.status !== undefined) patch.status = params.status as TaskStatus;
+      if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
+      if (params?.assignee !== undefined) patch.assignee = params.assignee ? String(params.assignee) : undefined;
+      if (params?.description !== undefined) patch.description = String(params.description);
+      const updated = taskStore.updateTask(roomId, taskId, patch);
+      if (!updated) return { ok: false, error: "Update failed" };
+      const action = before.status !== updated.status ? "status_changed" : "updated";
+      emitTaskEvent(roomId, action, updated, agentName);
+      return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
+    }
+    case "list_tasks": {
+      let tasks = taskStore.listTasks(roomId);
+      if (params?.status) tasks = tasks.filter((t) => t.status === params.status);
+      if (params?.assignee) tasks = tasks.filter((t) => t.assignee === String(params.assignee));
+      return tasks.map((t) => ({
+        id: t.id, title: t.title, status: t.status, priority: t.priority,
+        assignee: t.assignee, createdBy: t.createdBy,
+      }));
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2 } from "lucide-react";
-import type { RoomMessage } from "../api/client";
+import type { RoomMessage, TaskEventMeta } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
@@ -15,11 +15,12 @@ interface ChatAreaProps {
   searchOpen?: boolean;
   onCloseSearch?: () => void;
   members?: string[];
+  onNavigateToTask?: (taskId: string) => void;
 }
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -194,7 +195,9 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
               return (
                 <div key={msg.id} data-message-id={msg.id} className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`} style={animDelay ? { animationDelay: animDelay } : undefined}>
                   {showDateSep && <DateSeparator ts={msg.ts} />}
-                  {msg.type === "summary" ? (
+                  {msg.type === "task_event" && msg.task_event_meta ? (
+                    <TaskEventCard meta={msg.task_event_meta} content={msg.content} onJump={onNavigateToTask ? () => onNavigateToTask(msg.task_event_meta!.taskId) : undefined} />
+                  ) : msg.type === "summary" ? (
                     <SummaryCard message={msg} roomId={roomId || ""} />
                   ) : (
                     <MessageBubble
@@ -214,6 +217,24 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         <div ref={bottomRef} />
       </div>
     </div>
+    </div>
+  );
+}
+
+function TaskEventCard({ meta, content, onJump }: { meta: TaskEventMeta; content: string; onJump?: () => void }) {
+  const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
+  return (
+    <div className="flex items-center gap-2 py-1 text-xs text-zinc-500">
+      <span>{icon}</span>
+      <span className="flex-1">
+        {onJump && meta.action !== "deleted" ? (
+          <button onClick={onJump} className="text-blue-500 hover:text-blue-400 cursor-pointer underline-offset-2 hover:underline">
+            {content}
+          </button>
+        ) : (
+          content
+        )}
+      </span>
     </div>
   );
 }

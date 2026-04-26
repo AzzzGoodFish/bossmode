@@ -4,6 +4,22 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.1] — 2026-04-26
+
+### Added
+- **Task board** — lightweight task management per room: board (three-column kanban) and list views with drag-and-drop status changes, quick-add inline creation, full-page Linear-style task detail with dual-column layout, global All Tasks page with cross-room aggregation and filtering.
+- **Agent task tools** — three new MCP/pi-cli tools: `create_task`, `update_task`, `list_tasks` for agents to manage tasks programmatically.
+- **Task event system messages** — task creation, status changes, and deletion emit structured system messages in room chat with click-to-jump navigation to task detail.
+- **Sidebar All Tasks entry** — global task overview accessible from sidebar.
+
+### Fixed
+- **PATCH API field preservation** — updating a single task field (e.g. status) no longer wipes other fields (title, priority, assignee). Conditional patch construction ensures only explicitly provided fields are modified.
+
+### Tests
+- Added 8 unit tests for task-store CRUD and cross-room aggregation.
+- **Release validation**: `npm run build` passed (tsc zero errors); `npm test -- tests/unit` passed (247/247).
+- **Release note**: `feat: task board — lightweight task management per room with board/list views, drag-and-drop status changes, full-page task detail (Linear-style), quick add, global All Tasks page, agent tools (create_task/update_task/list_tasks), task event system messages with click-to-jump; fix: PATCH API field preservation`.
+
 ## [0.10.0] — 2026-04-25
 
 ### Added

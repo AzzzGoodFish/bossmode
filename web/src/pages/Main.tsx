@@ -6,6 +6,7 @@ import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
 import { Search } from "lucide-react";
+import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
   steerAgent as apiSteerAgent,
@@ -24,7 +25,7 @@ import { AddMemberDialog } from "../components/AddMemberDialog";
 import { useDialog } from "../components/dialogs";
 
 interface Tab {
-  type: "room" | "agent";
+  type: "room" | "tasks" | "agent";
   agentName?: string;
 }
 
@@ -44,6 +45,7 @@ interface MainProps {
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
+  onNavigateToTask?: (roomId: string, taskId: string) => void;
 }
 
 export function Main({
@@ -52,6 +54,7 @@ export function Main({
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
+  onNavigateToTask,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -70,11 +73,11 @@ export function Main({
   }, [externalShowCreateRoom, onCreateRoomShown]);
 
   const [tabs, setTabs] = useState<Tab[]>(() => {
-    if (!selectedRoomId) return [{ type: "room" as const }];
+    if (!selectedRoomId) return [{ type: "room" as const }, { type: "tasks" as const }];
     try {
       const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      return saved.length > 0 ? saved : [{ type: "room" as const }];
-    } catch { return [{ type: "room" as const }]; }
+      return saved.length > 0 ? saved : [{ type: "room" as const }, { type: "tasks" as const }];
+    } catch { return [{ type: "room" as const }, { type: "tasks" as const }]; }
   });
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [agentEventsCache, setAgentEventsCache] = useState<Record<string, CommittedEvent[]>>({});
@@ -108,9 +111,16 @@ export function Main({
     }
     try {
       const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      setTabs(saved.length > 0 ? saved : [{ type: "room" }]);
-    } catch { setTabs([{ type: "room" }]); }
-    setActiveTabIdx(0);
+      setTabs(saved.length > 0 ? saved : [{ type: "room" }, { type: "tasks" }]);
+    } catch { setTabs([{ type: "room" }, { type: "tasks" }]); }
+    // Restore tab from sessionStorage (e.g. after back from TaskDetailPage)
+    const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
+    if (restoreTab === "tasks") {
+      setActiveTabIdx(1);
+      sessionStorage.removeItem("bossmode_main_restore_tab");
+    } else {
+      setActiveTabIdx(0);
+    }
     setAgentEventsCache({});
   }, [selectedRoomId]);
 
@@ -304,8 +314,8 @@ export function Main({
       <div className="h-9 border-b border-zinc-200 dark:border-zinc-800 flex items-end px-2 shrink-0 gap-0.5 overflow-x-auto scrollbar-hide">
         {tabs.map((tab, idx) => {
           const isActive = idx === activeTabIdx;
-          const label = tab.type === "room" ? `# ${room.name}` : tab.agentName!;
-          const tabKey = tab.type === "room" ? "room" : tab.agentName!;
+          const label = tab.type === "room" ? `# ${room.name}` : tab.type === "tasks" ? "Tasks" : tab.agentName!;
+          const tabKey = tab.type === "room" ? "room" : tab.type === "tasks" ? "tasks" : tab.agentName!;
           const hasUnread = !isActive && unreadTabs?.has(tabKey);
           return (
             <button
@@ -356,9 +366,15 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {activeTab?.type === "room" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId) : undefined} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
+          ) : activeTab?.type === "tasks" && selectedRoomId ? (
+            <TasksTab
+              roomId={selectedRoomId}
+              members={room.members}
+              onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId)}
+            />
           ) : activeTab?.type === "agent" && selectedRoomId ? (
             <AgentTab
               key={`${selectedRoomId}:${activeTab.agentName}`}

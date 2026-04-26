@@ -376,14 +376,23 @@ export interface SummaryMeta {
   participants: string[];
 }
 
+export interface TaskEventMeta {
+  action: "created" | "updated" | "status_changed" | "deleted";
+  taskId: string;
+  taskTitle: string;
+  newStatus?: string;
+  actor: string;
+}
+
 export interface RoomMessage {
   id: string;
   sender: string;
   content: string;
   mentions: string[];
   ts: number;
-  type?: "summary";
+  type?: "summary" | "task_event";
   summary_meta?: SummaryMeta;
+  task_event_meta?: TaskEventMeta;
 }
 
 export interface MessageSearchResult {
@@ -599,6 +608,56 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
     method: "PUT",
     body: JSON.stringify({ sessionResume }),
   });
+}
+
+// -- Tasks --
+
+export type TaskStatus = "todo" | "in-progress" | "done";
+export type TaskPriority = "P0" | "P1" | "P2";
+
+export interface Task {
+  id: string;
+  roomId: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee?: string;
+  description?: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Only present in listAllTasks results */
+  roomName?: string;
+}
+
+export async function listAllTasks(opts: { status?: TaskStatus; query?: string } = {}): Promise<Task[]> {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.query) qs.set("query", opts.query);
+  return apiFetch(`/api/tasks${qs.toString() ? `?${qs}` : ""}`);
+}
+
+export async function listRoomTasks(roomId: string): Promise<Task[]> {
+  return apiFetch(`/api/rooms/${roomId}/tasks`);
+}
+
+export async function createTask(
+  roomId: string,
+  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string },
+): Promise<Task> {
+  return apiFetch(`/api/rooms/${roomId}/tasks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function updateTask(
+  roomId: string,
+  taskId: string,
+  patch: { title?: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string | null; description?: string; updatedBy?: string },
+): Promise<Task> {
+  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export async function deleteTaskApi(roomId: string, taskId: string, deletedBy?: string): Promise<void> {
+  await apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`, { method: "DELETE", body: JSON.stringify({ deletedBy }) });
 }
 
 // -- Filesystem --
