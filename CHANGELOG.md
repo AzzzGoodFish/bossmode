@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.8] — 2026-04-27
+
+### Fixed
+- **Remove confusing fake URL path under task title** — the internal route path (`/rooms/.../tasks/...`) shown below the task title was meaningless to users. Removed in favor of existing breadcrumb + sidebar metadata.
+
 ## [0.10.7] — 2026-04-27
 
 ### Fixed
