@@ -152,7 +152,6 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   const statusMeta = STATUS_META[status];
   const priorityMeta = PRIORITY_META[priority];
 
-  const fakeUrl = isCreate ? `/rooms/${roomId}/tasks/new` : task ? `/rooms/${roomId}/tasks/${task.id}` : "";
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
@@ -224,11 +223,8 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                 onChange={(e) => { setTitle(e.target.value); markDirty(); }}
                 placeholder={isCreate ? "Task title…" : "Untitled"}
                 autoFocus={isCreate}
-                className="w-full text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 mb-1 leading-tight"
+                className="w-full text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 mb-2 leading-tight"
               />
-              {!isCreate && (
-                <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-600 mb-6 select-all">{fakeUrl}</div>
-              )}
 
               {/* Description */}
               <div className="mt-6">
