@@ -38,7 +38,7 @@ export function getTask(roomId: string, taskId: string): Task | null {
 
 export function createTask(
   roomId: string,
-  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string },
+  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[] },
 ): Task {
   const now = Date.now();
   const task: Task = {
@@ -49,6 +49,7 @@ export function createTask(
     priority: input.priority ?? "P1",
     assignee: input.assignee,
     description: input.description,
+    references: input.references,
     createdBy: input.createdBy,
     createdAt: now,
     updatedAt: now,
@@ -62,7 +63,7 @@ export function createTask(
 export function updateTask(
   roomId: string,
   taskId: string,
-  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "description">>,
+  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "description" | "references">>,
 ): Task | null {
   const tasks = readTasks(roomId);
   const idx = tasks.findIndex((t) => t.id === taskId);

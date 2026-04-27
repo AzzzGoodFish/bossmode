@@ -206,6 +206,7 @@ export interface Task {
   priority: TaskPriority;
   assignee?: string;       // member name
   description?: string;   // markdown
+  references?: string[];   // soft links to knowledge docs or URLs
   createdBy: string;
   createdAt: number;
   updatedAt: number;

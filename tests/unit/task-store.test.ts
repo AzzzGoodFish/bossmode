@@ -116,4 +116,42 @@ describe("task-store", () => {
     expect(results.some((t) => t.title.includes("search"))).toBe(true);
     expect(results.every((t) => t.title.toLowerCase().includes("search"))).toBe(true);
   });
+
+  it("creates a task with references", async () => {
+    const { createTask, getTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r10");
+    const task = createTask("r10", {
+      title: "Task with refs",
+      createdBy: "pm",
+      references: ["docs/bossmode/prds/prd-task-board.md", "https://github.com/example"],
+    });
+    expect(task.references).toEqual(["docs/bossmode/prds/prd-task-board.md", "https://github.com/example"]);
+    const found = getTask("r10", task.id);
+    expect(found!.references).toEqual(["docs/bossmode/prds/prd-task-board.md", "https://github.com/example"]);
+  });
+
+  it("updates references on a task", async () => {
+    const { createTask, updateTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r11");
+    const task = createTask("r11", { title: "Ref update", createdBy: "pm", references: ["docs/a.md"] });
+    const updated = updateTask("r11", task.id, { references: ["docs/a.md", "docs/b.md"] });
+    expect(updated!.references).toEqual(["docs/a.md", "docs/b.md"]);
+  });
+
+  it("clears references with empty array", async () => {
+    const { createTask, updateTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r12");
+    const task = createTask("r12", { title: "Ref clear", createdBy: "pm", references: ["docs/x.md"] });
+    const updated = updateTask("r12", task.id, { references: [] });
+    expect(updated!.references).toEqual([]);
+  });
+
+  it("does not change references when not in patch", async () => {
+    const { createTask, updateTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r13");
+    const task = createTask("r13", { title: "Ref unchanged", createdBy: "pm", references: ["docs/y.md"] });
+    const updated = updateTask("r13", task.id, { title: "New title" });
+    expect(updated!.references).toEqual(["docs/y.md"]);
+    expect(updated!.title).toBe("New title");
+  });
 });

@@ -8,6 +8,14 @@ import {
   CHAT_TARGET_PARAM_DESCRIPTION,
   CHAT_MENTIONS_PARAM_DESCRIPTION,
 } from "../shared/chat-tool-description.js";
+import {
+  QUERY_ROOM_MESSAGES_DESCRIPTION,
+  CREATE_TASK_DESCRIPTION,
+  UPDATE_TASK_DESCRIPTION,
+  LIST_TASKS_DESCRIPTION,
+  WRITE_SUMMARY_DESCRIPTION,
+  PARAM_DESCRIPTIONS,
+} from "../shared/mcp-tool-descriptions.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
 const MAX_RESULT_CHARS = 25_000;
@@ -69,14 +77,14 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "query_room_messages",
-      "Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search filtered by sender and time range.",
+      QUERY_ROOM_MESSAGES_DESCRIPTION,
       {
-        query: z.string().optional().describe("Case-insensitive substring to search in message content"),
-        from: z.string().optional().describe("Filter by sender name (exact match, e.g. 'fish' or 'developer')"),
-        after: z.string().optional().describe("Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')"),
-        before: z.string().optional().describe("Only messages before this time: same format as 'after'"),
-        limit: z.number().optional().describe("Max messages to return (default 50, max 500)"),
-        output: z.enum(["text", "file"]).optional().describe("'text' returns inline (default, may be truncated). 'file' writes to a temp markdown file and returns the path — use this for large result sets and read the file with the Read tool"),
+        query: z.string().optional().describe(PARAM_DESCRIPTIONS.query),
+        from: z.string().optional().describe(PARAM_DESCRIPTIONS.from),
+        after: z.string().optional().describe(PARAM_DESCRIPTIONS.after),
+        before: z.string().optional().describe(PARAM_DESCRIPTIONS.before),
+        limit: z.number().optional().describe(PARAM_DESCRIPTIONS.limit),
+        output: z.enum(["text", "file"]).optional().describe(PARAM_DESCRIPTIONS.output),
       },
       async (args) => {
         const result = await callbackTool("query_room_messages", args);
@@ -87,13 +95,14 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "create_task",
-      "Create a task in the current room. Returns the created task ID.",
+      CREATE_TASK_DESCRIPTION,
       {
-        title: z.string().describe("Task title"),
-        description: z.string().optional().describe("Task description (markdown)"),
-        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("Initial status (default: todo)"),
-        priority: z.enum(["P0", "P1", "P2"]).optional().describe("Priority (default: P1)"),
-        assignee: z.string().optional().describe("Member name to assign the task to"),
+        title: z.string().describe(PARAM_DESCRIPTIONS.taskTitle),
+        description: z.string().optional().describe(PARAM_DESCRIPTIONS.taskDescription),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe(PARAM_DESCRIPTIONS.taskStatus),
+        priority: z.enum(["P0", "P1", "P2"]).optional().describe(PARAM_DESCRIPTIONS.taskPriority),
+        assignee: z.string().optional().describe(PARAM_DESCRIPTIONS.taskAssignee),
+        references: z.array(z.string()).optional().describe(PARAM_DESCRIPTIONS.taskReferences),
       },
       async (args) => {
         const result = await callbackTool("create_task", args);
@@ -105,14 +114,15 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "update_task",
-      "Update an existing task in the current room (status, title, priority, assignee, description).",
+      UPDATE_TASK_DESCRIPTION,
       {
-        taskId: z.string().describe("Task ID to update"),
-        title: z.string().optional().describe("New title"),
-        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("New status"),
-        priority: z.enum(["P0", "P1", "P2"]).optional().describe("New priority"),
-        assignee: z.string().optional().describe("New assignee (member name), empty string to unassign"),
-        description: z.string().optional().describe("New description"),
+        taskId: z.string().describe(PARAM_DESCRIPTIONS.taskId),
+        title: z.string().optional().describe(PARAM_DESCRIPTIONS.taskTitle),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe(PARAM_DESCRIPTIONS.taskStatusUpdate),
+        priority: z.enum(["P0", "P1", "P2"]).optional().describe(PARAM_DESCRIPTIONS.taskPriority),
+        assignee: z.string().optional().describe(PARAM_DESCRIPTIONS.taskAssignee),
+        description: z.string().optional().describe(PARAM_DESCRIPTIONS.taskDescription),
+        references: z.array(z.string()).optional().describe(PARAM_DESCRIPTIONS.taskReferences),
       },
       async (args) => {
         const result = await callbackTool("update_task", args);
@@ -124,10 +134,10 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "list_tasks",
-      "List tasks in the current room. Optionally filter by status or assignee.",
+      LIST_TASKS_DESCRIPTION,
       {
-        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("Filter by status"),
-        assignee: z.string().optional().describe("Filter by assignee name"),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe(PARAM_DESCRIPTIONS.taskStatusFilter),
+        assignee: z.string().optional().describe(PARAM_DESCRIPTIONS.taskAssigneeFilter),
       },
       async (args) => {
         const result = await callbackTool("list_tasks", args);
@@ -137,12 +147,12 @@ export function createMcpHandler(_serverUrl: string) {
 
     server.tool(
       "write_summary",
-      "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
+      WRITE_SUMMARY_DESCRIPTION,
       {
-        title: z.string().describe("Short topic title for this summary segment"),
-        summary: z.string().describe("1-3 sentence summary of the key content, decisions, and conclusions"),
-        from_id: z.string().describe("Message ID of the first message in this segment"),
-        to_id: z.string().describe("Message ID of the last message in this segment"),
+        title: z.string().describe(PARAM_DESCRIPTIONS.summaryTitle),
+        summary: z.string().describe(PARAM_DESCRIPTIONS.summary),
+        from_id: z.string().describe(PARAM_DESCRIPTIONS.summaryFromId),
+        to_id: z.string().describe(PARAM_DESCRIPTIONS.summaryToId),
       },
       async ({ title, summary, from_id, to_id }) => {
         const result = await callbackTool("write_summary", { title, summary, from_id, to_id });
