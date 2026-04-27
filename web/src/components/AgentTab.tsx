@@ -453,6 +453,7 @@ function AgentChat({
   const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const [commandIdx, setCommandIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -468,6 +469,13 @@ function AgentChat({
     { name: "/compact", description: "Compress agent context" },
     { name: "/reset-session", description: "Reset runtime session and cursor" },
   ];
+
+  const filteredCommands = COMMANDS.filter((c) => c.name.startsWith(input) || input === "/");
+
+  // Reset highlight when menu opens or filtered list changes
+  useEffect(() => {
+    if (showCommandMenu) setCommandIdx(0);
+  }, [showCommandMenu, input]);
 
   const chatEvents = committed.filter((e) => e.type === "user_steer" || e.type === "agent_reply" || e.type === "message" || e.type === "system");
 
@@ -629,6 +637,39 @@ function AgentChat({
   }, [input]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Slash command menu navigation takes priority when open
+    if (showCommandMenu && filteredCommands.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setCommandIdx((i) => (i + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setCommandIdx((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const cmd = filteredCommands[commandIdx] ?? filteredCommands[0];
+        setInput(cmd.name);
+        setShowCommandMenu(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const cmd = filteredCommands[commandIdx] ?? filteredCommands[0];
+        setInput(cmd.name);
+        setShowCommandMenu(false);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowCommandMenu(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter") {
       if (e.shiftKey) {
         // Shift+Enter: browser default inserts newline
@@ -733,19 +774,33 @@ function AgentChat({
 
       <div className="relative border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2 items-end">
         {/* Slash command menu */}
-        {showCommandMenu && (
-          <div className="absolute bottom-full left-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden w-64 z-20">
-            {COMMANDS.filter((c) => c.name.startsWith(input) || input === "/").map((cmd) => (
-              <button
-                key={cmd.name}
-                className="w-full text-left px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-sm transition-colors cursor-pointer"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { setInput(cmd.name); setShowCommandMenu(false); }}
-              >
-                <span className="text-zinc-900 dark:text-white font-mono">{cmd.name}</span>
-                <span className="text-zinc-400 dark:text-zinc-500 ml-2 text-xs">{cmd.description}</span>
-              </button>
-            ))}
+        {showCommandMenu && filteredCommands.length > 0 && (
+          <div
+            role="listbox"
+            aria-label="Slash commands"
+            className="absolute bottom-full left-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden w-72 z-20 max-h-60 overflow-y-auto"
+          >
+            {filteredCommands.map((cmd, idx) => {
+              const active = idx === commandIdx;
+              return (
+                <button
+                  key={cmd.name}
+                  role="option"
+                  aria-selected={active}
+                  className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
+                    active
+                      ? "bg-blue-50 dark:bg-blue-600/20"
+                      : "hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                  }`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setCommandIdx(idx)}
+                  onClick={() => { setInput(cmd.name); setShowCommandMenu(false); }}
+                >
+                  <span className={`font-mono ${active ? "text-blue-700 dark:text-blue-300" : "text-zinc-900 dark:text-white"}`}>{cmd.name}</span>
+                  <span className={`ml-2 text-xs ${active ? "text-blue-500/80 dark:text-blue-400/80" : "text-zinc-400 dark:text-zinc-500"}`}>{cmd.description}</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
