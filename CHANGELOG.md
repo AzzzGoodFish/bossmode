@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.13] — 2026-04-27
+
+### Fixed
+- **Search jump to old messages** — clicking a search result for a message not in the current loaded range now fetches a window around that message via `?around=<msgId>` API parameter. Previously failed silently.
+- **Search bar stays open after jump** — removed unconditional `onCloseSearch` call from `scrollToMessage`. Users can now click multiple search results to jump between them. Close via X / Esc only.
+
+### Added
+- **"Jump to latest" button** — floating button appears when viewing historical messages (after a search jump). Clicking returns to the live message stream.
+- **`around` query parameter** for `GET /api/rooms/:id/messages` — returns a window of messages centered on the target ID.
+- **History view mode** in `useRoom` — `inHistoryView` state suppresses WS message appends while reading old context.
+
+### Tests
+- Added: `getMessages around` (4 cases: centered window, not found, near start, near end).
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 272/272 ✅.
+
 ## [0.10.12] — 2026-04-27
 
 ### Added

@@ -16,11 +16,14 @@ interface ChatAreaProps {
   onCloseSearch?: () => void;
   members?: string[];
   onNavigateToTask?: (taskId: string) => void;
+  onJumpToMessage?: (messageId: string) => Promise<void>;
+  onReturnToLatest?: () => void;
+  inHistoryView?: boolean;
 }
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -28,18 +31,22 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   const isNearBottom = useRef(true);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  const scrollToMessage = useCallback((messageId: string) => {
-    const el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+  const scrollToMessage = useCallback(async (messageId: string) => {
+    let el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (!el && onJumpToMessage) {
+      // Message not in DOM — fetch around window from server
+      await onJumpToMessage(messageId);
+      // Wait for React to render the new messages
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    }
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setHighlightedId(messageId);
       setTimeout(() => setHighlightedId(null), 1500);
-    } else {
-      // Message not in current loaded range — user needs to load more
-      // (future: auto-load; for now show a visual hint via bottomRef)
     }
-    onCloseSearch?.();
-  }, [onCloseSearch]);
+    // Search bar stays open — user closes via X / Esc
+  }, [onJumpToMessage]);
 
   // Auto-scroll to bottom on new messages (only if user was near bottom)
   useEffect(() => {
@@ -217,6 +224,16 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         )}
         <div ref={bottomRef} />
       </div>
+      {inHistoryView && onReturnToLatest && (
+        <div className="absolute bottom-4 right-4 z-10">
+          <button
+            onClick={onReturnToLatest}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-colors"
+          >
+            ↓ Jump to latest
+          </button>
+        </div>
+      )}
     </div>
     </div>
   );

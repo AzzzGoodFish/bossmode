@@ -99,6 +99,9 @@ export function Main({
     sendMessage,
     handleWsEvent,
     reloadRoom,
+    jumpToMessage,
+    returnToLatest,
+    inHistoryView,
   } = useRoom(selectedRoomId);
 
   // Register useRoom's WS handler with Layout
@@ -376,7 +379,7 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {activeTab?.type === "room" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
           ) : activeTab?.type === "tasks" && selectedRoomId ? (
