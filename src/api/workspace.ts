@@ -121,8 +121,9 @@ addRoute("GET", "/api/rooms/:id/messages", async (req, res, params) => {
   const url = new URL(req.url || "", "http://localhost");
   const limit = parseInt(url.searchParams.get("limit") || "100", 10);
   const before = url.searchParams.get("before") || undefined;
+  const around = url.searchParams.get("around") || undefined;
 
-  const messages = messageStore.getMessages(params.id, { limit, before });
+  const messages = messageStore.getMessages(params.id, { limit, before, around });
   sendJson(res, 200, messages);
 });
 

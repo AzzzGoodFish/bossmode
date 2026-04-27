@@ -416,11 +416,12 @@ export async function searchMessages(
 
 export async function getMessages(
   roomId: string,
-  opts?: { limit?: number; before?: string },
+  opts?: { limit?: number; before?: string; around?: string },
 ): Promise<RoomMessage[]> {
   const params = new URLSearchParams();
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.before) params.set("before", opts.before);
+  if (opts?.around) params.set("around", opts.around);
   const qs = params.toString();
   return apiFetch(`/api/rooms/${roomId}/messages${qs ? `?${qs}` : ""}`);
 }

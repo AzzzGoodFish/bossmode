@@ -22,6 +22,7 @@ export function useRoom(roomId: string | null) {
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [contextUsage, setContextUsage] = useState<Record<string, ContextUsageData>>({});
+  const [inHistoryView, setInHistoryView] = useState(false);
 
   // Track agents known to not support context usage
   const unsupportedAgents = useRef(new Set<string>());
@@ -127,9 +128,11 @@ export function useRoom(roomId: string | null) {
       if (event.type === "room:message" && event.roomId === roomId) {
         // Summary messages trigger full reload (merged view changes)
         if (event.message.type === "summary") {
-          reloadRoom();
+          if (!inHistoryView) reloadRoom();
           return;
         }
+        // In history view, don't append new messages (user is reading old context)
+        if (inHistoryView) return;
         setMessages((prev) => {
           if (prev.some((m) => m.id === event.message.id)) return prev;
           return [...prev, event.message];
@@ -152,7 +155,7 @@ export function useRoom(roomId: string | null) {
         }));
       }
     },
-    [roomId, reloadRoom],
+    [roomId, reloadRoom, inHistoryView],
   );
 
   const sendMessage = useCallback(
@@ -167,6 +170,29 @@ export function useRoom(roomId: string | null) {
     [roomId],
   );
 
+  // Jump to a specific message by ID — fetches around window if not in DOM
+  const jumpToMessage = useCallback(async (messageId: string): Promise<void> => {
+    if (!roomId) return;
+    // Check if already loaded
+    const alreadyLoaded = messages.some((m) => m.id === messageId);
+    if (alreadyLoaded) return;
+    // Fetch around window
+    const window = await getMessages(roomId, { around: messageId, limit: PAGE_SIZE });
+    if (window.length === 0) return; // message not found
+    setMessages(window);
+    setHasMore(true);
+    setInHistoryView(true);
+  }, [roomId, messages]);
+
+  // Return to latest messages from history view
+  const returnToLatest = useCallback(async (): Promise<void> => {
+    if (!roomId) return;
+    const msgs = await getMessages(roomId, { limit: PAGE_SIZE });
+    setMessages(msgs);
+    setHasMore(msgs.length >= PAGE_SIZE);
+    setInHistoryView(false);
+  }, [roomId]);
+
   return {
     room,
     messages,
@@ -179,5 +205,8 @@ export function useRoom(roomId: string | null) {
     sendMessage,
     handleWsEvent,
     reloadRoom,
+    jumpToMessage,
+    returnToLatest,
+    inHistoryView,
   };
 }

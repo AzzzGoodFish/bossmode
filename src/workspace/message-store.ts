@@ -73,7 +73,7 @@ export function mergeWithSummaries(messages: RoomMessage[]): RoomMessage[] {
 }
 
 // 2c: getMessages with merge
-export function getMessages(roomId: string, opts?: { limit?: number; before?: string }): RoomMessage[] {
+export function getMessages(roomId: string, opts?: { limit?: number; before?: string; around?: string }): RoomMessage[] {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
 
@@ -84,6 +84,17 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
 
   // Merge summaries before pagination
   messages = mergeWithSummaries(messages);
+
+  // Around: return a window centered on the target message
+  if (opts?.around) {
+    const idx = messages.findIndex((m) => m.id === opts.around);
+    if (idx === -1) return [];
+    const total = opts?.limit || 30;
+    const before = Math.floor((total - 1) / 2);
+    const start = Math.max(0, idx - before);
+    const end = Math.min(messages.length, start + total);
+    return messages.slice(start, end);
+  }
 
   // Filter: messages before a given ID
   if (opts?.before) {
