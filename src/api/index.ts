@@ -141,7 +141,11 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
   }
 
   // Auth check (skip login/internal/mcp endpoints)
-  if (url !== "/api/auth/login" && !url.startsWith("/internal/") && !url.startsWith("/mcp/") && !requireAuth(req.headers)) {
+  // Attachment GET routes skip auth — filenames are sha256 hashes (unguessable), roomIds are UUIDs.
+  // Browser <img src> and <a download> don't send Authorization headers.
+  // See TD-A18 for long-term cookie-session migration plan.
+  const isAttachmentGet = req.method === "GET" && /^\/api\/rooms\/[^/]+\/attachments\//.test(url);
+  if (url !== "/api/auth/login" && !url.startsWith("/internal/") && !url.startsWith("/mcp/") && !isAttachmentGet && !requireAuth(req.headers)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
   }
