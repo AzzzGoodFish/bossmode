@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.7] — 2026-04-27
+
+### Fixed
+- **Attachment preview/download not working** — browser `<img src>` and `<a download>` don't send Authorization headers, so attachment GET requests were blocked by auth middleware (401). Added auth bypass for attachment GET routes. Security: filenames are sha256 hashes + roomIds are UUIDs (≈60-bit entropy), unguessable in LAN deployment.
+
+### Tests
+- Added unit test for attachment auth bypass regex pattern.
+- **Release validation**: `npm run build` passed; `npm test -- tests/unit` passed (251/251).
+
 ## [0.10.6] — 2026-04-27
 
 ### Added
