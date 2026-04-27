@@ -1,8 +1,24 @@
 ---
-title: Task Management Protocol
+title: SSOT — Source of Truth & Workspace Protocol
 ---
 
-# Task Management Protocol
+# Source of Truth
+
+The team has three information channels. Know which one to trust:
+
+| Channel | Role | Persistence |
+|---------|------|-------------|
+| **Task Board** | Work status — what's being done, by whom, what priority | Persistent |
+| **Knowledge** | Decisions and artifacts — PRDs, plans, specs, rules | Persistent |
+| **Chat** | Collaboration process — discussion, feedback, coordination | Ephemeral |
+
+- Before starting work, check Task Board for current assignments and Knowledge for context.
+- After completing work, update the relevant Task status and Knowledge documents.
+- Do not treat chat messages as authoritative — decisions made in chat must be recorded in Knowledge to be official.
+
+---
+
+# Task Management
 
 Tasks are the team's shared dashboard — a supplement to chat that tracks what's being worked on, by whom, and where it stands. Chat is the battlefield; the task board is the scoreboard.
 
@@ -82,3 +98,34 @@ When you `create_task` or `update_task` with an `assignee` who is an agent in th
 - **Update proactively.** When you finish work, update the task status in the same message where you report completion. Don't make PM chase you.
 - **Tasks reflect reality.** If work is in progress, the task should say in-progress. If it's done, move it to done. Stale task states erode trust in the board.
 - **Check the board before starting.** Use `list_tasks` to see what's already tracked before creating duplicates.
+
+---
+
+# Knowledge Discipline
+
+Knowledge documents are the team's long-term memory. Sessions are ephemeral; knowledge persists.
+
+## Structure
+
+Organize documents by project, then by type:
+
+```
+docs/
+├── {project}/                # One directory per project
+│   ├── architecture/         # Architecture maps, tech debt, key decisions
+│   ├── prds/                 # Product requirements documents
+│   ├── implementation-plans/ # Implementation plans for approved features
+│   ├── qa/                   # Test plans, acceptance reports, test infra guides
+│   ├── design/               # Design baselines, component specs, tokens
+│   └── releases/             # Version specs, release notes
+├── rules/                    # Cross-project rules (injected into system prompts)
+```
+
+When creating a document, place it in `{project}/{type}/`. Do not dump files in the root.
+
+## Principles
+
+- Before starting any task, read relevant knowledge documents. Do not assume your context is current.
+- After completing work that changes system behavior, update affected knowledge documents.
+- Each role maintains their own core documents. Keep them accurate — your teammates depend on them.
+- When you discover information that others will need, write it down. Don't keep it in your session only.

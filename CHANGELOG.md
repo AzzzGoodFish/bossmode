@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.12] — 2026-04-27
+
+### Added
+- **SSOT rule** — unified Source of Truth protocol (`docs/rules/ssot.md`): Task Board = work status, Knowledge = decisions & artifacts, Chat = ephemeral process. Includes task management lifecycle, references usage, assign auto-activation, and knowledge discipline.
+
+### Changed
+- Rule files restructured: `task-management-protocol.md` → `ssot.md` (broader scope); Knowledge Discipline moved from `dev-team-protocol.md` into `ssot.md`.
+
 ## [0.10.11] — 2026-04-27
 
 ### Fixed
