@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.2] — 2026-04-26
+
+### Fixed
+- **Tasks tab not visible in room** — tab bar React key for the tasks tab was `undefined` (missing type check), causing it to not render. Fixed key to `"tasks"`.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: tasks tab key rendering in room tab bar`.
+
 ## [0.10.1] — 2026-04-26
 
 ### Added
