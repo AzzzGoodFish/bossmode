@@ -4,6 +4,24 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.4] — 2026-04-27
+
+### Added
+- **Task board `review` status** — four-column kanban: Todo / In Progress / Review / Done. Status cycle updated across board, list, detail, and agent tools.
+- **Attachment preview cards in chat** — image attachments render as thumbnails in a grid below message text; non-image attachments show as file icon cards. Visual separation between message body and attachment area.
+
+### Fixed
+- **Task detail back navigation** — returns to the correct origin (Chat tab if entered from chat system message, Tasks tab if from board, All Tasks if from global page).
+- **Task event system messages styled as cards** — bordered card with status badge, replacing plain inline text.
+- **PATCH API undefined field overwrite** — already fixed in 0.10.1, now also defensive in store layer.
+
+### Refactor
+- **Task detail page visual overhaul** — Linear-style full-width layout with sidebar metadata, chip pickers for status/priority/assignee, auto-grow description textarea, inline header chips.
+
+### Tests
+- **Release validation**: `npm run build` passed (tsc zero errors); `npm test -- tests/unit` passed (247/247).
+- **Release note**: `feat: review status + attachment preview + task UI polish`.
+
 ## [0.10.3] — 2026-04-27
 
 ### Fixed

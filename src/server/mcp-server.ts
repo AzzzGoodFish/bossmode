@@ -91,7 +91,7 @@ export function createMcpHandler(_serverUrl: string) {
       {
         title: z.string().describe("Task title"),
         description: z.string().optional().describe("Task description (markdown)"),
-        status: z.enum(["todo", "in-progress", "done"]).optional().describe("Initial status (default: todo)"),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("Initial status (default: todo)"),
         priority: z.enum(["P0", "P1", "P2"]).optional().describe("Priority (default: P1)"),
         assignee: z.string().optional().describe("Member name to assign the task to"),
       },
@@ -109,7 +109,7 @@ export function createMcpHandler(_serverUrl: string) {
       {
         taskId: z.string().describe("Task ID to update"),
         title: z.string().optional().describe("New title"),
-        status: z.enum(["todo", "in-progress", "done"]).optional().describe("New status"),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("New status"),
         priority: z.enum(["P0", "P1", "P2"]).optional().describe("New priority"),
         assignee: z.string().optional().describe("New assignee (member name), empty string to unassign"),
         description: z.string().optional().describe("New description"),
@@ -126,7 +126,7 @@ export function createMcpHandler(_serverUrl: string) {
       "list_tasks",
       "List tasks in the current room. Optionally filter by status or assignee.",
       {
-        status: z.enum(["todo", "in-progress", "done"]).optional().describe("Filter by status"),
+        status: z.enum(["todo", "in-progress", "review", "done"]).optional().describe("Filter by status"),
         assignee: z.string().optional().describe("Filter by assignee name"),
       },
       async (args) => {

@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { FileText, Paperclip, Image as ImageIcon } from "lucide-react";
 import { Markdown } from "./Markdown";
 
 interface MessageBubbleProps {
@@ -12,6 +12,8 @@ interface MessageBubbleProps {
 
 /** Regex to match attachment lines: Attachment: [original filename: xxx](path) */
 const ATTACHMENT_RE = /^Attachment: \[original filename: ([^\]]+)\]\(([^)]+)\)$/;
+/** Multi-line aware test — used to detect whether content contains any attachment line */
+const ATTACHMENT_RE_M = /^Attachment: \[original filename: ([^\]]+)\]\(([^)]+)\)$/m;
 
 /** Image extensions for inline preview */
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
@@ -89,8 +91,8 @@ export function MessageBubble({
   const bubbleBg = isUser ? "bg-blue-50 dark:bg-blue-600/10 border-blue-200/50 dark:border-blue-800/20" : "bg-white dark:bg-zinc-800/60 border-zinc-200/50 dark:border-zinc-700/30";
   const displayName = isUser ? "you" : sender;
 
-  // Check if content has attachments
-  const hasAttachments = ATTACHMENT_RE.test(content);
+  // Check if content has attachments (any line matches; multi-line aware)
+  const hasAttachments = ATTACHMENT_RE_M.test(content);
 
   return (
     <div className={`group flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-zinc-100/50 dark:hover:bg-zinc-900/20`}>
@@ -110,9 +112,11 @@ export function MessageBubble({
         )}
 
         {hasAttachments ? (
-          <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-zinc-800 dark:text-zinc-300 break-words leading-relaxed inline-block max-w-full`}>
-            <AttachmentContent content={content} isMarkdown={isMarkdown} />
-          </div>
+          <MessageWithAttachments
+            content={content}
+            isMarkdown={isMarkdown}
+            bubbleBg={bubbleBg}
+          />
         ) : (
           <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-zinc-800 dark:text-zinc-300 break-words leading-relaxed inline-block max-w-full`}>
             {isMarkdown ? <Markdown content={content} /> : <MentionText content={content} />}
@@ -129,55 +133,115 @@ export function MessageBubble({
   );
 }
 
-/** Render content with inline attachments */
-function AttachmentContent({ content, isMarkdown }: { content: string; isMarkdown: boolean }) {
+/** Render message with body bubble + visually distinct attachment region below */
+function MessageWithAttachments({
+  content, isMarkdown, bubbleBg,
+}: { content: string; isMarkdown: boolean; bubbleBg: string }) {
   const segments = parseContentSegments(content);
+  const textSegments = segments.filter((s) => s.type === "text") as Array<{ type: "text"; text: string }>;
+  const attachmentSegments = segments.filter((s) => s.type === "attachment") as Array<{ type: "attachment"; originalName: string; path: string }>;
+
+  // Combine all text segments into one body (handles "text \n attachment \n text" gracefully)
+  const bodyText = textSegments.map((s) => s.text).join("\n\n").trim();
+  const hasBody = bodyText.length > 0;
 
   return (
-    <div className="space-y-2">
-      {segments.map((seg, i) => {
-        if (seg.type === "text") {
-          return (
-            <div key={i}>
-              {isMarkdown ? <Markdown content={seg.text} /> : <MentionText content={seg.text} />}
+    <div className="max-w-full">
+      {hasBody && (
+        <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-zinc-800 dark:text-zinc-300 break-words leading-relaxed inline-block max-w-full`}>
+          {isMarkdown ? <Markdown content={bodyText} /> : <MentionText content={bodyText} />}
+        </div>
+      )}
+
+      {attachmentSegments.length > 0 && (
+        <div className={`${hasBody ? "mt-1.5" : ""} flex flex-col gap-1.5`}>
+          {/* Header: "N attachments" hint, only when more than one or when no body text */}
+          {(attachmentSegments.length > 1 || !hasBody) && (
+            <div className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 px-0.5">
+              <Paperclip size={11} className="shrink-0" />
+              <span>{attachmentSegments.length} attachment{attachmentSegments.length === 1 ? "" : "s"}</span>
             </div>
-          );
-        }
+          )}
 
-        // Attachment segment
-        const url = attachmentUrl(seg.path, content);
-        const isImage = isImagePath(seg.path);
+          {/* Attachment cards — image grid + non-image stack */}
+          <AttachmentGroup attachments={attachmentSegments} content={content} />
+        </div>
+      )}
+    </div>
+  );
+}
 
-        if (isImage && url) {
-          return (
-            <div key={i} className="mt-1">
-              <a href={url} target="_blank" rel="noopener noreferrer" className="block">
-                <img
-                  src={url}
-                  alt={seg.originalName}
-                  className="max-w-xs max-h-48 rounded border border-zinc-300 dark:border-zinc-600 hover:border-blue-400 transition-colors"
-                  loading="lazy"
-                />
+function AttachmentGroup({
+  attachments, content,
+}: {
+  attachments: Array<{ type: "attachment"; originalName: string; path: string }>;
+  content: string;
+}) {
+  const images = attachments.filter((a) => isImagePath(a.path));
+  const files = attachments.filter((a) => !isImagePath(a.path));
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {images.length > 0 && (
+        <div
+          className={`grid gap-1.5 ${
+            images.length === 1 ? "grid-cols-1" :
+            images.length === 2 ? "grid-cols-2" :
+            "grid-cols-2 sm:grid-cols-3"
+          } max-w-md`}
+        >
+          {images.map((a, i) => {
+            const url = attachmentUrl(a.path, content);
+            return (
+              <a
+                key={i}
+                href={url || undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group/att relative block overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors"
+                title={a.originalName}
+              >
+                {url ? (
+                  <img
+                    src={url}
+                    alt={a.originalName}
+                    className={`w-full ${images.length === 1 ? "max-h-56" : "h-28"} object-cover`}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-full h-28 flex items-center justify-center text-zinc-400">
+                    <ImageIcon size={20} />
+                  </div>
+                )}
+                <div className="absolute bottom-0 inset-x-0 px-1.5 py-0.5 text-[10px] text-white bg-gradient-to-t from-black/70 to-transparent truncate opacity-0 group-hover/att:opacity-100 transition-opacity">
+                  {a.originalName}
+                </div>
               </a>
-              <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">{seg.originalName}</div>
-            </div>
-          );
-        }
+            );
+          })}
+        </div>
+      )}
 
-        // Non-image file
-        return (
-          <div key={i} className="flex items-center gap-2 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded border border-zinc-200 dark:border-zinc-700">
-            <FileText size={16} className="text-zinc-400 shrink-0" />
-            {url ? (
-              <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:text-blue-400 truncate">
-                {seg.originalName}
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1 max-w-md">
+          {files.map((a, i) => {
+            const url = attachmentUrl(a.path, content);
+            return (
+              <a
+                key={i}
+                href={url || undefined}
+                target={url ? "_blank" : undefined}
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors"
+                title={a.originalName}
+              >
+                <FileText size={14} className="text-zinc-500 shrink-0" />
+                <span className="text-xs text-zinc-700 dark:text-zinc-300 truncate flex-1">{a.originalName}</span>
               </a>
-            ) : (
-              <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">{seg.originalName}</span>
-            )}
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

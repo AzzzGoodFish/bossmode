@@ -77,6 +77,13 @@ When a user reports a visual or interaction issue:
 2. **Developer**: Update package.json + CHANGELOG, `git commit + tag + push`.
 3. **PM**: Confirm release, notify user.
 
+### Git Discipline
+
+- Before committing, always `git status` first to review what's in the working tree.
+- Stage files deliberately with `git add <specific files>` — group related changes together.
+- Do not use `git add -A` or `git add .` blindly. Every file in a commit should belong to that commit's purpose.
+- If the working tree contains unrelated changes, split them into separate commits.
+
 ### Direct Tasking
 
 For small changes, questions, or any task where the user engages an agent directly. No PM coordination needed.

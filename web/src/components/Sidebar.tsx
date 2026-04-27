@@ -16,7 +16,7 @@ export type ActivePage =
   | { type: "knowledge"; path?: string }
   | { type: "settings" }
   | { type: "all-tasks" }
-  | { type: "task"; roomId: string; taskId: string }
+  | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
 interface SidebarProps {

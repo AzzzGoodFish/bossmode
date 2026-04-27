@@ -95,7 +95,7 @@ export default function (pi) {
     parameters: Type.Object({
       title: Type.String({ description: "Task title" }),
       description: Type.Optional(Type.String({ description: "Task description (markdown)" })),
-      status: Type.Optional(Type.String({ description: "todo | in-progress | done (default: todo)" })),
+      status: Type.Optional(Type.String({ description: "todo | in-progress | review | done (default: todo)" })),
       priority: Type.Optional(Type.String({ description: "P0 | P1 | P2 (default: P1)" })),
       assignee: Type.Optional(Type.String({ description: "Member name to assign" })),
     }),
@@ -118,7 +118,7 @@ export default function (pi) {
     parameters: Type.Object({
       taskId: Type.String({ description: "Task ID to update" }),
       title: Type.Optional(Type.String({ description: "New title" })),
-      status: Type.Optional(Type.String({ description: "todo | in-progress | done" })),
+      status: Type.Optional(Type.String({ description: "todo | in-progress | review | done" })),
       priority: Type.Optional(Type.String({ description: "P0 | P1 | P2" })),
       assignee: Type.Optional(Type.String({ description: "New assignee, empty to unassign" })),
       description: Type.Optional(Type.String({ description: "New description" })),
@@ -140,7 +140,7 @@ export default function (pi) {
     label: "List Tasks",
     description: "List tasks in the current room. Optionally filter by status or assignee.",
     parameters: Type.Object({
-      status: Type.Optional(Type.String({ description: "Filter: todo | in-progress | done" })),
+      status: Type.Optional(Type.String({ description: "Filter: todo | in-progress | review | done" })),
       assignee: Type.Optional(Type.String({ description: "Filter by assignee name" })),
     }),
     async execute(id, params) {

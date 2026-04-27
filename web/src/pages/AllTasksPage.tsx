@@ -9,6 +9,7 @@ const STATUS_CHIPS: Array<{ value: TaskStatus | ""; label: string }> = [
   { value: "", label: "All" },
   { value: "todo", label: "Todo" },
   { value: "in-progress", label: "In Progress" },
+  { value: "review", label: "Review" },
   { value: "done", label: "Done" },
 ];
 
