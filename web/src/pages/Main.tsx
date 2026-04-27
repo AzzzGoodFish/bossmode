@@ -76,7 +76,12 @@ export function Main({
     if (!selectedRoomId) return [{ type: "room" as const }, { type: "tasks" as const }];
     try {
       const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      return saved.length > 0 ? saved : [{ type: "room" as const }, { type: "tasks" as const }];
+      if (saved.length > 0) {
+        // Migrate: ensure tasks tab exists at idx 1
+        if (!saved.some((t) => t.type === "tasks")) saved.splice(1, 0, { type: "tasks" });
+        return saved;
+      }
+      return [{ type: "room" as const }, { type: "tasks" as const }];
     } catch { return [{ type: "room" as const }, { type: "tasks" as const }]; }
   });
   const [activeTabIdx, setActiveTabIdx] = useState(0);
@@ -111,7 +116,12 @@ export function Main({
     }
     try {
       const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      setTabs(saved.length > 0 ? saved : [{ type: "room" }, { type: "tasks" }]);
+      if (saved.length > 0) {
+        if (!saved.some((t) => t.type === "tasks")) saved.splice(1, 0, { type: "tasks" });
+        setTabs(saved);
+      } else {
+        setTabs([{ type: "room" }, { type: "tasks" }]);
+      }
     } catch { setTabs([{ type: "room" }, { type: "tasks" }]); }
     // Restore tab from sessionStorage (e.g. after back from TaskDetailPage)
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");

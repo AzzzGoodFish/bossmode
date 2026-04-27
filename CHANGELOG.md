@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.3] — 2026-04-27
+
+### Fixed
+- **Tasks tab missing for existing rooms** — localStorage saved old tab configs without the tasks tab. Restore logic now auto-migrates by inserting the tasks tab at index 1 if absent.
+
+### Tests
+- **Release validation**: `npm run build` passed.
+- **Release note**: `fix: auto-migrate saved tabs to include tasks tab`.
+
 ## [0.10.2] — 2026-04-26
 
 ### Fixed
