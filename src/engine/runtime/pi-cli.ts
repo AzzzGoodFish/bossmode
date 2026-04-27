@@ -29,6 +29,13 @@ function generateExtension(serverUrl: string, roomId: string, agentName: string,
   return `
 import { Type } from "@sinclair/typebox";
 
+const QUERY_ROOM_MESSAGES_DESCRIPTION = ${JSON.stringify(QUERY_ROOM_MESSAGES_DESCRIPTION)};
+const CREATE_TASK_DESCRIPTION = ${JSON.stringify(CREATE_TASK_DESCRIPTION)};
+const UPDATE_TASK_DESCRIPTION = ${JSON.stringify(UPDATE_TASK_DESCRIPTION)};
+const LIST_TASKS_DESCRIPTION = ${JSON.stringify(LIST_TASKS_DESCRIPTION)};
+const WRITE_SUMMARY_DESCRIPTION = ${JSON.stringify(WRITE_SUMMARY_DESCRIPTION)};
+const PARAM_DESCRIPTIONS = ${JSON.stringify(PARAM_DESCRIPTIONS)};
+
 export default function (pi) {
   const SERVER = ${JSON.stringify(serverUrl)};
   const ROOM = ${JSON.stringify(roomId)};

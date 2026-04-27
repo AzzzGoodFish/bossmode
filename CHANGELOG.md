@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.11] — 2026-04-27
+
+### Fixed
+- **P0: Pi CLI extension crash on startup** — centralized tool description constants were referenced but not defined in the generated extension file. Fixed by inlining constants via `JSON.stringify` into the template. All agents can now start correctly.
+
 ## [0.10.10] — 2026-04-27
 
 ### Added
