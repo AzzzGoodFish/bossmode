@@ -55,6 +55,8 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   // Form state — single editable mode (Linear/Notion style)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [references, setReferences] = useState<string[]>([]);
+  const [newRef, setNewRef] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [priority, setPriority] = useState<TaskPriority>("P1");
   const [assignee, setAssignee] = useState<string>("");
@@ -85,6 +87,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
           setTask(found);
           setTitle(found.title);
           setDescription(found.description || "");
+          setReferences(found.references || []);
           setStatus(found.status);
           setPriority(found.priority);
           setAssignee(found.assignee || "");
@@ -104,15 +107,17 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
         await createTask(roomId, {
           title: title.trim(), createdBy: "user", status, priority,
           assignee: assignee || undefined, description: description || undefined,
-        });
+          references: references.length > 0 ? references : undefined,
+        } as any);
         toast("Task created", "success");
         onBack();
       } else {
         await updateTask(roomId, taskId, {
           title: title.trim(), status, priority,
           assignee: assignee || undefined, description: description || undefined,
+          references,
           updatedBy: "user",
-        });
+        } as any);
         setDirty(false);
         toast("Task saved", "success");
       }
@@ -245,6 +250,59 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                     </div>
                   </details>
                 )}
+              </div>
+
+              {/* References */}
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">References</h3>
+                </div>
+                {references.length > 0 && (
+                  <ul className="space-y-1 mb-2">
+                    {references.map((ref, i) => {
+                      const isUrl = /^https?:\/\//.test(ref);
+                      const label = ref.split("/").pop() || ref;
+                      return (
+                        <li key={i} className="group flex items-center gap-2 text-sm px-2 py-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors">
+                          <span className="text-zinc-400 text-xs">{isUrl ? "🔗" : "📄"}</span>
+                          {isUrl ? (
+                            <a href={ref} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 truncate flex-1" title={ref}>{label}</a>
+                          ) : (
+                            <span className="text-zinc-700 dark:text-zinc-300 truncate flex-1" title={ref}>{label}</span>
+                          )}
+                          <button
+                            onClick={() => { setReferences(references.filter((_, j) => j !== i)); markDirty(); }}
+                            className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity text-xs"
+                            title="Remove reference"
+                          >✕</button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const v = newRef.trim();
+                    if (v && !references.includes(v)) {
+                      setReferences([...references, v]);
+                      setNewRef("");
+                      markDirty();
+                    }
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  <input
+                    type="text"
+                    value={newRef}
+                    onChange={(e) => setNewRef(e.target.value)}
+                    placeholder="Add reference path or URL…"
+                    className="flex-1 text-sm px-2 py-1.5 bg-transparent border border-zinc-200 dark:border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-400 dark:placeholder-zinc-600"
+                  />
+                  <button type="submit" disabled={!newRef.trim()} className="text-xs px-2 py-1.5 text-blue-500 hover:text-blue-400 disabled:opacity-30">
+                    + Add
+                  </button>
+                </form>
               </div>
 
               {/* Footer hint */}

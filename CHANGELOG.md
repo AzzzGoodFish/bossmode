@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.10] — 2026-04-27
+
+### Added
+- **Task references field** — tasks can link to knowledge docs (`docs/...`) or URLs (`https://...`). Soft links that degrade gracefully when files are moved/deleted. UI shows references section in task detail page with add/remove, plus 📎 badge on task cards.
+- **Task assign auto-activation** — assigning a task to an agent in the room automatically activates that agent via the existing mention → router flow. Guards: no self-activation, no duplicate activation on same assignee, human users are not activated.
+- **Centralized MCP tool descriptions** — new `src/shared/mcp-tool-descriptions.ts` shared by mcp-server and pi-cli runtimes. Each tool now has usage guidance and side-effect documentation.
+- **Task management protocol rule** — `docs/rules/task-management-protocol.md` injected into agent prompts.
+
+### Tests
+- Added: task references CRUD (4 cases), auto-activation logic (8 cases), tool description quality (5 cases).
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 268/268 ✅.
+
 ## [0.10.9] — 2026-04-27
 
 ### Added

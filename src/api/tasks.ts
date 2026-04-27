@@ -7,12 +7,17 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
 import type { Task, TaskEventMeta } from "../shared/types.js";
 
-/** Emit a structured task_event system message + ws broadcast. */
+/** Emit a structured task_event system message + ws broadcast.
+ *  When activateAssignee is true and the assignee is an agent in the room
+ *  (not self, not same as previous), the system message includes a mention
+ *  that triggers the existing router → activateAgent flow.
+ */
 export function emitTaskEvent(
   roomId: string,
   action: TaskEventMeta["action"],
   task: Task,
   actor: string,
+  options?: { activateAssignee?: boolean; previousAssignee?: string },
 ): void {
   const meta: TaskEventMeta = {
     action,
@@ -30,11 +35,23 @@ export function emitTaskEvent(
     "updated task";
   const content = `[Task] ${actor} ${verb}: **${task.title}**`;
 
+  // Determine if assignee should be auto-activated via mention
+  const mentions: string[] = [];
+  if (options?.activateAssignee && task.assignee) {
+    const room = roomStore.getRoom(roomId);
+    const isAgent = room?.members.includes(task.assignee) ?? false;
+    const isSelfAssign = task.assignee === actor;
+    const isReassignment = options.previousAssignee !== task.assignee;
+    if (isAgent && !isSelfAssign && isReassignment) {
+      mentions.push(task.assignee);
+    }
+  }
+
   // Write to message store with task_event type
   const message = messageStore.addMessage(roomId, {
     sender: "system",
     content,
-    mentions: [],
+    mentions,
     type: "task_event",
     task_event_meta: meta,
   });
@@ -84,8 +101,13 @@ addRoute("POST", "/api/rooms/:id/tasks", async (req, res, params) => {
       priority: body.priority,
       assignee: body.assignee ? String(body.assignee) : undefined,
       description: body.description ? String(body.description) : undefined,
+      references: Array.isArray(body.references) ? body.references.map(String) : undefined,
     });
-    emitTaskEvent(params.id, "created", task, String(body.createdBy || "user"));
+    const actor = String(body.createdBy || "user");
+    emitTaskEvent(params.id, "created", task, actor, {
+      activateAssignee: true,
+      previousAssignee: undefined,
+    });
     sendJson(res, 200, task);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });
@@ -104,13 +126,17 @@ addRoute("PATCH", "/api/rooms/:id/tasks/:taskId", async (req, res, params) => {
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assignee !== undefined) patch.assignee = body.assignee || undefined;
     if (body.description !== undefined) patch.description = String(body.description);
+    if (body.references !== undefined) patch.references = Array.isArray(body.references) ? body.references.map(String) : [];
     const updated = taskStore.updateTask(params.id, params.taskId, patch);
     if (!updated) { sendJson(res, 404, { error: "Task not found" }); return; }
 
     // Only emit system message for status change
     const action = before.status !== updated.status ? "status_changed" : "updated";
     const actor = String(body.updatedBy || "user");
-    emitTaskEvent(params.id, action, updated, actor);
+    emitTaskEvent(params.id, action, updated, actor, {
+      activateAssignee: true,
+      previousAssignee: before.assignee,
+    });
     sendJson(res, 200, updated);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });

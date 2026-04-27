@@ -35,6 +35,9 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
         />
         <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate flex-1">{task.title}</span>
         <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_COLORS[task.priority]}`} title={task.priority} />
+        {task.references && task.references.length > 0 && (
+          <span className="text-[10px] text-zinc-400 shrink-0" title={task.references.join(', ')}>📎{task.references.length}</span>
+        )}
         {task.assignee && (
           <span className="text-[10px] text-zinc-400 shrink-0">@{task.assignee}</span>
         )}
@@ -53,6 +56,9 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
       </div>
       <div className="flex items-center gap-2 text-[10px] text-zinc-400 pl-4">
         {task.assignee && <span>@{task.assignee}</span>}
+        {task.references && task.references.length > 0 && (
+          <span title={task.references.join(', ')}>📎{task.references.length}</span>
+        )}
         {task.createdBy && <span className="ml-auto">by {task.createdBy}</span>}
       </div>
     </div>

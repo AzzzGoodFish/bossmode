@@ -623,6 +623,7 @@ export interface Task {
   priority: TaskPriority;
   assignee?: string;
   description?: string;
+  references?: string[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;

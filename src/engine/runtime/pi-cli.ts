@@ -6,6 +6,14 @@ import { logger, formatSpawnArgs } from "../../foundation/logger.js";
 import { getCleanSpawnEnv } from "./env.js";
 import { BaseCliAgentHandle } from "./base-cli-handle.js";
 import { buildChatToolDescription } from "../../shared/chat-tool-description.js";
+import {
+  QUERY_ROOM_MESSAGES_DESCRIPTION,
+  CREATE_TASK_DESCRIPTION,
+  UPDATE_TASK_DESCRIPTION,
+  LIST_TASKS_DESCRIPTION,
+  WRITE_SUMMARY_DESCRIPTION,
+  PARAM_DESCRIPTIONS,
+} from "../../shared/mcp-tool-descriptions.js";
 import type {
   AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts,
   RuntimeCapabilities, RuntimeDetectResult, TokenUsage, ContextUsage,
@@ -60,14 +68,14 @@ export default function (pi) {
   pi.registerTool({
     name: "query_room_messages",
     label: "Query Room Messages",
-    description: "Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.",
+    description: QUERY_ROOM_MESSAGES_DESCRIPTION,
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Case-insensitive substring to search in message content" })),
-      from: Type.Optional(Type.String({ description: "Filter by sender name (exact match, e.g. 'fish' or 'developer')" })),
-      after: Type.Optional(Type.String({ description: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')" })),
-      before: Type.Optional(Type.String({ description: "Only messages before this time: same format as 'after'" })),
-      limit: Type.Optional(Type.Number({ description: "Max messages to return (default 50, max 500)" })),
-      output: Type.Optional(Type.String({ description: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it" })),
+      query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.query })),
+      from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
+      after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
+      before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+      limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
+      output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -91,13 +99,14 @@ export default function (pi) {
   pi.registerTool({
     name: "create_task",
     label: "Create Task",
-    description: "Create a task in the current room.",
+    description: CREATE_TASK_DESCRIPTION,
     parameters: Type.Object({
-      title: Type.String({ description: "Task title" }),
-      description: Type.Optional(Type.String({ description: "Task description (markdown)" })),
-      status: Type.Optional(Type.String({ description: "todo | in-progress | review | done (default: todo)" })),
-      priority: Type.Optional(Type.String({ description: "P0 | P1 | P2 (default: P1)" })),
-      assignee: Type.Optional(Type.String({ description: "Member name to assign" })),
+      title: Type.String({ description: PARAM_DESCRIPTIONS.taskTitle }),
+      description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskDescription })),
+      status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatus })),
+      priority: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskPriority })),
+      assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
+      references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -114,14 +123,15 @@ export default function (pi) {
   pi.registerTool({
     name: "update_task",
     label: "Update Task",
-    description: "Update an existing task in the current room.",
+    description: UPDATE_TASK_DESCRIPTION,
     parameters: Type.Object({
-      taskId: Type.String({ description: "Task ID to update" }),
-      title: Type.Optional(Type.String({ description: "New title" })),
-      status: Type.Optional(Type.String({ description: "todo | in-progress | review | done" })),
-      priority: Type.Optional(Type.String({ description: "P0 | P1 | P2" })),
-      assignee: Type.Optional(Type.String({ description: "New assignee, empty to unassign" })),
-      description: Type.Optional(Type.String({ description: "New description" })),
+      taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
+      title: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskTitle })),
+      status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatusUpdate })),
+      priority: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskPriority })),
+      assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
+      description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskDescription })),
+      references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -138,10 +148,10 @@ export default function (pi) {
   pi.registerTool({
     name: "list_tasks",
     label: "List Tasks",
-    description: "List tasks in the current room. Optionally filter by status or assignee.",
+    description: LIST_TASKS_DESCRIPTION,
     parameters: Type.Object({
-      status: Type.Optional(Type.String({ description: "Filter: todo | in-progress | review | done" })),
-      assignee: Type.Optional(Type.String({ description: "Filter by assignee name" })),
+      status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatusFilter })),
+      assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssigneeFilter })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -160,12 +170,12 @@ export default function (pi) {
   pi.registerTool({
     name: "write_summary",
     label: "Write Summary",
-    description: "Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.",
+    description: WRITE_SUMMARY_DESCRIPTION,
     parameters: Type.Object({
-      title: Type.String({ description: "Short topic title for this summary segment" }),
-      summary: Type.String({ description: "1-3 sentence summary of the key content, decisions, and conclusions" }),
-      from_id: Type.String({ description: "Message ID of the first message in this segment" }),
-      to_id: Type.String({ description: "Message ID of the last message in this segment" }),
+      title: Type.String({ description: PARAM_DESCRIPTIONS.summaryTitle }),
+      summary: Type.String({ description: PARAM_DESCRIPTIONS.summary }),
+      from_id: Type.String({ description: PARAM_DESCRIPTIONS.summaryFromId }),
+      to_id: Type.String({ description: PARAM_DESCRIPTIONS.summaryToId }),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {

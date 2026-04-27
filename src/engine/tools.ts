@@ -137,8 +137,12 @@ export async function handleToolCallback(
         priority: (params?.priority as TaskPriority) || "P1",
         assignee: params?.assignee ? String(params.assignee) : undefined,
         description: params?.description ? String(params.description) : undefined,
+        references: Array.isArray(params?.references) ? params.references.map(String) : undefined,
       });
-      emitTaskEvent(roomId, "created", task, agentName);
+      emitTaskEvent(roomId, "created", task, agentName, {
+        activateAssignee: true,
+        previousAssignee: undefined,
+      });
       return { ok: true, taskId: task.id, title: task.title, status: task.status };
     }
     case "update_task": {
@@ -152,10 +156,14 @@ export async function handleToolCallback(
       if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
       if (params?.assignee !== undefined) patch.assignee = params.assignee ? String(params.assignee) : undefined;
       if (params?.description !== undefined) patch.description = String(params.description);
+      if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
       const updated = taskStore.updateTask(roomId, taskId, patch);
       if (!updated) return { ok: false, error: "Update failed" };
       const action = before.status !== updated.status ? "status_changed" : "updated";
-      emitTaskEvent(roomId, action, updated, agentName);
+      emitTaskEvent(roomId, action, updated, agentName, {
+        activateAssignee: true,
+        previousAssignee: before.assignee,
+      });
       return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
     }
     case "list_tasks": {
@@ -165,6 +173,7 @@ export async function handleToolCallback(
       return tasks.map((t) => ({
         id: t.id, title: t.title, status: t.status, priority: t.priority,
         assignee: t.assignee, createdBy: t.createdBy,
+        references: t.references,
       }));
     }
     case "write_summary": {

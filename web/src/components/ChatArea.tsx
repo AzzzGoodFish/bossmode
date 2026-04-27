@@ -196,7 +196,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                 <div key={msg.id} data-message-id={msg.id} className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`} style={animDelay ? { animationDelay: animDelay } : undefined}>
                   {showDateSep && <DateSeparator ts={msg.ts} />}
                   {msg.type === "task_event" && msg.task_event_meta ? (
-                    <TaskEventCard meta={msg.task_event_meta} content={msg.content} onJump={onNavigateToTask ? () => onNavigateToTask(msg.task_event_meta!.taskId) : undefined} />
+                    <TaskEventCard meta={msg.task_event_meta} content={msg.content} mentions={msg.mentions} onJump={onNavigateToTask ? () => onNavigateToTask(msg.task_event_meta!.taskId) : undefined} />
                   ) : msg.type === "summary" ? (
                     <SummaryCard message={msg} roomId={roomId || ""} />
                   ) : (
@@ -222,8 +222,9 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   );
 }
 
-function TaskEventCard({ meta, content, onJump }: { meta: TaskEventMeta; content: string; onJump?: () => void }) {
+function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMeta; content: string; mentions?: string[]; onJump?: () => void }) {
   const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
+  const activatedAgent = mentions?.length ? mentions[0] : null;
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 my-1 bg-zinc-50/50 dark:bg-zinc-900/30">
       <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -243,6 +244,9 @@ function TaskEventCard({ meta, content, onJump }: { meta: TaskEventMeta; content
           </span>
         )}
       </div>
+      {activatedAgent && (
+        <div className="mt-1 text-[10px] text-zinc-400">→ assigned to @{activatedAgent}</div>
+      )}
     </div>
   );
 }
