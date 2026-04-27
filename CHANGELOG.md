@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.9] — 2026-04-27
+
+### Added
+- **Keyboard navigation for popup menus** — `/` slash command menu (AgentTab) and `@` mention popup (MessageInput) now support ↑/↓ to move selection, Enter/Tab to confirm, Esc to close. Mouse hover syncs with keyboard highlight. Consistent with Slack/Discord/Notion interaction patterns.
+
 ## [0.10.8] — 2026-04-27
 
 ### Fixed

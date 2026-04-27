@@ -31,6 +31,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
   const [value, setValue, clearDraft] = useDraft(roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
+  const [mentionIdx, setMentionIdx] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -65,6 +66,35 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
   }, []);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Mention menu navigation takes priority when open
+    if (showMentions && filteredMembers.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIdx((i) => (i + 1) % filteredMembers.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIdx((i) => (i - 1 + filteredMembers.length) % filteredMembers.length);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        insertMention(filteredMembers[mentionIdx] ?? filteredMembers[0]);
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        insertMention(filteredMembers[mentionIdx] ?? filteredMembers[0]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowMentions(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter") {
       if (e.shiftKey) {
         // Shift+Enter: browser default inserts newline — do nothing
@@ -212,6 +242,11 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
     m.toLowerCase().startsWith(mentionFilter),
   );
 
+  // Reset highlight when the filtered list changes or menu reopens
+  useEffect(() => {
+    if (showMentions) setMentionIdx(0);
+  }, [showMentions, mentionFilter]);
+
   const hasPending = pendingFiles.length > 0;
 
   return (
@@ -223,19 +258,34 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
     >
       {/* Mention autocomplete */}
       {showMentions && filteredMembers.length > 0 && (
-        <div className="absolute bottom-full left-3 right-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden">
-          {filteredMembers.map((name) => (
-            <button
-              key={name}
-              onClick={() => insertMention(name)}
-              className="w-full text-left px-3 py-1.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
-            >
-              @{name}
-              {name === "all" && (
-                <span className="text-zinc-400 dark:text-zinc-500 ml-2 text-xs">activate all agents</span>
-              )}
-            </button>
-          ))}
+        <div
+          role="listbox"
+          aria-label="Mention suggestions"
+          className="absolute bottom-full left-3 right-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden max-h-60 overflow-y-auto"
+        >
+          {filteredMembers.map((name, idx) => {
+            const active = idx === mentionIdx;
+            return (
+              <button
+                key={name}
+                role="option"
+                aria-selected={active}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setMentionIdx(idx)}
+                onClick={() => insertMention(name)}
+                className={`w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer ${
+                  active
+                    ? "bg-blue-50 dark:bg-blue-600/20 text-blue-700 dark:text-blue-300"
+                    : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                }`}
+              >
+                @{name}
+                {name === "all" && (
+                  <span className={`ml-2 text-xs ${active ? "text-blue-500/80 dark:text-blue-400/80" : "text-zinc-400 dark:text-zinc-500"}`}>activate all agents</span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
