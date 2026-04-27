@@ -319,7 +319,7 @@ export function Main({
           const hasUnread = !isActive && unreadTabs?.has(tabKey);
           return (
             <button
-              key={tab.type === "room" ? "room" : tab.agentName}
+              key={tab.type === "room" ? "room" : tab.type === "tasks" ? "tasks" : tab.agentName}
               onClick={() => handleTabSwitch(idx)}
               className={`group flex items-center gap-1 px-3 py-1.5 text-xs rounded-t transition-colors cursor-pointer ${
                 isActive ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
