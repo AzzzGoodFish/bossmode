@@ -279,8 +279,9 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || uploading}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
+          aria-label="Attach files"
         >
           <Paperclip size={18} />
         </button>

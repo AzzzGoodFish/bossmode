@@ -251,7 +251,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
             />
           </div>
 
-          <div className="border-t border-zinc-200 dark:border-zinc-800 mt-1 pt-1">
+          <div className="border-t border-zinc-200 dark:border-zinc-800 mt-1">
             <SidebarSection
               icon={<UserCircle size={14} />}
               label="Members"
@@ -263,7 +263,9 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               onSelect={(id) => onNavigate({ type: "member", id })}
               onCreate={() => onNavigate({ type: "member", id: null })}
             />
+          </div>
 
+          <div className="border-t border-zinc-200 dark:border-zinc-800">
             <SidebarSection
               icon={<Bot size={14} />}
               label="Agents"
@@ -275,7 +277,9 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               onSelect={(name) => onNavigate({ type: "agent", name })}
               onCreate={() => onNavigate({ type: "agent", name: null })}
             />
+          </div>
 
+          <div className="border-t border-zinc-200 dark:border-zinc-800">
             <SidebarSection
               icon={<Puzzle size={14} />}
               label="Skills"
@@ -287,7 +291,9 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               onSelect={(name) => onNavigate({ type: "skill", name })}
               onCreate={() => onNavigate({ type: "skill", name: null })}
             />
+          </div>
 
+          <div className="border-t border-zinc-200 dark:border-zinc-800">
             <SidebarSection
               icon={<BookOpen size={14} />}
               label="Knowledge"
