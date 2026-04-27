@@ -3,14 +3,16 @@ import { TaskCard } from "./TaskCard";
 
 const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
   todo: "in-progress",
-  "in-progress": "done",
+  "in-progress": "review",
+  review: "done",
   done: "todo",
 };
 
-const STATUS_ORDER: TaskStatus[] = ["todo", "in-progress", "done"];
+const STATUS_ORDER: TaskStatus[] = ["todo", "in-progress", "review", "done"];
 const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: "Todo",
   "in-progress": "In Progress",
+  review: "Review",
   done: "Done",
 };
 

@@ -231,7 +231,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            onNavigateToTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId })}
+            onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
           />
         )}
 
@@ -308,7 +308,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
         {activePage?.type === "settings" && <SettingsPage onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />}
         {activePage?.type === "all-tasks" && (
           <AllTasksPage
-            onSelectTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId })}
+            onSelectTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId, from: "all-tasks" })}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
@@ -317,8 +317,13 @@ export function Layout({ onLogout, username }: LayoutProps) {
             roomId={activePage.roomId}
             taskId={activePage.taskId}
             onBack={() => {
-              sessionStorage.setItem("bossmode_main_restore_tab", "tasks");
-              setActivePage({ type: "room", id: activePage.roomId });
+              const from = activePage.type === "task" ? activePage.from : undefined;
+              if (from === "all-tasks") {
+                setActivePage({ type: "all-tasks" });
+              } else {
+                sessionStorage.setItem("bossmode_main_restore_tab", from === "chat" ? "room" : "tasks");
+                setActivePage({ type: "room", id: activePage.roomId });
+              }
             }}
           />
         )}

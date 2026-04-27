@@ -612,7 +612,7 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
 
 // -- Tasks --
 
-export type TaskStatus = "todo" | "in-progress" | "done";
+export type TaskStatus = "todo" | "in-progress" | "review" | "done";
 export type TaskPriority = "P0" | "P1" | "P2";
 
 export interface Task {

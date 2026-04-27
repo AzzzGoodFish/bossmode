@@ -9,6 +9,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   todo: "bg-zinc-400",
   "in-progress": "bg-amber-500",
+  review: "bg-violet-500",
   done: "bg-emerald-500",
 };
 

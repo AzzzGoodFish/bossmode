@@ -224,17 +224,24 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
 function TaskEventCard({ meta, content, onJump }: { meta: TaskEventMeta; content: string; onJump?: () => void }) {
   const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
   return (
-    <div className="flex items-center gap-2 py-1 text-xs text-zinc-500">
-      <span>{icon}</span>
-      <span className="flex-1">
-        {onJump && meta.action !== "deleted" ? (
-          <button onClick={onJump} className="text-blue-500 hover:text-blue-400 cursor-pointer underline-offset-2 hover:underline">
-            {content}
-          </button>
-        ) : (
-          content
+    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 my-1 bg-zinc-50/50 dark:bg-zinc-900/30">
+      <div className="flex items-center gap-2 text-xs text-zinc-500">
+        <span>{icon}</span>
+        <span className="flex-1">
+          {onJump && meta.action !== "deleted" ? (
+            <button onClick={onJump} className="text-blue-500 hover:text-blue-400 cursor-pointer underline-offset-2 hover:underline">
+              {content}
+            </button>
+          ) : (
+            content
+          )}
+        </span>
+        {meta.newStatus && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+            {meta.newStatus}
+          </span>
         )}
-      </span>
+      </div>
     </div>
   );
 }

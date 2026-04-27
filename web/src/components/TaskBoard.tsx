@@ -6,6 +6,7 @@ import { TaskCard } from "./TaskCard";
 const COLUMNS: Array<{ status: TaskStatus; label: string; color: string }> = [
   { status: "todo", label: "Todo", color: "text-zinc-500" },
   { status: "in-progress", label: "In Progress", color: "text-amber-500" },
+  { status: "review", label: "Review", color: "text-violet-500" },
   { status: "done", label: "Done", color: "text-emerald-500" },
 ];
 

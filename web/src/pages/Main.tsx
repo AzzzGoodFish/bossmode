@@ -45,7 +45,7 @@ interface MainProps {
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
-  onNavigateToTask?: (roomId: string, taskId: string) => void;
+  onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
 }
 
 export function Main({
@@ -125,9 +125,9 @@ export function Main({
     } catch { setTabs([{ type: "room" }, { type: "tasks" }]); }
     // Restore tab from sessionStorage (e.g. after back from TaskDetailPage)
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
+    sessionStorage.removeItem("bossmode_main_restore_tab");
     if (restoreTab === "tasks") {
       setActiveTabIdx(1);
-      sessionStorage.removeItem("bossmode_main_restore_tab");
     } else {
       setActiveTabIdx(0);
     }
@@ -376,14 +376,14 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {activeTab?.type === "room" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId) : undefined} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
             </>
           ) : activeTab?.type === "tasks" && selectedRoomId ? (
             <TasksTab
               roomId={selectedRoomId}
               members={room.members}
-              onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId)}
+              onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId, "tasks")}
             />
           ) : activeTab?.type === "agent" && selectedRoomId ? (
             <AgentTab
