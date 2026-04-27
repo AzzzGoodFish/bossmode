@@ -4,6 +4,17 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.5] — 2026-04-27
+
+### Fixed
+- **Built-in team update false positive** — update detection now compares template content hash instead of version number. If template content hasn't changed between versions, no update is shown. Existing installs without `templateHash` are silently backfilled on first check.
+
+### Tests
+- Added unit test: version bump without template change → no update shown.
+- Updated existing tests to change template content when testing update detection.
+- **Release validation**: `npm run build` passed (tsc zero errors); `npm test -- tests/unit` passed (248/248).
+- **Release note**: `fix: built-in team update false positive — use template content hash instead of version comparison`.
+
 ## [0.10.4] — 2026-04-27
 
 ### Added

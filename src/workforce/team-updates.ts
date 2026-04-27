@@ -19,6 +19,7 @@ interface TeamMetaFile {
 interface FileRecord {
   hash: string;
   version: string;
+  templateHash?: string;  // hash of raw template content (without injected frontmatter)
 }
 
 type AssetCategory = "agent" | "skill" | "rule";
@@ -297,6 +298,7 @@ export function checkForUpdates(): UpdateCheckResult {
   }
 
   const candidates: UpdateCandidate[] = [];
+  let needsMetaWrite = false;
   for (const tpl of enumerateTemplates()) {
     const localContent = getLocalContent(tpl);
     const templateHash = contentHash(tpl.templateContent);
@@ -318,8 +320,26 @@ export function checkForUpdates(): UpdateCheckResult {
     const localHash = contentHash(localContent);
     const { meta: fm } = parseYamlFrontmatter(localContent);
     if (fm.source !== "builtin") continue;
-    const localVersion = typeof fm.version === "string" ? fm.version : String(fm.version || "0.0.0");
-    if (!isVersionLess(localVersion, currentVersion)) continue;
+
+    // Primary gate: compare template content hash (not version)
+    const installedTemplateHash = meta.files[tpl.relativePath]?.templateHash || null;
+    if (installedTemplateHash !== null && templateHash === installedTemplateHash) {
+      continue;  // Template content unchanged — no update needed
+    }
+
+    // Fallback for old meta without templateHash: use version comparison
+    if (installedTemplateHash === null) {
+      const localVersion = typeof fm.version === "string" ? fm.version : String(fm.version || "0.0.0");
+      if (!isVersionLess(localVersion, currentVersion)) {
+        // Backfill templateHash silently so next check uses hash-based gate
+        meta.files[tpl.relativePath] = {
+          ...meta.files[tpl.relativePath],
+          templateHash,
+        };
+        needsMetaWrite = true;
+        continue;
+      }
+    }
 
     const status: UpdateStatus = installedHash && installedHash === localHash ? "updated" : "modified";
     candidates.push({
@@ -332,6 +352,9 @@ export function checkForUpdates(): UpdateCheckResult {
       installedHash,
     });
   }
+
+  // Persist backfilled templateHash values
+  if (needsMetaWrite) writeMeta(meta);
 
   return {
     hasUpdates: candidates.length > 0,
@@ -372,7 +395,7 @@ export function applyUpdates(paths: string[]): { applied: string[]; skipped: str
 
       const written = getLocalContent(tpl);
       if (written) {
-        meta.files[p] = { hash: contentHash(written), version: currentVersion };
+        meta.files[p] = { hash: contentHash(written), version: currentVersion, templateHash: contentHash(tpl.templateContent) };
       }
       applied.push(p);
     } catch (err) {
@@ -428,7 +451,11 @@ export function seedBuiltinTeam(): void {
         meta.files[tpl.relativePath] = {
           hash: contentHash(localContent),
           version: currentVersion,
+          templateHash: contentHash(tpl.templateContent),
         };
+      } else if (!meta.files[tpl.relativePath].templateHash) {
+        // Backfill templateHash for existing records
+        meta.files[tpl.relativePath].templateHash = contentHash(tpl.templateContent);
       }
       continue;
     }
@@ -447,7 +474,7 @@ export function seedBuiltinTeam(): void {
 
       const written = getLocalContent(tpl);
       if (written) {
-        meta.files[tpl.relativePath] = { hash: contentHash(written), version: currentVersion };
+        meta.files[tpl.relativePath] = { hash: contentHash(written), version: currentVersion, templateHash: contentHash(tpl.templateContent) };
       }
       seeded += 1;
     } catch (err) {

@@ -93,7 +93,9 @@ describe("team-updates service", () => {
   it("checkForUpdates detects template update by version", async () => {
     const m = await mod();
     m.seedBuiltinTeam();
+    // Bump version AND change template content (hash-based detection)
     writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
     const result = m.checkForUpdates();
     expect(result.hasUpdates).toBe(true);
     expect(result.candidates.some((c) => c.status === "updated")).toBe(true);
@@ -102,12 +104,25 @@ describe("team-updates service", () => {
   it("checkForUpdates marks modified files as modified", async () => {
     const m = await mod();
     m.seedBuiltinTeam();
+    // Bump version AND change template content
     writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
+    // Also modify the local file (user edit)
     const pmPath = join(bossmodeDir, "agents", "pm.md");
     const current = readFileSync(pmPath, "utf-8");
     writeFileSync(pmPath, `${current}\n# user edit\n`, "utf-8");
     const result = m.checkForUpdates();
     expect(result.candidates.find((c) => c.relativePath === "agents/pm.md")?.status).toBe("modified");
+  });
+
+  it("checkForUpdates skips update when template content unchanged despite version bump", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+    // Only bump version, don't change template content
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    const result = m.checkForUpdates();
+    expect(result.hasUpdates).toBe(false);
+    expect(result.candidates.length).toBe(0);
   });
 
   it("checkForUpdates detects new template files", async () => {
