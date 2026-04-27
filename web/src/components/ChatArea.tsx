@@ -207,6 +207,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       fullTime={fullTime}
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
+                      roomId={roomId}
                     />
                   )}
                 </div>

@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.6] — 2026-04-27
+
+### Added
+- **Lightweight attachment indicator** — attachments display as compact file rows (icon + filename + Preview/Download on hover) instead of inline images. Image preview via click-to-open lightbox with Esc/overlay close.
+
+### Fixed
+- **Dark mode message hover visibility** — hover background changed from near-invisible `bg-zinc-900/20` to perceptible `bg-zinc-800/40`.
+- **Sidebar section dividers unified** — all sections (Members/Agents/Skills/Knowledge) now have consistent top borders.
+- **Attachment button vertical alignment** — Paperclip button sized to match textarea height for proper center alignment.
+
+### Tests
+- **Release validation**: `npm run build` passed (tsc zero errors).
+- **Release note**: `feat: lightweight attachment indicator with preview/download; fix: dark mode message hover visibility; fix: sidebar section dividers unified; fix: attachment button vertical alignment with input`.
+
 ## [0.10.5] — 2026-04-27
 
 ### Fixed
