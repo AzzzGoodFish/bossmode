@@ -130,35 +130,6 @@ When joining a new project or after session reset, each role must onboard before
    - Developer: reads Architect's architecture map, confirms build and test pass
 3. Persist onboarding output to knowledge. This is your long-term memory.
 
-## Knowledge Discipline
-
-Knowledge documents are the team's long-term memory. Sessions are ephemeral; knowledge persists.
-
-### Structure
-
-Organize documents by project, then by type:
-
-```
-docs/
-├── {project}/                # One directory per project
-│   ├── architecture/         # Architecture maps, tech debt, key decisions
-│   ├── prds/                 # Product requirements documents
-│   ├── implementation-plans/ # Implementation plans for approved features
-│   ├── qa/                   # Test plans, acceptance reports, test infra guides
-│   ├── design/               # Design baselines, component specs, tokens
-│   └── releases/             # Version specs, release notes
-├── rules/                    # Cross-project rules (injected into system prompts)
-```
-
-When creating a document, place it in `{project}/{type}/`. Do not dump files in the root.
-
-### Principles
-
-- Before starting any task, read relevant knowledge documents. Do not assume your context is current.
-- After completing work that changes system behavior, update affected knowledge documents.
-- Each role maintains their own core documents. Keep them accurate — your teammates depend on them.
-- When you discover information that others will need, write it down. Don't keep it in your session only.
-
 ## Communication
 
 - On handoff: state what you did, where the output is, and what you need from the recipient.
