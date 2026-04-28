@@ -63,6 +63,29 @@ export function useUpload(onError?: (msg: string) => void) {
     });
   }, []);
 
+  /** Remove only successfully-uploaded items; keep pending / uploading / error / cancelled. */
+  const clearSuccessful = useCallback(() => {
+    setItems((prev) => {
+      prev.filter((i) => i.status === "done")
+        .forEach((i) => i.preview && URL.revokeObjectURL(i.preview));
+      return prev.filter((i) => i.status !== "done");
+    });
+  }, []);
+
+  /** Cancel all in-flight uploads (uploading status). Pending/done/error untouched. */
+  const cancelAll = useCallback(() => {
+    abortRefs.current.forEach((c) => c.abort());
+  }, []);
+
+  /** Reset an errored / cancelled item back to pending so it can be retried via uploadAll. */
+  const retryItem = useCallback((id: string) => {
+    setItems((prev) => prev.map((i) =>
+      i.id === id && (i.status === "error" || i.status === "cancelled")
+        ? { ...i, status: "pending" as const, progress: 0, error: undefined }
+        : i,
+    ));
+  }, []);
+
   /** Upload all pending items sequentially. Returns results for successful uploads. */
   const uploadAll = useCallback(async (roomId: string): Promise<UploadResult[]> => {
     const pending = items.filter((i) => i.status === "pending");
@@ -109,5 +132,5 @@ export function useUpload(onError?: (msg: string) => void) {
   const hasPending = items.some((i) => i.status === "pending");
   const isUploading = items.some((i) => i.status === "uploading");
 
-  return { items, addFiles, removeItem, clearAll, uploadAll, hasPending, isUploading };
+  return { items, addFiles, removeItem, retryItem, clearAll, clearSuccessful, cancelAll, uploadAll, hasPending, isUploading };
 }

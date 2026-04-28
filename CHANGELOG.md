@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.19] — 2026-04-28
+
+### Fixed
+- **Upload retry on error** — errored/cancelled items show a Retry button; clicking resets to pending for re-upload on next Send.
+- **Preserve errored items after send** — `clearSuccessful()` replaces `clearAll()` so only done items are removed; errors stay visible for retry.
+- **Cancel all button** — header shows "Cancel all" during multi-file uploads to abort all in-flight transfers at once.
+- **Visual polish** — cancel button text label, adjusted opacity/saturation for status colors, error message in tooltip, progress bar aria-label.
+
 ## [0.10.18] — 2026-04-28
 
 ### Added
