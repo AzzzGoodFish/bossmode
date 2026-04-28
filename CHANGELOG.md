@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.14] — 2026-04-28
+
+### Fixed
+- **Markdown table rendering in code blocks** — Prism markdown grammar splits table pipe syntax into per-token line breaks. `markdown`/`md` code blocks now skip Prism and render as plain `<pre>` text.
+
 ## [0.10.13] — 2026-04-27
 
 ### Fixed
