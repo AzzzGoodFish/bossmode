@@ -1,0 +1,82 @@
+// Attachment upload + download routes (extracted from workspace.ts)
+import { createReadStream, statSync } from "node:fs";
+import { extname } from "node:path";
+import { addRoute, sendJson } from "./index.js";
+import * as roomStore from "../workspace/room-store.js";
+import * as attachmentStore from "../workspace/attachment-store.js";
+
+const ATTACHMENT_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".zip": "application/zip",
+};
+
+// POST /api/rooms/:id/upload — stream-based upload (no memory buffering)
+addRoute("POST", "/api/rooms/:id/upload", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+
+  const url = new URL(req.url || "", "http://localhost");
+  const originalFilename = url.searchParams.get("filename");
+  if (!originalFilename) {
+    sendJson(res, 400, { error: "filename query parameter is required" });
+    return;
+  }
+
+  try {
+    const stored = await attachmentStore.streamToAttachment(req, params.id, originalFilename);
+    if (stored.size === 0) {
+      sendJson(res, 400, { error: "Empty file" });
+      return;
+    }
+    sendJson(res, 200, {
+      filename: stored.storedFilename,
+      originalFilename: stored.originalFilename,
+      path: stored.absolutePath,
+      size: stored.size,
+      url: `/api/rooms/${params.id}/attachments/${stored.storedFilename}`,
+    });
+  } catch (err: any) {
+    const isSize = String(err?.message || "").includes("too large");
+    sendJson(res, isSize ? 413 : 500, { error: err.message || String(err) });
+  }
+});
+
+// GET /api/rooms/:id/attachments/:filename — stream-based download
+addRoute("GET", "/api/rooms/:id/attachments/:filename", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+
+  if (!attachmentStore.attachmentExists(params.id, params.filename)) {
+    sendJson(res, 404, { error: "Attachment not found" });
+    return;
+  }
+
+  let absPath: string;
+  try {
+    absPath = attachmentStore.getAttachmentPath(params.id, params.filename);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message });
+    return;
+  }
+
+  const ext = extname(params.filename).toLowerCase();
+  const mime = ATTACHMENT_MIME[ext] || "application/octet-stream";
+  const size = statSync(absPath).size;
+
+  res.writeHead(200, {
+    "Content-Type": mime,
+    "Content-Length": size,
+    "Cache-Control": "public, max-age=86400",
+  });
+  createReadStream(absPath).pipe(res);
+});
