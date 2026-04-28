@@ -8,11 +8,14 @@ interface PendingFile {
   preview?: string; // data URL for image preview
 }
 
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB — must match server MAX_UPLOAD_SIZE
+
 interface MessageInputProps {
   onSend: (content: string) => void;
   members: string[];
   disabled?: boolean;
   roomId?: string;
+  onError?: (message: string) => void;
 }
 
 /** Format a clipboard image filename: clipboard-YYYYMMDD-HHmmss.png */
@@ -27,18 +30,26 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
 
-export function MessageInput({ onSend, members, disabled, roomId }: MessageInputProps) {
+export function MessageInput({ onSend, members, disabled, roomId, onError }: MessageInputProps) {
   const [value, setValue, clearDraft] = useDraft(roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionIdx, setMentionIdx] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((files: File[]) => {
+    const oversized = files.filter((f) => f.size > MAX_FILE_SIZE);
+    if (oversized.length > 0) {
+      const names = oversized.map((f) => f.name).join(", ");
+      const maxMB = Math.round(MAX_FILE_SIZE / 1024 / 1024);
+      onError?.(`File too large (max ${maxMB}MB): ${names}`);
+      return;
+    }
     const newPending: PendingFile[] = files.map((file) => {
       const pending: PendingFile = { file };
       if (isImageFile(file)) {
@@ -47,7 +58,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
       return pending;
     });
     setPendingFiles((prev) => [...prev, ...newPending]);
-  }, []);
+  }, [onError]);
 
   const removeFile = useCallback((idx: number) => {
     setPendingFiles((prev) => {
@@ -132,21 +143,25 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
       setUploading(true);
       try {
         const attachmentLines: string[] = [];
-        for (const pf of pendingFiles) {
-          const result = await uploadFile(roomId, pf.file);
+        for (let i = 0; i < pendingFiles.length; i++) {
+          setUploadProgress(`Uploading ${i + 1}/${pendingFiles.length}...`);
+          const result = await uploadFile(roomId, pendingFiles[i].file);
           attachmentLines.push(`Attachment: [original filename: ${result.originalFilename}](${result.path})`);
         }
         const attachmentText = attachmentLines.join("\n");
         content = content ? `${content}\n${attachmentText}` : attachmentText;
       } catch (err: any) {
         console.error("Upload failed:", err);
+        onError?.(`Upload failed: ${err.message || "Unknown error"}`);
         setUploading(false);
+        setUploadProgress("");
         return;
       }
       // Clean up previews
       pendingFiles.forEach((pf) => { if (pf.preview) URL.revokeObjectURL(pf.preview); });
       setPendingFiles([]);
       setUploading(false);
+      setUploadProgress("");
     }
 
     if (content) {
@@ -350,7 +365,7 @@ export function MessageInput({ onSend, members, disabled, roomId }: MessageInput
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={disabled || uploading}
-          placeholder={uploading ? "Uploading..." : "Type a message... (@ to mention, Ctrl+V to paste image)"}
+          placeholder={uploading ? (uploadProgress || "Uploading...") : "Type a message... (@ to mention, Ctrl+V to paste image)"}
           rows={1}
           className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
                      resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent

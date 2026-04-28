@@ -54,6 +54,7 @@ export default function (pi) {
       message: Type.String({ description: "Message to post" }),
       target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
       mentions: Type.Optional(Type.Array(Type.String(), { description: "Agent names to activate (authoritative activation channel)" })),
+      attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store. Recipients can preview/download them." })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {

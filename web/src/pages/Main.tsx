@@ -380,7 +380,7 @@ export function Main({
           {activeTab?.type === "room" ? (
             <>
               <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
-              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} />
+              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : activeTab?.type === "tasks" && selectedRoomId ? (
             <TasksTab
