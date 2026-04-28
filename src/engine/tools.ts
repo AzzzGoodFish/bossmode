@@ -1,6 +1,6 @@
 // Agent tool callback handler — business logic for chat/messages/summary tools
-import { writeFileSync, existsSync, readFileSync, copyFileSync, mkdirSync, statSync } from "node:fs";
-import { join, basename, extname, resolve, normalize } from "node:path";
+import { writeFileSync, existsSync, readFileSync, copyFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
+import { join, basename, extname, resolve, sep } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
@@ -23,16 +23,29 @@ const MAX_RESULT_CHARS = 25_000;
 const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
 const MAX_AGENT_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100 MB
 
-/** Check if a file path is within allowed directories for agent attachments. */
+/** Check if a file path is within allowed directories for agent attachments.
+ *  Uses realpathSync to resolve symlinks — prevents symlink escape attacks.
+ */
 function isAllowedAttachmentPath(filePath: string, roomCwd: string): boolean {
-  const resolved = resolve(filePath);
-  const normalized = normalize(resolved);
-  const allowedPrefixes = [
-    normalize(roomCwd),                          // room working directory
-    normalize(tmpdir()),                          // /tmp
-    normalize(join(homedir(), ".bossmode", "knowledge")), // knowledge docs
-  ];
-  return allowedPrefixes.some((prefix) => normalized.startsWith(prefix + "/") || normalized === prefix);
+  let resolved: string;
+  try {
+    resolved = realpathSync(resolve(filePath));
+  } catch {
+    return false; // doesn't exist or unreadable
+  }
+  let allowedPrefixes: string[];
+  try {
+    allowedPrefixes = [
+      realpathSync(roomCwd),
+      realpathSync(tmpdir()),
+      realpathSync(join(homedir(), ".bossmode", "knowledge")),
+    ];
+  } catch {
+    return false;
+  }
+  return allowedPrefixes.some((prefix) =>
+    resolved === prefix || resolved.startsWith(prefix + sep),
+  );
 }
 
 /** Process agent attachments: validate, copy to attachments dir, return Attachment lines. */

@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.17] — 2026-04-28
+
+### Security
+- **Fix symlink escape in agent attachments** — `isAllowedAttachmentPath` now uses `realpathSync` to resolve symlinks before whitelist comparison. Previously, a symlink inside an allowed directory pointing to a sensitive file (e.g., `/etc/passwd`) would pass the path check. All allowed prefixes are also resolved via `realpathSync` for cross-platform correctness (macOS `/tmp` → `/private/tmp`).
+
+### Tests
+- Updated agent attachment tests to use real temp files + symlink escape test case.
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 278/278 ✅.
+
 ## [0.10.16] — 2026-04-28
 
 ### Added
