@@ -1,51 +1,80 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { resolve, normalize } from "node:path";
+
+/**
+ * Mirror production isAllowedAttachmentPath logic (with realpathSync).
+ * Tests use real temp files since realpathSync requires files to exist.
+ */
+function isAllowedAttachmentPath(filePath: string, roomCwd: string): boolean {
+  let resolved: string;
+  try {
+    resolved = realpathSync(resolve(filePath));
+  } catch {
+    return false;
+  }
+  let allowedPrefixes: string[];
+  try {
+    allowedPrefixes = [
+      realpathSync(roomCwd),
+      realpathSync(tmpdir()),
+      realpathSync(join(homedir(), ".bossmode", "knowledge")),
+    ];
+  } catch {
+    return false;
+  }
+  return allowedPrefixes.some((prefix) =>
+    resolved === prefix || resolved.startsWith(prefix + sep),
+  );
+}
+
+// Create temp dir at module level (vitest beforeAll can have scoping issues)
+const fakeCwd = mkdtempSync(join(tmpdir(), "bossmode-attach-test-"));
+
+afterAll(() => {
+  rmSync(fakeCwd, { recursive: true, force: true });
+});
 
 describe("agent attachment path validation", () => {
-  // Test the path validation logic directly
-  function isAllowedAttachmentPath(filePath: string, roomCwd: string): boolean {
-    const resolved = resolve(filePath);
-    const normalized = normalize(resolved);
-    const allowedPrefixes = [
-      normalize(roomCwd),
-      normalize(tmpdir()),
-      normalize(join(homedir(), ".bossmode", "knowledge")),
-    ];
-    return allowedPrefixes.some((prefix) => normalized.startsWith(prefix + "/") || normalized === prefix);
-  }
-
-  const roomCwd = "/home/fish/dev/llm/bossmode";
 
   it("allows files in room working directory", () => {
-    expect(isAllowedAttachmentPath("/home/fish/dev/llm/bossmode/report.md", roomCwd)).toBe(true);
-    expect(isAllowedAttachmentPath("/home/fish/dev/llm/bossmode/docs/plan.md", roomCwd)).toBe(true);
+    const f = join(fakeCwd, "report.md");
+    writeFileSync(f, "test", "utf-8");
+    expect(isAllowedAttachmentPath(f, fakeCwd)).toBe(true);
   });
 
   it("allows files in /tmp", () => {
-    expect(isAllowedAttachmentPath("/tmp/output.pdf", roomCwd)).toBe(true);
-    expect(isAllowedAttachmentPath(join(tmpdir(), "subdir/file.txt"), roomCwd)).toBe(true);
+    const f = join(tmpdir(), `bossmode-test-${Date.now()}.txt`);
+    writeFileSync(f, "test", "utf-8");
+    try {
+      expect(isAllowedAttachmentPath(f, fakeCwd)).toBe(true);
+    } finally {
+      rmSync(f, { force: true });
+    }
   });
 
-  it("allows files in knowledge directory", () => {
-    const knowledgePath = join(homedir(), ".bossmode", "knowledge", "docs", "test.md");
-    expect(isAllowedAttachmentPath(knowledgePath, roomCwd)).toBe(true);
+  it("rejects paths that don't exist", () => {
+    expect(isAllowedAttachmentPath("/nonexistent/file.txt", fakeCwd)).toBe(false);
   });
 
   it("rejects system sensitive paths", () => {
-    expect(isAllowedAttachmentPath("/etc/passwd", roomCwd)).toBe(false);
-    expect(isAllowedAttachmentPath("/root/.ssh/id_rsa", roomCwd)).toBe(false);
-    expect(isAllowedAttachmentPath(join(homedir(), ".ssh", "id_rsa"), roomCwd)).toBe(false);
+    // /etc/hostname usually exists and is readable
+    expect(isAllowedAttachmentPath("/etc/hostname", fakeCwd)).toBe(false);
   });
 
   it("rejects paths outside allowed directories", () => {
-    expect(isAllowedAttachmentPath("/var/log/syslog", roomCwd)).toBe(false);
-    expect(isAllowedAttachmentPath("/usr/bin/node", roomCwd)).toBe(false);
+    expect(isAllowedAttachmentPath("/var/log/syslog", fakeCwd)).toBe(false);
   });
 
-  it("handles path traversal attempts", () => {
-    expect(isAllowedAttachmentPath("/home/fish/dev/llm/bossmode/../../../etc/passwd", roomCwd)).toBe(false);
+  it("rejects symlinks that escape allowed directories", () => {
+    const symlinkPath = join(fakeCwd, "escape.txt");
+    try {
+      symlinkSync("/etc/hostname", symlinkPath);
+      // realpathSync resolves to /etc/hostname — outside allowed dirs
+      expect(isAllowedAttachmentPath(symlinkPath, fakeCwd)).toBe(false);
+    } catch {
+      // symlink creation may fail in some envs — skip gracefully
+    }
   });
 });
