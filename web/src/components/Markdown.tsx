@@ -45,6 +45,17 @@ const components: Components = {
     }
 
     const language = match?.[1] || "text";
+
+    // Prism markdown grammar has token-rendering bugs (table syntax gets split
+    // into per-token line breaks). Render markdown code blocks as plain text.
+    if (language === "markdown" || language === "md") {
+      return (
+        <pre className="overflow-x-auto bg-zinc-900 rounded-md p-3 my-2 text-xs text-zinc-200 font-mono">
+          <code className="whitespace-pre">{String(children).replace(/\n$/, "")}</code>
+        </pre>
+      );
+    }
+
     return (
       <SyntaxHighlighter
         style={oneDark}
