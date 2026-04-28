@@ -1,10 +1,12 @@
-// Attachment upload UI — pending list with progress bars, cancel, error states
-import { X, FileText, Check, AlertCircle, RotateCw } from "lucide-react";
+// Attachment upload UI — pending list with progress bars, cancel, retry, error states
+import { X, FileText, Check, AlertCircle, RotateCw, Paperclip } from "lucide-react";
 import type { UploadItem } from "../hooks/useUpload";
 
 interface AttachmentUploaderProps {
   items: UploadItem[];
   onRemove: (id: string) => void;
+  onRetry?: (id: string) => void;
+  onCancelAll?: () => void;
   disabled?: boolean;
 }
 
@@ -16,19 +18,28 @@ function formatSize(bytes: number): string {
 }
 
 const stateClasses: Record<string, string> = {
-  pending: "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900",
-  uploading: "border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10",
-  done: "border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-900/10",
-  error: "border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-900/10",
-  cancelled: "border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 opacity-50",
+  pending:   "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900",
+  uploading: "border-blue-300/60 dark:border-blue-700/40 bg-blue-50/60 dark:bg-blue-900/20",
+  done:      "border-emerald-300/60 dark:border-emerald-700/40 bg-emerald-50/60 dark:bg-emerald-900/15",
+  error:     "border-red-300/60 dark:border-red-700/40 bg-red-50/60 dark:bg-red-900/15",
+  cancelled: "border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 opacity-60",
 };
 
-function UploadRow({ item, onRemove }: { item: UploadItem; onRemove: () => void }) {
+function UploadRow({
+  item, onRemove, onRetry,
+}: {
+  item: UploadItem;
+  onRemove: () => void;
+  onRetry?: () => void;
+}) {
   const pct = Math.round(item.progress * 100);
+  const isUploading = item.status === "uploading";
+  const isError = item.status === "error";
+
   return (
     <div className={`relative group/row flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-colors overflow-hidden ${stateClasses[item.status] || stateClasses.pending}`}>
       {/* Progress bar — bottom line */}
-      {item.status === "uploading" && (
+      {isUploading && (
         <div
           className="absolute bottom-0 left-0 h-0.5 bg-blue-500 transition-all duration-150"
           style={{ width: `${pct}%` }}
@@ -36,6 +47,7 @@ function UploadRow({ item, onRemove }: { item: UploadItem; onRemove: () => void 
           aria-valuenow={pct}
           aria-valuemin={0}
           aria-valuemax={100}
+          aria-label={`Uploading ${item.file.name}`}
         />
       )}
 
@@ -53,26 +65,52 @@ function UploadRow({ item, onRemove }: { item: UploadItem; onRemove: () => void 
           {item.status === "pending" && <span>{formatSize(item.file.size)}</span>}
           {item.status === "uploading" && <><span>{pct}%</span><span>·</span><span>{formatSize(item.file.size)}</span></>}
           {item.status === "done" && <><Check size={10} className="text-emerald-500" /><span>{formatSize(item.file.size)}</span></>}
-          {item.status === "error" && <><AlertCircle size={10} className="text-red-500" /><span className="text-red-500 truncate">{item.error || "Failed"}</span></>}
+          {item.status === "error" && (
+            <>
+              <AlertCircle size={10} className="text-red-500 shrink-0" />
+              <span className="text-red-500 truncate" title={item.error || "Failed"}>{item.error || "Failed"}</span>
+            </>
+          )}
           {item.status === "cancelled" && <span className="text-zinc-400">Cancelled</span>}
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        {item.status === "uploading" && (
-          <button onClick={onRemove} className="text-[10px] text-zinc-400 hover:text-red-500 transition-colors" title="Cancel upload">
-            <X size={14} />
+      <div className="flex items-center gap-0.5 shrink-0">
+        {isUploading && (
+          <button
+            onClick={onRemove}
+            title="Cancel upload"
+            aria-label="Cancel upload"
+            className="px-1.5 h-6 flex items-center gap-1 text-[10px] rounded text-zinc-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+          >
+            <X size={11} /> Cancel
           </button>
         )}
-        {(item.status === "pending" || item.status === "done" || item.status === "cancelled") && (
-          <button onClick={onRemove} className="opacity-0 group-hover/row:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity" title="Remove">
-            <X size={14} />
+
+        {isError && onRetry && (
+          <button
+            onClick={onRetry}
+            title="Retry upload"
+            aria-label="Retry upload"
+            className="w-6 h-6 flex items-center justify-center rounded text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          >
+            <RotateCw size={12} />
           </button>
         )}
-        {item.status === "error" && (
-          <button onClick={onRemove} className="text-zinc-400 hover:text-red-500 transition-colors" title="Remove">
-            <X size={14} />
+
+        {!isUploading && (
+          <button
+            onClick={onRemove}
+            title="Remove"
+            aria-label="Remove"
+            className={`w-6 h-6 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer ${
+              item.status === "pending" || item.status === "done" || item.status === "cancelled"
+                ? "opacity-0 group-hover/row:opacity-100"
+                : ""
+            }`}
+          >
+            <X size={12} />
           </button>
         )}
       </div>
@@ -80,20 +118,49 @@ function UploadRow({ item, onRemove }: { item: UploadItem; onRemove: () => void 
   );
 }
 
-export function AttachmentUploader({ items, onRemove, disabled }: AttachmentUploaderProps) {
+export function AttachmentUploader({ items, onRemove, onRetry, onCancelAll }: AttachmentUploaderProps) {
   if (items.length === 0) return null;
 
-  const uploading = items.filter((i) => i.status === "uploading").length;
+  const uploadingCount = items.filter((i) => i.status === "uploading").length;
+  const errorCount = items.filter((i) => i.status === "error").length;
+  const showHeader = items.length > 1;
+  const canCancelAll = uploadingCount > 1 && !!onCancelAll;
 
   return (
-    <div className="flex flex-col gap-1 mb-2">
-      {items.length > 1 && (
-        <div className="text-[10px] text-zinc-400 px-1">
-          Attachments ({items.length}){uploading > 0 && ` · ${uploading} uploading`}
+    <div className="flex flex-col gap-1 mb-2 max-w-full">
+      {showHeader && (
+        <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 px-0.5 mb-0.5">
+          <Paperclip size={11} className="shrink-0" />
+          <span>{items.length} attachment{items.length === 1 ? "" : "s"}</span>
+          {uploadingCount > 0 && (
+            <>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <span className="text-blue-600 dark:text-blue-400">{uploadingCount} uploading</span>
+            </>
+          )}
+          {errorCount > 0 && (
+            <>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <span className="text-red-500 dark:text-red-400">{errorCount} failed</span>
+            </>
+          )}
+          {canCancelAll && (
+            <button
+              onClick={onCancelAll}
+              className="ml-auto text-zinc-500 hover:text-red-500 underline-offset-2 hover:underline cursor-pointer"
+            >
+              Cancel all
+            </button>
+          )}
         </div>
       )}
       {items.map((item) => (
-        <UploadRow key={item.id} item={item} onRemove={() => onRemove(item.id)} />
+        <UploadRow
+          key={item.id}
+          item={item}
+          onRemove={() => onRemove(item.id)}
+          onRetry={onRetry ? () => onRetry(item.id) : undefined}
+        />
       ))}
     </div>
   );

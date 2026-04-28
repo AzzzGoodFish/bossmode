@@ -80,7 +80,8 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
         );
         content = content ? `${content}\n${lines.join("\n")}` : lines.join("\n");
       }
-      upload.clearAll();
+      // Only clear successful uploads — keep errored/cancelled items so user can retry.
+      upload.clearSuccessful();
     }
 
     if (content) onSend(content);
@@ -197,7 +198,13 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
       )}
 
       {/* Attachment upload area */}
-      <AttachmentUploader items={upload.items} onRemove={upload.removeItem} disabled={disabled} />
+      <AttachmentUploader
+        items={upload.items}
+        onRemove={upload.removeItem}
+        onRetry={upload.retryItem}
+        onCancelAll={upload.cancelAll}
+        disabled={disabled}
+      />
 
       {/* Drag overlay hint */}
       {dragOver && (
