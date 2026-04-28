@@ -150,7 +150,8 @@ export async function summarizeRoom(roomId: string, keepCount: number = 50): Pro
       );
       logger.warn("summarizer", "zero summaries produced", { roomId, messageCount: messages.length });
     } else {
-      postMessage(roomId, "system", `Summarization complete: ${messages.length} messages condensed into ${summaryCount} summaries.`);
+      const keptInfo = keepCount > 0 ? ` Latest ${keepCount} message(s) kept as raw text for ongoing context.` : "";
+      postMessage(roomId, "system", `Summarization complete: ${messages.length} messages condensed into ${summaryCount} summaries.${keptInfo}`);
       logger.info("summarizer", "summarization complete", { roomId, messageCount: messages.length, summaryCount });
     }
   } catch (err: any) {
@@ -178,7 +179,7 @@ export function initAutoSummary(): () => void {
   }
 
   const threshold = summaryConfig.threshold || 200;
-  const keepCount = summaryConfig.keepCount || 50;
+  const keepCount = summaryConfig.keepCount ?? 50;
 
   autoSummaryUnsubscribe = onMessage((roomId, _message) => {
     const count = (messageCounters.get(roomId) || 0) + 1;
