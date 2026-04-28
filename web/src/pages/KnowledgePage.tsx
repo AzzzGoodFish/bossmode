@@ -3,7 +3,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useLongPress } from "../hooks/useLongPress";
 import { MobileTopBar } from "../components/MobileTopBar";
 import {
-  Plus, Trash2, Pencil, FolderPlus, File as FileIcon,
+  Plus, Trash2, Pencil, FolderPlus, File as FileIcon, Download,
   Folder, FolderOpen, ChevronRight, ChevronDown,
   FolderInput, CheckSquare, X,
 } from "lucide-react";
@@ -25,6 +25,21 @@ const EXPANDED_STORAGE_KEY = "bossmode.knowledge.expandedFolders";
 const DEFAULT_WIDTH = 260;
 const MIN_WIDTH = 160;
 const MAX_WIDTH_RATIO = 0.5;
+
+/** Trigger client-side download of a knowledge document as .md file */
+function downloadDoc(doc: KnowledgeEntry) {
+  const filename = doc.id.split("/").pop() || `${(doc.title || "document").replace(/[^\w\-.\u4e00-\u9fff]/gu, "_")}.md`;
+  const blob = new Blob([doc.content || ""], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Defer revoke to allow Safari to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 interface KnowledgePageProps {
   initialPath?: string;
@@ -631,6 +646,11 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                     <div className="text-xs text-zinc-500 mt-0.5 font-mono truncate">{currentDoc.id} · by {currentDoc.source}</div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => downloadDoc(currentDoc)}
+                      title="Download as .md file"
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">
+                      <Download size={14} /> Download
+                    </button>
                     <button onClick={() => setEditing(true)}
                       className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">
                       <Pencil size={14} /> Edit

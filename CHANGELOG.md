@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.15] — 2026-04-28
+
+### Added
+- **Knowledge document download** — Download button on document detail page. Pure client-side Blob download, no backend route needed.
+
 ## [0.10.14] — 2026-04-28
 
 ### Fixed
