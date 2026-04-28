@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.16] — 2026-04-28
+
+### Added
+- **Agent chat attachments** — `chat` tool now accepts `attachments: string[]` parameter (local file paths). Files are validated (path whitelist + size limit), copied to room attachments directory, and rendered as attachment indicators in chat. Allowed paths: room working directory, `/tmp/`, and knowledge docs.
+- **Upload file size pre-validation** — files exceeding 100MB are rejected at selection time with a user-visible error toast (was: silent failure).
+- **Upload progress indicator** — multi-file uploads show "Uploading 2/4..." in the input placeholder.
+
+### Fixed
+- **Upload failure silent swallow** — upload errors now display a toast message instead of silently returning.
+- **MAX_UPLOAD_SIZE increased** — 50MB → 100MB per file.
+
+### Tests
+- Added: agent attachment path validation (6 cases: allowed dirs, system paths, traversal).
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 278/278 ✅.
+
 ## [0.10.15] — 2026-04-28
 
 ### Added

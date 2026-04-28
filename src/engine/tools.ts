@@ -1,8 +1,8 @@
 // Agent tool callback handler — business logic for chat/messages/summary tools
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { writeFileSync, existsSync, readFileSync, copyFileSync, mkdirSync, statSync } from "node:fs";
+import { join, basename, extname, resolve, normalize } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { randomUUID, createHash } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
@@ -20,6 +20,72 @@ import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 const MAX_RESULT_CHARS = 25_000;
 
 /** Truncate a serialized tool result if it exceeds the limit. */
+const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
+const MAX_AGENT_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100 MB
+
+/** Check if a file path is within allowed directories for agent attachments. */
+function isAllowedAttachmentPath(filePath: string, roomCwd: string): boolean {
+  const resolved = resolve(filePath);
+  const normalized = normalize(resolved);
+  const allowedPrefixes = [
+    normalize(roomCwd),                          // room working directory
+    normalize(tmpdir()),                          // /tmp
+    normalize(join(homedir(), ".bossmode", "knowledge")), // knowledge docs
+  ];
+  return allowedPrefixes.some((prefix) => normalized.startsWith(prefix + "/") || normalized === prefix);
+}
+
+/** Process agent attachments: validate, copy to attachments dir, return Attachment lines. */
+function processAgentAttachments(
+  attachments: string[],
+  roomId: string,
+): { lines: string[]; errors: string[] } {
+  const room = roomStore.getRoom(roomId);
+  if (!room) return { lines: [], errors: ["Room not found"] };
+
+  const lines: string[] = [];
+  const errors: string[] = [];
+
+  for (const rawPath of attachments) {
+    const filePath = resolve(rawPath);
+
+    if (!isAllowedAttachmentPath(filePath, room.cwd)) {
+      errors.push(`Path not allowed: ${rawPath}`);
+      continue;
+    }
+    if (!existsSync(filePath)) {
+      errors.push(`File not found: ${rawPath}`);
+      continue;
+    }
+    const stat = statSync(filePath);
+    if (!stat.isFile()) {
+      errors.push(`Not a file: ${rawPath}`);
+      continue;
+    }
+    if (stat.size > MAX_AGENT_ATTACHMENT_SIZE) {
+      errors.push(`File too large (max ${MAX_AGENT_ATTACHMENT_SIZE / 1024 / 1024}MB): ${rawPath}`);
+      continue;
+    }
+
+    // Hash + copy
+    const content = readFileSync(filePath);
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+    const ext = extname(filePath) || ".bin";
+    const storedFilename = `${hash}${ext}`;
+    const attachDir = join(room.cwd, ATTACHMENT_DIR_NAME);
+    mkdirSync(attachDir, { recursive: true });
+    const destPath = join(attachDir, storedFilename);
+    if (!existsSync(destPath)) {
+      copyFileSync(filePath, destPath);
+    }
+
+    const originalName = basename(filePath);
+    lines.push(`Attachment: [original filename: ${originalName}](${destPath})`);
+  }
+
+  return { lines, errors };
+}
+
 export function truncateToolResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
   const truncated = text.slice(0, MAX_RESULT_CHARS);
@@ -39,8 +105,25 @@ export async function handleToolCallback(
     case "chat": {
       const mentions: string[] = Array.isArray(params?.mentions) ? params.mentions : [];
       let target = params?.target || "room";
-      const message = params?.message || "";
+      let message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
+
+      // Process agent attachments (file paths → copy to attachments dir → append Attachment lines)
+      if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
+        const { lines, errors } = processAgentAttachments(params.attachments.map(String), roomId);
+        if (lines.length > 0) {
+          message = message ? `${message}\n${lines.join("\n")}` : lines.join("\n");
+        }
+        if (errors.length > 0) {
+          // Partial success: attach what we can, report errors
+          const errorMsg = errors.join("; ");
+          if (lines.length === 0) {
+            return { ok: false, error: `Attachment failed: ${errorMsg}` };
+          }
+          // Some succeeded, some failed — continue with warning
+          message += `\n(Attachment errors: ${errorMsg})`;
+        }
+      }
 
       let warning: string | undefined;
       if (target === "user" && source === "room_mention") {

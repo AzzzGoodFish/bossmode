@@ -62,9 +62,10 @@ export function createMcpHandler(_serverUrl: string) {
         message: z.string().describe(CHAT_MESSAGE_PARAM_DESCRIPTION),
         target: z.string().optional().describe(CHAT_TARGET_PARAM_DESCRIPTION),
         mentions: z.array(z.string()).optional().describe(CHAT_MENTIONS_PARAM_DESCRIPTION),
+        attachments: z.array(z.string()).optional().describe("Local file paths to attach. Files are copied to the room's attachment store. Recipients can preview/download them."),
       },
-      async ({ message, target, mentions }) => {
-        const resultText = await callbackTool("chat", { message, target, mentions });
+      async ({ message, target, mentions, attachments }) => {
+        const resultText = await callbackTool("chat", { message, target, mentions, attachments });
         const result = parseJsonSafe(resultText);
         const targetText = target === "user" ? "Private reply sent." : "Message sent to room.";
         const mentionText = mentions?.length ? ` Mentioned: ${mentions.join(", ")}` : "";
