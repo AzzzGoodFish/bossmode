@@ -1,0 +1,67 @@
+// Agent attachment processing — validate paths + copy to room attachments
+import { join } from "node:path";
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { checkPath, type PathPolicy } from "../shared/path-security.js";
+import { copyToAttachment, MAX_UPLOAD_SIZE } from "../workspace/attachment-store.js";
+import * as roomStore from "../workspace/room-store.js";
+import { getBossmodeDir } from "../shared/config.js";
+import { logger } from "../foundation/logger.js";
+
+export interface AttachmentSuccess {
+  ok: true;
+  storedFilename: string;
+  originalFilename: string;
+  absolutePath: string;
+  size: number;
+}
+
+export interface AttachmentError {
+  ok: false;
+  path: string;
+  error: string;
+}
+
+export type AttachmentOutcome = AttachmentSuccess | AttachmentError;
+
+/** Build path policy for a room — defines allowed attachment source directories. */
+function buildPolicy(roomId: string): PathPolicy {
+  const room = roomStore.getRoom(roomId);
+  if (!room) throw new Error(`Room not found: ${roomId}`);
+  const allowedPrefixes: string[] = [];
+  try { allowedPrefixes.push(realpathSync(room.cwd)); } catch { /* skip if unresolvable */ }
+  try { allowedPrefixes.push(realpathSync(tmpdir())); } catch { /* */ }
+  try { allowedPrefixes.push(realpathSync(join(getBossmodeDir(), "knowledge"))); } catch { /* */ }
+  return { allowedPrefixes, maxSizeBytes: MAX_UPLOAD_SIZE };
+}
+
+/**
+ * Process agent attachment paths: validate + copy to room's attachments dir.
+ * Returns one outcome per input path.
+ */
+export async function processAgentAttachments(
+  roomId: string,
+  paths: string[],
+): Promise<AttachmentOutcome[]> {
+  if (!Array.isArray(paths) || paths.length === 0) return [];
+
+  const policy = buildPolicy(roomId);
+  const results: AttachmentOutcome[] = [];
+
+  for (const p of paths) {
+    const check = checkPath(p, policy);
+    if (!check.ok) {
+      logger.warn("agent-attachment", "rejected", { roomId, path: p, error: check.error });
+      results.push({ ok: false, path: p, error: check.error });
+      continue;
+    }
+    try {
+      const stored = await copyToAttachment(check.absolutePath, roomId);
+      results.push({ ok: true, ...stored });
+    } catch (err: any) {
+      results.push({ ok: false, path: p, error: err.message || String(err) });
+    }
+  }
+
+  return results;
+}

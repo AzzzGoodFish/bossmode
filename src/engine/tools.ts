@@ -1,8 +1,8 @@
 // Agent tool callback handler — business logic for chat/messages/summary tools
-import { writeFileSync, existsSync, readFileSync, copyFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
-import { join, basename, extname, resolve, sep } from "node:path";
-import { tmpdir, homedir } from "node:os";
-import { randomUUID, createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
@@ -20,84 +20,7 @@ import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 const MAX_RESULT_CHARS = 25_000;
 
 /** Truncate a serialized tool result if it exceeds the limit. */
-const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
-const MAX_AGENT_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100 MB
-
-/** Check if a file path is within allowed directories for agent attachments.
- *  Uses realpathSync to resolve symlinks — prevents symlink escape attacks.
- */
-function isAllowedAttachmentPath(filePath: string, roomCwd: string): boolean {
-  let resolved: string;
-  try {
-    resolved = realpathSync(resolve(filePath));
-  } catch {
-    return false; // doesn't exist or unreadable
-  }
-  let allowedPrefixes: string[];
-  try {
-    allowedPrefixes = [
-      realpathSync(roomCwd),
-      realpathSync(tmpdir()),
-      realpathSync(join(homedir(), ".bossmode", "knowledge")),
-    ];
-  } catch {
-    return false;
-  }
-  return allowedPrefixes.some((prefix) =>
-    resolved === prefix || resolved.startsWith(prefix + sep),
-  );
-}
-
-/** Process agent attachments: validate, copy to attachments dir, return Attachment lines. */
-function processAgentAttachments(
-  attachments: string[],
-  roomId: string,
-): { lines: string[]; errors: string[] } {
-  const room = roomStore.getRoom(roomId);
-  if (!room) return { lines: [], errors: ["Room not found"] };
-
-  const lines: string[] = [];
-  const errors: string[] = [];
-
-  for (const rawPath of attachments) {
-    const filePath = resolve(rawPath);
-
-    if (!isAllowedAttachmentPath(filePath, room.cwd)) {
-      errors.push(`Path not allowed: ${rawPath}`);
-      continue;
-    }
-    if (!existsSync(filePath)) {
-      errors.push(`File not found: ${rawPath}`);
-      continue;
-    }
-    const stat = statSync(filePath);
-    if (!stat.isFile()) {
-      errors.push(`Not a file: ${rawPath}`);
-      continue;
-    }
-    if (stat.size > MAX_AGENT_ATTACHMENT_SIZE) {
-      errors.push(`File too large (max ${MAX_AGENT_ATTACHMENT_SIZE / 1024 / 1024}MB): ${rawPath}`);
-      continue;
-    }
-
-    // Hash + copy
-    const content = readFileSync(filePath);
-    const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
-    const ext = extname(filePath) || ".bin";
-    const storedFilename = `${hash}${ext}`;
-    const attachDir = join(room.cwd, ATTACHMENT_DIR_NAME);
-    mkdirSync(attachDir, { recursive: true });
-    const destPath = join(attachDir, storedFilename);
-    if (!existsSync(destPath)) {
-      copyFileSync(filePath, destPath);
-    }
-
-    const originalName = basename(filePath);
-    lines.push(`Attachment: [original filename: ${originalName}](${destPath})`);
-  }
-
-  return { lines, errors };
-}
+import { processAgentAttachments } from "./agent-attachments.js";
 
 export function truncateToolResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
@@ -121,19 +44,26 @@ export async function handleToolCallback(
       let message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
 
-      // Process agent attachments (file paths → copy to attachments dir → append Attachment lines)
+      // Process agent attachments (file paths → validate + copy → append Attachment lines)
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const { lines, errors } = processAgentAttachments(params.attachments.map(String), roomId);
+        const outcomes = await processAgentAttachments(roomId, params.attachments.map(String));
+        const lines: string[] = [];
+        const errors: string[] = [];
+        for (const o of outcomes) {
+          if (o.ok) {
+            lines.push(`Attachment: [original filename: ${o.originalFilename}](${o.absolutePath})`);
+          } else {
+            errors.push(`${o.path}: ${o.error}`);
+          }
+        }
         if (lines.length > 0) {
           message = message ? `${message}\n${lines.join("\n")}` : lines.join("\n");
         }
         if (errors.length > 0) {
-          // Partial success: attach what we can, report errors
           const errorMsg = errors.join("; ");
           if (lines.length === 0) {
             return { ok: false, error: `Attachment failed: ${errorMsg}` };
           }
-          // Some succeeded, some failed — continue with warning
           message += `\n(Attachment errors: ${errorMsg})`;
         }
       }

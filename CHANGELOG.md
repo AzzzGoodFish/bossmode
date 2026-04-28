@@ -4,6 +4,25 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.18] — 2026-04-28
+
+### Added
+- **Stream-based file upload** — backend uses `pipeline(req → hash transform → writeStream)` with zero memory buffering. Temp file written first, renamed on completion, cleaned up on error/abort. Max upload size raised to 1GB.
+- **Real upload progress** — XHR-based `uploadWithProgress()` client with `upload.onprogress` percentage reporting. New `useUpload` hook manages per-file state (pending/uploading/done/error/cancelled).
+- **Upload cancellation** — `AbortController` integration; cancel button on each uploading file removes it and cleans up server temp files.
+- **AttachmentUploader component** — dedicated upload UI with per-file progress bars, status indicators, error display. Replaces inline 64px grid in MessageInput.
+
+### Refactored
+- **Backend modules extracted**: `path-security.ts` (whitelist + symlink defense), `attachment-store.ts` (stream storage + hash naming), `uploads.ts` (HTTP routes), `agent-attachments.ts` (agent tool path validation + copy).
+- **Frontend modules extracted**: `upload-client.ts` (XHR wrapper), `useUpload.ts` (state hook), `AttachmentUploader.tsx` (UI component).
+- **MessageInput.tsx** — ~350 lines → ~200 lines; all upload logic delegated to useUpload hook.
+- **workspace.ts** — attachment routes removed (moved to uploads.ts).
+- **GET attachments** — now streams via `createReadStream().pipe(res)` instead of `readFileSync`.
+
+### Tests
+- Added: `path-security.test.ts` (7 cases: whitelist, symlink, size, invalid input).
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 285/285 ✅.
+
 ## [0.10.17] — 2026-04-28
 
 ### Security
