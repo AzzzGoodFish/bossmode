@@ -315,7 +315,7 @@ addRoute("POST", "/api/rooms/:id/summarize", async (req, res, params) => {
   }
 
   const body = (await parseBody(req)) as { keepCount?: number };
-  const keepCount = body.keepCount || 50;
+  const keepCount = body.keepCount ?? 50;
 
   if (isSummarizing(params.id)) {
     sendJson(res, 409, { error: "Summarization already in progress" });

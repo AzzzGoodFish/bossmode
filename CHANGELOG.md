@@ -4,6 +4,12 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.21] — 2026-04-28
+
+### Fixed
+- **Summarizer keepCount=0 ignored** — `body.keepCount || 50` treated `0` as falsy, always defaulting to 50. Fixed with `??` (nullish coalescing) in both API route and auto-summary config.
+- **Summarization completion message** — now reports how many messages were kept as raw text (e.g., "Latest 50 message(s) kept as raw text for ongoing context"), or nothing when keepCount=0.
+
 ## [0.10.20] — 2026-04-28
 
 ### Fixed
