@@ -35,7 +35,7 @@ export function useUpload(onError?: (msg: string) => void) {
     setItems((prev) => [
       ...prev,
       ...files.map((file) => ({
-        id: crypto.randomUUID(),
+        id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
         file,
         preview: isImageFile(file) ? URL.createObjectURL(file) : undefined,
         status: "pending" as const,

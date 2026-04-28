@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.20] — 2026-04-28
+
+### Fixed
+- **P0: Attachment upload crash on HTTP + LAN IP** — `crypto.randomUUID()` requires Secure Context (HTTPS or localhost). Replaced with `Date.now() + Math.random()` fallback for upload item IDs.
+
 ## [0.10.19] — 2026-04-28
 
 ### Fixed
