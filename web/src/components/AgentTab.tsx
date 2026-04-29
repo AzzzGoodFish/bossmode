@@ -371,6 +371,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
               streamingText={streamingText}
               streamingThinking={streamingThinking}
               agentName={agentName}
+              roomId={roomId}
               loading={loading}
               hasMore={hasMoreEvents}
               loadingOlder={loadingOlderEvents}
@@ -736,6 +737,7 @@ function AgentChat({
                 isMarkdown={event.type !== "user_steer"}
                 time={event.ts ? formatTime(event.ts) : undefined}
                 fullTime={event.ts ? new Date(event.ts).toLocaleString() : undefined}
+                roomId={roomId}
               />
             </div>
             );
@@ -852,6 +854,7 @@ function AgentActivity({
   streamingText,
   streamingThinking,
   agentName,
+  roomId,
   loading,
   hasMore,
   loadingOlder,
@@ -861,6 +864,7 @@ function AgentActivity({
   streamingText: string | null;
   streamingThinking: string | null;
   agentName: string;
+  roomId?: string;
   loading: boolean;
   hasMore: boolean;
   loadingOlder: boolean;
@@ -992,7 +996,7 @@ function AgentActivity({
           const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
           return (
             <div key={i} className={isNewPrepend ? "msg-enter" : undefined} style={animDelay ? { animationDelay: animDelay } : undefined}>
-              <ActivityItem event={event} agentName={agentName} />
+              <ActivityItem event={event} agentName={agentName} roomId={roomId} />
             </div>
           );
         })}
@@ -1013,7 +1017,7 @@ function AgentActivity({
 
 const TS_CLS = "text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums";
 
-function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: string }) {
+function ActivityItem({ event, agentName, roomId }: { event: CommittedEvent; agentName: string; roomId?: string }) {
   const ts = event.ts ? formatTime(event.ts) : undefined;
   const fullTs = event.ts ? new Date(event.ts).toLocaleString() : undefined;
   const inlineTs = ts ? <span className={`${TS_CLS} ml-2 hidden md:inline`} title={fullTs}>{ts}</span> : null;
@@ -1030,11 +1034,11 @@ function ActivityItem({ event, agentName }: { event: CommittedEvent; agentName: 
     case "tool":
       return <ToolCard event={event} time={ts} fullTime={fullTs} />;
     case "user_steer":
-      return <MessageBubble sender="user" content={event.text || ""} time={ts} fullTime={fullTs} />;
+      return <MessageBubble sender="user" content={event.text || ""} time={ts} fullTime={fullTs} roomId={roomId} />;
     case "agent_reply":
       return <MessageCard text={event.text || ""} label="DM Reply" time={ts} fullTime={fullTs} />;
     case "system":
-      return <MessageBubble sender="system" content={event.text || ""} time={ts} fullTime={fullTs} />;
+      return <MessageBubble sender="system" content={event.text || ""} time={ts} fullTime={fullTs} roomId={roomId} />;
     default:
       return null;
   }
