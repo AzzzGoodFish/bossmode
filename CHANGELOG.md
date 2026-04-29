@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.24] — 2026-04-29
+
+### Fixed
+- **MDXEditor: code block plugin missing** — added `codeBlockPlugin` + `InsertCodeBlock` toolbar button. ` ``` ` markdown shortcut now creates code blocks.
+- **MDXEditor: DiffSourceToggleWrapper usage** — wrapper now wraps all toolbar contents so Source mode correctly hides rich-text buttons.
+- **MDXEditor CSS completeness** — added styles for `select` (BlockTypeSelect), `pre` (code blocks), `a` (links), `hr` (thematic breaks), Source mode textarea, `::selection`.
+- **Rule file cleanup** — removed old-name rule files, updated 2 rooms' `ruleDocs` references to new names.
+
 ## [0.10.23] — 2026-04-29
 
 ### Added

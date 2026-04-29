@@ -36,12 +36,13 @@ function InnerEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
         mod.linkPlugin(),
         mod.linkDialogPlugin(),
         mod.tablePlugin(),
+        mod.codeBlockPlugin({ defaultCodeBlockLanguage: "text" }),
         mod.markdownShortcutPlugin(),
         mod.diffSourcePlugin({ viewMode: "rich-text", diffMarkdown: "" }),
         mod.toolbarPlugin({
           toolbarClassName: "mdx-toolbar",
           toolbarContents: () => (
-            <>
+            <mod.DiffSourceToggleWrapper>
               <mod.UndoRedo />
               <ToolbarSep />
               <mod.BoldItalicUnderlineToggles />
@@ -50,10 +51,9 @@ function InnerEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
               <mod.BlockTypeSelect />
               <ToolbarSep />
               <mod.CreateLink />
+              <mod.InsertCodeBlock />
               <mod.InsertTable />
-              <ToolbarSep />
-              <mod.DiffSourceToggleWrapper children={null} />
-            </>
+            </mod.DiffSourceToggleWrapper>
           ),
         }),
       ]);
