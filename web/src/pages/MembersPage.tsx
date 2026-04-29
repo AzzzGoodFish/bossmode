@@ -246,8 +246,11 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                   {["off", "minimal", "low", "medium", "high", "xhigh"].map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
               </Field>
-              <Field label="Context Limit">
-                <input autoComplete="off" type="number" value={form.contextLimit ?? 50}
+              <Field
+                label="Messages on Activation"
+                hint="Max recent room messages this member sees each time it's activated."
+              >
+                <input autoComplete="off" type="number" min={1} value={form.contextLimit ?? 50}
                   onChange={(e) => setForm({ ...form, contextLimit: parseInt(e.target.value, 10) || 50 })} className={inputCls} />
               </Field>
             </div>
@@ -384,11 +387,12 @@ function formatSpawnArgs(args: string[]): string {
   return lines.join("\n");
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">{label}</label>
       {children}
+      {hint && <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 leading-snug">{hint}</div>}
     </div>
   );
 }

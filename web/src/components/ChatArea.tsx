@@ -243,7 +243,7 @@ function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMet
   const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
   const activatedAgent = mentions?.length ? mentions[0] : null;
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 my-1 bg-zinc-50/50 dark:bg-zinc-900/30">
+    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 mt-3 bg-zinc-50/50 dark:bg-zinc-900/30">
       <div className="flex items-center gap-2 text-xs text-zinc-500">
         <span>{icon}</span>
         <span className="flex-1">

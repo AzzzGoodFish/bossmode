@@ -1,5 +1,5 @@
 ---
-title: Dev Team 协作规范
+title: "Team: Dev Team Protocol"
 author: architect
 created: 1776677830089
 updated: 1776677830089

@@ -88,3 +88,85 @@ textarea::-webkit-scrollbar {
   animation: message-pulse 1500ms ease-out;
   border-radius: 0.375rem;
 }
+
+/* ── MDXEditor theme ── */
+:root {
+  --mdxeditor-fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  --mdxeditor-fontSize: 14px;
+  --mdxeditor-lineHeight: 1.65;
+  --mdxeditor-color: rgb(39 39 42);
+  --mdxeditor-bg: transparent;
+  --mdxeditor-borderColor: transparent;
+  --mdxeditor-accentColor: rgb(37 99 235);
+  --mdxeditor-mutedColor: rgb(113 113 122);
+  --mdxeditor-codeBg: rgb(244 244 245);
+  --mdxeditor-codeColor: rgb(220 38 38);
+  --mdxeditor-blockquoteBorder: rgb(212 212 216);
+  --mdxeditor-toolbarBg: rgb(255 255 255);
+  --mdxeditor-toolbarColor: rgb(82 82 91);
+  --mdxeditor-toolbarBorderColor: rgb(228 228 231);
+  --mdxeditor-toolbarHoverBg: rgb(244 244 245);
+  --mdxeditor-toolbarActiveBg: rgb(219 234 254);
+}
+html.dark {
+  --mdxeditor-color: rgb(228 228 231);
+  --mdxeditor-mutedColor: rgb(161 161 170);
+  --mdxeditor-codeBg: rgb(39 39 42);
+  --mdxeditor-codeColor: rgb(248 113 113);
+  --mdxeditor-blockquoteBorder: rgb(63 63 70);
+  --mdxeditor-toolbarBg: rgb(24 24 27);
+  --mdxeditor-toolbarColor: rgb(212 212 216);
+  --mdxeditor-toolbarBorderColor: rgb(39 39 42);
+  --mdxeditor-toolbarHoverBg: rgb(39 39 42);
+  --mdxeditor-toolbarActiveBg: rgba(37 99 235 / 0.2);
+}
+
+.markdown-editor .mdx-content {
+  padding: 0;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.markdown-editor .mdx-content > * + * { margin-top: 0.75rem; }
+.markdown-editor .mdx-content h1, .markdown-editor .mdx-content h2, .markdown-editor .mdx-content h3 {
+  font-weight: 600; letter-spacing: -0.01em; margin-top: 1.5rem; margin-bottom: 0.5rem;
+}
+.markdown-editor .mdx-content h1 { font-size: 1.5rem; }
+.markdown-editor .mdx-content h2 { font-size: 1.25rem; }
+.markdown-editor .mdx-content h3 { font-size: 1.0625rem; }
+.markdown-editor .mdx-content code {
+  padding: 0.125rem 0.375rem; border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.875em;
+}
+.markdown-editor .mdx-content blockquote {
+  border-left: 3px solid var(--mdxeditor-blockquoteBorder);
+  padding-left: 1rem; color: var(--mdxeditor-mutedColor); font-style: normal;
+}
+.markdown-editor .mdx-content ul, .markdown-editor .mdx-content ol { padding-left: 1.5rem; }
+.markdown-editor .mdx-content table { border-collapse: collapse; margin-top: 0.75rem; font-size: 0.875em; }
+.markdown-editor .mdx-content th, .markdown-editor .mdx-content td {
+  border: 1px solid var(--mdxeditor-toolbarBorderColor); padding: 0.375rem 0.625rem;
+}
+.markdown-editor .mdx-content th { background: var(--mdxeditor-codeBg); font-weight: 600; }
+
+/* Toolbar: floating, focus-triggered */
+.markdown-editor .mdx-toolbar {
+  position: absolute; top: -40px; right: 0;
+  display: flex; gap: 2px; padding: 4px; border-radius: 6px;
+  background: var(--mdxeditor-toolbarBg);
+  border: 1px solid var(--mdxeditor-toolbarBorderColor);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  opacity: 0; pointer-events: none; transition: opacity 150ms; z-index: 10;
+}
+.markdown-editor:focus-within .mdx-toolbar, .markdown-editor .mdx-toolbar:hover {
+  opacity: 1; pointer-events: auto;
+}
+.markdown-editor .mdx-toolbar button {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; color: var(--mdxeditor-toolbarColor);
+  background: transparent; border: none; cursor: pointer; transition: background 100ms;
+}
+.markdown-editor .mdx-toolbar button:hover { background: var(--mdxeditor-toolbarHoverBg); }
+.markdown-editor .mdx-toolbar button[data-state="on"], .markdown-editor .mdx-toolbar button.active {
+  background: var(--mdxeditor-toolbarActiveBg); color: var(--mdxeditor-accentColor);
+}

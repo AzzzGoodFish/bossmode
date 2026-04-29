@@ -41,7 +41,9 @@ Use this tool when:
 - Status changes are recorded as system messages in the room (others see progress).
 - Reassigning to a different agent in this room automatically activates that agent.
 
-Always update task status promptly — stale task states erode the team's awareness.`;
+Always update task status promptly — stale task states erode the team's awareness.
+
+When updating description, **preserve previous content and append** your contribution (plans, findings, decisions). Do not overwrite — task descriptions are living records maintained by multiple actors.`;
 
 export const LIST_TASKS_DESCRIPTION = `List tasks in the current room. Optionally filter by status or assignee.
 
