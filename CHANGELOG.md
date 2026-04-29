@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.28] — 2026-04-29
+
+### Fixed
+- **MDXEditor content flush with page** — removed focus ring and reset internal wrapper padding/margin/border. Content now sits directly on page background with zero chrome.
+
 ## [0.10.27] — 2026-04-29
 
 ### Changed

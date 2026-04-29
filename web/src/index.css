@@ -121,6 +121,17 @@ html.dark {
   --mdxeditor-toolbarActiveBg: rgba(37 99 235 / 0.2);
 }
 
+/* Strip default padding/border from MDXEditor's internal wrappers so content sits flush */
+.markdown-editor > div,
+.markdown-editor [class*="_editorRoot"],
+.markdown-editor [class*="_rootContentEditableWrapper"],
+.markdown-editor [class*="_contentEditable"] {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+}
+
 .markdown-editor .mdx-content {
   padding: 0;
   outline: none;
