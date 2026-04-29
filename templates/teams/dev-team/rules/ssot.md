@@ -18,6 +18,45 @@ The team has three information channels. Know which one to trust:
 
 ---
 
+# Information Retrieval
+
+When you need to find information — a past decision, a credential, a discussion outcome, a spec detail — search before asking. You have two persistent information sources and specific tools for each:
+
+## Chat History
+
+Use `query_room_messages` to search past conversations:
+
+```
+query_room_messages({ query: "keyword", from: "sender", after: "7d", limit: 100 })
+```
+
+All parameters are optional and combinable. Supports keyword substring match (case-insensitive), sender filter, time range (`"today"`, `"7d"`, ISO timestamps), and `output: "file"` for large result sets.
+
+## Knowledge Documents
+
+Your system prompt includes a document tree with titles. When you know which document you need, use `Read` to load it by path.
+
+When you don't know the path — you're looking for a keyword, a topic, or you're not sure which document contains what you need — use `Bash` to search:
+
+```
+Bash({ command: "grep -rl 'keyword' /home/fish/.bossmode/knowledge/docs/" })
+```
+
+This returns file paths containing the keyword. Then `Read` the relevant files.
+
+## Search Order
+
+When you hit an information gap:
+
+1. **Scan the document tree** in your system prompt — titles often reveal the right document
+2. **Search Knowledge** with `grep`/`rg` if the title doesn't help — cast a wide net across all docs
+3. **Search chat history** with `query_room_messages` — discussions may contain context not yet documented
+4. **Ask a teammate or the user** — only after exhausting tools. Ask specific questions, not open-ended ones.
+
+Do not skip steps. A question you could have answered with a search is a wasted turn.
+
+---
+
 # Task Management
 
 Tasks are the team's shared dashboard — a supplement to chat that tracks what's being worked on, by whom, and where it stands. Chat is the battlefield; the task board is the scoreboard.
