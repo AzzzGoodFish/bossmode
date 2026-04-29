@@ -22,14 +22,16 @@ export function onMessage(fn: MessageListener): () => void {
 /**
  * Unified message posting: write to store + WS broadcast + notify listeners.
  * All message sources (API, tool callback, MCP) call this.
+ * Optional `extra` fields are spread into the stored message (e.g. type, task_event_meta).
  */
 export function postMessage(
   roomId: string,
   sender: string,
   content: string,
   mentions: string[] = [],
+  extra?: Partial<Pick<RoomMessage, "type" | "summary_meta" | "task_event_meta">>,
 ): RoomMessage {
-  const message = messageStore.addMessage(roomId, { sender, content, mentions });
+  const message = messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
 
   // WebSocket broadcast
   broadcastToRoom(roomId, { type: "room:message", roomId, message });

@@ -2,7 +2,7 @@
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as taskStore from "../workspace/task-store.js";
 import * as roomStore from "../workspace/room-store.js";
-import * as messageStore from "../workspace/message-store.js";
+import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
 import type { Task, TaskEventMeta } from "../shared/types.js";
@@ -47,16 +47,11 @@ export function emitTaskEvent(
     }
   }
 
-  // Write to message store with task_event type
-  const message = messageStore.addMessage(roomId, {
-    sender: "system",
-    content,
-    mentions,
+  // Write + broadcast + notify listeners (including router for mention activation)
+  postMessage(roomId, "system", content, mentions, {
     type: "task_event",
     task_event_meta: meta,
   });
-  // Broadcast room:message for chat stream
-  broadcastToRoom(roomId, { type: "room:message", roomId, message });
 
   // Also broadcast dedicated ws event for real-time UI updates (no message stream)
   const wsType = action === "deleted" ? "task:deleted" :
