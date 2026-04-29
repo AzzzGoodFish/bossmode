@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.25] — 2026-04-29
+
+### Fixed
+- **MDXEditor: fenced code blocks with language tags** — added `codeMirrorPlugin` with language mappings (js/ts/python/bash/json/yaml/css/html/sql/md). Without it, ` ```js ` blocks caused parse errors. Bundle increase ~150KB (lazy loaded, only on Task detail page).
+
 ## [0.10.24] — 2026-04-29
 
 ### Fixed

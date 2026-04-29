@@ -37,6 +37,17 @@ function InnerEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
         mod.linkDialogPlugin(),
         mod.tablePlugin(),
         mod.codeBlockPlugin({ defaultCodeBlockLanguage: "text" }),
+        mod.codeMirrorPlugin({
+          codeBlockLanguages: {
+            js: "JavaScript", javascript: "JavaScript",
+            ts: "TypeScript", typescript: "TypeScript", tsx: "TSX",
+            python: "Python", py: "Python",
+            bash: "Bash", sh: "Bash", shell: "Bash",
+            json: "JSON", yaml: "YAML", css: "CSS",
+            html: "HTML", sql: "SQL", md: "Markdown",
+            text: "Plain", "": "Plain",
+          },
+        }),
         mod.markdownShortcutPlugin(),
         mod.diffSourcePlugin({ viewMode: "rich-text", diffMarkdown: "" }),
         mod.toolbarPlugin({
