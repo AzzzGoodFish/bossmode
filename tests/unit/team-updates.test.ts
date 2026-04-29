@@ -20,7 +20,7 @@ function seedTemplateProject(root: string, version = "9.9.9"): void {
 
   writeFileSync(join(root, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM\n---\n\n# prompt\n", "utf-8");
   writeFileSync(join(root, "templates", "skills", "skill-a", "SKILL.md"), "---\nname: skill-a\ndescription: A\n---\n\nskill\n", "utf-8");
-  writeFileSync(join(root, "templates", "teams", "universal-agent-principles.md"), "# UAP\n\nbody\n", "utf-8");
+  writeFileSync(join(root, "templates", "teams", "universal-principles.md"), "# UAP\n\nbody\n", "utf-8");
 }
 
 describe("team-updates service", () => {
@@ -60,7 +60,7 @@ describe("team-updates service", () => {
     m.seedBuiltinTeam();
     expect(existsSync(join(bossmodeDir, "agents", "pm.md"))).toBe(true);
     expect(existsSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(bossmodeDir, "knowledge", "docs", "rules", "universal-agent-principles.md"))).toBe(true);
+    expect(existsSync(join(bossmodeDir, "knowledge", "docs", "rules", "member-universal-principles.md"))).toBe(true);
     expect(existsSync(join(bossmodeDir, "team-meta.json"))).toBe(true);
   });
 

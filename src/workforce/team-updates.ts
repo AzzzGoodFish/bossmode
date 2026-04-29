@@ -1,5 +1,5 @@
 import {
-  existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
+  existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync,
   type Dirent,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -151,16 +151,32 @@ function findTemplatesDir(): string | null {
   return null;
 }
 
+/** Map from legacy rule filenames to canonical names for cleanup */
+const LEGACY_RULE_NAMES: Record<string, string> = {
+  "rules/dev-team-protocol.md": "rules/team-dev-protocol.md",
+  "rules/lite-team-protocol.md": "rules/team-lite-protocol.md",
+  "rules/ssot.md": "rules/member-ssot.md",
+  "rules/universal-agent-principles.md": "rules/member-universal-principles.md",
+};
+
 export function toRulePath(relTemplatePath: string): string {
   const rel = relTemplatePath.replace(/\\/g, "/");
-  if (rel === "dev-team/team-prompt.md") return "rules/dev-team-protocol.md";
+  // team-prompt.md → team-{teamSlug}-protocol.md
+  // e.g. dev-team/team-prompt.md → rules/team-dev-protocol.md
   if (rel.endsWith("/team-prompt.md")) {
     const parts = rel.split("/");
-    const teamName = parts[parts.length - 2];
-    return `rules/${teamName}-protocol.md`;
+    const teamDir = parts[parts.length - 2]; // e.g. "dev-team"
+    const teamSlug = teamDir.replace(/-team$/, "");
+    return `rules/team-${teamSlug}-protocol.md`;
   }
+  // rules/ssot.md → member-ssot.md
+  if (rel.includes("/rules/")) {
+    const fileName = rel.split("/").pop()!;
+    return `rules/member-${fileName}`;
+  }
+  // universal-agent-principles.md → member-universal-principles.md
   const fileName = rel.split("/").pop()!;
-  return `rules/${fileName}`;
+  return `rules/member-${fileName}`;
 }
 
 function enumerateTemplates(): TemplateFile[] {
@@ -245,12 +261,19 @@ function injectBuiltinFrontmatter(content: string, version: string): string {
 }
 
 function parseRuleTemplate(content: string, rulePath: string): { title: string; body: string } {
-  let body = content;
-  const h1 = body.match(/^#\s+(.+)\n/);
-  let title = basename(rulePath, ".md").replace(/[-_]/g, " ");
-  if (h1) {
-    title = h1[1].trim();
-    body = body.slice(h1[0].length).trimStart();
+  // Strip template frontmatter first (buildRuleDoc will create its own)
+  const { meta: fm, body: rawBody } = parseYamlFrontmatter(content);
+  let body = rawBody;
+  // Extract title from frontmatter, h1 heading, or filename
+  let title = typeof fm.title === "string" ? fm.title : "";
+  if (!title) {
+    const h1 = body.match(/^#\s+(.+)\n/);
+    if (h1) {
+      title = h1[1].trim();
+      body = body.slice(h1[0].length).trimStart();
+    } else {
+      title = basename(rulePath, ".md").replace(/[-_]/g, " ");
+    }
   }
   return { title, body };
 }
@@ -482,7 +505,24 @@ export function seedBuiltinTeam(): void {
     }
   }
 
+  // Clean up legacy rule files that were superseded by canonical names
+  let cleaned = 0;
+  for (const [legacyPath, _canonicalPath] of Object.entries(LEGACY_RULE_NAMES)) {
+    const absPath = join(bossmodeDir(), "knowledge", "docs", ...legacyPath.split("/"));
+    if (existsSync(absPath)) {
+      try {
+        unlinkSync(absPath);
+        // Remove old meta entry
+        delete meta.files[legacyPath];
+        cleaned += 1;
+        logger.info("team-updates", "removed legacy rule file", { path: legacyPath });
+      } catch (err) {
+        logger.error("team-updates", "failed to remove legacy rule", { path: legacyPath, error: String(err) });
+      }
+    }
+  }
+
   meta.installedVersion = currentVersion;
   writeMeta(meta);
-  if (seeded > 0) logger.info("team-updates", "seeded missing builtin team files", { seeded });
+  if (seeded > 0 || cleaned > 0) logger.info("team-updates", "seeded missing builtin team files", { seeded, cleaned });
 }

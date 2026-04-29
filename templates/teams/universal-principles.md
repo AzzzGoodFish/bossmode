@@ -1,5 +1,5 @@
 ---
-title: "Universal Agent Principles"
+title: "Member: Universal Principles"
 type: rule
 createdAt: "2026-04-23"
 updatedAt: "2026-04-23"
