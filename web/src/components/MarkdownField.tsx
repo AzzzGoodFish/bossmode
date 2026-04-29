@@ -42,6 +42,17 @@ export function MarkdownField({
     if (!editing) setDraft(value);
   }, [value, editing]);
 
+  /**
+   * In autoEdit mode (e.g. task creation), changes are committed continuously.
+   * The parent owns the save semantic via its own page-level button — the
+   * field-local Save/Cancel are meaningless because there's no "View" target
+   * to switch to yet.
+   */
+  const handleDraftChange = useCallback((next: string) => {
+    setDraft(next);
+    if (autoEdit) onChange(next);
+  }, [autoEdit, onChange]);
+
   const enterEdit = useCallback(() => {
     if (readOnly) return;
     setDraft(value);
@@ -75,25 +86,27 @@ export function MarkdownField({
       <div className={`markdown-field markdown-field--editing ${className}`}>
         <MarkdownEditor
           value={draft}
-          onChange={setDraft}
+          onChange={handleDraftChange}
           placeholder={placeholder}
         />
-        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-          <button
-            onClick={handleSave}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Check size={14} /> Save
-            <span className="hidden md:inline ml-1 text-[10px] text-blue-100/80 font-mono">⌘↵</span>
-          </button>
-          <button
-            onClick={handleCancel}
-            className="px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            Cancel
-            <span className="hidden md:inline text-[10px] text-zinc-400 font-mono">Esc</span>
-          </button>
-        </div>
+        {!autoEdit && (
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            <button
+              onClick={handleSave}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Check size={14} /> Save
+              <span className="hidden md:inline ml-1 text-[10px] text-blue-100/80 font-mono">⌘↵</span>
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              Cancel
+              <span className="hidden md:inline text-[10px] text-zinc-400 font-mono">Esc</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -127,7 +140,7 @@ export function MarkdownField({
           type="button"
           onClick={enterEdit}
           aria-label="Edit"
-          className="absolute top-1 right-1 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
+          className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
         >
           <Pencil size={12} /> Edit
         </button>
