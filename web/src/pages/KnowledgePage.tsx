@@ -14,8 +14,7 @@ import {
   deleteKnowledgeEntry as apiDeleteEntry,
   moveKnowledgeEntry, batchMoveKnowledge, batchDeleteKnowledge,
 } from "../api/client";
-import { Markdown } from "../components/Markdown";
-import { MarkdownEditor } from "../components/MarkdownEditor";
+import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MoveToDialog } from "../components/MoveToDialog";
 
@@ -55,9 +54,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const lastClickedRef = useRef<string | null>(null);
 
   const [currentDoc, setCurrentDoc] = useState<KnowledgeEntry | null>(null);
-  const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftContent, setDraftContent] = useState("");
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: KnowledgeTreeNode } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -129,8 +126,6 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     getKnowledgeEntry(selectedPath).then((doc) => {
       setCurrentDoc(doc);
       setDraftTitle(doc.title);
-      setDraftContent(doc.content);
-      setEditing(false);
     }).catch((err) => {
       toast(String(err?.message || err), "error");
       setCurrentDoc(null);
@@ -259,15 +254,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     }
   };
 
-  const handleSaveEdit = async () => {
-    if (!currentDoc || !draftTitle) return;
-    try {
-      const updated = await updateKnowledgeEntry(currentDoc.id, draftTitle, draftContent);
-      setCurrentDoc(updated);
-      setEditing(false);
-      refreshTree();
-    } catch (err: any) { toast(err.message, "error"); }
-  };
+
 
   const moveSingle = useCallback(async (fromPath: string, destination: string) => {
     const base = fromPath.split("/").pop() || fromPath;
@@ -610,48 +597,22 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
             </button>
           )}
           {currentDoc ? (
-            editing ? (
-              <div className="p-6">
-                {/* Title — borderless to match TaskDetailPage editor aesthetic */}
-                <input
-                  value={draftTitle}
-                  onChange={(e) => setDraftTitle(e.target.value)}
-                  placeholder="Untitled"
-                  autoFocus
-                  className="w-full text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 mb-4 leading-tight"
-                />
-
-                {/* WYSIWYG body */}
-                <MarkdownEditor
-                  value={draftContent}
-                  onChange={setDraftContent}
-                  placeholder="Start writing… (markdown supported, type / for shortcuts)"
-                />
-
-                <div className="flex items-center gap-2 mt-6 pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                  <button
-                    onClick={handleSaveEdit}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md cursor-pointer transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDraftTitle(currentDoc.title);
-                      setDraftContent(currentDoc.content);
-                      setEditing(false);
-                    }}
-                    className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
               <div className="p-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-bold text-zinc-900 dark:text-white truncate">{currentDoc.title}</h2>
+                    <input
+                      value={draftTitle}
+                      onChange={(e) => setDraftTitle(e.target.value)}
+                      onBlur={() => {
+                        if (draftTitle && draftTitle !== currentDoc.title) {
+                          updateKnowledgeEntry(currentDoc.id, draftTitle, currentDoc.content)
+                            .then((updated) => { setCurrentDoc(updated); refreshTree(); })
+                            .catch((err: any) => toast(err.message, "error"));
+                        }
+                      }}
+                      placeholder="Untitled"
+                      className="w-full text-lg font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 leading-tight"
+                    />
                     <div className="text-xs text-zinc-500 mt-0.5 font-mono truncate">{currentDoc.id} · by {currentDoc.source}</div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -660,21 +621,22 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                       className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">
                       <Download size={14} /> Download
                     </button>
-                    <button onClick={() => setEditing(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">
-                      <Pencil size={14} /> Edit
-                    </button>
                     <button onClick={handleDeleteDoc}
                       className="flex items-center gap-1 px-3 py-1.5 text-red-500 dark:text-red-400 hover:text-red-400 dark:hover:text-red-300 text-sm cursor-pointer">
                       <Trash2 size={14} /> Delete
                     </button>
                   </div>
                 </div>
-                <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
-                  {currentDoc.content ? <Markdown content={currentDoc.content} /> : <em className="text-zinc-400">(empty document)</em>}
-                </div>
+                <MarkdownField
+                  value={currentDoc.content}
+                  onChange={(v) => {
+                    updateKnowledgeEntry(currentDoc.id, currentDoc.title, v)
+                      .then((updated) => { setCurrentDoc(updated); })
+                      .catch((err: any) => toast(err.message, "error"));
+                  }}
+                  placeholder="Start writing… (markdown supported)"
+                />
               </div>
-            )
           ) : folderNode ? (
             <FolderOverview
               node={folderNode}

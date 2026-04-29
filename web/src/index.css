@@ -191,4 +191,10 @@ html.dark {
   background: rgb(37 99 235 / 0.18);
 }
 
+/* MarkdownField — mobile: Edit button always visible (no :hover) */
+@media (hover: none) {
+  .markdown-field--view button[aria-label="Edit"] {
+    opacity: 1 !important;
+  }
+}
 

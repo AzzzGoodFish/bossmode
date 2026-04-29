@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ArrowLeft, Trash2, ChevronDown, User, Circle, CircleDot, CheckCircle2, AlertCircle, AlertOctagon, Minus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority } from "../api/client";
 import { listRoomTasks, updateTask, deleteTaskApi, createTask, getRoom } from "../api/client";
-import { MarkdownEditor } from "../components/MarkdownEditor";
+import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MobileTopBar } from "../components/MobileTopBar";
 
@@ -228,10 +228,11 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
               {/* Description */}
               <div className="mt-6">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 mb-2">Description</div>
-                <MarkdownEditor
+                <MarkdownField
                   value={description}
                   onChange={(v) => { setDescription(v); markDirty(); }}
                   placeholder="Add a description… (markdown supported)"
+                  autoEdit={isCreate}
                 />
               </div>
 
