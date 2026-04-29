@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.27] — 2026-04-29
+
+### Changed
+- **MDXEditor toolbar removed** — Linear-style minimal editing. All formatting via markdown shortcuts (`# ` H1, `- ` list, ` ``` ` code, `Cmd+B` bold, etc.) and keyboard shortcuts. No floating toolbar chrome. Source toggle also removed for consistency.
+
 ## [0.10.26] — 2026-04-29
 
 ### Added
