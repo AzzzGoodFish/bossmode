@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.22] — 2026-04-28
+
+### Added
+- **Lite team template** — `templates/teams/lite-team/` with 3 members (architect as leader, developer, qa). Suited for libraries, CLI tools, services, and SDK projects without PM/Designer overhead.
+
+### Changed
+- **ssot.md decoupled from role names** — task management rules now use generic terms (Creator, Assignee, Verifier) instead of hardcoded role names (PM, Developer, QA). Enables reuse across different team compositions.
+- Added `.bossmode-attachments/` to `.gitignore`.
+
 ## [0.10.21] — 2026-04-28
 
 ### Fixed

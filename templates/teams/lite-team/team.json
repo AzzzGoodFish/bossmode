@@ -1,0 +1,6 @@
+{
+  "name": "lite-team",
+  "description": "精简开发团队 — 适用于库、CLI、服务等非 UI 项目",
+  "leader": "architect",
+  "members": ["architect", "developer", "qa"]
+}
