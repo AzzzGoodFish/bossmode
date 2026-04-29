@@ -149,34 +149,7 @@ html.dark {
 }
 .markdown-editor .mdx-content th { background: var(--mdxeditor-codeBg); font-weight: 600; }
 
-/* Toolbar: floating, focus-triggered */
-.markdown-editor .mdx-toolbar {
-  position: absolute; top: -40px; right: 0;
-  display: flex; gap: 2px; padding: 4px; border-radius: 6px;
-  background: var(--mdxeditor-toolbarBg);
-  border: 1px solid var(--mdxeditor-toolbarBorderColor);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  opacity: 0; pointer-events: none; transition: opacity 150ms; z-index: 10;
-}
-.markdown-editor:focus-within .mdx-toolbar, .markdown-editor .mdx-toolbar:hover {
-  opacity: 1; pointer-events: auto;
-}
-.markdown-editor .mdx-toolbar button {
-  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 4px; color: var(--mdxeditor-toolbarColor);
-  background: transparent; border: none; cursor: pointer; transition: background 100ms;
-}
-.markdown-editor .mdx-toolbar button:hover { background: var(--mdxeditor-toolbarHoverBg); }
-.markdown-editor .mdx-toolbar button[data-state="on"], .markdown-editor .mdx-toolbar button.active {
-  background: var(--mdxeditor-toolbarActiveBg); color: var(--mdxeditor-accentColor);
-}
-.markdown-editor .mdx-toolbar select {
-  height: 28px; padding: 0 6px; border-radius: 4px;
-  background: transparent; color: var(--mdxeditor-toolbarColor);
-  border: 1px solid var(--mdxeditor-toolbarBorderColor);
-  font-size: 12px; cursor: pointer;
-}
-.markdown-editor .mdx-toolbar select:hover { background: var(--mdxeditor-toolbarHoverBg); }
+/* No toolbar — Linear-style minimal editor. All formatting via markdown shortcuts. */
 
 /* Code blocks (rendered inside editor as <pre><code>) */
 .markdown-editor .mdx-content pre {
@@ -207,13 +180,4 @@ html.dark {
   background: rgb(37 99 235 / 0.18);
 }
 
-/* Source-mode (raw markdown view) — keep readable, monospace */
-.markdown-editor [class*="_diffSourceWrapper"] textarea,
-.markdown-editor [class*="_sourceView"] textarea {
-  background: transparent !important;
-  color: var(--mdxeditor-color) !important;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
-  font-size: 13px !important; line-height: 1.6 !important;
-  border: 1px dashed var(--mdxeditor-toolbarBorderColor) !important;
-  border-radius: 6px; padding: 10px 12px;
-}
+
