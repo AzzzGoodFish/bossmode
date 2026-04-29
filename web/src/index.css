@@ -170,3 +170,50 @@ html.dark {
 .markdown-editor .mdx-toolbar button[data-state="on"], .markdown-editor .mdx-toolbar button.active {
   background: var(--mdxeditor-toolbarActiveBg); color: var(--mdxeditor-accentColor);
 }
+.markdown-editor .mdx-toolbar select {
+  height: 28px; padding: 0 6px; border-radius: 4px;
+  background: transparent; color: var(--mdxeditor-toolbarColor);
+  border: 1px solid var(--mdxeditor-toolbarBorderColor);
+  font-size: 12px; cursor: pointer;
+}
+.markdown-editor .mdx-toolbar select:hover { background: var(--mdxeditor-toolbarHoverBg); }
+
+/* Code blocks (rendered inside editor as <pre><code>) */
+.markdown-editor .mdx-content pre {
+  background: var(--mdxeditor-codeBg);
+  border-radius: 6px; padding: 10px 12px; margin-top: 0.75rem;
+  overflow-x: auto;
+}
+.markdown-editor .mdx-content pre code {
+  background: transparent; padding: 0; color: var(--mdxeditor-color);
+  font-size: 12.5px; line-height: 1.5;
+}
+
+/* Links */
+.markdown-editor .mdx-content a {
+  color: var(--mdxeditor-accentColor);
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
+}
+.markdown-editor .mdx-content a:hover { text-decoration-thickness: 2px; }
+
+/* Horizontal rule */
+.markdown-editor .mdx-content hr {
+  border: 0; border-top: 1px solid var(--mdxeditor-toolbarBorderColor);
+  margin: 1.25rem 0;
+}
+
+/* Selection color matches accent */
+.markdown-editor .mdx-content ::selection {
+  background: rgb(37 99 235 / 0.18);
+}
+
+/* Source-mode (raw markdown view) — keep readable, monospace */
+.markdown-editor [class*="_diffSourceWrapper"] textarea,
+.markdown-editor [class*="_sourceView"] textarea {
+  background: transparent !important;
+  color: var(--mdxeditor-color) !important;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
+  font-size: 13px !important; line-height: 1.6 !important;
+  border: 1px dashed var(--mdxeditor-toolbarBorderColor) !important;
+  border-radius: 6px; padding: 10px 12px;
+}
