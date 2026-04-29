@@ -15,6 +15,7 @@ import {
   moveKnowledgeEntry, batchMoveKnowledge, batchDeleteKnowledge,
 } from "../api/client";
 import { Markdown } from "../components/Markdown";
+import { MarkdownEditor } from "../components/MarkdownEditor";
 import { useDialog } from "../components/dialogs";
 import { MoveToDialog } from "../components/MoveToDialog";
 
@@ -611,29 +612,37 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
           {currentDoc ? (
             editing ? (
               <div className="p-6">
+                {/* Title — borderless to match TaskDetailPage editor aesthetic */}
                 <input
                   value={draftTitle}
                   onChange={(e) => setDraftTitle(e.target.value)}
-                  placeholder="Title"
-                  className={`${inputCls} mb-3`}
+                  placeholder="Untitled"
+                  autoFocus
+                  className="w-full text-2xl md:text-3xl font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 mb-4 leading-tight"
                 />
-                <textarea
+
+                {/* WYSIWYG body */}
+                <MarkdownEditor
                   value={draftContent}
-                  onChange={(e) => setDraftContent(e.target.value)}
-                  placeholder="Markdown body..."
-                  rows={24}
-                  className={`${inputCls} font-mono text-xs resize-y`}
+                  onChange={setDraftContent}
+                  placeholder="Start writing… (markdown supported, type / for shortcuts)"
                 />
-                <div className="flex gap-2 mt-3">
-                  <button onClick={handleSaveEdit}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded cursor-pointer">
+
+                <div className="flex items-center gap-2 mt-6 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                  <button
+                    onClick={handleSaveEdit}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md cursor-pointer transition-colors"
+                  >
                     Save
                   </button>
-                  <button onClick={() => {
-                    setDraftTitle(currentDoc.title);
-                    setDraftContent(currentDoc.content);
-                    setEditing(false);
-                  }} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
+                  <button
+                    onClick={() => {
+                      setDraftTitle(currentDoc.title);
+                      setDraftContent(currentDoc.content);
+                      setEditing(false);
+                    }}
+                    className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors"
+                  >
                     Cancel
                   </button>
                 </div>

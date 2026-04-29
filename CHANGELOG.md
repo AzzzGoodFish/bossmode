@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.26] — 2026-04-29
+
+### Added
+- **Knowledge editor WYSIWYG** — KnowledgePage edit mode now uses the same `<MarkdownEditor>` component as Task detail. Replaces raw textarea with inline rich-text editing, floating toolbar, code block support, and Source toggle. Zero additional bundle cost (MDXEditor chunk already loaded).
+
 ## [0.10.25] — 2026-04-29
 
 ### Fixed
