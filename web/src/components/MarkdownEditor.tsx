@@ -83,7 +83,7 @@ function InnerEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
 
 export function MarkdownEditor({ value, onChange, placeholder, className }: MarkdownEditorProps) {
   return (
-    <div className={`markdown-editor relative rounded-md transition-all focus-within:ring-2 focus-within:ring-blue-500/30 ${className || ""}`}>
+    <div className={`markdown-editor relative ${className || ""}`}>
       <Suspense fallback={<EditorFallback value={value} placeholder={placeholder} />}>
         <InnerEditor value={value} onChange={onChange} placeholder={placeholder} />
       </Suspense>
