@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ArrowLeft, Trash2, ChevronDown, User, Circle, CircleDot, CheckCircle2, AlertCircle, AlertOctagon, Minus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority } from "../api/client";
 import { listRoomTasks, updateTask, deleteTaskApi, createTask, getRoom } from "../api/client";
-import { Markdown } from "../components/Markdown";
+import { MarkdownEditor } from "../components/MarkdownEditor";
 import { useDialog } from "../components/dialogs";
 import { MobileTopBar } from "../components/MobileTopBar";
 
@@ -64,13 +64,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   const [saving, setSaving] = useState(false);
 
   // Auto-grow textarea
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const adjustTextarea = useCallback(() => {
-    const el = taRef.current; if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.max(el.scrollHeight, 200) + "px";
-  }, []);
-  useEffect(() => { adjustTextarea(); }, [description, adjustTextarea]);
+
 
   // Load room (for name + members) and task
   useEffect(() => {
@@ -234,22 +228,11 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
               {/* Description */}
               <div className="mt-6">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 mb-2">Description</div>
-                <textarea
-                  ref={taRef}
+                <MarkdownEditor
                   value={description}
-                  onChange={(e) => { setDescription(e.target.value); markDirty(); adjustTextarea(); }}
+                  onChange={(v) => { setDescription(v); markDirty(); }}
                   placeholder="Add a description… (markdown supported)"
-                  className="w-full bg-transparent text-base md:text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed font-mono resize-none focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700"
-                  style={{ minHeight: 200 }}
                 />
-                {description.trim() && (
-                  <details className="mt-4 text-xs">
-                    <summary className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer select-none">Preview</summary>
-                    <div className="mt-3 px-4 py-3 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-                      <Markdown content={description} />
-                    </div>
-                  </details>
-                )}
               </div>
 
               {/* References */}

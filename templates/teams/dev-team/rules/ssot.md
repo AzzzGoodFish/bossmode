@@ -1,5 +1,5 @@
 ---
-title: SSOT — Source of Truth & Workspace Protocol
+title: "Member: SSOT — Source of Truth & Workspace Protocol"
 ---
 
 # Source of Truth
@@ -92,6 +92,20 @@ When you `create_task` or `update_task` with an `assignee` who is an agent in th
 **When to use task assign vs chat mention:**
 - Need structured context (title + description + references) → create/update task with assignee
 - Quick clarification or ad-hoc discussion → chat mention
+
+## Tasks Are Living Records
+
+A task description is not just the original request — it grows as work progresses. Each actor that takes over a task should add their output to the description:
+
+| Actor takes the task | What they append |
+|----------------------|-----------------|
+| Designer of the approach | Implementation plan, key decisions, risks |
+| Implementer | What was built, file changes, commits, known limitations |
+| Verifier | Test results, acceptance scope, defects found |
+
+Use `update_task` with `description=` to append (preserve previous content; don't overwrite).
+
+This makes task.description the single record of the work — readable end-to-end without spelunking through chat history.
 
 ## Principles
 

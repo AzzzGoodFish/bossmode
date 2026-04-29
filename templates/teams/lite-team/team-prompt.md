@@ -1,4 +1,14 @@
 ---
+title: "Team: Lite Team Protocol"
+type: rule
+source: builtin
+version: 0.10.21
+author: builtin
+created: 1777429832548
+updated: 1777429832548
+---
+
+---
 title: Lite Team 协作规范
 ---
 

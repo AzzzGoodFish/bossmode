@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.10.23] — 2026-04-29
+
+### Added
+- **Task description WYSIWYG editor** — MDXEditor integration with lazy loading (~250KB gzip, only loaded on Task detail page). Replaces textarea + preview toggle with inline rich-text editing. Supports headings, lists, quotes, tables, links, code blocks, markdown shortcuts. Floating toolbar appears on focus.
+- **"Tasks Are Living Records" principle** — added to ssot.md. Task descriptions are enriched by each actor (append, don't overwrite).
+
+### Changed
+- **Context Limit renamed** — "Context Limit" → "Messages on Activation" with descriptive hint text.
+- **Task event message spacing** — unified with regular message spacing (`mt-3`).
+- **update_task tool description** — added "preserve previous content and append" guidance.
+- **Rule files renamed** — `member-universal-principles.md`, `member-ssot.md`, `team-dev-protocol.md`, `team-lite-protocol.md`.
+
+### Tests
+- **Release validation**: `npm run build` ✅; `npm test -- tests/unit` 285/285 ✅.
+
 ## [0.10.22] — 2026-04-28
 
 ### Added
