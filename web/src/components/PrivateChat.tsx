@@ -265,7 +265,7 @@ export function PrivateChat({
           </div>
         )}
         {committed.map((event, i) => (
-          <CommittedItem key={i} event={event} agentName={agentName} />
+          <CommittedItem key={i} event={event} agentName={agentName} roomId={roomId} />
         ))}
         {streamingThinking !== null && streamingThinking.length > 0 && (
           <ThinkingCard thinking={streamingThinking} isStreaming />
@@ -302,7 +302,7 @@ export function PrivateChat({
   );
 }
 
-function CommittedItem({ event, agentName }: { event: CommittedEvent; agentName: string }) {
+function CommittedItem({ event, agentName, roomId }: { event: CommittedEvent; agentName: string; roomId?: string }) {
   switch (event.type) {
     case "agent_start":
     case "agent_end":
@@ -310,11 +310,11 @@ function CommittedItem({ event, agentName }: { event: CommittedEvent; agentName:
     case "thinking":
       return <ThinkingCard thinking={event.thinking || ""} />;
     case "message":
-      return <MessageBubble sender={agentName} content={event.text || ""} isMarkdown />;
+      return <MessageBubble sender={agentName} content={event.text || ""} isMarkdown roomId={roomId} />;
     case "tool":
       return <ToolCard event={event} />;
     case "user_steer":
-      return <MessageBubble sender="user" content={event.text || ""} />;
+      return <MessageBubble sender="user" content={event.text || ""} roomId={roomId} />;
     default:
       return null;
   }
