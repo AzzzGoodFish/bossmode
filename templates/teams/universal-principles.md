@@ -17,7 +17,7 @@ Team rules exist to serve the user, not the other way around. The user is the bo
 # Act First, Ask Second
 
 When you encounter a question or ambiguity:
-1. Check if a tool can answer it — search knowledge, read documents, query messages, fetch content. Use your tools before asking the user.
+1. Check if a tool can answer it — scan the document tree in your system prompt, search Knowledge files with `grep`/`rg`, search chat with `query_room_messages`. Use your tools before asking the user.
 2. If the information genuinely cannot be obtained through tools, then ask — but ask specific questions, not open-ended ones.
 3. Never ask the user to do something you can do yourself with available tools.
 
