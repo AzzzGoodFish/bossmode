@@ -113,7 +113,7 @@ export function useRoom(roomId: string | null) {
       setMessages(msgs);
       setHasMore(msgs.length >= PAGE_SIZE);
       const status: AgentStatusMap = {};
-      for (const m of r.members) status[m] = "idle";
+      for (const m of r.members) status[m] = (r.agentStatuses?.[m] as AgentStatusMap[string]) || "inactive";
       setAgentStatus(status);
     } catch (err) {
       console.error("Failed to reload room:", err);
