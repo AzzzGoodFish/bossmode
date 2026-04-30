@@ -809,7 +809,7 @@ function AgentChat({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
           aria-label="Attach files"
         >
@@ -830,14 +830,14 @@ function AgentChat({
           disabled={uploading}
           rows={1}
           placeholder={uploading ? "Uploading..." : "Type / for commands, or send instruction..."}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white
-                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 max-h-[120px]"
+          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
+                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 max-h-[120px]"
         />
         <button
           onClick={handleSend}
           disabled={uploading || (!input.trim() && pendingFiles.length === 0)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
-                     text-white text-sm font-medium rounded transition-colors cursor-pointer"
+          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
+                     text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
         >
           {uploading ? "..." : "Send"}
         </button>
