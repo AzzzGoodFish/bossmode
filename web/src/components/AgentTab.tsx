@@ -632,7 +632,7 @@ function AgentChat({
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "0px";
-    const newHeight = Math.min(Math.max(el.scrollHeight, 36), 120);
+    const newHeight = Math.min(Math.max(el.scrollHeight, 38), 120);
     el.style.height = newHeight + "px";
     el.style.overflowY = el.scrollHeight > 120 ? "auto" : "hidden";
   }, [input]);
