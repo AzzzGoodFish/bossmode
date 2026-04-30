@@ -809,8 +809,9 @@ function AgentChat({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
+          aria-label="Attach files"
         >
           <Paperclip size={16} />
         </button>
