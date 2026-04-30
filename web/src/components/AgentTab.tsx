@@ -813,7 +813,7 @@ function AgentChat({
           title="Attach files"
           aria-label="Attach files"
         >
-          <Paperclip size={16} />
+          <Paperclip size={18} />
         </button>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
 
@@ -831,7 +831,7 @@ function AgentChat({
           rows={1}
           placeholder={uploading ? "Uploading..." : "Type / for commands, or send instruction..."}
           className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
-                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 max-h-[120px]"
+                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 disabled:opacity-50 max-h-[120px]"
         />
         <button
           onClick={handleSend}
