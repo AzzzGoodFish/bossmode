@@ -69,18 +69,6 @@ export async function handleToolCallback(
       }
 
       let warning: string | undefined;
-      if (target === "user" && source === "room_mention") {
-        target = "room";
-        warning = "target: \"user\" is not allowed when activated from a room @mention. Server rewrote to \"room\". Your message was posted to the room.";
-        logger.warn("callback", "target_rewrite", {
-          roomId,
-          agent: agentName,
-          originalTarget: "user",
-          rewrittenTo: "room",
-          reason: "activated_from_room_mention",
-          source,
-        });
-      }
 
       if (target === "user") {
         // Private reply: emit as agent_reply event, don't write to room messages

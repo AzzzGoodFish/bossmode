@@ -8,21 +8,21 @@ export function buildChatToolDescription(memberList: string): string {
 Parameters:
 - message (required): text content
 - target (optional): "room" | "user"
-  - Default: follow the "Reply via chat: target=..." instruction in the envelope of the triggering message (the last one in your delivery, the one that carries a [Reply via chat: ...] footer). That instruction is authoritative.
+  - Default: "room" for room conversations, "user" for private messages.
   - "room": visible to everyone in the room (the normal case)
-  - "user": private reply, only the user sees it. Use ONLY when the triggering envelope says so (i.e. the incoming message was a [Private message from user ...]).
+  - "user": private reply, only the user sees it.
+  - The envelope footer suggests a default target. You may override it when the user explicitly asks (e.g. "post this to the room" or "reply privately").
 - mentions (optional): array of agent names to activate, e.g. ["developer","qa"]. This is the only activation channel. @name in message text is a reference only.
 
 Rules:
-- Follow the footer of the triggering message for target. Do not override unless you are proactively starting a new conversation with no room activation in the current turn.
-- If activated by a room mention and you try target="user", the server rewrites it to "room" and returns a warning.
+- Follow the envelope footer's suggested target unless the user explicitly requests otherwise.
 - In room replies, include mentions[] only for agents you need to activate next.
 
 Available mention targets in this room: ${memberList}`;
 }
 
 export const CHAT_TARGET_PARAM_DESCRIPTION =
-  '"room" or "user"; default follows the triggering envelope footer';
+  '"room" or "user"; default follows triggering envelope footer';
 
 export const CHAT_MENTIONS_PARAM_DESCRIPTION =
   "Agent names to activate (authoritative activation channel)";

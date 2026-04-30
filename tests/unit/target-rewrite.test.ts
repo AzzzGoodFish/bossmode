@@ -50,7 +50,7 @@ vi.mock("../../src/communication/ws.js", () => ({
 
 import { handleToolCallback } from "../../src/engine/tools.js";
 
-describe("chat target rewrite enforcement", () => {
+describe("chat target routing (soft hints, no hard rewrite)", () => {
   beforeEach(() => {
     clearAllActivationSources();
     mocks.postMessage.mockReset();
@@ -61,7 +61,7 @@ describe("chat target rewrite enforcement", () => {
     mocks.parseMentions.mockReturnValue([]);
   });
 
-  it("rewrites room_mention + target=user to room with warning", async () => {
+  it("room_mention + target=user sends private (no rewrite)", async () => {
     setActivationSource("room1", "pm", "room_mention");
 
     const result = await handleToolCallback("chat", "room1", "pm", {
@@ -70,12 +70,12 @@ describe("chat target rewrite enforcement", () => {
       mentions: [],
     });
 
-    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "pm", "reply", []);
-    expect(mocks.emitAgentReply).not.toHaveBeenCalled();
-    expect(String((result as any).warning)).toContain("rewrote");
+    expect(mocks.emitAgentReply).toHaveBeenCalledWith("room1", "pm", "reply");
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect((result as any).warning).toBeUndefined();
   });
 
-  it("keeps private for private_instruction + target=user", async () => {
+  it("private_instruction + target=user sends private", async () => {
     setActivationSource("room1", "pm", "private_instruction");
 
     const result = await handleToolCallback("chat", "room1", "pm", {
@@ -89,40 +89,41 @@ describe("chat target rewrite enforcement", () => {
     expect((result as any).warning).toBeUndefined();
   });
 
-  it("keeps private for self_start + target=user", async () => {
-    setActivationSource("room1", "pm", "self_start");
-    await handleToolCallback("chat", "room1", "pm", { message: "private", target: "user" });
-    expect(mocks.emitAgentReply).toHaveBeenCalled();
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+  it("private_instruction + target=room sends to room (cross-channel allowed)", async () => {
+    setActivationSource("room1", "pm", "private_instruction");
+
+    const result = await handleToolCallback("chat", "room1", "pm", {
+      message: "forwarded to room",
+      target: "room",
+      mentions: [],
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "pm", "forwarded to room", []);
+    expect(mocks.emitAgentReply).not.toHaveBeenCalled();
   });
 
-  it("keeps private for system + target=user", async () => {
-    setActivationSource("room1", "pm", "system");
-    await handleToolCallback("chat", "room1", "pm", { message: "private", target: "user" });
-    expect(mocks.emitAgentReply).toHaveBeenCalled();
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-  });
-
-  it("keeps private for null source + target=user", async () => {
-    await handleToolCallback("chat", "room1", "pm", { message: "private", target: "user" });
-    expect(mocks.emitAgentReply).toHaveBeenCalled();
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-  });
-
-  it("room_mention + target=room passes without warning", async () => {
+  it("room_mention + target=room sends to room", async () => {
     setActivationSource("room1", "pm", "room_mention");
     const result = await handleToolCallback("chat", "room1", "pm", { message: "public", target: "room", mentions: [] });
     expect(mocks.postMessage).toHaveBeenCalledWith("room1", "pm", "public", []);
     expect((result as any).warning).toBeUndefined();
   });
 
-  it("@all fan-out classified as room_mention is also rewritten", async () => {
-    setActivationSource("room1", "pm", "room_mention");
-    const result = await handleToolCallback("chat", "room1", "pm", {
-      message: "should be room",
-      target: "user",
-    });
-    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "pm", "should be room", []);
-    expect(String((result as any).warning)).toContain("room @mention");
+  it("self_start + target=user sends private", async () => {
+    setActivationSource("room1", "pm", "self_start");
+    await handleToolCallback("chat", "room1", "pm", { message: "private", target: "user" });
+    expect(mocks.emitAgentReply).toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("null source + target=user sends private", async () => {
+    await handleToolCallback("chat", "room1", "pm", { message: "private", target: "user" });
+    expect(mocks.emitAgentReply).toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("null source + target=room sends to room", async () => {
+    const result = await handleToolCallback("chat", "room1", "pm", { message: "public", target: "room", mentions: [] });
+    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "pm", "public", []);
   });
 });

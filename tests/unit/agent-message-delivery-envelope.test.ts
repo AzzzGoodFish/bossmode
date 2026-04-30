@@ -146,7 +146,7 @@ describe("agent delivery envelope formatting", () => {
     expect(sent).toContain('[Message from room "bossmode dev", from user @fish]');
     expect(sent).toContain('[Message from room "bossmode dev", from member @architect]');
     expect(sent).toContain('[Message from room "bossmode dev", mentioned by user @fish]');
-    expect(sent.match(/\[ACTION REQUIRED: Call chat tool with target="room"/g)?.length).toBe(1);
+    expect(sent.match(/\[Reply hint: Suggested call the chat tool with target="room"/g)?.length).toBe(1);
   });
 
   it("keeps summary messages as pass-through", async () => {
@@ -169,6 +169,6 @@ describe("agent delivery envelope formatting", () => {
     await activateAgent("room1", "pm");
     const sent = mocks.prompt.mock.calls[0][0] as string;
     expect(sent).toContain('[Message from room "bossmode dev", mentioned by member @architect]');
-    expect(sent).toContain('[ACTION REQUIRED: Call chat tool with target="room"');
+    expect(sent).toContain('[Reply hint: Suggested call the chat tool with target="room"');
   });
 });
