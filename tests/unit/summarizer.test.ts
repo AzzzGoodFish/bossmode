@@ -36,7 +36,7 @@ vi.mock("../../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "summarizer",
     model: "haiku",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     thinkingLevel: "off",
   })),
   saveMember: vi.fn(),

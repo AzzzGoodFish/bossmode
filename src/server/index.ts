@@ -10,7 +10,6 @@ import { initRouter } from "../communication/router.js";
 import { initAutoSummary } from "../engine/summarizer.js";
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiCliRuntime } from "../engine/runtime/pi-cli.js";
-import { ClaudeCliRuntime } from "../engine/runtime/claude-cli.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import { seedBuiltinTeam } from "../workforce/team-updates.js";
@@ -55,7 +54,6 @@ export function startServer(opts: ServerOptions): Promise<void> {
   // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiCliRuntime(undefined, opts.port));
-  registry.register(new ClaudeCliRuntime(undefined, opts.port));
   initAgentManager(registry);
 
   // Session-resume OFF means fresh runtime sessions; reset cursors so agents receive

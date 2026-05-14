@@ -48,6 +48,78 @@ export interface SkillDefinition {
   source?: string; // directory this skill was loaded from
 }
 
+// -- Model Credentials --
+
+export type ModelProtocol =
+  | "openai-completions"
+  | "openai-responses"
+  | "openai-codex-responses"
+  | "anthropic-messages"
+  | "azure-openai-responses"
+  | "google-generative-ai"
+  | "google-gemini-cli"
+  | "google-vertex"
+  | "bedrock-converse-stream"
+  | "mistral-conversations";
+
+export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
+export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "openai_codex_subscription";
+
+export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
+
+export interface ModelDefinitionConfig {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+  metadataSource?: ModelMetadataSource;
+}
+
+export interface ModelCredentialProfile {
+  id: string;
+  name: string;
+  providerSlug: string;
+  protocol: ModelProtocol;
+  baseUrl?: string;
+  authType: ModelAuthType;
+  apiKey?: string;
+  oauthProviderId?: string;
+  oauthCredentials?: Record<string, unknown>;
+  requestProfile: ModelRequestProfile;
+  authHeader?: boolean;
+  headers?: Record<string, string>;
+  enabled: boolean;
+  isDefault: boolean;
+  models: ModelDefinitionConfig[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ModelCredentialProfileInput = Omit<ModelCredentialProfile, "id" | "createdAt" | "updatedAt">;
+
+export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfile, "apiKey" | "oauthCredentials"> {
+  hasSecret: boolean;
+  modelRefs: string[];
+}
+
+export interface ModelOption {
+  ref: string;
+  providerSlug: string;
+  modelId: string;
+  displayName?: string;
+  profileId: string;
+  profileName: string;
+  protocol: ModelProtocol;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+  metadataSource?: ModelMetadataSource;
+  credentialStatus: "configured" | "missing" | "no_auth" | "ambient";
+}
+
 // -- Member --
 
 export interface MemberBase {
@@ -57,14 +129,18 @@ export interface MemberBase {
   avatar?: string;
 }
 
+export type AgentRuntimeName = "pi-cli";
+
 export interface AgentMemberConfig extends MemberBase {
   type: "agent";
   agent: string;             // references agent definition name
-  model: string;
-  runtime: "pi-cli" | "claude-cli";
+  /** Optional member-level model override. When omitted, runtime uses the agent definition model. */
+  model?: string;
+  runtime: AgentRuntimeName;
   skills?: string[];         // override agent's default skills
   thinkingLevel: string;
   contextLimit?: number;     // max messages per activation (default 50)
+  credentialId?: string;     // optional Model Credential Profile override
 }
 
 export interface HumanMemberConfig extends MemberBase {
@@ -78,11 +154,12 @@ export interface LegacyMemberConfig {
   id: string;
   name: string;
   agent: string;
-  model: string;
-  runtime: "pi-cli" | "claude-cli";
+  model?: string;
+  runtime: AgentRuntimeName | "claude-cli";
   thinkingLevel: string;
   avatar?: string;
   contextLimit?: number;
+  credentialId?: string;
   type?: "agent";
   skills?: string[];
 }

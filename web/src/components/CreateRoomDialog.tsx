@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
-import type { MemberInfo, RuntimeInfo, KnowledgeTreeNode } from "../api/client";
+import type { MemberInfo, KnowledgeTreeNode, ModelOption, AgentInfo } from "../api/client";
 import { Sheet } from "./Sheet";
 import { FolderPicker } from "./FolderPicker";
-import { getMembers, getRuntimes, getKnowledgeTree, createMember } from "../api/client";
+import { getMembers, getKnowledgeTree, createMember, getConfiguredModels, getAgents } from "../api/client";
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
 import { Shield, FolderOpen } from "lucide-react";
@@ -17,7 +17,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [cwd, setCwd] = useState("");
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [members, setMembers] = useState<MemberInfo[]>([]);
-  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
 
   // Knowledge tree for rules selection
@@ -32,7 +32,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
 
   useEffect(() => {
     refreshMembers();
-    getRuntimes().then(setRuntimes).catch(console.error);
+    getAgents().then(setAgents).catch(console.error);
     getKnowledgeTree().then(setTree).catch(console.error);
   }, []);
 
@@ -135,15 +135,29 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           </div>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {members.length === 0 && (
-              <p className="text-xs text-zinc-600">No members configured. Go to Members page to create them.</p>
+              <p className="text-xs text-zinc-600">No members configured. Create one from an agent below.</p>
             )}
             {members.filter((m) => m.name !== "summarizer").map((m) => (
               <label key={m.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800 cursor-pointer">
                 <input autoComplete="off" type="checkbox" checked={selectedMembers.has(m.name)} onChange={() => toggleMember(m.name)} />
                 <span className="text-sm text-zinc-300">{m.name}</span>
-                <span className="text-xs text-zinc-600 ml-auto">{m.agent} · {m.runtime}</span>
+                <span className="text-xs text-zinc-600 ml-auto">{m.agent} · {m.model || "agent default"}</span>
               </label>
             ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={creatingForAgent || ""}
+              onChange={(e) => e.target.value && setCreatingForAgent(e.target.value)}
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              <option value="">Create member from agent…</option>
+              {agents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
+            </select>
+            <button type="button" onClick={() => setCreatingForAgent(agents[0]?.name || null)} disabled={agents.length === 0}
+              className="px-2 py-1.5 text-xs rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
+              New member
+            </button>
           </div>
         </div>
 
@@ -182,7 +196,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
       {creatingForAgent && (
         <InlineCreateMember
           agentName={creatingForAgent}
-          runtimes={runtimes}
           onCreated={(newMember) => {
             setCreatingForAgent(null);
             refreshMembers();
@@ -205,20 +218,25 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
 }
 
 function InlineCreateMember({
-  agentName, runtimes, onCreated, onClose,
+  agentName, onCreated, onClose,
 }: {
-  agentName: string; runtimes: RuntimeInfo[]; onCreated: (member: MemberInfo) => void; onClose: () => void;
+  agentName: string; onCreated: (member: MemberInfo) => void; onClose: () => void;
 }) {
   const { toast } = useDialog();
   const [name, setName] = useState(agentName);
-  const [runtime, setRuntime] = useState("pi-cli");
-  const [model, setModel] = useState("sonnet");
+  const DEFAULT_MODEL_VALUE = "__agent_default__";
+  const [model, setModel] = useState<string | undefined>();
+  const [credentialId, setCredentialId] = useState<string | undefined>();
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [manualModel, setManualModel] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => { getConfiguredModels().then(setModels).catch(() => setModels([])); }, []);
 
   const handleCreate = async () => {
     setSaving(true);
     try {
-      const member = await createMember({ name, agent: agentName, model, runtime: runtime as any, thinkingLevel: "off" });
+      const member = await createMember({ name, agent: agentName, model, credentialId, runtime: "pi-cli", thinkingLevel: "off" });
       onCreated(member);
     } catch (err: any) { toast(err.message, "error"); }
     finally { setSaving(false); }
@@ -234,16 +252,21 @@ function InlineCreateMember({
             className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
         </div>
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Runtime</label>
-          <select value={runtime} onChange={(e) => setRuntime(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-            {runtimes.filter((r) => r.available).map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
-          </select>
-        </div>
-        <div>
           <label className="block text-xs text-zinc-400 mb-1">Model</label>
-          <input autoComplete="off" value={model} onChange={(e) => setModel(e.target.value)} placeholder="sonnet"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+          {!manualModel && models.length > 0 ? (
+            <select value={credentialId && model ? `${credentialId}::${model}` : DEFAULT_MODEL_VALUE} onChange={(e) => { if (e.target.value === DEFAULT_MODEL_VALUE) { setModel(undefined); setCredentialId(undefined); return; } const [profileId, ref] = e.target.value.split("::"); setModel(ref); setCredentialId(profileId); }}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
+              <option value={DEFAULT_MODEL_VALUE}>Use agent default</option>
+              {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}</option>)}
+            </select>
+          ) : (
+            <input autoComplete="off" value={model || ""} onChange={(e) => { setModel(e.target.value || undefined); setCredentialId(undefined); }} placeholder="Use agent default"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+          )}
+          <p className="text-xs text-zinc-500 mt-1">Uses the model configured on the agent definition unless a model is selected here.</p>
+          <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 cursor-pointer">
+            {manualModel ? "Choose from configured models" : "Enter model manually"}
+          </button>
         </div>
         <div className="flex gap-2 justify-end pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-white cursor-pointer">Cancel</button>

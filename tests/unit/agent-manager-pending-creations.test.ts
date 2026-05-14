@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
   prompt: vi.fn(async () => {}),
+  steer: vi.fn(),
+  abort: vi.fn(),
+  subscribeCb: undefined as any,
   setCursor: vi.fn(),
+  broadcastToRoom: vi.fn(),
 }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -37,7 +41,7 @@ vi.mock("../../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "developer",
     model: "sonnet",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     thinkingLevel: "off",
     skills: [],
   })),
@@ -67,7 +71,7 @@ vi.mock("../../src/communication/message-bus.js", () => ({
 }));
 
 vi.mock("../../src/communication/ws.js", () => ({
-  broadcastToRoom: vi.fn(),
+  broadcastToRoom: mocks.broadcastToRoom,
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
@@ -88,18 +92,22 @@ describe("agent-manager pending creation dedup", () => {
   beforeEach(async () => {
     mocks.createAgent.mockReset();
     mocks.prompt.mockReset();
+    mocks.steer.mockReset();
+    mocks.abort.mockReset();
+    mocks.subscribeCb = undefined;
     mocks.setCursor.mockReset();
+    mocks.broadcastToRoom.mockReset();
 
     const handle = {
       prompt: mocks.prompt,
-      steer: vi.fn(),
-      abort: vi.fn(),
+      steer: mocks.steer,
+      abort: mocks.abort,
       destroy: vi.fn(),
       waitForIdle: vi.fn(async () => {}),
-      subscribe: vi.fn(() => () => {}),
+      subscribe: vi.fn((fn) => { mocks.subscribeCb = fn; return () => {}; }),
       getContextUsage: vi.fn(async () => null),
       isWorking: false,
-      runtimeName: "claude-cli",
+      runtimeName: "pi-cli",
     };
 
     mocks.createAgent.mockImplementation(async () => {
@@ -108,7 +116,7 @@ describe("agent-manager pending creation dedup", () => {
     });
 
     const runtime = {
-      name: "claude-cli",
+      name: "pi-cli",
       capabilities: {
         streaming: true,
         toolEvents: true,
@@ -138,5 +146,41 @@ describe("agent-manager pending creation dedup", () => {
     ]);
 
     expect(mocks.createAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not broadcast working until runtime agent_start", async () => {
+    let resolvePrompt!: () => void;
+    mocks.prompt.mockReturnValue(new Promise<void>((resolve) => { resolvePrompt = resolve; }));
+
+    const activation = activateAgent("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mocks.prompt).toHaveBeenCalledTimes(1);
+    expect(mocks.broadcastToRoom).not.toHaveBeenCalledWith("room1", expect.objectContaining({ type: "agent:status", status: "working" }));
+
+    mocks.subscribeCb?.({ type: "agent_start" });
+    expect(mocks.broadcastToRoom).not.toHaveBeenCalledWith("room1", expect.objectContaining({ type: "agent:status", status: "working" }));
+
+    resolvePrompt();
+    await activation;
+  });
+
+  it("queues activation during promptSubmitted and flushes it as steer on agent_start", async () => {
+    let resolvePrompt!: () => void;
+    mocks.prompt.mockReturnValue(new Promise<void>((resolve) => { resolvePrompt = resolve; }));
+
+    const first = activateAgent("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = activateAgent("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mocks.prompt).toHaveBeenCalledTimes(1);
+    expect(mocks.steer).not.toHaveBeenCalled();
+
+    mocks.subscribeCb?.({ type: "agent_start" });
+    expect(mocks.steer).toHaveBeenCalledTimes(1);
+
+    resolvePrompt();
+    await Promise.all([first, second]);
   });
 });

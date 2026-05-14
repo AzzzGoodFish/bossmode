@@ -14,6 +14,35 @@ import {
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
 import { getMemberInstances, destroyInstance, activateAgent } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
+import { getModelCredentialProfile, normalizeModelRef } from "../engine/model-credentials.js";
+
+const ONLY_SUPPORTED_RUNTIME = "pi-cli";
+function isUnsupportedRuntime(runtime: unknown): boolean {
+  return runtime !== undefined && runtime !== ONLY_SUPPORTED_RUNTIME;
+}
+
+function providerFromModelRef(model: string): string {
+  const ref = normalizeModelRef(model);
+  const idx = ref.indexOf("/");
+  return idx > 0 ? ref.slice(0, idx) : "anthropic";
+}
+
+function validateCredentialMatchesModel(credentialId: unknown, model: string | undefined): string | undefined {
+  if (credentialId === undefined || credentialId === null || credentialId === "") return undefined;
+  if (typeof credentialId !== "string") throw new Error("credentialId must be a string");
+  if (!model) throw new Error("credentialId requires an explicit model override");
+  const credential = getModelCredentialProfile(credentialId);
+  if (!credential) throw new Error("Model credential profile not found");
+  const provider = providerFromModelRef(model);
+  if (credential.providerSlug !== provider) {
+    throw new Error(`Credential provider ${credential.providerSlug} does not match model provider ${provider}`);
+  }
+  return credentialId;
+}
+
+function optionalModel(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 // ── Agent CRUD ──
 
@@ -185,18 +214,31 @@ addRoute("GET", "/api/members/:id", async (_req, res, params) => {
 
 addRoute("POST", "/api/members", async (req, res) => {
   const body = (await parseBody(req)) as any;
-  if (!body.name || !body.runtime) {
-    sendJson(res, 400, { error: "name and runtime are required" });
+  if (!body.name) {
+    sendJson(res, 400, { error: "name is required" });
+    return;
+  }
+  if (isUnsupportedRuntime(body.runtime)) {
+    sendJson(res, 400, { error: "Unsupported runtime. Bossmode currently supports pi-cli only." });
+    return;
+  }
+  const model = optionalModel(body.model);
+  let credentialId: string | undefined;
+  try {
+    credentialId = validateCredentialMatchesModel(body.credentialId, model);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
     return;
   }
   const member = saveMember({
     name: body.name,
     agent: body.agent || "",
-    model: body.model || "sonnet",
-    runtime: body.runtime,
+    model,
+    runtime: ONLY_SUPPORTED_RUNTIME,
     thinkingLevel: body.thinkingLevel || "off",
     avatar: body.avatar,
     contextLimit: body.contextLimit,
+    credentialId,
   });
   sendJson(res, 200, member);
 });
@@ -205,15 +247,28 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
   const existing = getMember(params.id);
   if (!existing) { sendJson(res, 404, { error: "Member not found" }); return; }
   const body = (await parseBody(req)) as any;
+  if (isUnsupportedRuntime(body.runtime)) {
+    sendJson(res, 400, { error: "Unsupported runtime. Bossmode currently supports pi-cli only." });
+    return;
+  }
+  const model = Object.prototype.hasOwnProperty.call(body, "model") ? optionalModel(body.model) : existing.model;
+  let credentialId: string | undefined;
+  try {
+    credentialId = validateCredentialMatchesModel(body.credentialId ?? existing.credentialId, model);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+    return;
+  }
   const member = saveMember({
     id: params.id,
     name: body.name ?? existing.name,
     agent: body.agent ?? existing.agent,
-    model: body.model ?? existing.model,
-    runtime: body.runtime ?? existing.runtime,
+    model,
+    runtime: ONLY_SUPPORTED_RUNTIME,
     thinkingLevel: body.thinkingLevel ?? existing.thinkingLevel,
     avatar: body.avatar ?? existing.avatar,
     contextLimit: body.contextLimit ?? existing.contextLimit,
+    credentialId,
   });
   sendJson(res, 200, member);
 });

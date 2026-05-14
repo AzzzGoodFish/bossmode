@@ -43,23 +43,24 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     expect(result.fullPrompt).toContain("Room members:");
   });
 
-  it("includes knowledge titles in agentPrompt when present (on-demand content)", () => {
+  it("includes knowledge titles in envPrompt when present (on-demand content)", () => {
     const agent = makeAgent("You are the PM.", "pm");
     const entries = [makeEntry("Design Doc", "The system uses React")];
     const result = buildAgentPrompt(agent, entries, ["pm"], "bossmode dev", undefined, undefined, undefined, "/tmp/test-docs");
-    // Titles are injected as a lightweight document index
-    expect(result.agentPrompt).toContain("Design Doc");
+    // Titles are injected as a lightweight Bossmode overlay, not as the agent role prompt.
+    expect(result.agentPrompt).toBe("You are the PM.");
+    expect(result.envPrompt).toContain("Design Doc");
     // Full content is NOT injected (read on-demand via filesystem)
-    expect(result.agentPrompt).not.toContain("The system uses React");
-    expect(result.agentPrompt).toContain("Documents are stored at");
+    expect(result.envPrompt).not.toContain("The system uses React");
+    expect(result.envPrompt).toContain("Documents are stored at");
   });
 
-  it("empty systemPrompt + knowledge still produces non-empty agentPrompt", () => {
+  it("empty systemPrompt + knowledge keeps agentPrompt empty for builtin/default prompt preservation", () => {
     const agent = makeAgent("", "general");
     const entries = [makeEntry("Design Doc", "The system uses React")];
     const result = buildAgentPrompt(agent, entries, ["general"], "bossmode dev");
-    // Knowledge goes in agentPrompt even if L1 is empty
-    expect(result.agentPrompt).toContain("Design Doc");
+    expect(result.agentPrompt).toBe("");
+    expect(result.envPrompt).toContain("Design Doc");
   });
 
   it("envPrompt uses envelope guidance and no tool/rules sections", () => {

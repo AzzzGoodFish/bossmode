@@ -8,13 +8,13 @@ const mockHandle = {
   waitForIdle: vi.fn(async () => {}),
   subscribe: vi.fn(() => () => {}),
   isWorking: false,
-  runtimeName: "claude-cli",
+  runtimeName: "pi-cli",
 };
 
 let sessionResumeEnabled = true;
 
 const mockRuntime = {
-  name: "claude-cli",
+  name: "pi-cli",
   capabilities: {
     streaming: true,
     toolEvents: true,
@@ -56,7 +56,7 @@ vi.mock("../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "pm",
     model: "mock-model",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     skills: [],
     thinkingLevel: "off",
   })),
@@ -79,7 +79,7 @@ vi.mock("../src/workspace/room-store.js", () => ({
 }));
 
 vi.mock("../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({ pm: { runtime: "claude-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } })),
+  getSessions: vi.fn(() => ({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } })),
   saveSession: vi.fn(),
   clearSession: vi.fn(),
 }));
@@ -159,7 +159,7 @@ describe("resetAgentSession", () => {
 
     expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
     expect(mockHandle.destroy).toHaveBeenCalledTimes(1);
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "pm", "claude-cli");
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "pm", "pi-cli");
     expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "pm", null);
     expect(appendEventToDisk).toHaveBeenCalledWith(
       "room1",

@@ -32,7 +32,7 @@ export function getOrCreateSummarizerMember(): AgentMemberConfig {
     name: "summarizer",
     agent: "summarizer",
     model: "sonnet",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     thinkingLevel: "off",
   });
 }
