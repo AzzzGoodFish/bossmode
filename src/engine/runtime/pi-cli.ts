@@ -240,7 +240,15 @@ function mapPiEvent(raw: any): AgentStreamEvent | null {
         cacheWrite: msg.usage.cacheWrite,
         cost: msg.usage.cost?.total,
       } : undefined;
-      return { type: "message_end", text, usage };
+      const stopReason = typeof msg.stopReason === "string" ? msg.stopReason : (typeof msg.stop_reason === "string" ? msg.stop_reason : undefined);
+      const errorMessage = typeof msg.errorMessage === "string" ? msg.errorMessage : (typeof msg.error_message === "string" ? msg.error_message : undefined);
+      return {
+        type: "message_end",
+        text,
+        usage,
+        ...(stopReason ? { stopReason } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
+      };
     }
 
     case "tool_execution_start":
@@ -335,6 +343,24 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
         this.sessionCallback(session);
         this.sessionCallback = null;
       }
+    }
+
+    if (raw.type === "compaction_start") {
+      this.emit({ type: "agent_start" });
+      return;
+    }
+
+    if (raw.type === "compaction_end") {
+      const hasError = raw.error || raw.message || raw.reason || raw.summary === "error";
+      if (hasError && typeof hasError === "string") {
+        this.emit({ type: "message_end", text: `Context compaction failed: ${hasError}` });
+      } else {
+        const summary = ((raw.data?.summary ?? raw.summary ?? "No summary") as string).slice(0, 300);
+        const tokensBefore = raw.data?.tokensBefore ?? raw.tokensBefore ?? "unknown";
+        this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
+      }
+      this.emit({ type: "agent_end" });
+      return;
     }
 
     if (raw.type === "response" && raw.command === "compact") {

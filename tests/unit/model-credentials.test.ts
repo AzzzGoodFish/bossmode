@@ -75,6 +75,44 @@ describe("model credential profiles", () => {
     ]);
   });
 
+  it("falls back to consistent pi catalog metadata across providers", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "cloud_a", id: "claude-opus-4-6", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
+      { provider: "opencode", id: "claude-opus-4-6", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["image", "text"] },
+    ]);
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: "claude-opus-4-6" }] }),
+    } as any);
+
+    const result = await mod.discoverModelCredentialModels({
+      name: "Cloud Open",
+      providerSlug: "cloud_a",
+      protocol: "anthropic-messages",
+      baseUrl: "https://api.example.com/v1",
+      authType: "api_key",
+      apiKey: "sk-secret",
+      requestProfile: "standard",
+      enabled: true,
+      isDefault: false,
+      models: [{ id: "placeholder", contextWindow: 1 }],
+    });
+
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "claude-opus-4-6",
+        contextWindow: 1000000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+    ]);
+
+    fetchMock.mockRestore();
+  });
+
   it("allows unknown public context metadata but applies internal pi export fallback", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({ ...baseProfile, models: [{ id: "unknown-model" }] });

@@ -3,9 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const routes = new Map<string, any>();
 const sendJsonMock = vi.fn();
 const destroyInstanceMock = vi.fn();
-const activateAgentMock = vi.fn();
 const getMemberMock = vi.fn();
 const loggerErrorMock = vi.fn();
+const latestMessageIdMock = vi.fn(() => "m-last");
+const setCursorMock = vi.fn();
 
 vi.mock("../../src/api/index.js", () => ({
   addRoute: vi.fn((method: string, path: string, handler: any) => {
@@ -42,7 +43,14 @@ vi.mock("../../src/workforce/member-store.js", () => ({
 vi.mock("../../src/engine/agent-manager.js", () => ({
   getMemberInstances: vi.fn(() => []),
   destroyInstance: destroyInstanceMock,
-  activateAgent: activateAgentMock,
+}));
+
+vi.mock("../../src/communication/message-bus.js", () => ({
+  getLatestMessageId: (...args: any[]) => latestMessageIdMock(...args),
+}));
+
+vi.mock("../../src/workspace/room-store.js", () => ({
+  setCursor: (...args: any[]) => setCursorMock(...args),
 }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -61,9 +69,10 @@ describe("POST /api/members/:id/restart", () => {
     routes.clear();
     sendJsonMock.mockReset();
     destroyInstanceMock.mockReset();
-    activateAgentMock.mockReset();
     getMemberMock.mockReset();
     loggerErrorMock.mockReset();
+    latestMessageIdMock.mockReset();
+    setCursorMock.mockReset();
 
     await import("../../src/api/workforce.js");
   });
@@ -76,32 +85,35 @@ describe("POST /api/members/:id/restart", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 400, { error: "member and roomId required" });
     expect(destroyInstanceMock).not.toHaveBeenCalled();
-    expect(activateAgentMock).not.toHaveBeenCalled();
+    expect(setCursorMock).not.toHaveBeenCalled();
   });
 
-  it("destroys then fire-and-forget activates without waiting", async () => {
+  it("destroys, updates cursor to latest, and does not activate", async () => {
     const handler = routes.get("POST /api/members/:id/restart");
     getMemberMock.mockReturnValue({ id: "m1", name: "pm", runtime: "pi-cli" });
-    activateAgentMock.mockReturnValue(new Promise(() => {}));
 
     await handler({ url: "/api/members/m1/restart?roomId=room-1" } as any, {} as any, { id: "m1" });
 
     expect(destroyInstanceMock).toHaveBeenCalledWith("room-1", "pm");
-    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, { ok: true, message: "Instance restarting." });
-    expect(activateAgentMock).toHaveBeenCalledWith("room-1", "pm");
+    expect(setCursorMock).toHaveBeenCalledWith("room-1", "pm", "m-last");
+    expect(latestMessageIdMock).toHaveBeenCalledWith("room-1");
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      200,
+      expect.objectContaining({
+        ok: true,
+        message: "Instance restarted. Next activation will wait for new messages.",
+      }),
+    );
   });
 
-  it("logs when background activation fails", async () => {
+  it("does not require activation side effects", async () => {
     const handler = routes.get("POST /api/members/:id/restart");
     getMemberMock.mockReturnValue({ id: "m1", name: "pm", runtime: "pi-cli" });
-    activateAgentMock.mockRejectedValue(new Error("boom"));
 
     await handler({ url: "/api/members/m1/restart?roomId=room-1" } as any, {} as any, { id: "m1" });
     await Promise.resolve();
 
-    expect(loggerErrorMock).toHaveBeenCalledWith("api", "restart activation failed", {
-      member: "pm",
-      error: "boom",
-    });
+    expect(loggerErrorMock).not.toHaveBeenCalled();
   });
 });

@@ -92,7 +92,7 @@ export type AgentStreamEvent =
   | { type: "agent_end" }
   | { type: "message_start" }
   | { type: "message_update"; text?: string; thinking?: string }
-  | { type: "message_end"; text: string; usage?: TokenUsage }
+  | { type: "message_end"; text: string; usage?: TokenUsage; stopReason?: string; errorMessage?: string }
   | { type: "tool_start"; toolName: string; toolCallId: string; args: unknown }
   | { type: "tool_update"; toolName: string; toolCallId: string; partialResult: unknown }
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }

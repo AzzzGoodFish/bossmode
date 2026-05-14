@@ -131,7 +131,7 @@ describe("model credential profile API routes", () => {
     const body = JSON.parse(res.body);
     expect(body.models).toEqual([
       expect.objectContaining({ id: "gpt-4.1", input: ["text"], metadataSource: "unknown" }),
-      expect.objectContaining({ id: "gpt-4.1-mini", name: "GPT 4.1 Mini", metadataSource: "unknown" }),
+      expect.objectContaining({ id: "gpt-4.1-mini", name: "GPT 4.1 Mini" }),
     ]);
     expect(body.models[0].contextWindow).toBeUndefined();
     expect(body.partial).toBe(true);
@@ -319,20 +319,36 @@ describe("model credential profile API routes", () => {
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 
-  it("returns clear discovery errors for unsupported protocols without network calls", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
+  it("supports anthropic-messages model discovery via /models endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: "claude-opus-4-6", contextWindow: 1000000 } ] }),
+    } as any);
     const ts = await createTestServer();
     const token = await login(ts.port);
 
     const res = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/discover-models", {
       token,
-      body: { protocol: "anthropic-messages", baseUrl: "https://api.example.com", authType: "api_key", apiKey: "sk-secret" },
+      body: {
+        name: "Anthropic Relay",
+        providerSlug: "relay",
+        protocol: "anthropic-messages",
+        baseUrl: "https://api.example.com/v1",
+        authType: "api_key",
+        apiKey: "sk-secret",
+        requestProfile: "standard",
+        enabled: true,
+        isDefault: false,
+        models: [{ id: "placeholder", contextWindow: 1 }],
+      },
     });
 
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error).toContain("unsupported protocol");
-    expect(res.body).not.toContain("sk-secret");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).models).toEqual([expect.objectContaining({ id: "claude-opus-4-6" })]);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/v1/models", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer sk-secret" }),
+    }));
 
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
     fetchMock.mockRestore();
@@ -366,6 +382,59 @@ describe("model credential profile API routes", () => {
     expect(JSON.parse(clearedRes.body).model).toBeUndefined();
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${created.id}`, { token });
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+  });
+
+  it("clears stale credential when explicitly set to null", async () => {
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const profileA = JSON.parse((await jsonRequest(ts.port, "POST", "/api/model-credential-profiles", {
+      token,
+      body: {
+        name: "Profile A",
+        providerSlug: `cloud-a-${Date.now()}`,
+        protocol: "anthropic-messages",
+        baseUrl: "https://api.example.com/v1",
+        authType: "api_key",
+        apiKey: "sk-a",
+        requestProfile: "standard",
+        enabled: true,
+        isDefault: false,
+        models: [{ id: "model-x", contextWindow: 1024 }],
+      },
+    })).body);
+
+    const member = JSON.parse((await jsonRequest(ts.port, "POST", "/api/members", {
+      token,
+      body: {
+        name: `member-${Date.now()}`,
+        agent: "developer",
+        model: `${profileA.providerSlug}/model-x`,
+        runtime: "pi-cli",
+        credentialId: profileA.id,
+        thinkingLevel: "off",
+      },
+    })).body);
+
+    const noClear = await jsonRequest(ts.port, "PUT", `/api/members/${member.id}`, {
+      token,
+      body: { model: "other-provider/model-y" },
+    });
+    expect(noClear.status).toBe(400);
+    expect(JSON.parse(noClear.body).error).toContain("does not match model provider");
+
+    const cleared = await jsonRequest(ts.port, "PUT", `/api/members/${member.id}`, {
+      token,
+      body: { model: "other-provider/model-y", credentialId: null },
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = JSON.parse(cleared.body);
+    expect(clearedBody.model).toBe("other-provider/model-y");
+    expect(clearedBody.credentialId).toBeUndefined();
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${profileA.id}`, { token });
+    await jsonRequest(ts.port, "DELETE", `/api/members/${member.id}`, { token });
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 

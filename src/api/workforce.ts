@@ -12,9 +12,11 @@ import {
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
-import { getMemberInstances, destroyInstance, activateAgent } from "../engine/agent-manager.js";
+import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getModelCredentialProfile, normalizeModelRef } from "../engine/model-credentials.js";
+import { getLatestMessageId } from "../communication/message-bus.js";
+import { setCursor } from "../workspace/room-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 function isUnsupportedRuntime(runtime: unknown): boolean {
@@ -252,9 +254,12 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
     return;
   }
   const model = Object.prototype.hasOwnProperty.call(body, "model") ? optionalModel(body.model) : existing.model;
+  const credentialInput = Object.prototype.hasOwnProperty.call(body, "credentialId")
+    ? body.credentialId
+    : existing.credentialId;
   let credentialId: string | undefined;
   try {
-    credentialId = validateCredentialMatchesModel(body.credentialId ?? existing.credentialId, model);
+    credentialId = validateCredentialMatchesModel(credentialInput, model);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
     return;
@@ -291,11 +296,12 @@ addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
   const member = getMember(params.id);
   if (!member || !roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
   destroyInstance(roomId, member.name);
-  sendJson(res, 200, { ok: true, message: "Instance restarting." });
-  activateAgent(roomId, member.name).catch((err) => {
-    logger.error("api", "restart activation failed", {
-      member: member.name,
-      error: String((err as Error)?.message || err),
-    });
+
+  const latestId = getLatestMessageId(roomId);
+  setCursor(roomId, member.name, latestId);
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Instance restarted. Next activation will wait for new messages.",
   });
 });

@@ -352,6 +352,91 @@ describe("PiCliRuntime spawn args", () => {
     handle.destroy();
   });
 
+  it("maps auto compaction events to visible agent lifecycle events", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    const handle = await p;
+    const proc = spawnMock.mock.results[0].value as any;
+
+    const events: any[] = [];
+    handle.subscribe((ev) => events.push(ev));
+
+    proc.stdout.emit("data", Buffer.from('{"type":"compaction_start"}\n'));
+    proc.stdout.emit("data", Buffer.from('{"type":"compaction_end","data":{"tokensBefore":2000,"summary":"auto compaction"}}\n'));
+
+    expect(events.some((e) => e.type === "agent_start")).toBe(true);
+    expect(events.some((e) => e.type === "message_end" && String(e.text).includes("Tokens before: 2000"))).toBe(true);
+    expect(events.some((e) => e.type === "agent_end")).toBe(true);
+
+    handle.destroy();
+  });
+
+  it("maps failed auto compaction to an explicit compact failure message", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: {
+        onChat: async () => {},
+        onMention: async () => {},
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    const handle = await p;
+    const proc = spawnMock.mock.results[0].value as any;
+
+    const events: any[] = [];
+    handle.subscribe((ev) => events.push(ev));
+
+    proc.stdout.emit("data", Buffer.from('{"type":"compaction_end","error":"provider rate limit"}\n'));
+
+    expect(events.some((e) => e.type === "agent_start")).toBe(false);
+    expect(events.some((e) => e.type === "message_end" && String(e.text).includes("Context compaction failed: provider rate limit"))).toBe(true);
+    expect(events.some((e) => e.type === "agent_end")).toBe(true);
+
+    handle.destroy();
+  });
+
   it("does not emit agent_end or reject prompt on 90s stdout inactivity timeout", async () => {
     const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
 
