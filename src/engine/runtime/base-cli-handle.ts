@@ -21,6 +21,7 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
   protected proc: ChildProcessWithoutNullStreams;
   protected listeners = new Set<(event: AgentStreamEvent) => void>();
   protected _isWorking = false;
+  protected _hasRuntimeStarted = false;
   protected idleResolvers: Array<() => void> = [];
   protected promptRejecter: ((err: Error) => void) | null = null;
   protected buffer = "";
@@ -60,7 +61,8 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
     proc.on("error", (err) => {
       logger.error(this.logScope, "process error", { pid: this.pid, error: err.message });
       this.clearActivityTimer();
-      if (this._isWorking) {
+      if (this._hasRuntimeStarted) {
+        this._hasRuntimeStarted = false;
         this._isWorking = false;
         this.emit({ type: "agent_end" });
       }
@@ -77,7 +79,8 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
 
     proc.on("exit", (code, signal) => {
       this.clearActivityTimer();
-      if (this._isWorking) {
+      if (this._hasRuntimeStarted) {
+        this._hasRuntimeStarted = false;
         this._isWorking = false;
         this.emit({ type: "agent_end" });
       }
@@ -100,8 +103,9 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
   protected abstract get runtimeDisplayName(): string;
 
   protected startWork(stdinPayload: unknown): Promise<void> {
+    // Command submission is not proof that the runtime has started an agent turn.
+    // Concrete runtimes must emit agent_start only after the CLI reports it.
     this._isWorking = true;
-    this.emit({ type: "agent_start" });
     this.safeStdinWrite(JSON.stringify(stdinPayload) + "\n");
     this.resetActivityTimer();
     return new Promise<void>((resolve, reject) => {
@@ -116,6 +120,7 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
 
   protected endWork(): void {
     this._isWorking = false;
+    this._hasRuntimeStarted = false;
     this.promptRejecter = null;
     this.clearActivityTimer();
     this.resolveIdle();
@@ -123,12 +128,12 @@ export abstract class BaseCliAgentHandle implements AgentHandle {
 
   protected failWork(error: string): void {
     this._isWorking = false;
+    this._hasRuntimeStarted = false;
     this.clearActivityTimer();
     if (this.promptRejecter) {
       this.promptRejecter(new Error(error));
       this.promptRejecter = null;
     }
-    this.emit({ type: "agent_end" });
     this.resolveIdle();
   }
 

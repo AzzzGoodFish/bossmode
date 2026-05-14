@@ -16,7 +16,7 @@ import { getActivationSource } from "./activation-context.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 
-/** Max chars for tool result text. ~6K tokens, aligned with Claude Code conventions. */
+/** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
 
 /** Truncate a serialized tool result if it exceeds the limit. */
@@ -28,7 +28,7 @@ export function truncateToolResult(text: string): string {
   return truncated + `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
 }
 
-/** Handle a tool callback from an agent runtime (pi-cli extension or claude MCP) */
+/** Handle a tool callback from an agent runtime (pi-cli extension) */
 export async function handleToolCallback(
   tool: string,
   roomId: string,

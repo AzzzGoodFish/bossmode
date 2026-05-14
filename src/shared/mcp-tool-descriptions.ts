@@ -1,5 +1,4 @@
-// Centralized MCP tool descriptions — used by both mcp-server.ts and pi-cli.ts
-// to avoid description drift between runtimes.
+// Centralized agent tool descriptions used by pi-cli extension generation.
 
 export const QUERY_ROOM_MESSAGES_DESCRIPTION = `Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.
 

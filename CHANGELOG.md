@@ -4,6 +4,35 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.11.0] — 2026-05-13
+
+### Breaking
+- Removed Claude Code CLI runtime support and related MCP/session-hook server paths. Bossmode now uses `pi-cli` internally.
+- Removed runtime selection from the user-facing member/create-room flows; model credentials are now the configuration surface.
+
+### Added
+- Model Credential Profiles with API key, no-auth/proxy, OpenAI-compatible, Anthropic Messages, and OAuth-backed provider profiles.
+- Credential-backed model catalog and Member/CreateRoom model pickers with per-member `modelRef + credentialId` selection.
+- Fetch Models discovery for OpenAI-compatible endpoints with best-effort metadata handling.
+- OAuth credential login job flow through the pi-ai provider boundary, with token redaction in API/UI.
+- Agent-scoped pi config export (`models.json`/`auth.json`) for credential-backed runtime execution.
+- pi RPC `agent_start`/`agent_end` as the authoritative public working/idle status source.
+
+### Changed
+- Model metadata trust strategy is now `endpoint/provider response > pi catalog exact match > unknown in UI / internal fallback only`.
+- Fetch Models no longer exposes fake default `128k` context when an endpoint only returns model IDs.
+- Removed user-visible `text/images`, context, max tokens, and reasoning configuration from normal model rows; internal pi-compatible defaults are preserved for export.
+- pi builtin/general agents now preserve pi's default prompt: only agent role prompts use `--system-prompt`; Bossmode env/docs/rules use `--append-system-prompt`.
+
+### Fixed
+- “Use agent default” no longer persists a concrete fallback model override.
+- Member sidebar no longer exposes runtime labels or `undefined` model text.
+- Prompt dispatch no longer uses optimistic public working/idle status outside runtime lifecycle events.
+
+### Tests
+- Build, unit/integration suite, real-browser E2E, and real credential smoke passed during the 0.11.0 acceptance cycle.
+- Prompt args targeted verification: `npm run build` ✅; `npm test -- tests/general-agent.test.ts tests/unit/pi-cli-args.test.ts` ✅.
+
 ## [0.10.28] — 2026-04-29
 
 ### Fixed

@@ -11,7 +11,7 @@ const mockHandle = {
   waitForIdle: vi.fn(async () => {}),
   subscribe: vi.fn(() => () => {}),
   isWorking: false,
-  runtimeName: "claude-cli",
+  runtimeName: "pi-cli",
 };
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -45,7 +45,7 @@ vi.mock("../../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "developer",
     model: "sonnet",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     thinkingLevel: "off",
     skills: [],
   })),
@@ -59,7 +59,7 @@ vi.mock("../../src/workspace/room-store.js", () => ({
 
 vi.mock("../../src/workspace/session-store.js", () => ({
   getSessions: vi.fn(() => ({
-    developer: { runtime: "claude-cli", sessionId: "sid-123", sessionFile: "/tmp/sid.json" },
+    developer: { runtime: "pi-cli", sessionId: "sid-123", sessionFile: "/tmp/sid.json" },
   })),
   saveSession: vi.fn(),
 }));
@@ -101,7 +101,7 @@ describe("agent-manager session resume toggle", () => {
     mockHandle.subscribe.mockReturnValue(() => {});
 
     const runtime = {
-      name: "claude-cli",
+      name: "pi-cli",
       capabilities: {
         streaming: true,
         toolEvents: true,

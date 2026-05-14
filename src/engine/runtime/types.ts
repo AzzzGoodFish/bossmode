@@ -45,8 +45,8 @@ export interface CreateAgentOpts {
   member: AgentMemberConfig;
 
   // Layered prompt content
-  agentPrompt: string;       // Layer 1 (agent def) + Layer 4 (knowledge). Empty if no system prompt.
-  envPrompt: string;         // Layer 5 (environment info). Always present.
+  agentPrompt: string;       // Layer 1: agent definition role prompt only. Empty for builtin/general.
+  envPrompt: string;         // Bossmode overlays: docs index + environment info. Always appended.
   skillPaths: string[];      // Layer 2: skill directory paths
   rulesPrompt?: string;      // Layer 3: rules from knowledge base
 

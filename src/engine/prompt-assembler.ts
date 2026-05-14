@@ -4,15 +4,15 @@ import type { AgentDefinition, KnowledgeEntry, KnowledgeTreeNode } from "../shar
 
 /** Result of prompt assembly — split for runtime injection strategy */
 export interface AssembledPrompt {
-  /** L1 (Agent definition) + L4 (Knowledge). Empty string if agent has no systemPrompt. */
+  /** L1: agent definition role prompt only. Empty for builtin/general agents. */
   agentPrompt: string;
-  /** L5 (Environment info: member list, tools, communication rules). Always present. */
+  /** Bossmode overlays appended to the runtime prompt: docs index + environment info. Always present. */
   envPrompt: string;
   /** Combined agentPrompt + envPrompt for convenience */
   fullPrompt: string;
 }
 
-/** Build agent prompt split into agentPrompt (L1+L4) and envPrompt (L5) */
+/** Build prompt split into role prompt (system) and Bossmode overlays (append). */
 export function buildAgentPrompt(
   agentDef: AgentDefinition,
   knowledgeEntries: KnowledgeEntry[],
@@ -23,27 +23,27 @@ export function buildAgentPrompt(
   activeRuleDocs?: string[],
   docsRoot?: string,
 ): AssembledPrompt {
-  const agentParts: string[] = [];
+  // Layer 1: Agent definition (may be empty for builtin general agent).
+  // This is the only content that should be passed via --system-prompt.
+  const agentPrompt = agentDef.systemPrompt.trim() ? agentDef.systemPrompt : "";
 
-  // Layer 1: Agent definition (may be empty for builtin general agent)
-  if (agentDef.systemPrompt.trim()) {
-    agentParts.push(agentDef.systemPrompt);
-  }
+  const overlayParts: string[] = [];
 
   // Layer 4: Project documents index — directory tree of available docs.
   // Agents read specific documents on demand via filesystem tools.
   // Only the INDEX is injected to keep the system prompt small (<10KB typical).
+  // This is Bossmode runtime context, so it belongs in --append-system-prompt.
   if (tree && tree.children && tree.children.length > 0) {
-    agentParts.push("---\n\n# Project Documents\n");
-    agentParts.push(
+    overlayParts.push("---\n\n# Project Documents\n");
+    overlayParts.push(
       "This project has a document library. Read documents on demand — do NOT expect their full content here.\n",
     );
-    agentParts.push("```");
-    agentParts.push("docs/");
-    renderTree(tree.children, "", agentParts, new Set(activeRuleDocs || []));
-    agentParts.push("```\n");
+    overlayParts.push("```");
+    overlayParts.push("docs/");
+    renderTree(tree.children, "", overlayParts, new Set(activeRuleDocs || []));
+    overlayParts.push("```\n");
     const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
-    agentParts.push(
+    overlayParts.push(
       `Documents are stored at \`${docsPath}/\`. Use the read tool to load a document by path. Use write/edit tools to create or update documents.`,
       "",
       "When creating documents, include YAML frontmatter with at least a title:",
@@ -55,24 +55,23 @@ export function buildAgentPrompt(
       "```",
     );
     if (activeRuleDocs && activeRuleDocs.length > 0) {
-      agentParts.push(
+      overlayParts.push(
         "\nDocs marked `[rule]` above are already injected as rules in this room.",
       );
     }
   } else if (knowledgeEntries.length > 0) {
     // Fallback (should be rare): flat list when tree is unavailable
-    agentParts.push("---\n\n# Project Documents\n");
-    for (const entry of knowledgeEntries) agentParts.push(`- **${entry.title}**`);
+    overlayParts.push("---\n\n# Project Documents\n");
+    for (const entry of knowledgeEntries) overlayParts.push(`- **${entry.title}**`);
     const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
-    agentParts.push(`\nDocuments are stored at \`${docsPath}/\`. Use the read tool to load a document by path.`);
+    overlayParts.push(`\nDocuments are stored at \`${docsPath}/\`. Use the read tool to load a document by path.`);
   }
-
-  const agentPrompt = agentParts.join("\n");
 
   // Layer 5: Environment — use memberName as identity, agentDef.name as role
   const identity = memberName || agentDef.name;
   const role = memberName && memberName !== agentDef.name ? agentDef.name : undefined;
-  const envPrompt = buildEnvironmentPrompt(identity, role, roomMembers, roomName);
+  overlayParts.push(buildEnvironmentPrompt(identity, role, roomMembers, roomName));
+  const envPrompt = overlayParts.join("\n");
 
   const fullPrompt = agentPrompt ? agentPrompt + "\n" + envPrompt : envPrompt;
 

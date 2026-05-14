@@ -86,7 +86,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
   const memberItems: SidebarItem[] = members.map((m) => ({
     id: m.id,
     label: m.name,
-    sublabel: `${m.runtime} · ${m.model}`,
+    sublabel: m.model || "Use agent default",
   }));
 
   const agentItems: SidebarItem[] = agents.map((a) => ({

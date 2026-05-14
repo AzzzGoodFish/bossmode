@@ -17,7 +17,7 @@ Bossmode lets you run a collaborative workspace where you and multiple AI agents
 | Setting context | Building knowledge |
 
 **Agent** = a role definition (PM, developer, architect…)  
-**Member** = an agent assigned to a runtime + model configuration  
+**Member** = an agent assigned to a model configuration  
 **Room** = a project workspace where you and members collaborate  
 **Knowledge** = shared context injected into agent prompts
 
@@ -31,7 +31,7 @@ npm install -g bossmode
 
 **Requirements**:
 - Node.js ≥ 18
-- At least one agent runtime: [pi-coding-agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) or [claude-cli](https://docs.claude.com/claude-code) (Claude Code)
+- [pi-coding-agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) installed as `pi`
 
 ---
 
@@ -70,7 +70,7 @@ Open your browser at `http://localhost:8080` and sign in. On first run, `bossmod
 - Restart a stuck agent instance without leaving the room
 
 ### 👥 Members
-- Create members by combining an agent definition + runtime + model
+- Create members by combining an agent definition + model
 - Configure per-member: thinking level (`off` / `minimal` / `low` / `medium` / `high` / `xhigh`), context limit, and skills
 - Members persist across rooms and can be added to any room
 
@@ -96,9 +96,9 @@ Open your browser at `http://localhost:8080` and sign in. On first run, `bossmod
 - Configure auto-summarization threshold in Settings
 
 ### ⚙️ Settings
-- **Session Resume**: toggle whether agents resume prior runtime sessions (applies to all runtimes)
+- **Session Resume**: toggle whether agents resume prior pi-cli sessions
 - **Auto-Summary**: enable automatic summarization with configurable threshold and keep count
-- Runtime status: see detected runtimes and their capabilities
+- Runtime status: see detected pi-cli availability and capabilities
 
 ---
 
@@ -143,19 +143,17 @@ Bossmode is a single Node.js daemon: HTTP static serving + REST API + WebSocket 
 │   └────────────────────────────────────┘     │              │
 └──────────────────────────────────────────────┼──────────────┘
                                                │ spawn
-                              ┌────────────────┴────────────────┐
-                              ▼                                 ▼
-                     ┌─────────────────┐               ┌─────────────────┐
-                     │    pi-cli       │               │   claude-cli    │
-                     │   (runtime)     │               │   (runtime)     │
-                     └─────────────────┘               └─────────────────┘
+                              ┌─────────────────┐
+                              │    pi-cli       │
+                              │   (runtime)     │
+                              └─────────────────┘
 ```
 
 **Five core domains**:
 
 | Domain | Responsibility | Key entities |
 |--------|---------------|--------------|
-| **Workforce** | Who does the work | Agent (definition), Skill (capability), Member (runtime assignment) |
+| **Workforce** | Who does the work | Agent (definition), Skill (capability), Member (model assignment) |
 | **Workspace** | Where the work happens | Room, Message, Archive, Session |
 | **Knowledge** | Background context | Knowledge Entry, Rule |
 | **Communication** | How messages flow | message-bus, router (@mention parsing), WebSocket |
@@ -165,16 +163,15 @@ Dependency direction is strictly one-way: `API → Communication → Engine → 
 
 ### Supported Runtimes
 
-Bossmode does not bundle an LLM engine — it spawns external CLI runtimes. At least one must be installed.
+Bossmode does not bundle an LLM engine — it spawns pi-coding-agent (`pi`) as its CLI runtime.
 
 | Runtime | Command | Install | Notes |
 |---------|---------|---------|-------|
 | **pi-cli** | `pi` | `npm install -g @mariozechner/pi-coding-agent` | Open-source multi-provider agent runtime |
-| **claude-cli** | `claude` | [Anthropic docs](https://docs.claude.com/claude-code) | Claude Code CLI with MCP + Sessions + Hooks |
 
-Both runtimes support the same capability set: streaming, tool events, thinking levels, session resume, context usage tracking, and dynamic model/thinking configuration.
+pi-cli provides streaming, tool events, thinking levels, session resume, context usage tracking, and dynamic model/thinking configuration.
 
-Agent tools are injected via each runtime's native mechanism — pi-cli uses a JS extension, claude-cli uses an MCP HTTP server hosted on the main process.
+Agent tools are injected via a Bossmode-generated pi extension.
 
 ### Data Storage
 
@@ -185,7 +182,7 @@ All data lives in `~/.bossmode/` — plain text and JSON, easy to back up and mi
 ├── config.json              # Global settings (credentials, port, runtime config)
 ├── bossmode.pid             # Daemon process PID
 ├── bossmode.log             # Server log
-├── members.json             # Member configurations (runtime + model assignments)
+├── members.json             # Member configurations (model assignments)
 ├── agents/                  # Custom agent definitions (override built-in templates)
 │   └── *.md                 #   Markdown + YAML frontmatter
 ├── skills/                  # Custom skill documents
@@ -221,7 +218,7 @@ Optional environment variables:
 
 Host and port can also be set via `--host` / `--port` flags on `bossmode on`.
 
-Runtime detection happens automatically. `bossmode status` shows which runtimes are available and their detected versions.
+Runtime detection happens automatically. `bossmode status` shows pi-cli availability and detected version.
 
 ---
 

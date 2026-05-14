@@ -6,6 +6,7 @@ const execSyncMock = vi.fn();
 const writeFileSyncMock = vi.fn();
 const unlinkSyncMock = vi.fn();
 const existsSyncMock = vi.fn();
+const exportPiConfigForMemberMock = vi.fn(() => null);
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
@@ -17,6 +18,10 @@ vi.mock("node:fs", () => ({
   unlinkSync: unlinkSyncMock,
   existsSync: existsSyncMock,
   mkdirSync: vi.fn(),
+}));
+
+vi.mock("../../src/engine/model-credentials.js", () => ({
+  exportPiConfigForMember: exportPiConfigForMemberMock,
 }));
 
 function createFakeProc() {
@@ -44,6 +49,7 @@ describe("PiCliRuntime spawn args", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     existsSyncMock.mockReturnValue(false);
+    exportPiConfigForMemberMock.mockReturnValue(null);
     spawnMock.mockImplementation(() => createFakeProc());
     execSyncMock.mockReturnValue("pi 1.0.0");
   });
@@ -84,6 +90,120 @@ describe("PiCliRuntime spawn args", () => {
     const spawnArgs = spawnMock.mock.calls[0][1] as string[];
     expect(spawnArgs).not.toContain("--no-extensions");
     expect(spawnArgs).toContain("--no-skills");
+  });
+
+  it("passes only the role prompt via --system-prompt and appends Bossmode overlays", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "ROLE PROMPT",
+      envPrompt: "DOCS INDEX\nENV PROMPT",
+      rulesPrompt: "ROOM RULES",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: { onChat: async () => {}, onMention: async () => {} },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await p;
+
+    const spawnArgs = spawnMock.mock.calls[0][1] as string[];
+    expect(spawnArgs).toContain("--system-prompt");
+    expect(spawnArgs[spawnArgs.indexOf("--system-prompt") + 1]).toBe("ROLE PROMPT");
+    const appendValues = spawnArgs
+      .map((arg, i) => (arg === "--append-system-prompt" ? spawnArgs[i + 1] : null))
+      .filter(Boolean);
+    expect(appendValues).toEqual(["DOCS INDEX\nENV PROMPT", "ROOM RULES"]);
+  });
+
+  it("does not pass --system-prompt for builtin/general when only Bossmode overlays exist", async () => {
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "general",
+        name: "general",
+        type: "agent",
+        agent: "general",
+        model: "sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+      },
+      agentPrompt: "",
+      envPrompt: "DOCS INDEX\nENV PROMPT",
+      rulesPrompt: "ROOM RULES",
+      skillPaths: [],
+      roomMembers: ["general", "pm"],
+      callbacks: { onChat: async () => {}, onMention: async () => {} },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await p;
+
+    const spawnArgs = spawnMock.mock.calls[0][1] as string[];
+    expect(spawnArgs).not.toContain("--system-prompt");
+    const appendValues = spawnArgs
+      .map((arg, i) => (arg === "--append-system-prompt" ? spawnArgs[i + 1] : null))
+      .filter(Boolean);
+    expect(appendValues).toEqual(["DOCS INDEX\nENV PROMPT", "ROOM RULES"]);
+  });
+
+  it("exports configured model credentials to pi env and extension args", async () => {
+    exportPiConfigForMemberMock.mockReturnValue({
+      agentDir: "/tmp/bossmode-pi-agent",
+      extensionPaths: ["/tmp/profile-extension.ts"],
+    });
+    const { PiCliRuntime } = await import("../../src/engine/runtime/pi-cli.js");
+
+    const runtime = new PiCliRuntime("pi", 12345);
+    const p = runtime.createAgent({
+      cwd: "/tmp",
+      roomId: "room-a",
+      member: {
+        id: "dev",
+        name: "dev",
+        type: "agent",
+        agent: "developer",
+        model: "openrouter/anthropic/claude-sonnet",
+        runtime: "pi-cli",
+        thinkingLevel: "off",
+        credentialId: "cred-1",
+      },
+      agentPrompt: "system",
+      envPrompt: "env",
+      skillPaths: [],
+      roomMembers: ["dev", "pm"],
+      callbacks: { onChat: async () => {}, onMention: async () => {} },
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await p;
+
+    expect(exportPiConfigForMemberMock).toHaveBeenCalledWith({
+      roomId: "room-a",
+      memberName: "dev",
+      modelRef: "openrouter/anthropic/claude-sonnet",
+      credentialId: "cred-1",
+    });
+    const spawnArgs = spawnMock.mock.calls[0][1] as string[];
+    const spawnOpts = spawnMock.mock.calls[0][2] as any;
+    expect(spawnArgs).toContain("/tmp/profile-extension.ts");
+    expect(spawnOpts.env.PI_CODING_AGENT_DIR).toBe("/tmp/bossmode-pi-agent");
   });
 
   it("registers write_summary tool in generated extension", async () => {

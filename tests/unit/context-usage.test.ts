@@ -77,7 +77,7 @@ describe("getBarColor", () => {
 
 describe("control_request/response matching", () => {
   /**
-   * Simulates the pending request mechanism from claude-cli.ts
+   * Simulates runtime pending request behavior
    */
   class RequestTracker {
     pending = new Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();

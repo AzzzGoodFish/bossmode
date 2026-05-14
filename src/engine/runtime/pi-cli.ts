@@ -3,7 +3,8 @@ import { spawn, execSync, type ChildProcessWithoutNullStreams } from "node:child
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { logger, formatSpawnArgs } from "../../foundation/logger.js";
-import { getCleanSpawnEnv } from "./env.js";
+import { getPiSpawnEnv } from "./env.js";
+import { exportPiConfigForMember } from "../model-credentials.js";
 import { BaseCliAgentHandle } from "./base-cli-handle.js";
 import { buildChatToolDescription } from "../../shared/chat-tool-description.js";
 import {
@@ -356,7 +357,10 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
       return;
     }
 
-    if (raw.type === "agent_start") this._isWorking = true;
+    if (raw.type === "agent_start") {
+      this._isWorking = true;
+      this._hasRuntimeStarted = true;
+    }
     if (raw.type === "agent_end") {
       this.endWork();
     }
@@ -396,6 +400,7 @@ class PiCliAgentHandle extends BaseCliAgentHandle implements AgentHandle {
 
   private handleCompactCommand(): Promise<void> {
     this._isWorking = true;
+    this._hasRuntimeStarted = true;
     this.emit({ type: "agent_start" });
     this.emit({ type: "message_start" });
     this.emit({ type: "message_update", text: "Compacting context..." });
@@ -469,10 +474,17 @@ export class PiCliRuntime implements AgentRuntime {
     writeFileSync(extPath, extContent, "utf-8");
     this.extFiles.push(extPath);
 
-    const resolvedModel = normalizeModel(opts.member.model);
+    const resolvedModel = normalizeModel(opts.member.model || "claude-sonnet-4-6");
+    const piConfig = exportPiConfigForMember({
+      roomId: opts.roomId,
+      memberName: opts.member.name,
+      modelRef: resolvedModel,
+      credentialId: opts.member.credentialId,
+    });
 
-    // Decide injection strategy based on whether agentPrompt has content
-    const hasAgentPrompt = opts.agentPrompt.trim().length > 0;
+    // --system-prompt replaces pi's default prompt; use it only for the agent's own role prompt.
+    // Bossmode overlays (env/docs/rules) are always appended so builtin/general can preserve pi defaults.
+    const rolePrompt = opts.agentPrompt.trim();
 
     const buildArgs = (sessionFile?: string): string[] => {
       const args = [
@@ -481,16 +493,12 @@ export class PiCliRuntime implements AgentRuntime {
         "--thinking", opts.member.thinkingLevel || "off",
         "--no-skills",
         "--extension", extPath,
+        ...(piConfig?.extensionPaths || []).flatMap((p) => ["--extension", p]),
         ...opts.skillPaths.filter((p) => existsSync(p)).flatMap((p) => ["--skill", p]),
       ];
 
-      if (hasAgentPrompt) {
-        // Override mode: agentPrompt + envPrompt in --system-prompt
-        args.push("--system-prompt", opts.agentPrompt + "\n" + opts.envPrompt);
-      } else {
-        // Append mode: preserve CLI default, append envPrompt
-        args.push("--append-system-prompt", opts.envPrompt);
-      }
+      if (rolePrompt) args.push("--system-prompt", rolePrompt);
+      if (opts.envPrompt.trim()) args.push("--append-system-prompt", opts.envPrompt);
 
       if (sessionFile) args.push("--session", sessionFile);
       if (opts.rulesPrompt) args.push("--append-system-prompt", opts.rulesPrompt);
@@ -507,7 +515,7 @@ export class PiCliRuntime implements AgentRuntime {
       const proc = spawn(this.cliPath, args, {
         cwd: opts.cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: getCleanSpawnEnv(),
+        env: getPiSpawnEnv(piConfig?.agentDir),
       });
 
       const spawnHeader = `spawn agent="${opts.member.name}" pid=${proc.pid}`;

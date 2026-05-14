@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { Plus, Search, ArrowLeft, Save, Trash2, X, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { MemberInfo, AgentInfo, RuntimeInfo, MemberInstanceInfo } from "../api/client";
+import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../api/client";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
-  getAgents, getAgent, getRuntimes, getMemberStatus, restartMember,
+  getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels,
 } from "../api/client";
 import { useDialog } from "../components/dialogs";
 
@@ -41,7 +41,8 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
 
   const filtered = members.filter((m) =>
     m.name.toLowerCase().includes(search.toLowerCase()) ||
-    m.runtime.includes(search.toLowerCase())
+    m.agent.toLowerCase().includes(search.toLowerCase()) ||
+    (m.model || "").toLowerCase().includes(search.toLowerCase())
   );
 
   // Create mode
@@ -90,11 +91,11 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">{m.avatar || "👤"}</span>
               <span className="font-semibold text-white text-sm">{m.name}</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded ${m.runtime === "claude-cli" ? "bg-purple-900/50 text-purple-400" : "bg-blue-900/50 text-blue-400"}`}>
-                {m.runtime}
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                {m.credentialId ? "credential" : "default model"}
               </span>
             </div>
-            <div className="text-xs text-zinc-500">Model: {m.model}</div>
+            <div className="text-xs text-zinc-500">Model: {m.model || "Use agent default"}</div>
             <div className="text-xs text-zinc-600">Agent: {m.agent}</div>
           </div>
         ))}
@@ -111,8 +112,10 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   const { toast, confirm } = useDialog();
   const [member, setMember] = useState<MemberInfo | null>(isCreate ? {} as MemberInfo : null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
-  const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: "sonnet", thinkingLevel: "off" } : {});
+  const DEFAULT_MODEL_VALUE = "__agent_default__";
+  const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: undefined, thinkingLevel: "off" } : {});
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [manualModel, setManualModel] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [agentDetail, setAgentDetail] = useState<{ description: string; skills: string[]; avatar?: string } | null>(null);
   const [instances, setInstances] = useState<MemberInstanceInfo[]>([]);
@@ -127,7 +130,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       refreshStatus();
     }
     getAgents().then(setAgents);
-    getRuntimes().then(setRuntimes);
+    getConfiguredModels().then(setModels).catch(() => setModels([]));
   }, [id, isCreate]);
 
   // Track whether selected agent is builtin
@@ -227,17 +230,25 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
               )}
             </Field>
 
-            <Field label="Runtime">
-              <select value={form.runtime || ""} onChange={(e) => setForm({ ...form, runtime: e.target.value as any })} className={inputCls}>
-                {runtimes.filter((r) => r.available).map((r) => (
-                  <option key={r.name} value={r.name}>{r.name} {r.version ? `(v${r.version})` : ""}</option>
-                ))}
-              </select>
-            </Field>
-
             <Field label="Model">
-              <input autoComplete="off" value={form.model || ""} onChange={(e) => setForm({ ...form, model: e.target.value })}
-                placeholder="sonnet, opus, anthropic/claude-sonnet-4-6" className={inputCls} />
+              {!manualModel && models.length > 0 ? (
+                <select value={form.credentialId && form.model ? `${form.credentialId}::${form.model}` : (form.model || DEFAULT_MODEL_VALUE)} onChange={(e) => {
+                  if (e.target.value === DEFAULT_MODEL_VALUE) { setForm({ ...form, model: null, credentialId: undefined }); return; }
+                  const [profileId, ref] = e.target.value.split("::");
+                  setForm({ ...form, model: ref, credentialId: profileId });
+                }} className={inputCls}>
+                  <option value={DEFAULT_MODEL_VALUE}>Use agent default</option>
+                  {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ""}</option>)}
+                </select>
+              ) : (
+                <input autoComplete="off" value={form.model || ""} onChange={(e) => setForm({ ...form, model: e.target.value || null, credentialId: undefined })}
+                  placeholder="Use agent default, or enter anthropic/claude-sonnet-4-6" className={inputCls} />
+              )}
+              <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-500 hover:text-blue-400 cursor-pointer">
+                {manualModel ? "Choose from configured models" : "Enter model manually"}
+              </button>
+              <p className="text-xs text-zinc-500 mt-1">Uses the model configured on the agent definition unless a model is selected here.</p>
+              {form.credentialId && <p className="text-xs text-zinc-500 mt-1">Credential profile: {form.credentialId}</p>}
             </Field>
 
             <div className="grid grid-cols-2 gap-3">

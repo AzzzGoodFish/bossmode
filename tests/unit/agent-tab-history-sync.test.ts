@@ -11,7 +11,7 @@ beforeAll(async () => {
     removeItem: () => {},
   });
   ({ getAgentHistorySyncPlan, buildAgentHistoryState, getAgentTabHeaderControls } = await import("../../web/src/components/AgentTab"));
-});
+}, 30000);
 
 describe("agent tab history sync", () => {
   it("still fetches authoritative history even when cached events exist", () => {

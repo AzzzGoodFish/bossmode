@@ -59,7 +59,7 @@ const streamState = new Map<string, { text: string; thinking: string }>();
  * 2. Enrich message_end with accumulated content
  * 3. Persist non-streaming events to disk
  * 4. Push all events via WebSocket
- * 5. Update instance status on agent_end
+ * 5. Update public instance status from runtime agent_start/agent_end
  *
  * Returns the new status if it changed, undefined otherwise.
  */
@@ -145,7 +145,12 @@ export function handleAgentEvent(
     event: processedEvent,
   });
 
-  // Status change on agent_end
+  // Public status is sourced only from runtime lifecycle events.
+  if (processedEvent.type === "agent_start") {
+    logger.info("agent", "statusChange", { agent: agentName, status: "working" });
+    return "working";
+  }
+
   if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
     // Proactively refresh context usage cache while agent is idle (responsive to control_request)

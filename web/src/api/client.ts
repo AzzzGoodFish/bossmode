@@ -143,11 +143,12 @@ export interface MemberInfo {
   id: string;
   name: string;
   agent: string;
-  model: string;
-  runtime: "pi-cli" | "claude-cli";
+  model?: string | null;
+  runtime: "pi-cli";
   thinkingLevel: string;
   avatar?: string;
   contextLimit?: number;
+  credentialId?: string;
 }
 
 export async function getMembers(): Promise<MemberInfo[]> {
@@ -185,6 +186,135 @@ export async function getMemberStatus(id: string): Promise<{ instances: MemberIn
 
 export async function restartMember(id: string, roomId: string): Promise<void> {
   await apiFetch(`/api/members/${id}/restart?roomId=${roomId}`, { method: "POST" });
+}
+
+// -- Model Credentials --
+
+export type ModelProtocol =
+  | "openai-completions"
+  | "openai-responses"
+  | "openai-codex-responses"
+  | "anthropic-messages"
+  | "azure-openai-responses"
+  | "google-generative-ai"
+  | "google-gemini-cli"
+  | "google-vertex"
+  | "bedrock-converse-stream"
+  | "mistral-conversations";
+
+export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
+export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "openai_codex_subscription";
+
+export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
+
+export interface ModelDefinitionConfig {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+  metadataSource?: ModelMetadataSource;
+}
+
+export interface PublicModelCredentialProfile {
+  id: string;
+  name: string;
+  providerSlug: string;
+  protocol: ModelProtocol;
+  baseUrl?: string;
+  authType: ModelAuthType;
+  oauthProviderId?: string;
+  requestProfile: ModelRequestProfile;
+  authHeader?: boolean;
+  headers?: Record<string, string>;
+  enabled: boolean;
+  isDefault: boolean;
+  models: ModelDefinitionConfig[];
+  createdAt: number;
+  updatedAt: number;
+  hasSecret: boolean;
+  modelRefs: string[];
+}
+
+export interface ModelCredentialProfileInput extends Omit<PublicModelCredentialProfile, "id" | "createdAt" | "updatedAt" | "hasSecret" | "modelRefs"> {
+  apiKey?: string;
+  oauthCredentials?: Record<string, unknown>;
+}
+
+export interface ModelOption {
+  ref: string;
+  providerSlug: string;
+  modelId: string;
+  displayName?: string;
+  profileId: string;
+  profileName: string;
+  protocol: ModelProtocol;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+  metadataSource?: ModelMetadataSource;
+  credentialStatus: "configured" | "missing" | "no_auth" | "ambient";
+}
+
+export async function getModelCredentialProfiles(): Promise<PublicModelCredentialProfile[]> {
+  return apiFetch("/api/model-credential-profiles");
+}
+
+export async function createModelCredentialProfile(data: ModelCredentialProfileInput): Promise<PublicModelCredentialProfile> {
+  return apiFetch("/api/model-credential-profiles", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateModelCredentialProfile(id: string, data: Partial<ModelCredentialProfileInput>): Promise<PublicModelCredentialProfile> {
+  return apiFetch(`/api/model-credential-profiles/${id}`, { method: "PUT", body: JSON.stringify(data) });
+}
+
+export async function deleteModelCredentialProfile(id: string): Promise<void> {
+  await apiFetch(`/api/model-credential-profiles/${id}`, { method: "DELETE" });
+}
+
+export interface ModelDiscoveryResult {
+  models: ModelDefinitionConfig[];
+  partial: boolean;
+  warnings: string[];
+}
+
+export interface OAuthLoginJob {
+  id: string;
+  status: "awaiting_input" | "completed" | "failed" | "cancelled";
+  providerId: string;
+  authUrl?: string;
+  userCode?: string;
+  prompt: string;
+  error?: string;
+  profileId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function startOAuthLoginJob(data: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string }): Promise<OAuthLoginJob> {
+  return apiFetch("/api/model-credential-profiles/oauth-login/start", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function getOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}`);
+}
+
+export async function submitOAuthLoginJobInput(id: string, code: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
+}
+
+export async function cancelOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/cancel`, { method: "POST" });
+}
+
+export async function discoverModelCredentialModels(data: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
+  return apiFetch("/api/model-credential-profiles/discover-models", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function getConfiguredModels(): Promise<ModelOption[]> {
+  return apiFetch("/api/models");
 }
 
 // -- Runtimes --

@@ -48,11 +48,15 @@ export function getRegistry(): RuntimeRegistry | null {
 
 // -- Instance tracking --
 
+type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
+
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
   agentName: string;
   status: AgentStatus;
+  dispatchState: DispatchState;
+  queuedInputs: string[];
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
 }
@@ -76,6 +80,29 @@ function transition(
   instance.status = newStatus;
   logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: newStatus });
+}
+
+function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
+  if (instance.dispatchState === next) return;
+  logger.info("agent", "dispatchStateTransition", {
+    member: instance.agentName,
+    from: instance.dispatchState,
+    to: next,
+    trigger,
+  });
+  instance.dispatchState = next;
+}
+
+function flushQueuedInputs(instance: AgentInstance, trigger: string): void {
+  if (instance.queuedInputs.length === 0) return;
+  const queued = instance.queuedInputs.splice(0);
+  logger.info("agent", "flushQueuedInputs", { member: instance.agentName, count: queued.length, trigger });
+  for (const input of queued) instance.handle.steer(input);
+}
+
+function queueInput(instance: AgentInstance, input: string, trigger: string): void {
+  instance.queuedInputs.push(input);
+  logger.info("agent", "queueInput", { member: instance.agentName, count: instance.queuedInputs.length, trigger });
 }
 
 // -- Format messages --
@@ -164,6 +191,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       };
       logger.info("agent", "loadMember", { member: memberName, source: "auto-default", agent: memberName, runtime: "pi-cli", model: member.model });
     } else {
+      member = { ...member, model: member.model || loadAgentDefinition(member.agent)?.model || "claude-sonnet-4-6" };
       logger.info("agent", "loadMember", { member: memberName, source: "members.json", agent: member.agent, runtime: member.runtime, model: member.model });
     }
 
@@ -259,12 +287,23 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         roomId,
         agentName: memberName,
         status: "idle",
+        dispatchState: "idle",
+        queuedInputs: [],
         unsubscribe: () => {},
         eventBuffer: [],
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
         const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer);
+        if (event.type === "agent_start") {
+          updateDispatchState(instance, "running", event.type);
+          flushQueuedInputs(instance, event.type);
+        } else if (event.type === "agent_end") {
+          updateDispatchState(instance, "idle", event.type);
+        } else if (event.type === "runtime_exit" && event.unexpected) {
+          updateDispatchState(instance, "idle", event.type);
+          instance.queuedInputs = [];
+        }
         if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
 
         // Unexpected CLI exit: notify room and drop dead instance so next mention respawns.
@@ -328,23 +367,28 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   const formattedMessages = formatMessagesForAgent(newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
-  const wasWorking = instance.status === "working";
-  transition(instance, roomId, memberName, "working", "activate");
-
   setActivationSource(roomId, memberName, "room_mention");
 
-  if (wasWorking) {
+  if (instance.dispatchState === "running" || instance.status === "working") {
     instance.handle.steer(formattedMessages);
-  } else {
-    logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
-    try {
-      await instance.handle.prompt(formattedMessages);
-      transition(instance, roomId, memberName, "idle", "activate_prompt_resolved");
-    } catch (err: any) {
-      logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
-      postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
-      transition(instance, roomId, memberName, "idle", "activate_prompt_error");
-    }
+    return;
+  }
+
+  if (instance.dispatchState === "promptSubmitted" || instance.dispatchState === "aborting") {
+    queueInput(instance, formattedMessages, "activate");
+    return;
+  }
+
+  logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
+  updateDispatchState(instance, "promptSubmitted", "activate");
+  try {
+    await instance.handle.prompt(formattedMessages);
+    if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "activate_prompt_resolved");
+  } catch (err: any) {
+    logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
+    postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
+    updateDispatchState(instance, "idle", "activate_prompt_error");
+    instance.queuedInputs = [];
   }
 }
 
@@ -356,7 +400,7 @@ export async function activateAll(roomId: string): Promise<void> {
   const activations = room.members.map((agentName) => {
     const key = instanceKey(roomId, agentName);
     const instance = instances.get(key);
-    if (instance && instance.status === "working") return Promise.resolve();
+    if (instance && (instance.status === "working" || instance.dispatchState !== "idle")) return Promise.resolve();
     return activateAgent(roomId, agentName);
   });
   await Promise.allSettled(activations);
@@ -449,17 +493,24 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
 
   setActivationSource(roomId, agentName, isSlashCommand ? "system" : "private_instruction");
 
-  if (instance.status === "working") {
+  if (instance.dispatchState === "running" || instance.status === "working") {
     instance.handle.steer(userMessage);
-  } else {
-    transition(instance, roomId, agentName, "working", "steer");
-    try {
-      await instance.handle.prompt(userMessage);
-      transition(instance, roomId, agentName, "idle", "steer_prompt_resolved");
-    } catch (err: any) {
-      logger.error("agent", "steer error", { agent: agentName, error: err.message || String(err) });
-      transition(instance, roomId, agentName, "idle", "steer_prompt_error");
-    }
+    return;
+  }
+
+  if (instance.dispatchState === "promptSubmitted" || instance.dispatchState === "aborting") {
+    queueInput(instance, userMessage, "steer");
+    return;
+  }
+
+  updateDispatchState(instance, "promptSubmitted", "steer");
+  try {
+    await instance.handle.prompt(userMessage);
+    if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "steer_prompt_resolved");
+  } catch (err: any) {
+    logger.error("agent", "steer error", { agent: agentName, error: err.message || String(err) });
+    updateDispatchState(instance, "idle", "steer_prompt_error");
+    instance.queuedInputs = [];
   }
 }
 
@@ -469,11 +520,12 @@ export function abortAgent(roomId: string, memberName: string): { ok: boolean; a
   const key = instanceKey(roomId, memberName);
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
-  if (instance.status !== "working") return { ok: true, action: "already_idle" };
+  if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
 
-  // Abort via stdin protocol (both pi-cli and claude-cli), keep instance alive
+  // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
-  transition(instance, roomId, memberName, "idle", "abort");
+  updateDispatchState(instance, "aborting", "abort");
+  instance.queuedInputs = [];
   logger.info("agent", "aborted", { member: memberName, roomId });
   return { ok: true, action: "aborted" };
 }

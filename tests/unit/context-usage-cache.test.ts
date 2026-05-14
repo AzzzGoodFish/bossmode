@@ -18,7 +18,7 @@ const mockHandle = {
     return { totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet" };
   }),
   isWorking: false,
-  runtimeName: "claude-cli",
+  runtimeName: "pi-cli",
 };
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -52,7 +52,7 @@ vi.mock("../../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "developer",
     model: "sonnet",
-    runtime: "claude-cli",
+    runtime: "pi-cli",
     thinkingLevel: "off",
     skills: [],
   })),
@@ -114,7 +114,7 @@ describe("agent-manager context usage cache", () => {
     mocks.broadcastToRoom.mockReset();
 
     const runtime = {
-      name: "claude-cli",
+      name: "pi-cli",
       capabilities: {
         streaming: true,
         toolEvents: true,

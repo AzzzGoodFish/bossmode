@@ -116,7 +116,7 @@ describe("BaseCliAgentHandle", () => {
     vi.useRealTimers();
   });
 
-  it("startWork emits agent_start and resolves after endWork", async () => {
+  it("startWork submits prompt without synthetic agent_start and resolves after endWork", async () => {
     const proc = createFakeProc();
     const handle = new TestHandle(proc);
     const events: AgentStreamEvent[] = [];
@@ -128,7 +128,7 @@ describe("BaseCliAgentHandle", () => {
     });
 
     expect(proc.stdin.write).toHaveBeenCalledWith('{"type":"prompt","message":"hi"}\n');
-    expect(events.some((e) => e.type === "agent_start")).toBe(true);
+    expect(events.some((e) => e.type === "agent_start")).toBe(false);
     expect(done).toBe(false);
 
     handle.finish();
@@ -136,7 +136,7 @@ describe("BaseCliAgentHandle", () => {
     expect(done).toBe(true);
   });
 
-  it("failWork rejects pending prompt and emits agent_end", async () => {
+  it("failWork rejects pending prompt without synthetic agent_end", async () => {
     const proc = createFakeProc();
     const handle = new TestHandle(proc);
     const events: AgentStreamEvent[] = [];
@@ -146,7 +146,7 @@ describe("BaseCliAgentHandle", () => {
     handle.fail("boom");
 
     await expect(p).rejects.toThrow("boom");
-    expect(events.some((e) => e.type === "agent_end")).toBe(true);
+    expect(events.some((e) => e.type === "agent_end")).toBe(false);
   });
 
   it("destroy rejects pending requests", async () => {

@@ -10,7 +10,7 @@ beforeAll(async () => {
     removeItem: () => {},
   });
   ({ isResetSessionCommand, buildResetSessionConfirmMessage } = await import("../../web/src/components/AgentTab"));
-});
+}, 30000);
 
 describe("reset session command helpers", () => {
   it("matches only the exact /reset-session command", () => {

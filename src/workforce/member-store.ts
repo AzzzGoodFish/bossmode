@@ -15,10 +15,11 @@ function normalizeMember(raw: LegacyMemberConfig | AgentMemberConfig): AgentMemb
     type: "agent",
     agent: raw.agent,
     model: raw.model,
-    runtime: raw.runtime,
+    runtime: "pi-cli",
     thinkingLevel: raw.thinkingLevel,
     avatar: raw.avatar,
     contextLimit: raw.contextLimit,
+    credentialId: raw.credentialId,
     skills: raw.skills,
   };
 }
@@ -54,6 +55,7 @@ export function saveMember(member: Omit<AgentMemberConfig, "id" | "type"> & { id
   const members = readAll();
   const config: AgentMemberConfig = {
     ...member,
+    runtime: "pi-cli",
     id: member.id || randomUUID().slice(0, 8),
     type: "agent",
   };

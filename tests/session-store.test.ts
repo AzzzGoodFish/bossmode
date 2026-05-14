@@ -28,13 +28,13 @@ describe("session-store", () => {
     const room = roomStore.createRoom("test", "/tmp", ["pm"]);
 
     sessionStore.saveSession(room.id, "pm", {
-      runtime: "claude-cli",
+      runtime: "pi-cli",
       sessionId: "session-123",
       sessionFile: "/tmp/session.json",
     });
 
-    sessionStore.clearSession(room.id, "pm", "claude-cli");
+    sessionStore.clearSession(room.id, "pm", "pi-cli");
 
-    expect(sessionStore.getSessions(room.id).pm).toEqual({ runtime: "claude-cli" });
+    expect(sessionStore.getSessions(room.id).pm).toEqual({ runtime: "pi-cli" });
   });
 });

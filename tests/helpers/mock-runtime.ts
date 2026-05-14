@@ -34,7 +34,12 @@ export class MockAgentHandle implements AgentHandle {
   }
 
   async prompt(message: string): Promise<void> {
-    return mockPromptFn(message);
+    this.emit({ type: "agent_start" });
+    try {
+      return await mockPromptFn(message);
+    } finally {
+      this.emit({ type: "agent_end" });
+    }
   }
 
   steer(message: string): void {

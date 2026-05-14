@@ -1,5 +1,5 @@
-// Canonical description for the `chat` tool, shared across runtimes (pi-cli + MCP).
-// Centralizing this avoids drift between the two runtime adapters and keeps the
+// Canonical description for the `chat` tool used by pi-cli extension generation.
+// Centralizing this keeps the
 // envelope/target/mentions contract in a single source of truth.
 
 export function buildChatToolDescription(memberList: string): string {

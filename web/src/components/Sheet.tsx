@@ -6,12 +6,13 @@ const SIZE_CLS: Record<string, string> = {
   md: "max-w-md",
   lg: "max-w-lg",
   xl: "max-w-2xl",
+  "2xl": "max-w-4xl",
 };
 
 interface SheetProps {
   open: boolean;
   onClose: () => void;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl";
   closeOnOverlayClick?: boolean;
   children: React.ReactNode;
 }
