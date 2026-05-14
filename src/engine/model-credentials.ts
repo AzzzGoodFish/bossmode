@@ -66,6 +66,13 @@ interface OAuthLoginAdapter {
   login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 }
 
+type ModelDiscoveredMetadata = {
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+};
+
 type OAuthLoginJob = OAuthLoginJobPublic & {
   profileInput: ModelCredentialProfileInput & { id?: string };
   inputWaiter?: OAuthInputWaiter;
@@ -409,7 +416,12 @@ export interface ModelDiscoveryResult {
   warnings: string[];
 }
 
-const OPENAI_COMPATIBLE_PROTOCOLS: ModelProtocol[] = ["openai-completions", "openai-responses", "openai-codex-responses"];
+const DISCOVERY_SUPPORTED_PROTOCOLS: ModelProtocol[] = [
+  "openai-completions",
+  "openai-responses",
+  "openai-codex-responses",
+  "anthropic-messages",
+];
 
 function classifyNetworkError(err: unknown): Error {
   const text = String((err as any)?.message || err || "network error");
@@ -453,9 +465,52 @@ function coerceDiscoveredModel(raw: any): ModelDefinitionConfig | null {
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
-    input: ["text"],
+    ...(Array.isArray(raw?.input) && raw.input.length ? { input: raw.input } : { input: ["text"] }),
     metadataSource: hasEndpointMetadata ? "endpoint" : "unknown",
   };
+}
+
+function normalizeRuntimeBaseUrl(profile: ModelCredentialProfile, rawBaseUrl: string): string {
+  if (profile.protocol !== "anthropic-messages") return rawBaseUrl;
+  try {
+    const url = new URL(rawBaseUrl);
+    const trimmed = url.pathname.replace(/\/+$/, "");
+    if (trimmed.endsWith("/v1")) {
+      url.pathname = (trimmed.length > 3 ? trimmed.slice(0, -3) : "") || "/";
+      return url.toString();
+    }
+  } catch {
+    return rawBaseUrl;
+  }
+  return rawBaseUrl;
+}
+
+function hasSameMetadata(a: ModelDiscoveredMetadata, b: ModelDiscoveredMetadata): boolean {
+  const normalizeInputs = (items?: Array<"text" | "image">) => {
+    const copy = items ? [...items] : undefined;
+    return copy ? copy.sort() : undefined;
+  };
+  return (
+    a.contextWindow === b.contextWindow
+    && a.maxTokens === b.maxTokens
+    && a.reasoning === b.reasoning
+    && JSON.stringify(normalizeInputs(a.input)) === JSON.stringify(normalizeInputs(b.input))
+  );
+}
+
+function applyConsistentMetadataFallback(matches: ModelDiscoveredMetadata[]): ModelDiscoveredMetadata | null {
+  if (matches.length === 0) return null;
+  const first = matches[0];
+  if (
+    first.contextWindow === undefined
+    && first.maxTokens === undefined
+    && first.reasoning === undefined
+    && !first.input
+  ) {
+    return null;
+  }
+  if (!matches.every((m) => hasSameMetadata(m, first))) return null;
+  return first;
 }
 
 export function setPiCatalogModelsForTests(models: any[] | null): void {
@@ -475,24 +530,55 @@ async function loadPiCatalogModels(): Promise<any[]> {
 
 function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: string, catalog: any[]): ModelDefinitionConfig {
   if (model.contextWindow !== undefined && model.maxTokens !== undefined && model.reasoning !== undefined) return model;
+
   const exact = catalog.find((m) => m.provider === providerSlug && m.id === model.id);
-  const global = exact ? undefined : catalog.filter((m) => m.id === model.id);
-  const match = exact || (global?.length === 1 ? global[0] : undefined);
-  if (!match) return model;
+  const fallback = ((): { contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: Array<"text" | "image"> } | null => {
+    if (exact) {
+      return {
+        contextWindow: positiveNumber(exact.contextWindow),
+        maxTokens: positiveNumber(exact.maxTokens, exact.max_output_tokens),
+        reasoning: explicitBoolean(exact.reasoning, exact.supports_reasoning),
+        input: Array.isArray(exact.input) ? exact.input : undefined,
+      };
+    }
+
+    const matches = catalog
+      .filter((m) => m.id === model.id)
+      .map((m) => ({
+        contextWindow: positiveNumber(m.contextWindow),
+        maxTokens: positiveNumber(m.maxTokens, m.max_output_tokens),
+        reasoning: explicitBoolean(m.reasoning, m.supports_reasoning),
+        input: Array.isArray(m.input) ? m.input : undefined,
+      }));
+
+    return applyConsistentMetadataFallback(matches);
+  })();
+
+  if (!fallback) return model;
+
   const patched: ModelDefinitionConfig = {
     ...model,
-    contextWindow: model.contextWindow ?? positiveNumber(match.contextWindow),
-    maxTokens: model.maxTokens ?? positiveNumber(match.maxTokens),
-    reasoning: model.reasoning ?? explicitBoolean(match.reasoning),
+    contextWindow: model.contextWindow ?? fallback.contextWindow,
+    maxTokens: model.maxTokens ?? fallback.maxTokens,
+    reasoning: model.reasoning ?? explicitBoolean(fallback.reasoning),
+    ...(fallback.input ? { input: fallback.input } : {}),
   };
-  const added = patched.contextWindow !== model.contextWindow || patched.maxTokens !== model.maxTokens || patched.reasoning !== model.reasoning;
-  return added ? { ...patched, metadataSource: model.metadataSource === "endpoint" ? "endpoint" : "pi_catalog" } : model;
+
+  const added =
+    patched.contextWindow !== model.contextWindow
+    || patched.maxTokens !== model.maxTokens
+    || patched.reasoning !== model.reasoning
+    || (patched.input && JSON.stringify(patched.input) !== JSON.stringify(model.input));
+
+  return added
+    ? { ...patched, metadataSource: model.metadataSource === "endpoint" ? "endpoint" : "pi_catalog" }
+    : model;
 }
 
 export async function discoverModelCredentialModels(input: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
   const existing = input.id ? getModelCredentialProfile(input.id) : null;
   const protocol = input.protocol || existing?.protocol;
-  if (!protocol || !OPENAI_COMPATIBLE_PROTOCOLS.includes(protocol)) {
+  if (!protocol || !DISCOVERY_SUPPORTED_PROTOCOLS.includes(protocol)) {
     throw new Error(`unsupported protocol for model discovery: ${protocol || "unknown"}`);
   }
   const authType = input.authType || existing?.authType || "api_key";
@@ -570,8 +656,9 @@ export function listConfiguredModels(): ModelOption[] {
 }
 
 function piProviderConfig(profile: ModelCredentialProfile): Record<string, unknown> {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
   return {
-    baseUrl: profile.baseUrl,
+    baseUrl: normalizedBaseUrl,
     api: profile.requestProfile === "anthropic_claude_code_oauth" ? `${profile.providerSlug}-anthropic-claude-code-oauth` : profile.protocol,
     apiKey: profile.authType === "none" ? DUMMY_API_KEY : API_KEY_PLACEHOLDER,
     ...(profile.authHeader ? { authHeader: true } : {}),
@@ -598,7 +685,8 @@ function authEntry(profile: ModelCredentialProfile): unknown | undefined {
 }
 
 function extensionSource(profile: ModelCredentialProfile): string {
-  return `import { streamSimpleAnthropic } from "@mariozechner/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(profile.baseUrl)},\n    api: ${JSON.stringify(`${profile.providerSlug}-anthropic-claude-code-oauth`)},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(profile.baseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
+  return `import { streamSimpleAnthropic } from "@mariozechner/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(`${profile.providerSlug}-anthropic-claude-code-oauth`)},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
 }
 
 export interface PiCredentialExport {

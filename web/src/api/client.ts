@@ -148,7 +148,7 @@ export interface MemberInfo {
   thinkingLevel: string;
   avatar?: string;
   contextLimit?: number;
-  credentialId?: string;
+  credentialId?: string | null;
 }
 
 export async function getMembers(): Promise<MemberInfo[]> {

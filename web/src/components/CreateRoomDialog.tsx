@@ -6,11 +6,13 @@ import { getMembers, getKnowledgeTree, createMember, getConfiguredModels, getAge
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
 import { Shield, FolderOpen } from "lucide-react";
+import { composeManualModelPayload, uniqueModelProfiles } from "../model-helpers";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
   onSubmit: (name: string, cwd: string, members: string[], ruleDocs?: string[]) => void;
 }
+
 
 export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [name, setName] = useState("");
@@ -226,7 +228,7 @@ function InlineCreateMember({
   const [name, setName] = useState(agentName);
   const DEFAULT_MODEL_VALUE = "__agent_default__";
   const [model, setModel] = useState<string | undefined>();
-  const [credentialId, setCredentialId] = useState<string | undefined>();
+  const [credentialId, setCredentialId] = useState<string | null>();
   const [models, setModels] = useState<ModelOption[]>([]);
   const [manualModel, setManualModel] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -236,7 +238,10 @@ function InlineCreateMember({
   const handleCreate = async () => {
     setSaving(true);
     try {
-      const member = await createMember({ name, agent: agentName, model, credentialId, runtime: "pi-cli", thinkingLevel: "off" });
+      const modelPayload = manualModel
+        ? composeManualModelPayload(model, credentialId, models)
+        : { model: model ?? null, credentialId: credentialId ?? null };
+      const member = await createMember({ name, agent: agentName, ...modelPayload, runtime: "pi-cli", thinkingLevel: "off" });
       onCreated(member);
     } catch (err: any) { toast(err.message, "error"); }
     finally { setSaving(false); }
@@ -254,14 +259,23 @@ function InlineCreateMember({
         <div>
           <label className="block text-xs text-zinc-400 mb-1">Model</label>
           {!manualModel && models.length > 0 ? (
-            <select value={credentialId && model ? `${credentialId}::${model}` : DEFAULT_MODEL_VALUE} onChange={(e) => { if (e.target.value === DEFAULT_MODEL_VALUE) { setModel(undefined); setCredentialId(undefined); return; } const [profileId, ref] = e.target.value.split("::"); setModel(ref); setCredentialId(profileId); }}
+            <select value={credentialId && model ? `${credentialId}::${model}` : DEFAULT_MODEL_VALUE} onChange={(e) => { if (e.target.value === DEFAULT_MODEL_VALUE) { setModel(undefined); setCredentialId(null); return; } const [profileId, ref] = e.target.value.split("::"); setModel(ref); setCredentialId(profileId); }}
               className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
               <option value={DEFAULT_MODEL_VALUE}>Use agent default</option>
               {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}</option>)}
             </select>
           ) : (
-            <input autoComplete="off" value={model || ""} onChange={(e) => { setModel(e.target.value || undefined); setCredentialId(undefined); }} placeholder="Use agent default"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+            <div className="space-y-2">
+              {models.length > 0 && (
+                <select value={credentialId || ""} onChange={(e) => setCredentialId(e.target.value || null)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
+                  <option value="">No credential profile (enter full provider/model)</option>
+                  {uniqueModelProfiles(models).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.providerSlug}</option>)}
+                </select>
+              )}
+              <input autoComplete="off" value={model || ""} onChange={(e) => setModel(e.target.value || undefined)} placeholder={credentialId ? "Enter model id" : "Use agent default, or enter provider/model"}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+            </div>
           )}
           <p className="text-xs text-zinc-500 mt-1">Uses the model configured on the agent definition unless a model is selected here.</p>
           <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 cursor-pointer">

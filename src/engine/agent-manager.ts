@@ -306,6 +306,13 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         }
         if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
 
+        if (event.type === "message_end" && event.stopReason === "error") {
+          const detail = typeof event.errorMessage === "string" && event.errorMessage.trim()
+            ? ` Error: ${event.errorMessage.trim()}`
+            : " An unrecoverable provider error occurred.";
+          postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
+        }
+
         // Unexpected CLI exit: notify room and drop dead instance so next mention respawns.
         if (event.type === "runtime_exit" && event.unexpected) {
           const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");

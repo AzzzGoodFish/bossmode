@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Plus, Search, ArrowLeft, Save, Trash2, X, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
 import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../api/client";
+import { composeManualModelPayload, uniqueModelProfiles } from "../model-helpers";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
   getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels,
@@ -15,6 +16,9 @@ interface MembersPageProps {
   onNavigateAgent?: (name: string) => void;
   onOpenMobileSidebar?: () => void;
 }
+
+type ModelPayload = Pick<Partial<MemberInfo>, "model" | "credentialId">;
+
 
 export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, onNavigateAgent, onOpenMobileSidebar }: MembersPageProps) {
   const { toast, confirm } = useDialog();
@@ -154,14 +158,19 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   const handleSave = async () => {
     setSaveState("saving");
     try {
+      const modelPayload = manualModel
+        ? composeManualModelPayload(form.model, form.credentialId, models)
+        : { model: form.model ?? null, credentialId: form.credentialId ?? null };
+      const payload = { ...form, ...modelPayload };
       if (isCreate) {
         if (!form.name || !form.agent) { toast("Name and agent are required", "error"); setSaveState("idle"); return; }
-        const created = await createMember(form as any);
+        const created = await createMember(payload as any);
         onCreated?.(created.id);
         setSaveState("saved");
       } else {
-        await updateMember(id!, form);
-        setMember({ ...member!, ...form } as MemberInfo);
+        const updated = await updateMember(id!, payload);
+        setMember(updated);
+        setForm(updated);
         setSaveState("saved");
       }
       setTimeout(() => setSaveState("idle"), 1500);
@@ -233,7 +242,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
             <Field label="Model">
               {!manualModel && models.length > 0 ? (
                 <select value={form.credentialId && form.model ? `${form.credentialId}::${form.model}` : (form.model || DEFAULT_MODEL_VALUE)} onChange={(e) => {
-                  if (e.target.value === DEFAULT_MODEL_VALUE) { setForm({ ...form, model: null, credentialId: undefined }); return; }
+                  if (e.target.value === DEFAULT_MODEL_VALUE) { setForm({ ...form, model: null, credentialId: null }); return; }
                   const [profileId, ref] = e.target.value.split("::");
                   setForm({ ...form, model: ref, credentialId: profileId });
                 }} className={inputCls}>
@@ -241,8 +250,16 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                   {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ""}</option>)}
                 </select>
               ) : (
-                <input autoComplete="off" value={form.model || ""} onChange={(e) => setForm({ ...form, model: e.target.value || null, credentialId: undefined })}
-                  placeholder="Use agent default, or enter anthropic/claude-sonnet-4-6" className={inputCls} />
+                <div className="space-y-2">
+                  {models.length > 0 && (
+                    <select value={form.credentialId || ""} onChange={(e) => setForm({ ...form, credentialId: e.target.value || null })} className={inputCls}>
+                      <option value="">No credential profile (enter full provider/model)</option>
+                      {uniqueModelProfiles(models).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.providerSlug}</option>)}
+                    </select>
+                  )}
+                  <input autoComplete="off" value={form.model || ""} onChange={(e) => setForm({ ...form, model: e.target.value || null })}
+                    placeholder={form.credentialId ? "Enter model id, e.g. gpt-4.1 or anthropic/claude-sonnet" : "Use agent default, or enter provider/model"} className={inputCls} />
+                </div>
               )}
               <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-500 hover:text-blue-400 cursor-pointer">
                 {manualModel ? "Choose from configured models" : "Enter model manually"}

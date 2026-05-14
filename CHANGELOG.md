@@ -4,6 +4,23 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.11.1] — 2026-05-14
+
+### Fixed
+- Credential-backed model metadata no longer accepts stale/incorrect fallback values; profile-scoped credential + model pair now drives discovery/export behavior.
+- Manual model input now respects selected credential profile provider boundaries: supports bare model IDs with selected profile, blocks mismatched provider prefixes, and requires `provider/model` when no profile is selected.
+- Anthropic message protocol endpoints normalize `.../v1` to avoid duplicated base paths during runtime call assembly.
+- Discovery logic is protocol-specific and no longer blocks Anthropic-compatible providers from model discovery.
+- Pi catalog metadata is only applied when provider-metadata is consistent to avoid cross-provider misattribution.
+- Member restart is now a silent reset (destroy instance + cursor advance) that does not trigger immediate re-activation.
+- Auto compact now produces visible `agent_start` / `agent_end` lifecycle events.
+- Provider/runtime errors now emit explicit room-visible messages from `message_end` summaries.
+- Custom provider export and model credential clearing semantics were validated and normalized.
+
+### Tests
+- Hotfix targeted validation: `manual-model-helper`, `workforce-restart`, `pi-cli-args`, `model-credentials`, `model-credential-routes`.
+- `npm run build`.
+
 ## [0.11.0] — 2026-05-13
 
 ### Breaking
