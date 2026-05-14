@@ -67,11 +67,19 @@ export function inferMemberModelMode(
 ): MemberModelMode {
   if (!model) return "agent-default";
   if (!credentialId) return "manual-provider-model";
-  if (!models.length) return "saved-credential";
+  if (!models.length) return "manual-provider-model";
   const match = models.some((m) => m.profileId === credentialId && m.ref === model);
   return match ? "saved-credential" : "manual-provider-model";
 }
 
-export function getMemberModelBadge(model: string | null | undefined, credentialId: string | null | undefined): "Agent default" | "Saved credential" | "Manual model" {
-  return model && credentialId ? "Saved credential" : model ? "Manual model" : "Agent default";
+export function getMemberModelBadge(
+  model: string | null | undefined,
+  credentialId: string | null | undefined,
+  models: ModelOption[] = [],
+): "Agent default" | "Saved credential" | "Manual model" {
+  if (!model) return "Agent default";
+  if (!credentialId) return "Manual model";
+  if (!models.length) return "Manual model";
+  const match = models.some((m) => m.profileId === credentialId && m.ref === model);
+  return match ? "Saved credential" : "Manual model";
 }
