@@ -25,6 +25,8 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(propSelectedId ?? null);
   const [showCreate, setShowCreate] = useState(propSelectedId === null);
+  const [configuredModels, setConfiguredModels] = useState<ModelOption[]>([]);
+  const [configuredModelsLoaded, setConfiguredModelsLoaded] = useState(false);
 
   useEffect(() => {
     if (propSelectedId !== undefined) {
@@ -34,6 +36,13 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
   }, [propSelectedId]);
 
   useEffect(() => { getMembers().then(setMembers).catch(console.error); }, []);
+
+  useEffect(() => {
+    getConfiguredModels()
+      .then((loadedModels) => setConfiguredModels(loadedModels))
+      .catch(() => setConfiguredModels([]))
+      .finally(() => setConfiguredModelsLoaded(true));
+  }, []);
 
   const refresh = () => { getMembers().then(setMembers); onRefresh?.(); };
 
@@ -52,12 +61,25 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
 
   // Create mode
   if (propSelectedId === null && showCreate) {
-    return <MemberDetailView id={null} isCreate onBack={() => { setShowCreate(false); onSelect?.(undefined as any); refresh(); }}
-      onCreated={(newId) => { setSelectedId(newId); onSelect?.(newId); refresh(); }} onNavigateAgent={onNavigateAgent} />;
+    return <MemberDetailView
+      id={null}
+      isCreate
+      onBack={() => { setShowCreate(false); onSelect?.(undefined as any); refresh(); }}
+      onCreated={(newId) => { setSelectedId(newId); onSelect?.(newId); refresh(); }}
+      onNavigateAgent={onNavigateAgent}
+      configuredModels={configuredModels}
+      configuredModelsLoaded={configuredModelsLoaded}
+    />;
   }
 
   if (selectedId) {
-    return <MemberDetailView id={selectedId} onBack={() => { setSelectedId(null); refresh(); }} onNavigateAgent={onNavigateAgent} />;
+    return <MemberDetailView
+      id={selectedId}
+      onBack={() => { setSelectedId(null); refresh(); }}
+      onNavigateAgent={onNavigateAgent}
+      configuredModels={configuredModels}
+      configuredModelsLoaded={configuredModelsLoaded}
+    />;
   }
 
   return (
@@ -97,7 +119,7 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
               <span className="text-lg">{m.avatar || "👤"}</span>
               <span className="font-semibold text-white text-sm">{m.name}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                {getMemberModelBadge(m.model || null, m.credentialId || null)}
+                {getMemberModelBadge(m.model || null, m.credentialId || null, configuredModels)}
               </span>
             </div>
             <div className="text-xs text-zinc-500">Model: {modelDisplay(m)}</div>
@@ -111,14 +133,20 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
   );
 }
 
-function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: {
-  id: string | null; onBack: () => void; isCreate?: boolean; onCreated?: (id: string) => void; onNavigateAgent?: (name: string) => void;
+function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, configuredModels, configuredModelsLoaded }: {
+  id: string | null;
+  onBack: () => void;
+  isCreate?: boolean;
+  onCreated?: (id: string) => void;
+  onNavigateAgent?: (name: string) => void;
+  configuredModels: ModelOption[];
+  configuredModelsLoaded: boolean;
 }) {
   const { toast, confirm } = useDialog();
   const [member, setMember] = useState<MemberInfo | null>(isCreate ? {} as MemberInfo : null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: undefined, thinkingLevel: "off" } : {});
-  const [models, setModels] = useState<ModelOption[]>([]);
+  const models = configuredModels;
   const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
   const [savedModelSelection, setSavedModelSelection] = useState("");
   const [manualModelInput, setManualModelInput] = useState("");
@@ -148,9 +176,6 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       setModelMode("agent-default");
     }
     getAgents().then(setAgents);
-    getConfiguredModels().then((loadedModels) => {
-      setModels(loadedModels);
-    }).catch(() => setModels([]));
   }, [id, isCreate]);
 
   // Track whether selected agent is builtin
@@ -174,6 +199,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   useEffect(() => {
     if (isCreate || autoModelModeInitialized) return;
     if (!member && id) return;
+    if (!configuredModelsLoaded) return;
     const mode = inferMemberModelMode(form.model || null, form.credentialId || null, models);
     setModelMode(mode);
     if (mode === "saved-credential") {
@@ -187,7 +213,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       setManualModelInput("");
     }
     setAutoModelModeInitialized(true);
-  }, [form.model, form.credentialId, isCreate, member, models, autoModelModeInitialized]);
+  }, [form.model, form.credentialId, isCreate, member, models, autoModelModeInitialized, configuredModelsLoaded]);
 
   const getModelPayload = () => {
     if (modelMode === "agent-default") {
