@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { Plus, Search, ArrowLeft, Save, Trash2, X, RefreshCw } from "lucide-react";
+import { Plus, Search, ArrowLeft, Save, Trash2, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
 import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../api/client";
-import { composeManualModelPayload, shouldUseManualModelInput, uniqueModelProfiles } from "../model-helpers";
+import { composeManualModelPayload, getMemberModelBadge, inferMemberModelMode } from "../model-helpers";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
   getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels,
@@ -17,7 +17,6 @@ interface MembersPageProps {
   onOpenMobileSidebar?: () => void;
 }
 
-type ModelPayload = Pick<Partial<MemberInfo>, "model" | "credentialId">;
 
 
 export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, onNavigateAgent, onOpenMobileSidebar }: MembersPageProps) {
@@ -48,6 +47,8 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
     m.agent.toLowerCase().includes(search.toLowerCase()) ||
     (m.model || "").toLowerCase().includes(search.toLowerCase())
   );
+
+  const modelDisplay = (member: MemberInfo) => member.model || "Use agent default";
 
   // Create mode
   if (propSelectedId === null && showCreate) {
@@ -96,10 +97,10 @@ export function MembersPage({ selectedId: propSelectedId, onSelect, onRefresh, o
               <span className="text-lg">{m.avatar || "👤"}</span>
               <span className="font-semibold text-white text-sm">{m.name}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                {m.credentialId ? "credential" : "default model"}
+                {getMemberModelBadge(m.model || null, m.credentialId || null)}
               </span>
             </div>
-            <div className="text-xs text-zinc-500">Model: {m.model || "Use agent default"}</div>
+            <div className="text-xs text-zinc-500">Model: {modelDisplay(m)}</div>
             <div className="text-xs text-zinc-600">Agent: {m.agent}</div>
           </div>
         ))}
@@ -116,10 +117,11 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   const { toast, confirm } = useDialog();
   const [member, setMember] = useState<MemberInfo | null>(isCreate ? {} as MemberInfo : null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const DEFAULT_MODEL_VALUE = "__agent_default__";
   const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: undefined, thinkingLevel: "off" } : {});
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [manualModel, setManualModel] = useState(false);
+  const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
+  const [savedModelSelection, setSavedModelSelection] = useState("");
+  const [manualModelInput, setManualModelInput] = useState("");
   const [autoModelModeInitialized, setAutoModelModeInitialized] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [agentDetail, setAgentDetail] = useState<{ description: string; skills: string[]; avatar?: string } | null>(null);
@@ -140,9 +142,15 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       refreshStatus();
     } else {
       setAutoModelModeInitialized(false);
+      setForm({ runtime: "pi-cli", model: undefined, thinkingLevel: "off" });
+      setSavedModelSelection("");
+      setManualModelInput("");
+      setModelMode("agent-default");
     }
     getAgents().then(setAgents);
-    getConfiguredModels().then(setModels).catch(() => setModels([]));
+    getConfiguredModels().then((loadedModels) => {
+      setModels(loadedModels);
+    }).catch(() => setModels([]));
   }, [id, isCreate]);
 
   // Track whether selected agent is builtin
@@ -166,17 +174,44 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   useEffect(() => {
     if (isCreate || autoModelModeInitialized) return;
     if (!member && id) return;
-    const shouldEnterManual = shouldUseManualModelInput(form.model ?? null, form.credentialId ?? null, models);
-    setManualModel(shouldEnterManual);
+    const mode = inferMemberModelMode(form.model || null, form.credentialId || null, models);
+    setModelMode(mode);
+    if (mode === "saved-credential") {
+      if (form.model && form.credentialId) setSavedModelSelection(`${form.credentialId}::${form.model}`);
+      setManualModelInput("");
+    } else if (mode === "manual-provider-model") {
+      setManualModelInput(form.model || "");
+      setSavedModelSelection("");
+    } else {
+      setSavedModelSelection("");
+      setManualModelInput("");
+    }
     setAutoModelModeInitialized(true);
   }, [form.model, form.credentialId, isCreate, member, models, autoModelModeInitialized]);
+
+  const getModelPayload = () => {
+    if (modelMode === "agent-default") {
+      return { model: null, credentialId: null };
+    }
+
+    if (modelMode === "saved-credential") {
+      const [profileId, ...refParts] = savedModelSelection.split("::");
+      const modelRef = refParts.join("::");
+      if (!profileId || !modelRef) {
+        throw new Error("Please select a model from configured credentials.");
+      }
+      return { model: modelRef, credentialId: profileId };
+    }
+
+    const payload = composeManualModelPayload(manualModelInput, null, models);
+    if (!payload.model) throw new Error("Manual model must be in provider/model format, e.g., provider/model.");
+    return payload;
+  };
 
   const handleSave = async () => {
     setSaveState("saving");
     try {
-      const modelPayload = manualModel
-        ? composeManualModelPayload(form.model, form.credentialId, models)
-        : { model: form.model ?? null, credentialId: form.credentialId ?? null };
+      const modelPayload = getModelPayload();
       const payload = { ...form, ...modelPayload };
       if (isCreate) {
         if (!form.name || !form.agent) { toast("Name and agent are required", "error"); setSaveState("idle"); return; }
@@ -187,6 +222,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
         const updated = await updateMember(id!, payload);
         setMember(updated);
         setForm(updated);
+        setAutoModelModeInitialized(false);
         setSaveState("saved");
       }
       setTimeout(() => setSaveState("idle"), 1500);
@@ -256,32 +292,77 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
             </Field>
 
             <Field label="Model">
-              {!manualModel && models.length > 0 ? (
-                <select value={form.credentialId && form.model ? `${form.credentialId}::${form.model}` : (form.model || DEFAULT_MODEL_VALUE)} onChange={(e) => {
-                  if (e.target.value === DEFAULT_MODEL_VALUE) { setForm({ ...form, model: null, credentialId: null }); return; }
-                  const [profileId, ref] = e.target.value.split("::");
-                  setForm({ ...form, model: ref, credentialId: profileId });
-                }} className={inputCls}>
-                  <option value={DEFAULT_MODEL_VALUE}>Use agent default</option>
-                  {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ""}</option>)}
-                </select>
-              ) : (
-                <div className="space-y-2">
-                  {models.length > 0 && (
-                    <select value={form.credentialId || ""} onChange={(e) => setForm({ ...form, credentialId: e.target.value || null })} className={inputCls}>
-                      <option value="">No credential profile (enter full provider/model)</option>
-                      {uniqueModelProfiles(models).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.providerSlug}</option>)}
-                    </select>
-                  )}
-                  <input autoComplete="off" value={form.model || ""} onChange={(e) => setForm({ ...form, model: e.target.value || null })}
-                    placeholder={form.credentialId ? "Enter model id, e.g. gpt-4.1 or anthropic/claude-sonnet" : "Use agent default, or enter provider/model"} className={inputCls} />
-                </div>
-              )}
-              <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-500 hover:text-blue-400 cursor-pointer">
-                {manualModel ? "Choose from configured models" : "Enter model manually"}
-              </button>
-              <p className="text-xs text-zinc-500 mt-1">Uses the model configured on the agent definition unless a model is selected here.</p>
-              {form.credentialId && <p className="text-xs text-zinc-500 mt-1">Credential profile: {form.credentialId}</p>}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="radio"
+                    name={`member-model-mode-${id ?? "new"}`}
+                    checked={modelMode === "agent-default"}
+                    onChange={() => setModelMode("agent-default")}
+                    className="size-3.5"
+                  />
+                  Follow agent default
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="radio"
+                    name={`member-model-mode-${id ?? "new"}`}
+                    checked={modelMode === "saved-credential"}
+                    disabled={models.length === 0}
+                    onChange={() => {
+                      if (models.length > 0) {
+                        const next = savedModelSelection || `${models[0].profileId}::${models[0].ref}`;
+                        setSavedModelSelection(next);
+                        setModelMode("saved-credential");
+                      }
+                    }}
+                    className="size-3.5"
+                  />
+                  Use saved credential model
+                  {models.length === 0 && <span className="text-[11px] text-zinc-500 dark:text-zinc-400">(no saved models yet)</span>}
+                </label>
+
+                {modelMode === "saved-credential" && models.length > 0 && (
+                  <select value={savedModelSelection} onChange={(e) => setSavedModelSelection(e.target.value)} className={inputCls}>
+                    {models.map((m) => (
+                      <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>
+                        {m.profileName} — {m.ref}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                  <input
+                    type="radio"
+                    name={`member-model-mode-${id ?? "new"}`}
+                    checked={modelMode === "manual-provider-model"}
+                    onChange={() => setModelMode("manual-provider-model")}
+                    className="size-3.5"
+                  />
+                  Advanced: manual provider/model
+                </label>
+
+                {modelMode === "manual-provider-model" && (
+                  <input
+                    autoComplete="off"
+                    value={manualModelInput}
+                    onChange={(e) => setManualModelInput(e.target.value)}
+                    placeholder="provider/model, e.g., anthropic-proxy/claude-opus-4-6"
+                    className={inputCls}
+                  />
+                )}
+              </div>
+
+              <p className="text-xs text-zinc-500 mt-1">
+                {modelMode === "agent-default"
+                  ? "Follow agent default model configuration."
+                  : modelMode === "saved-credential"
+                    ? "Use a model preconfigured in Settings → Model Credentials."
+                    : "Advanced mode: provide a model as provider/model and do not use saved credentials."
+                }
+              </p>
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
@@ -370,8 +451,6 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
                     <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                       <span className={`w-1.5 h-1.5 rounded-full ${inst.status === "working" ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`} />
                       <span>{inst.status === "working" ? "Working" : "Idle"}</span>
-                      <span className="text-zinc-300 dark:text-zinc-600">·</span>
-                      <span>{inst.runtime}</span>
                       {inst.pid && <><span className="text-zinc-300 dark:text-zinc-600">·</span><span>PID {inst.pid}</span></>}
                     </div>
                     {inst.spawnArgs && inst.spawnArgs.length > 0 && (

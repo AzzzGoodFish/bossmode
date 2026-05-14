@@ -5,6 +5,8 @@ export type ManualModelPayload = {
   credentialId: string | null;
 };
 
+export type MemberModelMode = "agent-default" | "saved-credential" | "manual-provider-model";
+
 export type ModelCredentialProfileSummary = {
   id: string;
   name: string;
@@ -56,4 +58,20 @@ export function shouldUseManualModelInput(model: string | null | undefined, cred
     return !models.some((m) => m.profileId === credentialId && m.ref === model);
   }
   return true;
+}
+
+export function inferMemberModelMode(
+  model: string | null | undefined,
+  credentialId: string | null | undefined,
+  models: ModelOption[] = [],
+): MemberModelMode {
+  if (!model) return "agent-default";
+  if (!credentialId) return "manual-provider-model";
+  if (!models.length) return "saved-credential";
+  const match = models.some((m) => m.profileId === credentialId && m.ref === model);
+  return match ? "saved-credential" : "manual-provider-model";
+}
+
+export function getMemberModelBadge(model: string | null | undefined, credentialId: string | null | undefined): "Agent default" | "Saved credential" | "Manual model" {
+  return model && credentialId ? "Saved credential" : model ? "Manual model" : "Agent default";
 }

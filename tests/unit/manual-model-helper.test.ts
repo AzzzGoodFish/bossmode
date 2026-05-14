@@ -1,16 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { composeManualModelPayload, shouldUseManualModelInput } from "../../web/src/model-helpers.js";
+import {
+  composeManualModelPayload,
+  inferMemberModelMode,
+  getMemberModelBadge,
+  shouldUseManualModelInput,
+} from "../../web/src/model-helpers.js";
 
 const models = [
   {
     profileId: "p-cloud",
     profileName: "Cloud Online",
     providerSlug: "cloud_online",
+    ref: "claude-opus-4-6",
+    modelId: "",
+    protocol: "openai-completions",
+    credentialStatus: "configured",
   },
   {
     profileId: "p-other",
     profileName: "Other",
     providerSlug: "other",
+    ref: "gpt-4o",
+    modelId: "",
+    protocol: "openai-completions",
+    credentialStatus: "configured",
   },
 ] as any[];
 
@@ -64,5 +77,22 @@ describe("shouldUseManualModelInput", () => {
 
   it("empty model should not force manual mode", () => {
     expect(shouldUseManualModelInput("", undefined, discoveredModels)).toBe(false);
+  });
+});
+
+describe("inferMemberModelMode + badge", () => {
+  it("classifies agent-default", () => {
+    expect(inferMemberModelMode(null, null, models)).toBe("agent-default");
+    expect(getMemberModelBadge(null, null)).toBe("Agent default");
+  });
+
+  it("classifies saved credential model when matched", () => {
+    expect(inferMemberModelMode("claude-opus-4-6", "p-cloud", models)).toBe("saved-credential");
+    expect(getMemberModelBadge("claude-opus-4-6", "p-cloud")).toBe("Saved credential");
+  });
+
+  it("falls back to manual when credential model no longer available", () => {
+    expect(inferMemberModelMode("gpt-4.1", "p-missing", models)).toBe("manual-provider-model");
+    expect(getMemberModelBadge("anthropic-proxy/claude-opus", null)).toBe("Manual model");
   });
 });
