@@ -4,6 +4,17 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.11.3] — 2026-05-14
+
+### Fixed
+- Fixed member model configuration initialization when `getConfiguredModels()` is still loading: stale `model + credentialId` pairs are now treated as manual overrides, avoiding accidental `Saved credential` mode selection.
+- Prevented manual `provider/model` overrides from being misclassified as saved credentials when configured model list is empty or stale.
+- Member model badges now validate against current configured models; unmatched credential pairs now display as `Manual model`.
+
+### Tests
+- `npm run build`
+- `npx vitest run tests/unit/manual-model-helper.test.ts`
+
 ## [0.11.2] — 2026-05-14
 
 ### Fixed
