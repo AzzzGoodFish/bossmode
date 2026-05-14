@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { composeManualModelPayload } from "../../web/src/model-helpers.js";
+import { composeManualModelPayload, shouldUseManualModelInput } from "../../web/src/model-helpers.js";
 
 const models = [
   {
@@ -40,5 +40,29 @@ describe("composeManualModelPayload", () => {
   it("no profile + full ref => pass through", () => {
     const result = composeManualModelPayload("anthropic-proxy/claude-opus-4-6", undefined, models);
     expect(result).toEqual({ model: "anthropic-proxy/claude-opus-4-6", credentialId: null });
+  });
+});
+
+describe("shouldUseManualModelInput", () => {
+  const discoveredModels = [
+    { profileId: "p-cloud", profileName: "Cloud Online", providerSlug: "cloud_online", ref: "claude-opus", contextWindow: 1024 },
+    { profileId: "p-cloud", profileName: "Cloud Online", providerSlug: "cloud_online", ref: "gpt-4o", contextWindow: 1024 },
+    { profileId: "p-alt", profileName: "Alt", providerSlug: "alt", ref: "gpt-4", contextWindow: 1024 },
+  ] as any[];
+
+  it("model from configured profile ref should use picker mode", () => {
+    expect(shouldUseManualModelInput("claude-opus", "p-cloud", discoveredModels)).toBe(false);
+  });
+
+  it("model with missing configured pair should use manual mode", () => {
+    expect(shouldUseManualModelInput("unknown", "p-cloud", discoveredModels)).toBe(true);
+  });
+
+  it("manual model without credential should stay in manual mode", () => {
+    expect(shouldUseManualModelInput("anthropic/claude-opus", undefined, discoveredModels)).toBe(true);
+  });
+
+  it("empty model should not force manual mode", () => {
+    expect(shouldUseManualModelInput("", undefined, discoveredModels)).toBe(false);
   });
 });
