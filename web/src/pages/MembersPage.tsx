@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Plus, Search, ArrowLeft, Save, Trash2, X, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
 import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../api/client";
-import { composeManualModelPayload, uniqueModelProfiles } from "../model-helpers";
+import { composeManualModelPayload, shouldUseManualModelInput, uniqueModelProfiles } from "../model-helpers";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
   getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels,
@@ -120,9 +120,11 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
   const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: undefined, thinkingLevel: "off" } : {});
   const [models, setModels] = useState<ModelOption[]>([]);
   const [manualModel, setManualModel] = useState(false);
+  const [autoModelModeInitialized, setAutoModelModeInitialized] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [agentDetail, setAgentDetail] = useState<{ description: string; skills: string[]; avatar?: string } | null>(null);
   const [instances, setInstances] = useState<MemberInstanceInfo[]>([]);
+
 
   const refreshStatus = () => {
     if (id) getMemberStatus(id).then((s) => setInstances(s.instances)).catch(() => setInstances([]));
@@ -130,8 +132,14 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
 
   useEffect(() => {
     if (!isCreate && id) {
-      getMember(id).then((m) => { setMember(m); setForm(m); });
+      getMember(id).then((m) => {
+        setMember(m);
+        setForm(m);
+        setAutoModelModeInitialized(false);
+      });
       refreshStatus();
+    } else {
+      setAutoModelModeInitialized(false);
     }
     getAgents().then(setAgents);
     getConfiguredModels().then(setModels).catch(() => setModels([]));
@@ -154,6 +162,14 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent }: 
       setIsBuiltinAgent(false);
     }
   }, [form.agent]);
+
+  useEffect(() => {
+    if (isCreate || autoModelModeInitialized) return;
+    if (!member && id) return;
+    const shouldEnterManual = shouldUseManualModelInput(form.model ?? null, form.credentialId ?? null, models);
+    setManualModel(shouldEnterManual);
+    setAutoModelModeInitialized(true);
+  }, [form.model, form.credentialId, isCreate, member, models, autoModelModeInitialized]);
 
   const handleSave = async () => {
     setSaveState("saving");

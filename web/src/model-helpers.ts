@@ -48,3 +48,12 @@ export function composeManualModelPayload(rawModel: unknown, credentialId: strin
   if (!model.includes("/")) throw new Error("Manual model without a credential profile must use provider/model format.");
   return { model, credentialId: null };
 }
+
+export function shouldUseManualModelInput(model: string | null | undefined, credentialId: string | null | undefined, models: ModelOption[]): boolean {
+  if (!model) return false;
+  if (!models.length) return true;
+  if (credentialId) {
+    return !models.some((m) => m.profileId === credentialId && m.ref === model);
+  }
+  return true;
+}
