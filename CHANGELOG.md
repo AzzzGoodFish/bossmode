@@ -4,6 +4,11 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.11.2] — 2026-05-14
+
+### Fixed
+- Member edit page no longer shows `Use agent default` when an explicit manual model override exists (e.g., `provider/model`) outside configured credential profile dropdown options.
+
 ## [0.11.1] — 2026-05-14
 
 ### Fixed
