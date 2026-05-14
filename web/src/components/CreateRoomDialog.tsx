@@ -6,7 +6,7 @@ import { getMembers, getKnowledgeTree, createMember, getConfiguredModels, getAge
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
 import { Shield, FolderOpen } from "lucide-react";
-import { composeManualModelPayload, uniqueModelProfiles } from "../model-helpers";
+import { composeManualModelPayload } from "../model-helpers";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
@@ -189,9 +189,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         <div className="flex gap-2 justify-end pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-white cursor-pointer">Cancel</button>
           <button type="submit" disabled={!canSubmit}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer">
-            Create
-          </button>
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer">Create</button>
         </div>
       </form>
 
@@ -226,25 +224,40 @@ function InlineCreateMember({
 }) {
   const { toast } = useDialog();
   const [name, setName] = useState(agentName);
-  const DEFAULT_MODEL_VALUE = "__agent_default__";
-  const [model, setModel] = useState<string | undefined>();
-  const [credentialId, setCredentialId] = useState<string | null>();
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [manualModel, setManualModel] = useState(false);
+  const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
+  const [savedModelSelection, setSavedModelSelection] = useState("");
+  const [manualModelInput, setManualModelInput] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { getConfiguredModels().then(setModels).catch(() => setModels([])); }, []);
 
+  const getModelPayload = () => {
+    if (modelMode === "agent-default") {
+      return { model: null, credentialId: null };
+    }
+    if (modelMode === "saved-credential") {
+      const [profileId, ...refParts] = savedModelSelection.split("::");
+      const modelRef = refParts.join("::");
+      if (!profileId || !modelRef) throw new Error("Please select a model from configured credentials.");
+      return { model: modelRef, credentialId: profileId };
+    }
+    const payload = composeManualModelPayload(manualModelInput, null, models);
+    if (!payload.model) throw new Error("Manual model must be in provider/model format, e.g., provider/model.");
+    return payload;
+  };
+
   const handleCreate = async () => {
     setSaving(true);
     try {
-      const modelPayload = manualModel
-        ? composeManualModelPayload(model, credentialId, models)
-        : { model: model ?? null, credentialId: credentialId ?? null };
+      const modelPayload = getModelPayload();
       const member = await createMember({ name, agent: agentName, ...modelPayload, runtime: "pi-cli", thinkingLevel: "off" });
       onCreated(member);
-    } catch (err: any) { toast(err.message, "error"); }
-    finally { setSaving(false); }
+    } catch (err: any) {
+      toast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -258,29 +271,73 @@ function InlineCreateMember({
         </div>
         <div>
           <label className="block text-xs text-zinc-400 mb-1">Model</label>
-          {!manualModel && models.length > 0 ? (
-            <select value={credentialId && model ? `${credentialId}::${model}` : DEFAULT_MODEL_VALUE} onChange={(e) => { if (e.target.value === DEFAULT_MODEL_VALUE) { setModel(undefined); setCredentialId(null); return; } const [profileId, ref] = e.target.value.split("::"); setModel(ref); setCredentialId(profileId); }}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-              <option value={DEFAULT_MODEL_VALUE}>Use agent default</option>
-              {models.map((m) => <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>{m.profileName} — {m.ref}</option>)}
-            </select>
-          ) : (
-            <div className="space-y-2">
-              {models.length > 0 && (
-                <select value={credentialId || ""} onChange={(e) => setCredentialId(e.target.value || null)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-                  <option value="">No credential profile (enter full provider/model)</option>
-                  {uniqueModelProfiles(models).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.providerSlug}</option>)}
-                </select>
-              )}
-              <input autoComplete="off" value={model || ""} onChange={(e) => setModel(e.target.value || undefined)} placeholder={credentialId ? "Enter model id" : "Use agent default, or enter provider/model"}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
-            </div>
-          )}
-          <p className="text-xs text-zinc-500 mt-1">Uses the model configured on the agent definition unless a model is selected here.</p>
-          <button type="button" onClick={() => setManualModel(!manualModel)} className="mt-1.5 text-xs text-blue-400 hover:text-blue-300 cursor-pointer">
-            {manualModel ? "Choose from configured models" : "Enter model manually"}
-          </button>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <input
+                type="radio"
+                name={`create-member-mode-${agentName}`}
+                checked={modelMode === "agent-default"}
+                onChange={() => setModelMode("agent-default")}
+                className="size-3.5"
+              />
+              Follow agent default
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <input
+                type="radio"
+                name={`create-member-mode-${agentName}`}
+                checked={modelMode === "saved-credential"}
+                disabled={models.length === 0}
+                onChange={() => {
+                  if (models.length > 0) {
+                    const next = savedModelSelection || `${models[0].profileId}::${models[0].ref}`;
+                    setSavedModelSelection(next);
+                    setModelMode("saved-credential");
+                  }
+                }}
+                className="size-3.5"
+              />
+              Use saved credential model
+              {models.length === 0 && <span className="text-[11px] text-zinc-500">(no saved models yet)</span>}
+            </label>
+            {modelMode === "saved-credential" && models.length > 0 && (
+              <select value={savedModelSelection} onChange={(e) => setSavedModelSelection(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
+                {models.map((m) => (
+                  <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>
+                    {m.profileName} — {m.ref}
+                  </option>
+                ))}
+              </select>
+            )}
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <input
+                type="radio"
+                name={`create-member-mode-${agentName}`}
+                checked={modelMode === "manual-provider-model"}
+                onChange={() => setModelMode("manual-provider-model")}
+                className="size-3.5"
+              />
+              Advanced: manual provider/model
+            </label>
+            {modelMode === "manual-provider-model" && (
+              <input
+                autoComplete="off"
+                value={manualModelInput}
+                onChange={(e) => setManualModelInput(e.target.value)}
+                placeholder="provider/model, e.g., anthropic-proxy/claude-opus-4-6"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            )}
+          </div>
+          <p className="text-xs text-zinc-500 mt-1">
+            {modelMode === "agent-default"
+              ? "Follow agent default model configuration."
+              : modelMode === "saved-credential"
+                ? "Use a model preconfigured in Settings → Model Credentials."
+                : "Advanced mode: provide a model as provider/model and do not use saved credentials."
+            }
+          </p>
         </div>
         <div className="flex gap-2 justify-end pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-white cursor-pointer">Cancel</button>
