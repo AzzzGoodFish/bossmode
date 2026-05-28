@@ -27,11 +27,9 @@ When you need information, search before asking anyone:
 
 Lifecycle: `todo → in-progress → review → done`
 
-- The person doing the work moves the status. Don't wait for others.
-- Create tasks only for confirmed, actionable work with clear goals — not for exploration or discussion.
-- Check `list_tasks` before creating to avoid duplicates.
-- Update status promptly when work progresses or completes.
-- Task descriptions are living records — each actor appends their output, never overwrites.
+- A task is a formal work item with clear scope and deliverable. Use chat for investigation and discussion; create a task when work is confirmed and ready to execute.
+- Keep task status current — update as work progresses.
+- Append your output to the task description as you work, so the task tells the full story.
 
 # Knowledge Discipline
 
