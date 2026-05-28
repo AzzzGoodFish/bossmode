@@ -15,9 +15,20 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 
-// Use a test-specific bossmode dir to avoid interfering with real config
+// Use a test-specific bossmode dir/port to avoid interfering with real config
 const TEST_DIR = "/tmp/bossmode-cli-test";
-const TEST_PORT = 19876;
+let TEST_PORT = 19876;
+
+async function getFreePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as { port: number };
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
 
 function setupTestConfig(): void {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -78,7 +89,8 @@ function runCli(args: string, env?: Record<string, string>): { stdout: string; s
 }
 
 describe("Acceptance: CLI (v1.1 Batch 1)", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
+    TEST_PORT = await getFreePort();
     setupTestConfig();
   });
 
@@ -126,7 +138,7 @@ describe("Acceptance: CLI (v1.1 Batch 1)", () => {
     it("shows error when port is in use", async () => {
       // Occupy the port with a TCP server
       const blocker = createServer();
-      const occupiedPort = TEST_PORT + 1;
+      const occupiedPort = await getFreePort();
       await new Promise<void>((resolve) => blocker.listen(occupiedPort, "127.0.0.1", resolve));
 
       try {

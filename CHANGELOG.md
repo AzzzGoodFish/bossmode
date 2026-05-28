@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.12.0] — 2026-05-27
+
+### Changed
+- Slimmed built-in PM, Architect, Developer, Designer, and QA prompts to reduce over-eager process, premature task creation, and proactive skill use.
+- Slimmed always-injected team rules for SSOT, team protocol, and universal principles.
+- Removed non-designer built-in skills and replaced legacy designer skills with the upstream `impeccable` skill.
+
+### Tests
+- `npm run build`
+- `npm test`
+- `npm pack --dry-run`
+
 ## [0.11.3] — 2026-05-14
 
 ### Fixed
