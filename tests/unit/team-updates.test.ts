@@ -168,6 +168,20 @@ describe("team-updates service", () => {
     expect(result.candidates.some((c) => c.relativePath === "agents/new-agent.md" && c.status === "new")).toBe(true);
   });
 
+  it("checkForUpdates de-duplicates rules mapped from multiple team templates", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+    mkdirSync(join(projectDir, "templates", "teams", "dev-team", "rules"), { recursive: true });
+    mkdirSync(join(projectDir, "templates", "teams", "lite-team", "rules"), { recursive: true });
+    writeFileSync(join(projectDir, "templates", "teams", "dev-team", "rules", "ssot.md"), "# SSOT\n\ndev\n");
+    writeFileSync(join(projectDir, "templates", "teams", "lite-team", "rules", "ssot.md"), "# SSOT\n\nlite\n");
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+
+    const result = m.checkForUpdates();
+
+    expect(result.candidates.filter((c) => c.relativePath === "rules/member-ssot.md")).toHaveLength(1);
+  });
+
   it("checkForUpdates respects dismissedVersion", async () => {
     const m = await mod();
     m.seedBuiltinTeam();
@@ -192,10 +206,39 @@ describe("team-updates service", () => {
     const m = await mod();
     m.seedBuiltinTeam();
     writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
     const result = m.applyUpdates(["agents/pm.md"]);
     expect(result.applied).toContain("agents/pm.md");
     const meta = JSON.parse(readFileSync(join(bossmodeDir, "team-meta.json"), "utf-8"));
     expect(meta.files["agents/pm.md"].version).toBe("1.2.4");
+    expect(meta.installedVersion).toBe("1.2.4");
+  });
+
+  it("applyUpdates with no paths does not advance installedVersion", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
+
+    const result = m.applyUpdates([]);
+
+    expect(result.applied).toEqual([]);
+    const meta = JSON.parse(readFileSync(join(bossmodeDir, "team-meta.json"), "utf-8"));
+    expect(meta.installedVersion).toBe("1.2.3");
+  });
+
+  it("partial applyUpdates does not advance installedVersion", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
+    writeFileSync(join(projectDir, "templates", "agents", "qa.md"), "---\nname: qa\n---\n\nqa\n", "utf-8");
+
+    const result = m.applyUpdates(["agents/pm.md"]);
+
+    expect(result.applied).toContain("agents/pm.md");
+    const meta = JSON.parse(readFileSync(join(bossmodeDir, "team-meta.json"), "utf-8"));
+    expect(meta.installedVersion).toBe("1.2.3");
   });
 
   it("applyUpdates injects source/version frontmatter", async () => {
