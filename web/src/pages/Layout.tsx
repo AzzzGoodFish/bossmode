@@ -399,14 +399,14 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
               await refreshUpdateCheck();
             }}
             onUpdateAll={async () => {
-              const paths = updateCheck.candidates.filter((c) => c.status !== "modified").map((c) => c.relativePath);
+              const modifiedCount = updateCheck.candidates.filter((c) => c.status === "modified").length;
+              if (modifiedCount > 0) {
+                const ok = window.confirm(`Update All will overwrite ${modifiedCount} modified built-in file${modifiedCount === 1 ? "" : "s"}. Continue?`);
+                if (!ok) return;
+              }
+              const paths = updateCheck.candidates.map((c) => c.relativePath);
               const result = await applyTeamUpdates(paths);
-              const skippedModified = updateCheck.candidates.filter((c) => c.status === "modified").length;
-              setUpdateResultNote(
-                skippedModified > 0
-                  ? `Updated ${result.applied.length} files. Skipped ${skippedModified} modified file${skippedModified === 1 ? "" : "s"} (use Review to update individually).`
-                  : `Updated ${result.applied.length} files.`,
-              );
+              setUpdateResultNote(`Updated ${result.applied.length} files.`);
               await refreshUpdateCheck();
             }}
           />

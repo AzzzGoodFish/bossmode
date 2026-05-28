@@ -277,8 +277,12 @@ function enumerateTemplates(): TemplateFile[] {
     walk(teamsDir);
   }
 
-  out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  return out;
+  const unique = new Map<string, TemplateFile>();
+  for (const tpl of out) {
+    if (!unique.has(tpl.relativePath)) unique.set(tpl.relativePath, tpl);
+  }
+
+  return Array.from(unique.values()).sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
 function parseYamlFrontmatter(raw: string): { meta: Record<string, unknown>; body: string } {
@@ -507,7 +511,10 @@ export function checkForUpdates(): UpdateCheckResult {
 export function applyUpdates(paths: string[]): { applied: string[]; skipped: string[]; errors: string[] } {
   const meta = readMeta();
   const currentVersion = getCurrentVersion();
-  const templates = new Map(enumerateTemplates().map((t) => [t.relativePath, t]));
+  const templatesList = enumerateTemplates();
+  const templates = new Map(templatesList.map((t) => [t.relativePath, t]));
+  const requested = new Set(paths);
+  const candidatesBefore = checkForUpdates().candidates.map((c) => c.relativePath);
 
   const applied: string[] = [];
   const skipped: string[] = [];
@@ -533,11 +540,18 @@ export function applyUpdates(paths: string[]): { applied: string[]; skipped: str
     }
   }
 
-  const templatesList = Array.from(templates.values());
-  for (const removed of cleanupDeletedBuiltinSkills(meta, templatesList)) applied.push(removed);
+  if (paths.length > 0) {
+    for (const removed of cleanupDeletedBuiltinSkills(meta, templatesList)) applied.push(removed);
+  }
 
-  meta.installedVersion = currentVersion;
-  if (meta.dismissedVersion === currentVersion) meta.dismissedVersion = null;
+  const appliedAllCandidates = candidatesBefore.length > 0
+    && candidatesBefore.every((p) => requested.has(p))
+    && skipped.length === 0
+    && errors.length === 0;
+  if (appliedAllCandidates) {
+    meta.installedVersion = currentVersion;
+    if (meta.dismissedVersion === currentVersion) meta.dismissedVersion = null;
+  }
   writeMeta(meta);
 
   return { applied, skipped, errors };

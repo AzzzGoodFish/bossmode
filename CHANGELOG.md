@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.12.2] — 2026-05-28
+
+### Fixed
+- Fixed Update All to apply every built-in team update candidate, including modified built-in files, after one confirmation.
+- Prevented empty or partial update applies from advancing `team-meta.installedVersion` and creating same-version update prompts.
+- De-duplicated rule update candidates when multiple built-in team templates map to the same live rule path.
+
+### Tests
+- `npm run build`
+- `npm test`
+- `npm pack --dry-run`
+
 ## [0.12.1] — 2026-05-28
 
 ### Fixed
