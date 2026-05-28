@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.12.1] — 2026-05-28
+
+### Fixed
+- Fixed built-in team update to recognize legacy built-in agents/rules tracked in `team-meta.json` even when older files lack `source: builtin`.
+- Fixed skill updates to treat `skills/<name>/` as a directory asset, including nested reference files, with directory-level hashing and whole-directory replacement.
+- Removed deleted built-in skill directories during update while preserving custom skills.
+
+### Tests
+- `npm run build`
+- `npm test`
+- `npm pack --dry-run`
+
 ## [0.12.0] — 2026-05-27
 
 ### Changed

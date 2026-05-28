@@ -1,12 +1,11 @@
 import {
-  existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync,
+  existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, rmSync,
   type Dirent,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { parseFrontmatter } from "../shared/frontmatter.js";
 import { logger } from "../foundation/logger.js";
 
 interface TeamMetaFile {
@@ -52,6 +51,12 @@ interface TemplateFile {
   name: string;
   templateContent: string;
   localPath: string;
+  files?: TemplateAssetFile[];
+}
+
+interface TemplateAssetFile {
+  relativePath: string;
+  content: string;
 }
 
 function bossmodeDir(): string {
@@ -159,6 +164,35 @@ const LEGACY_RULE_NAMES: Record<string, string> = {
   "rules/universal-agent-principles.md": "rules/member-universal-principles.md",
 };
 
+function readDirectoryFiles(root: string): TemplateAssetFile[] {
+  const files: TemplateAssetFile[] = [];
+  const walk = (dir: string): void => {
+    let entries: Dirent[];
+    try { entries = readdirSync(dir, { withFileTypes: true }) as Dirent[]; }
+    catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const abs = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      files.push({
+        relativePath: relative(root, abs).replace(/\\/g, "/"),
+        content: readFileSync(abs, "utf-8"),
+      });
+    }
+  };
+  walk(root);
+  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return files;
+}
+
+function directoryMaterial(files: TemplateAssetFile[]): string {
+  return files.map((f) => `${f.relativePath}\0${f.content}`).join("\0");
+}
+
 export function toRulePath(relTemplatePath: string): string {
   const rel = relTemplatePath.replace(/\\/g, "/");
   // team-prompt.md → team-{teamSlug}-protocol.md
@@ -200,14 +234,17 @@ function enumerateTemplates(): TemplateFile[] {
   const skillsDir = join(templatesDir, "skills");
   if (existsSync(skillsDir)) {
     for (const d of readdirSync(skillsDir)) {
-      const skillPath = join(skillsDir, d, "SKILL.md");
+      const skillDir = join(skillsDir, d);
+      const skillPath = join(skillDir, "SKILL.md");
       if (!existsSync(skillPath)) continue;
+      const files = readDirectoryFiles(skillDir);
       out.push({
         category: "skill",
-        relativePath: `skills/${d}/SKILL.md`,
+        relativePath: `skills/${d}`,
         name: d,
-        templateContent: readFileSync(skillPath, "utf-8"),
-        localPath: join(bossmodeDir(), "skills", d, "SKILL.md"),
+        templateContent: directoryMaterial(files),
+        localPath: join(bossmodeDir(), "skills", d),
+        files,
       });
     }
   }
@@ -294,15 +331,94 @@ function buildRuleDoc(title: string, body: string, version: string): string {
 
 function getLocalContent(tpl: TemplateFile): string | null {
   try {
-    if (tpl.category === "rule") {
-      if (!existsSync(tpl.localPath)) return null;
-      return readFileSync(tpl.localPath, "utf-8");
-    }
     if (!existsSync(tpl.localPath)) return null;
+    if (tpl.category === "skill") return directoryMaterial(readDirectoryFiles(tpl.localPath));
     return readFileSync(tpl.localPath, "utf-8");
   } catch {
     return null;
   }
+}
+
+function isTrustedBuiltin(tpl: TemplateFile, localContent: string, meta: TeamMetaFile): boolean {
+  if (tpl.category === "skill") {
+    const skillMd = join(tpl.localPath, "SKILL.md");
+    if (existsSync(skillMd)) {
+      try {
+        const { meta: fm } = parseYamlFrontmatter(readFileSync(skillMd, "utf-8"));
+        if (fm.source === "builtin") return true;
+      } catch { /* ignore */ }
+    }
+  } else {
+    const { meta: fm } = parseYamlFrontmatter(localContent);
+    if (fm.source === "builtin") return true;
+  }
+
+  const record = meta.files[tpl.relativePath];
+  if (!record) return false;
+
+  const localHash = contentHash(localContent);
+  // Legacy built-ins before source frontmatter are trusted only when the
+  // tracker can prove this file came from a prior built-in install.
+  return record.hash === localHash || Boolean(record.templateHash);
+}
+
+function renderTemplate(tpl: TemplateFile, version: string): string {
+  if (tpl.category === "rule") {
+    const { title, body } = parseRuleTemplate(tpl.templateContent, tpl.relativePath);
+    return buildRuleDoc(title, body, version);
+  }
+  return injectBuiltinFrontmatter(tpl.templateContent, version);
+}
+
+function writeTemplate(tpl: TemplateFile, version: string): void {
+  if (tpl.category !== "skill") {
+    const nextContent = renderTemplate(tpl, version);
+    mkdirSync(dirname(tpl.localPath), { recursive: true });
+    writeFileSync(tpl.localPath, nextContent, "utf-8");
+    return;
+  }
+
+  rmSync(tpl.localPath, { recursive: true, force: true });
+  for (const file of tpl.files || []) {
+    const content = file.relativePath === "SKILL.md" ? injectBuiltinFrontmatter(file.content, version) : file.content;
+    const target = join(tpl.localPath, ...file.relativePath.split("/"));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+  }
+}
+
+function templateSkillNames(templates: TemplateFile[]): Set<string> {
+  return new Set(templates.filter((t) => t.category === "skill").map((t) => t.name));
+}
+
+function cleanupDeletedBuiltinSkills(meta: TeamMetaFile, templates: TemplateFile[]): string[] {
+  const skillsRoot = join(bossmodeDir(), "skills");
+  if (!existsSync(skillsRoot)) return [];
+
+  const activeSkills = templateSkillNames(templates);
+  const removed: string[] = [];
+
+  for (const d of readdirSync(skillsRoot)) {
+    if (activeSkills.has(d)) continue;
+    const skillDir = join(skillsRoot, d);
+    const skillMd = join(skillDir, "SKILL.md");
+    let isBuiltin = Boolean(meta.files[`skills/${d}`]) || Object.keys(meta.files).some((p) => p.startsWith(`skills/${d}/`));
+    if (!isBuiltin && existsSync(skillMd)) {
+      try {
+        const { meta: fm } = parseYamlFrontmatter(readFileSync(skillMd, "utf-8"));
+        isBuiltin = fm.source === "builtin";
+      } catch { /* ignore */ }
+    }
+    if (!isBuiltin) continue;
+
+    rmSync(skillDir, { recursive: true, force: true });
+    for (const key of Object.keys(meta.files)) {
+      if (key === `skills/${d}` || key.startsWith(`skills/${d}/`)) delete meta.files[key];
+    }
+    removed.push(`skills/${d}`);
+  }
+
+  return removed;
 }
 
 export function checkForUpdates(): UpdateCheckResult {
@@ -341,8 +457,7 @@ export function checkForUpdates(): UpdateCheckResult {
     }
 
     const localHash = contentHash(localContent);
-    const { meta: fm } = parseYamlFrontmatter(localContent);
-    if (fm.source !== "builtin") continue;
+    if (!isTrustedBuiltin(tpl, localContent, meta)) continue;
 
     // Primary gate: compare template content hash (not version)
     const installedTemplateHash = meta.files[tpl.relativePath]?.templateHash || null;
@@ -352,6 +467,7 @@ export function checkForUpdates(): UpdateCheckResult {
 
     // Fallback for old meta without templateHash: use version comparison
     if (installedTemplateHash === null) {
+      const { meta: fm } = parseYamlFrontmatter(localContent);
       const localVersion = typeof fm.version === "string" ? fm.version : String(fm.version || "0.0.0");
       if (!isVersionLess(localVersion, currentVersion)) {
         // Backfill templateHash silently so next check uses hash-based gate
@@ -405,16 +521,7 @@ export function applyUpdates(paths: string[]): { applied: string[]; skipped: str
     }
 
     try {
-      if (tpl.category === "rule") {
-        const { title, body } = parseRuleTemplate(tpl.templateContent, tpl.relativePath);
-        const nextContent = buildRuleDoc(title, body, currentVersion);
-        mkdirSync(dirname(tpl.localPath), { recursive: true });
-        writeFileSync(tpl.localPath, nextContent, "utf-8");
-      } else {
-        const nextContent = injectBuiltinFrontmatter(tpl.templateContent, currentVersion);
-        mkdirSync(dirname(tpl.localPath), { recursive: true });
-        writeFileSync(tpl.localPath, nextContent, "utf-8");
-      }
+      writeTemplate(tpl, currentVersion);
 
       const written = getLocalContent(tpl);
       if (written) {
@@ -425,6 +532,9 @@ export function applyUpdates(paths: string[]): { applied: string[]; skipped: str
       errors.push(`${p}: ${String(err)}`);
     }
   }
+
+  const templatesList = Array.from(templates.values());
+  for (const removed of cleanupDeletedBuiltinSkills(meta, templatesList)) applied.push(removed);
 
   meta.installedVersion = currentVersion;
   if (meta.dismissedVersion === currentVersion) meta.dismissedVersion = null;
@@ -484,16 +594,7 @@ export function seedBuiltinTeam(): void {
     }
 
     try {
-      if (tpl.category === "rule") {
-        const { title, body } = parseRuleTemplate(tpl.templateContent, tpl.relativePath);
-        const nextContent = buildRuleDoc(title, body, currentVersion);
-        mkdirSync(dirname(tpl.localPath), { recursive: true });
-        writeFileSync(tpl.localPath, nextContent, "utf-8");
-      } else {
-        const nextContent = injectBuiltinFrontmatter(tpl.templateContent, currentVersion);
-        mkdirSync(dirname(tpl.localPath), { recursive: true });
-        writeFileSync(tpl.localPath, nextContent, "utf-8");
-      }
+      writeTemplate(tpl, currentVersion);
 
       const written = getLocalContent(tpl);
       if (written) {
@@ -522,7 +623,11 @@ export function seedBuiltinTeam(): void {
     }
   }
 
+  const removedSkills = cleanupDeletedBuiltinSkills(meta, templates);
+
   meta.installedVersion = currentVersion;
   writeMeta(meta);
-  if (seeded > 0 || cleaned > 0) logger.info("team-updates", "seeded missing builtin team files", { seeded, cleaned });
+  if (seeded > 0 || cleaned > 0 || removedSkills.length > 0) {
+    logger.info("team-updates", "seeded missing builtin team files", { seeded, cleaned, removedSkills: removedSkills.length });
+  }
 }
