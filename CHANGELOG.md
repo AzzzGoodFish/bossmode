@@ -10,6 +10,8 @@ All notable changes to Bossmode are documented here.
 - Fixed Update All to apply every built-in team update candidate, including modified built-in files, after one confirmation.
 - Prevented empty or partial update applies from advancing `team-meta.installedVersion` and creating same-version update prompts.
 - De-duplicated rule update candidates when multiple built-in team templates map to the same live rule path.
+- Added `Classify Before Acting` to built-in universal principles so members choose between answering, discussing, planning, executing, and verifying before acting.
+- Reframed built-in task management rules around formal scoped work items, current status, and task descriptions as the work record.
 
 ### Tests
 - `npm run build`
