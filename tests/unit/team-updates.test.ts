@@ -64,6 +64,21 @@ describe("team-updates service", () => {
     expect(existsSync(join(bossmodeDir, "team-meta.json"))).toBe(true);
   });
 
+  it("seedBuiltinTeam syncs whole skill directories including raw reference files", async () => {
+    write(join(projectDir, "templates", "skills", "skill-a", "NOTICE.md"), "notice\n");
+    write(join(projectDir, "templates", "skills", "skill-a", "reference", "guide.md"), "# Guide\n");
+    const m = await mod();
+    m.seedBuiltinTeam();
+
+    expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"), "utf-8")).toContain("source: builtin");
+    expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "NOTICE.md"), "utf-8")).toBe("notice\n");
+    expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "reference", "guide.md"), "utf-8")).toBe("# Guide\n");
+
+    const meta = JSON.parse(readFileSync(join(bossmodeDir, "team-meta.json"), "utf-8"));
+    expect(meta.files["skills/skill-a"]).toBeTruthy();
+    expect(meta.files["skills/skill-a"].templateHash).toBeTruthy();
+  });
+
   it("seedBuiltinTeam is idempotent for existing files", async () => {
     const m = await mod();
     m.seedBuiltinTeam();
@@ -99,6 +114,25 @@ describe("team-updates service", () => {
     const result = m.checkForUpdates();
     expect(result.hasUpdates).toBe(true);
     expect(result.candidates.some((c) => c.status === "updated")).toBe(true);
+  });
+
+  it("checkForUpdates trusts legacy built-ins tracked in team-meta without source frontmatter", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+
+    const legacyContent = "---\nname: pm\ndescription: PM\nversion: 1.2.3\n---\n\n# prompt\n";
+    const pmPath = join(bossmodeDir, "agents", "pm.md");
+    writeFileSync(pmPath, legacyContent, "utf-8");
+    const metaPath = join(bossmodeDir, "team-meta.json");
+    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+    meta.files["agents/pm.md"].hash = m.contentHash(legacyContent);
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf-8");
+
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(join(projectDir, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM v2\n---\n\n# updated prompt\n", "utf-8");
+
+    const result = m.checkForUpdates();
+    expect(result.candidates.find((c) => c.relativePath === "agents/pm.md")?.status).toBe("updated");
   });
 
   it("checkForUpdates marks modified files as modified", async () => {
@@ -170,6 +204,37 @@ describe("team-updates service", () => {
     const content = readFileSync(join(bossmodeDir, "agents", "pm.md"), "utf-8");
     expect(content).toContain("source: builtin");
     expect(content).toContain("version: 1.2.3");
+  });
+
+  it("applyUpdates updates a skill as one directory asset and removes stale files inside it", async () => {
+    write(join(projectDir, "templates", "skills", "skill-a", "reference", "guide.md"), "v1\n");
+    const m = await mod();
+    m.seedBuiltinTeam();
+
+    write(join(bossmodeDir, "skills", "skill-a", "reference", "stale.md"), "stale\n");
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    write(join(projectDir, "templates", "skills", "skill-a", "reference", "guide.md"), "v2\n");
+
+    const check = m.checkForUpdates();
+    expect(check.candidates.find((c) => c.relativePath === "skills/skill-a")?.status).toBe("modified");
+
+    const result = m.applyUpdates(["skills/skill-a"]);
+    expect(result.applied).toContain("skills/skill-a");
+    expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "reference", "guide.md"), "utf-8")).toBe("v2\n");
+    expect(existsSync(join(bossmodeDir, "skills", "skill-a", "reference", "stale.md"))).toBe(false);
+  });
+
+  it("applyUpdates removes deleted built-in skills but preserves custom skills", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+    write(join(bossmodeDir, "skills", "old-built-in", "SKILL.md"), "---\nname: old-built-in\nsource: builtin\n---\n\nold\n");
+    write(join(bossmodeDir, "skills", "custom-skill", "SKILL.md"), "---\nname: custom-skill\n---\n\ncustom\n");
+
+    const result = m.applyUpdates(["agents/pm.md"]);
+
+    expect(result.applied).toContain("skills/old-built-in");
+    expect(existsSync(join(bossmodeDir, "skills", "old-built-in"))).toBe(false);
+    expect(existsSync(join(bossmodeDir, "skills", "custom-skill", "SKILL.md"))).toBe(true);
   });
 
   it("dismissVersion persists state", async () => {
