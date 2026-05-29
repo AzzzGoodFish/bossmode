@@ -251,7 +251,7 @@ function InlineCreateMember({
     setSaving(true);
     try {
       const modelPayload = getModelPayload();
-      const member = await createMember({ name, agent: agentName, ...modelPayload, runtime: "pi-cli", thinkingLevel: "off" });
+      const member = await createMember({ name, agent: agentName, ...modelPayload, thinkingLevel: "off" });
       onCreated(member);
     } catch (err: any) {
       toast(err.message, "error");

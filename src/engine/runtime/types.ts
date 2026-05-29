@@ -1,5 +1,5 @@
 // ============================================================================
-// Agent Runtime Abstraction Layer V2 — CLI-Only Design
+// Agent Runtime Abstraction Layer V2
 // ============================================================================
 
 import type { AgentMemberConfig } from "../../shared/types.js";
@@ -66,6 +66,14 @@ export interface AgentCallbacks {
 
 // -- Agent handle --
 
+export interface AgentRuntimeParams {
+  model?: string;
+  thinkingLevel?: string;
+  systemPrompt?: string;
+  skills?: string[];
+  extensions?: string[];
+}
+
 export interface AgentHandle {
   prompt(message: string): Promise<void>;
   steer(message: string): void;
@@ -75,9 +83,10 @@ export interface AgentHandle {
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
 
   // Metadata for status reporting
-  readonly pid?: number;
+  readonly pid?: number; // deprecated: CLI rollback metadata
   readonly runtimeName?: string;
-  readonly spawnArgs?: string[];
+  readonly spawnArgs?: string[]; // deprecated: CLI rollback metadata
+  readonly runtimeParams?: AgentRuntimeParams;
 
   // Optional — check runtime.capabilities before calling
   setModel?(model: string): void;
@@ -98,9 +107,8 @@ export type AgentStreamEvent =
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
   | { type: "cli:stdout"; text: string }
   | { type: "cli:stderr"; text: string }
-  // Emitted exactly once per handle when the CLI process exits.
-  // `unexpected` is true for crashes / startup failures / parse errors;
-  // false only when triggered by handle.destroy() (normal shutdown).
+  // Emitted when a runtime ends unexpectedly or during normal shutdown.
+  // `unexpected` is true for crashes / startup failures / parse errors.
   | { type: "runtime_exit"; code: number | null; signal: string | null; stderrTail?: string; unexpected: boolean };
 
 export interface TokenUsage {

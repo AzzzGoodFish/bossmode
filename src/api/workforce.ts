@@ -20,9 +20,6 @@ import { setCursor } from "../workspace/room-store.js";
 import { getMemberTokenUsage } from "../workspace/token-usage-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
-function isUnsupportedRuntime(runtime: unknown): boolean {
-  return runtime !== undefined && runtime !== ONLY_SUPPORTED_RUNTIME;
-}
 
 function providerFromModelRef(model: string): string {
   const ref = normalizeModelRef(model);
@@ -221,10 +218,6 @@ addRoute("POST", "/api/members", async (req, res) => {
     sendJson(res, 400, { error: "name is required" });
     return;
   }
-  if (isUnsupportedRuntime(body.runtime)) {
-    sendJson(res, 400, { error: "Unsupported runtime. Bossmode currently supports pi-cli only." });
-    return;
-  }
   const model = optionalModel(body.model);
   let credentialId: string | undefined;
   try {
@@ -250,10 +243,6 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
   const existing = getMember(params.id);
   if (!existing) { sendJson(res, 404, { error: "Member not found" }); return; }
   const body = (await parseBody(req)) as any;
-  if (isUnsupportedRuntime(body.runtime)) {
-    sendJson(res, 400, { error: "Unsupported runtime. Bossmode currently supports pi-cli only." });
-    return;
-  }
   const model = Object.prototype.hasOwnProperty.call(body, "model") ? optionalModel(body.model) : existing.model;
   const credentialInput = Object.prototype.hasOwnProperty.call(body, "credentialId")
     ? body.credentialId

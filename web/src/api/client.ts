@@ -144,7 +144,7 @@ export interface MemberInfo {
   name: string;
   agent: string;
   model?: string | null;
-  runtime: "pi-cli";
+  runtime?: "pi-cli";
   thinkingLevel: string;
   avatar?: string;
   contextLimit?: number;
@@ -175,11 +175,20 @@ export async function getMemberTokenUsage(id: string): Promise<{ totalTokens: nu
   return apiFetch(`/api/members/${id}/token-usage`);
 }
 
+export interface AgentRuntimeParams {
+  model?: string;
+  thinkingLevel?: string;
+  systemPrompt?: string;
+  skills?: string[];
+  extensions?: string[];
+}
+
 export interface MemberInstanceInfo {
   roomId: string;
   roomName: string;
   status: "idle" | "working";
   runtime: string;
+  runtimeParams?: AgentRuntimeParams;
   pid?: number;
   spawnArgs?: string[];
 }
@@ -322,18 +331,6 @@ export async function getConfiguredModels(): Promise<ModelOption[]> {
 }
 
 // -- Runtimes --
-
-export interface RuntimeInfo {
-  name: string;
-  available: boolean;
-  version?: string;
-  path?: string;
-  capabilities: Record<string, boolean>;
-}
-
-export async function getRuntimes(): Promise<RuntimeInfo[]> {
-  return apiFetch("/api/runtimes");
-}
 
 // -- Knowledge --
 //

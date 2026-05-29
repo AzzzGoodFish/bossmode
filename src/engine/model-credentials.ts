@@ -1,8 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { getBossmodeDir, ensureBossmodeDir } from "../shared/config.js";
 import type {
   ModelCredentialProfile,
@@ -252,17 +251,9 @@ function waitForOAuthInput(job: OAuthLoginJob): Promise<string> {
   return new Promise<string>((resolve, reject) => { job.inputWaiter = { resolve, reject }; });
 }
 
-function resolvePiCodingAgentIndex(): string {
-  const piPath = process.env.BOSSMODE_PI_CLI_PATH || execFileSync("bash", ["-lc", "command -v pi"], { encoding: "utf-8" }).trim();
-  const realPiPath = realpathSync(piPath);
-  return join(dirname(dirname(realPiPath)), "dist", "index.js");
-}
-
 class PiAiOAuthLoginAdapter implements OAuthLoginAdapter {
   async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
-    const indexPath = resolvePiCodingAgentIndex();
-    const mod = await import(pathToFileURL(indexPath).href) as any;
-    const auth = mod.AuthStorage.inMemory({});
+    const auth = AuthStorage.inMemory({});
     const providers = auth.getOAuthProviders().map((p: any) => p.id);
     if (!providers.includes(providerId)) throw new Error(`OAuth provider ${providerId} is not supported by installed pi-ai (${providers.join(", ") || "none"})`);
     await auth.login(providerId, callbacks);
@@ -520,8 +511,7 @@ export function setPiCatalogModelsForTests(models: any[] | null): void {
 async function loadPiCatalogModels(): Promise<any[]> {
   if (piCatalogModelsForTests) return piCatalogModelsForTests;
   try {
-    const mod = await import(pathToFileURL(resolvePiCodingAgentIndex()).href) as any;
-    const registry = mod.ModelRegistry.inMemory(mod.AuthStorage.inMemory({}));
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
     return typeof registry.getAll === "function" ? registry.getAll() : [];
   } catch {
     return [];
@@ -686,7 +676,7 @@ function authEntry(profile: ModelCredentialProfile): unknown | undefined {
 
 function extensionSource(profile: ModelCredentialProfile): string {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
-  return `import { streamSimpleAnthropic } from "@mariozechner/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(`${profile.providerSlug}-anthropic-claude-code-oauth`)},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
+  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(`${profile.providerSlug}-anthropic-claude-code-oauth`)},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
 }
 
 export interface PiCredentialExport {

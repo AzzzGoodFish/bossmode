@@ -313,11 +313,11 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
           postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
         }
 
-        // Unexpected CLI exit: notify room and drop dead instance so next mention respawns.
+        // Unexpected runtime exit: notify room and drop dead instance so next mention respawns.
         if (event.type === "runtime_exit" && event.unexpected) {
           const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
           const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
-          postMessage(roomId, "system", `Member "${memberName}" CLI ${codeStr} unexpectedly.${detail}`);
+          postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
           logger.warn("agent", "instance removed after unexpected exit", {
             member: memberName, roomId, code: event.code, signal: event.signal,
           });
@@ -332,7 +332,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       return instance;
     } catch (err: any) {
       logger.error("agent", `failed to create agent`, { member: memberName, agent: member.agent, runtime: member.runtime, error: err.message || String(err) });
-      postMessage(roomId, "system", `Failed to create member "${memberName}" (${member.runtime}): ${err.message || String(err)}`);
+      postMessage(roomId, "system", `Failed to create member "${memberName}": ${err.message || String(err)}`);
       return null;
     }
   })();
@@ -491,7 +491,7 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
   instance.eventBuffer.push(steerEvent);
   try { appendEventToDisk(roomId, agentName, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
 
-  // Slash commands (e.g. /compact, /model) are transparently forwarded to the CLI runtime.
+  // Slash commands (e.g. /compact, /model) are transparently forwarded to the runtime.
   // Only regular text gets wrapped with the private envelope + footer.
   const isSlashCommand = instruction.startsWith('/');
   const userMessage = isSlashCommand
@@ -546,8 +546,9 @@ export function getMemberInstances(memberName: string): Array<{
   runtime: string;
   pid?: number;
   spawnArgs?: string[];
+  runtimeParams?: import("./runtime/types.js").AgentRuntimeParams;
 }> {
-  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[] }> = [];
+  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("./runtime/types.js").AgentRuntimeParams }> = [];
   for (const [key, instance] of instances) {
     if (key.endsWith(`:${memberName}`)) {
       const roomId = key.split(":")[0];
@@ -560,6 +561,7 @@ export function getMemberInstances(memberName: string): Array<{
         runtime: handle.runtimeName || "unknown",
         pid: handle.pid,
         spawnArgs: handle.spawnArgs,
+        runtimeParams: handle.runtimeParams,
       });
     }
   }
