@@ -9,7 +9,7 @@
     "url": "git+https://github.com/AzzzGoodFish/bossmode.git"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.6.0"
   },
   "keywords": [
     "ai",
@@ -35,6 +35,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.74.2",
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "typebox": "^1.1.39",
     "ws": "^8.18.0",
     "yaml": "^2.8.3"
   },

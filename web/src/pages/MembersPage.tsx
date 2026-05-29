@@ -145,7 +145,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
   const { toast, confirm } = useDialog();
   const [member, setMember] = useState<MemberInfo | null>(isCreate ? {} as MemberInfo : null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { runtime: "pi-cli", model: undefined, thinkingLevel: "off" } : {});
+  const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { model: undefined, thinkingLevel: "off" } : {});
   const models = configuredModels;
   const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
   const [savedModelSelection, setSavedModelSelection] = useState("");
@@ -172,7 +172,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
       getMemberTokenUsage(id).then((usage) => setTotalTokens(usage.totalTokens)).catch(() => setTotalTokens(null));
     } else {
       setAutoModelModeInitialized(false);
-      setForm({ runtime: "pi-cli", model: undefined, thinkingLevel: "off" });
+      setForm({ model: undefined, thinkingLevel: "off" });
       setSavedModelSelection("");
       setManualModelInput("");
       setModelMode("agent-default");
@@ -489,18 +489,8 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
                     <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                       <span className={`w-1.5 h-1.5 rounded-full ${inst.status === "working" ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`} />
                       <span>{inst.status === "working" ? "Working" : "Idle"}</span>
-                      {inst.pid && <><span className="text-zinc-300 dark:text-zinc-600">·</span><span>PID {inst.pid}</span></>}
                     </div>
-                    {inst.spawnArgs && inst.spawnArgs.length > 0 && (
-                      <details className="mt-1.5">
-                        <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">
-                          CLI args ({inst.spawnArgs.filter((a) => a.startsWith("--")).length} flags)
-                        </summary>
-                        <pre className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono mt-1 whitespace-pre-wrap break-all leading-relaxed max-h-48 overflow-y-auto">
-                          {formatSpawnArgs(inst.spawnArgs)}
-                        </pre>
-                      </details>
-                    )}
+                    {inst.runtimeParams && <RuntimeParamsView params={inst.runtimeParams} />}
                   </div>
                 ))}
               </div>
@@ -513,39 +503,42 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
 }
 
 
-/** Format CLI spawn args array: group --flag + value pairs, truncate long values */
-function formatSpawnArgs(args: string[]): string {
-  const lines: string[] = [];
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-    if (arg.startsWith("--")) {
-      // Check if next arg is the value (not another flag)
-      const nextArg = i + 1 < args.length ? args[i + 1] : undefined;
-      if (nextArg !== undefined && !nextArg.startsWith("--")) {
-        // Flag with value — truncate long values
-        const maxLen = 80;
-        if (nextArg.length <= maxLen) {
-          lines.push(`${arg} ${nextArg.replace(/\n/g, " ")}`);
-        } else {
-          const sizeLabel = nextArg.length >= 1024
-            ? `${(nextArg.length / 1024).toFixed(1)}k`
-            : `${nextArg.length}`;
-          lines.push(`${arg} ${nextArg.slice(0, maxLen).replace(/\n/g, " ")}... [${sizeLabel} chars]`);
-        }
-        i += 2;
-      } else {
-        // Boolean flag (no value)
-        lines.push(arg);
-        i += 1;
-      }
-    } else {
-      // Standalone arg (e.g. binary path)
-      lines.push(arg);
-      i += 1;
-    }
-  }
-  return lines.join("\n");
+function basename(pathOrLabel: string): string {
+  if (!pathOrLabel.includes("/")) return pathOrLabel;
+  return pathOrLabel.split("/").filter(Boolean).pop() || pathOrLabel;
+}
+
+function charCountLabel(text: string): string {
+  return text.length >= 1000 ? `${(text.length / 1000).toFixed(1)}k chars` : `${text.length} chars`;
+}
+
+function RuntimeParamsView({ params }: { params: NonNullable<import("../api/client").MemberInstanceInfo["runtimeParams"]> }) {
+  const skills = params.skills || [];
+  const extensions = params.extensions || [];
+  return (
+    <div className="mt-2 space-y-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+      <div><span className="text-zinc-400 dark:text-zinc-500">Model:</span> <span className="font-mono">{params.model || "default"}</span></div>
+      <div><span className="text-zinc-400 dark:text-zinc-500">Thinking:</span> <span className="font-mono">{params.thinkingLevel || "off"}</span></div>
+      {params.systemPrompt && (
+        <details>
+          <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">System Prompt [{charCountLabel(params.systemPrompt)}]</summary>
+          <pre className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono mt-1 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto rounded bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 p-2">{params.systemPrompt}</pre>
+        </details>
+      )}
+      {skills.length > 0 && (
+        <details>
+          <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">Skills ({skills.length})</summary>
+          <ul className="mt-1 list-disc list-inside text-[10px] font-mono text-zinc-500 dark:text-zinc-600">{skills.map((s) => <li key={s}>{basename(s)}</li>)}</ul>
+        </details>
+      )}
+      {extensions.length > 0 && (
+        <details>
+          <summary className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono cursor-pointer hover:text-zinc-300">Extensions ({extensions.length})</summary>
+          <ul className="mt-1 list-disc list-inside text-[10px] font-mono text-zinc-500 dark:text-zinc-600">{extensions.map((s) => <li key={s}>{basename(s)}</li>)}</ul>
+        </details>
+      )}
+    </div>
+  );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {

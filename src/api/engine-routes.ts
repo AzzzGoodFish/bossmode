@@ -26,18 +26,6 @@ addRoute("GET", "/api/capabilities", async (_req, res) => {
   });
 });
 
-// GET /api/runtimes — runtime detect results
-addRoute("GET", "/api/runtimes", async (_req, res) => {
-  const reg = getRegistry();
-  if (!reg) { sendJson(res, 200, []); return; }
-  const results = [];
-  for (const rt of reg.getAll()) {
-    const detect = await rt.detect();
-    results.push({ name: rt.name, ...detect, capabilities: rt.capabilities });
-  }
-  sendJson(res, 200, results);
-});
-
 // GET /api/model-credential-profiles — sanitized credential-backed model catalog profiles
 addRoute("GET", "/api/model-credential-profiles", async (_req, res) => {
   sendJson(res, 200, listPublicModelCredentialProfiles());
