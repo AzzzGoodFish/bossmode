@@ -38,6 +38,9 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
         {task.references && task.references.length > 0 && (
           <span className="text-[10px] text-zinc-400 shrink-0" title={task.references.join(', ')}>📎{task.references.length}</span>
         )}
+        {((task.commentCount ?? task.comments?.length ?? 0) > 0) && (
+          <span className="text-[10px] text-zinc-400 shrink-0">💬{task.commentCount ?? task.comments?.length}</span>
+        )}
         {task.assignee && (
           <span className="text-[10px] text-zinc-400 shrink-0">@{task.assignee}</span>
         )}
@@ -58,6 +61,9 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
         {task.assignee && <span>@{task.assignee}</span>}
         {task.references && task.references.length > 0 && (
           <span title={task.references.join(', ')}>📎{task.references.length}</span>
+        )}
+        {((task.commentCount ?? task.comments?.length ?? 0) > 0) && (
+          <span>💬{task.commentCount ?? task.comments?.length}</span>
         )}
         {task.createdBy && <span className="ml-auto">by {task.createdBy}</span>}
       </div>

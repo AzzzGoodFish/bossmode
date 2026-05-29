@@ -2,11 +2,48 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { roomDir, listRooms, getRoom } from "./room-store.js";
-import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
+import { roomDir, listRooms } from "./room-store.js";
+import type { Task, TaskStatus, TaskPriority, TaskComment, TaskListItem } from "../shared/types.js";
 
 function tasksPath(roomId: string): string {
   return join(roomDir(roomId), "tasks.json");
+}
+
+function uniqueStrings(values: unknown[] | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const s = String(value ?? "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    result.push(s);
+  }
+  return result;
+}
+
+function normalizeComment(raw: any): TaskComment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const content = String(raw.content ?? "").trim();
+  const author = String(raw.author ?? "").trim();
+  if (!content || !author) return null;
+  return {
+    id: String(raw.id || `comment-${randomUUID().slice(0, 8)}`),
+    author,
+    content,
+    createdAt: Number(raw.createdAt) || Date.now(),
+  };
+}
+
+function normalizeTask(raw: any): Task {
+  const comments = Array.isArray(raw?.comments)
+    ? raw.comments.map(normalizeComment).filter((c: TaskComment | null): c is TaskComment => Boolean(c))
+    : [];
+  return {
+    ...raw,
+    comments,
+    subscribers: uniqueStrings(raw?.subscribers),
+  } as Task;
 }
 
 function readTasks(roomId: string): Task[] {
@@ -15,7 +52,7 @@ function readTasks(roomId: string): Task[] {
   try {
     const raw = readFileSync(p, "utf-8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeTask) : [];
   } catch {
     return [];
   }
@@ -25,11 +62,20 @@ function writeTasks(roomId: string, tasks: Task[]): void {
   const p = tasksPath(roomId);
   const dir = join(p, "..");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(tasks, null, 2), "utf-8");
+  writeFileSync(p, JSON.stringify(tasks.map(normalizeTask), null, 2), "utf-8");
+}
+
+export function toTaskListItem(task: Task): TaskListItem {
+  const { comments: _comments, ...rest } = normalizeTask(task);
+  return { ...rest, commentCount: _comments?.length ?? 0 };
 }
 
 export function listTasks(roomId: string): Task[] {
   return readTasks(roomId);
+}
+
+export function listTaskSummaries(roomId: string): TaskListItem[] {
+  return listTasks(roomId).map(toTaskListItem);
 }
 
 export function getTask(roomId: string, taskId: string): Task | null {
@@ -38,7 +84,7 @@ export function getTask(roomId: string, taskId: string): Task | null {
 
 export function createTask(
   roomId: string,
-  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[] },
+  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[]; subscribers?: string[] },
 ): Task {
   const now = Date.now();
   const task: Task = {
@@ -50,6 +96,8 @@ export function createTask(
     assignee: input.assignee,
     description: input.description,
     references: input.references,
+    subscribers: uniqueStrings([input.createdBy, ...(input.subscribers ?? [])]),
+    comments: [],
     createdBy: input.createdBy,
     createdAt: now,
     updatedAt: now,
@@ -63,7 +111,7 @@ export function createTask(
 export function updateTask(
   roomId: string,
   taskId: string,
-  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "description" | "references">>,
+  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "description" | "references" | "subscribers">>,
 ): Task | null {
   const tasks = readTasks(roomId);
   const idx = tasks.findIndex((t) => t.id === taskId);
@@ -71,12 +119,42 @@ export function updateTask(
   // Only apply defined fields from patch (don't overwrite with undefined)
   const cleanPatch: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (v !== undefined) cleanPatch[k] = v;
+    if (v !== undefined) cleanPatch[k] = k === "subscribers" ? uniqueStrings(v as unknown[]) : v;
   }
-  const updated: Task = { ...tasks[idx], ...cleanPatch, updatedAt: Date.now() };
+  const updated: Task = normalizeTask({ ...tasks[idx], ...cleanPatch, updatedAt: Date.now() });
   tasks[idx] = updated;
   writeTasks(roomId, tasks);
   return updated;
+}
+
+export function addTaskComment(
+  roomId: string,
+  taskId: string,
+  input: { author: string; content: string },
+): { task: Task; comment: TaskComment } | null {
+  const content = input.content.trim();
+  if (!content) throw new Error("comment is required");
+  const author = input.author.trim();
+  if (!author) throw new Error("author is required");
+
+  const tasks = readTasks(roomId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx < 0) return null;
+  const comment: TaskComment = {
+    id: `comment-${randomUUID().slice(0, 8)}`,
+    author,
+    content,
+    createdAt: Date.now(),
+  };
+  const task = normalizeTask(tasks[idx]);
+  const updated: Task = {
+    ...task,
+    comments: [...(task.comments ?? []), comment],
+    updatedAt: Date.now(),
+  };
+  tasks[idx] = updated;
+  writeTasks(roomId, tasks);
+  return { task: updated, comment };
 }
 
 export function deleteTask(roomId: string, taskId: string): boolean {
@@ -87,7 +165,7 @@ export function deleteTask(roomId: string, taskId: string): boolean {
   return true;
 }
 
-export interface TaskWithRoomName extends Task {
+export interface TaskWithRoomName extends TaskListItem {
   roomName: string;
 }
 
@@ -99,7 +177,7 @@ export function listAllTasks(opts: { status?: TaskStatus; query?: string } = {})
     for (const t of tasks) {
       if (opts.status && t.status !== opts.status) continue;
       if (opts.query && !t.title.toLowerCase().includes(opts.query.toLowerCase())) continue;
-      result.push({ ...t, roomName: room.name });
+      result.push({ ...toTaskListItem(t), roomName: room.name });
     }
   }
   return result.sort((a, b) => b.updatedAt - a.updatedAt);

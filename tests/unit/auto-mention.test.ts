@@ -7,32 +7,12 @@ const mocks = vi.hoisted(() => ({
   parseMentions: vi.fn(),
 }));
 
-vi.mock("../../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: mocks.postMessage,
-}));
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: mocks.getRoom,
-}));
-
-vi.mock("../../src/communication/router.js", () => ({
-  parseMentions: mocks.parseMentions,
-}));
-
-vi.mock("../../src/engine/agent-manager.js", () => ({
-  emitAgentReply: mocks.emitAgentReply,
-}));
-
-vi.mock("../../src/workspace/message-store.js", () => ({
-  getMessages: vi.fn(() => []),
-  getMessagesByRange: vi.fn(() => []),
-  addMessage: vi.fn(),
-}));
-
+vi.mock("../../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../../src/communication/message-bus.js", () => ({ postMessage: mocks.postMessage }));
+vi.mock("../../src/workspace/room-store.js", () => ({ getRoom: mocks.getRoom }));
+vi.mock("../../src/communication/router.js", () => ({ parseMentions: mocks.parseMentions }));
+vi.mock("../../src/engine/agent-manager.js", () => ({ emitAgentReply: mocks.emitAgentReply }));
+vi.mock("../../src/workspace/message-store.js", () => ({ getMessages: vi.fn(() => []), getMessagesByRange: vi.fn(() => []), addMessage: vi.fn() }));
 vi.mock("../../src/knowledge/store.js", () => ({
   addEntry: vi.fn(),
   listEntries: vi.fn(() => []),
@@ -40,14 +20,11 @@ vi.mock("../../src/knowledge/store.js", () => ({
   updateEntry: vi.fn(),
   deleteEntry: vi.fn(),
 }));
-
-vi.mock("../../src/communication/ws.js", () => ({
-  broadcastToRoom: vi.fn(),
-}));
+vi.mock("../../src/communication/ws.js", () => ({ broadcastToRoom: vi.fn() }));
 
 import { handleToolCallback } from "../../src/engine/tools.js";
 
-describe("tools chat mentions semantics", () => {
+describe("tools chat textual @mention activation", () => {
   beforeEach(() => {
     mocks.postMessage.mockReset();
     mocks.emitAgentReply.mockReset();
@@ -57,43 +34,25 @@ describe("tools chat mentions semantics", () => {
     mocks.parseMentions.mockReturnValue([]);
   });
 
-  it("does not auto-activate from content @mentions when mentions is empty", async () => {
+  it("activates parsed @mentions from room message text", async () => {
     mocks.parseMentions.mockReturnValue(["developer"]);
 
     const result = await handleToolCallback("chat", "room1", "architect", {
       message: "@developer please implement",
-      mentions: [],
     });
 
-    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer please implement", []);
-    expect(result).toEqual({
-      ok: true,
-      warning: expect.stringContaining("@developer"),
-    });
+    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer please implement", ["developer"]);
+    expect(result).toEqual({ ok: true });
   });
 
-  it("returns warning for missing mentions[] entries only", async () => {
+  it("passes all parsed exact @mentions", async () => {
     mocks.parseMentions.mockReturnValue(["developer", "qa"]);
 
     const result = await handleToolCallback("chat", "room1", "architect", {
       message: "@developer @qa sync",
-      mentions: ["developer"],
     });
 
-    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer @qa sync", ["developer"]);
-    expect(String((result as any).warning)).toContain("@qa");
-    expect(String((result as any).warning)).not.toContain("@developer");
-  });
-
-  it("does not warn when mentions[] fully matches content mentions", async () => {
-    mocks.parseMentions.mockReturnValue(["developer"]);
-
-    const result = await handleToolCallback("chat", "room1", "architect", {
-      message: "@developer please implement",
-      mentions: ["developer"],
-    });
-
-    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer please implement", ["developer"]);
+    expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer @qa sync", ["developer", "qa"]);
     expect(result).toEqual({ ok: true });
   });
 
@@ -101,7 +60,6 @@ describe("tools chat mentions semantics", () => {
     const result = await handleToolCallback("chat", "room1", "architect", {
       message: "@developer this is private",
       target: "user",
-      mentions: [],
     });
 
     expect(mocks.emitAgentReply).toHaveBeenCalledWith("room1", "architect", "@developer this is private");
@@ -110,12 +68,11 @@ describe("tools chat mentions semantics", () => {
     expect(result).toEqual({ ok: true, target: "user" });
   });
 
-  it("silently degrades when room lookup fails", async () => {
+  it("falls back to no activation when room lookup fails", async () => {
     mocks.getRoom.mockReturnValue(null);
 
     const result = await handleToolCallback("chat", "room1", "architect", {
       message: "@developer ping",
-      mentions: [],
     });
 
     expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer ping", []);

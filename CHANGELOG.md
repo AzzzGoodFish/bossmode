@@ -4,6 +4,22 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.12.3] — 2026-05-28
+
+### Changed
+- Limited skill scanning to `~/.bossmode/skills`, removing legacy `~/.agents/skills` and `~/.pi/agent/skills` from the Skills UI.
+- Simplified member activation: chat room messages now activate members via exact textual `@name`; the chat tool no longer exposes `mentions`.
+- Task assignee changes no longer activate members; task assignment is metadata only.
+
+### Added
+- Member detail page now shows historical total tokens for that member, aggregated from room agent event usage logs.
+- Added `GET /api/members/:id/token-usage`.
+
+### Tests
+- `npm run build`
+- `npm test`
+- `npm pack --dry-run`
+
 ## [0.12.2] — 2026-05-28
 
 ### Fixed

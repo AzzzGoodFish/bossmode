@@ -1,6 +1,5 @@
 // Canonical description for the `chat` tool used by pi-cli extension generation.
-// Centralizing this keeps the
-// envelope/target/mentions contract in a single source of truth.
+// Centralizing this keeps the envelope/target/@mention contract in a single source of truth.
 
 export function buildChatToolDescription(memberList: string): string {
   return `Post a message.
@@ -12,19 +11,20 @@ Parameters:
   - "room": visible to everyone in the room (the normal case)
   - "user": private reply, only the user sees it.
   - The envelope footer suggests a default target. You may override it when the user explicitly asks (e.g. "post this to the room" or "reply privately").
-- mentions (optional): array of agent names to activate, e.g. ["developer","qa"]. This is the only activation channel. @name in message text is a reference only.
+
+Activation:
+- In room messages, write @name in the message text to activate a member and request their reply.
+- @name must exactly match a member name.
+- Use @name only when you want that member to reply. To refer to someone without activating them, write their name without @.
+- Private messages do not activate members.
 
 Rules:
 - Follow the envelope footer's suggested target unless the user explicitly requests otherwise.
-- In room replies, include mentions[] only for agents you need to activate next.
 
-Available mention targets in this room: ${memberList}`;
+Available @ targets in this room: ${memberList}`;
 }
 
 export const CHAT_TARGET_PARAM_DESCRIPTION =
   '"room" or "user"; default follows triggering envelope footer';
-
-export const CHAT_MENTIONS_PARAM_DESCRIPTION =
-  "Agent names to activate (authoritative activation channel)";
 
 export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post";

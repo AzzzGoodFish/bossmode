@@ -7,23 +7,20 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
 import type { Task, TaskEventMeta } from "../shared/types.js";
 
-/** Emit a structured task_event system message + ws broadcast.
- *  When activateAssignee is true and the assignee is an agent in the room
- *  (not self, not same as previous), the system message includes a mention
- *  that triggers the existing router → activateAgent flow.
- */
+/** Emit a structured task_event system message + ws broadcast. */
 export function emitTaskEvent(
   roomId: string,
   action: TaskEventMeta["action"],
   task: Task,
   actor: string,
-  options?: { activateAssignee?: boolean; previousAssignee?: string },
+  opts: { commentId?: string } = {},
 ): void {
   const meta: TaskEventMeta = {
     action,
     taskId: task.id,
     taskTitle: task.title,
     newStatus: action === "status_changed" ? task.status : undefined,
+    commentId: opts.commentId,
     actor,
   };
 
@@ -32,23 +29,12 @@ export function emitTaskEvent(
     action === "created" ? "created task" :
     action === "deleted" ? "deleted task" :
     action === "status_changed" ? `moved task to ${task.status}` :
+    action === "commented" ? "commented on task" :
     "updated task";
   const content = `[Task] ${actor} ${verb}: **${task.title}**`;
 
-  // Determine if assignee should be auto-activated via mention
-  const mentions: string[] = [];
-  if (options?.activateAssignee && task.assignee) {
-    const room = roomStore.getRoom(roomId);
-    const isAgent = room?.members.includes(task.assignee) ?? false;
-    const isSelfAssign = task.assignee === actor;
-    const isReassignment = options.previousAssignee !== task.assignee;
-    if (isAgent && !isSelfAssign && isReassignment) {
-      mentions.push(task.assignee);
-    }
-  }
-
-  // Write + broadcast + notify listeners (including router for mention activation)
-  postMessage(roomId, "system", content, mentions, {
+  // Task assignment is metadata only. Activation happens exclusively through chat @mentions.
+  postMessage(roomId, "system", content, [], {
     type: "task_event",
     task_event_meta: meta,
   });
@@ -81,7 +67,14 @@ addRoute("GET", "/api/tasks", async (req, res) => {
 
 addRoute("GET", "/api/rooms/:id/tasks", async (_req, res, params) => {
   if (!roomStore.getRoom(params.id)) { sendJson(res, 404, { error: "Room not found" }); return; }
-  sendJson(res, 200, taskStore.listTasks(params.id));
+  sendJson(res, 200, taskStore.listTaskSummaries(params.id));
+});
+
+addRoute("GET", "/api/rooms/:id/tasks/:taskId", async (_req, res, params) => {
+  if (!roomStore.getRoom(params.id)) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const task = taskStore.getTask(params.id, params.taskId);
+  if (!task) { sendJson(res, 404, { error: "Task not found" }); return; }
+  sendJson(res, 200, task);
 });
 
 addRoute("POST", "/api/rooms/:id/tasks", async (req, res, params) => {
@@ -97,12 +90,10 @@ addRoute("POST", "/api/rooms/:id/tasks", async (req, res, params) => {
       assignee: body.assignee ? String(body.assignee) : undefined,
       description: body.description ? String(body.description) : undefined,
       references: Array.isArray(body.references) ? body.references.map(String) : undefined,
+      subscribers: Array.isArray(body.subscribers) ? body.subscribers.map(String) : undefined,
     });
     const actor = String(body.createdBy || "user");
-    emitTaskEvent(params.id, "created", task, actor, {
-      activateAssignee: true,
-      previousAssignee: undefined,
-    });
+    emitTaskEvent(params.id, "created", task, actor);
     sendJson(res, 200, task);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });
@@ -122,17 +113,32 @@ addRoute("PATCH", "/api/rooms/:id/tasks/:taskId", async (req, res, params) => {
     if (body.assignee !== undefined) patch.assignee = body.assignee || undefined;
     if (body.description !== undefined) patch.description = String(body.description);
     if (body.references !== undefined) patch.references = Array.isArray(body.references) ? body.references.map(String) : [];
+    if (body.subscribers !== undefined) patch.subscribers = Array.isArray(body.subscribers) ? body.subscribers.map(String) : [];
     const updated = taskStore.updateTask(params.id, params.taskId, patch);
     if (!updated) { sendJson(res, 404, { error: "Task not found" }); return; }
 
     // Only emit system message for status change
     const action = before.status !== updated.status ? "status_changed" : "updated";
     const actor = String(body.updatedBy || "user");
-    emitTaskEvent(params.id, action, updated, actor, {
-      activateAssignee: true,
-      previousAssignee: before.assignee,
-    });
+    emitTaskEvent(params.id, action, updated, actor);
     sendJson(res, 200, updated);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
+});
+
+addRoute("POST", "/api/rooms/:id/tasks/:taskId/comments", async (req, res, params) => {
+  if (!roomStore.getRoom(params.id)) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const body = (await parseBody(req)) as any;
+  try {
+    const actor = String(body.author || "user");
+    const result = taskStore.addTaskComment(params.id, params.taskId, {
+      author: actor,
+      content: String(body.comment || ""),
+    });
+    if (!result) { sendJson(res, 404, { error: "Task not found" }); return; }
+    emitTaskEvent(params.id, "commented", result.task, actor, { commentId: result.comment.id });
+    sendJson(res, 200, result.task);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });
   }

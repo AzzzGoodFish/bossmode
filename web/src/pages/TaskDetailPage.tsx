@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ArrowLeft, Trash2, ChevronDown, User, Circle, CircleDot, CheckCircle2, AlertCircle, AlertOctagon, Minus } from "lucide-react";
-import type { Task, TaskStatus, TaskPriority } from "../api/client";
-import { listRoomTasks, updateTask, deleteTaskApi, createTask, getRoom } from "../api/client";
+import type { Task, TaskStatus, TaskPriority, TaskComment } from "../api/client";
+import { getTask, updateTask, deleteTaskApi, createTask, getRoom, commentTask } from "../api/client";
+import { Markdown } from "../components/Markdown";
 import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MobileTopBar } from "../components/MobileTopBar";
@@ -60,6 +61,10 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [priority, setPriority] = useState<TaskPriority>("P1");
   const [assignee, setAssignee] = useState<string>("");
+  const [subscribers, setSubscribers] = useState<string[]>([]);
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [commenting, setCommenting] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -74,18 +79,17 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   useEffect(() => {
     if (isCreate) { setLoading(false); return; }
     setLoading(true);
-    listRoomTasks(roomId)
-      .then((tasks) => {
-        const found = tasks.find((t) => t.id === taskId);
-        if (found) {
-          setTask(found);
-          setTitle(found.title);
-          setDescription(found.description || "");
-          setReferences(found.references || []);
-          setStatus(found.status);
-          setPriority(found.priority);
-          setAssignee(found.assignee || "");
-        }
+    getTask(roomId, taskId)
+      .then((found) => {
+        setTask(found);
+        setTitle(found.title);
+        setDescription(found.description || "");
+        setReferences(found.references || []);
+        setStatus(found.status);
+        setPriority(found.priority);
+        setAssignee(found.assignee || "");
+        setSubscribers(found.subscribers || []);
+        setComments(found.comments || []);
       })
       .catch((err: any) => toast(err.message, "error"))
       .finally(() => setLoading(false));
@@ -102,7 +106,8 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
           title: title.trim(), createdBy: "user", status, priority,
           assignee: assignee || undefined, description: description || undefined,
           references: references.length > 0 ? references : undefined,
-        } as any);
+          subscribers,
+        });
         toast("Task created", "success");
         onBack();
       } else {
@@ -110,8 +115,13 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
           title: title.trim(), status, priority,
           assignee: assignee || undefined, description: description || undefined,
           references,
+          subscribers,
           updatedBy: "user",
-        } as any);
+        });
+        const latest = await getTask(roomId, taskId);
+        setTask(latest);
+        setComments(latest.comments || []);
+        setSubscribers(latest.subscribers || []);
         setDirty(false);
         toast("Task saved", "success");
       }
@@ -119,6 +129,23 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
       toast(err.message, "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCommentSubmit = async () => {
+    const comment = newComment.trim();
+    if (!comment) return;
+    setCommenting(true);
+    try {
+      const updated = await commentTask(roomId, taskId, { author: "user", comment });
+      setTask(updated);
+      setComments(updated.comments || []);
+      setNewComment("");
+      toast("Comment added", "success");
+    } catch (err: any) {
+      toast(err.message, "error");
+    } finally {
+      setCommenting(false);
     }
   };
 
@@ -289,6 +316,49 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                 </form>
               </div>
 
+              {!isCreate && (
+                <div className="mt-8">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 mb-3">Comments</div>
+                  <div className="space-y-4">
+                    {comments.length === 0 ? (
+                      <div className="text-sm text-zinc-400 italic">No comments yet.</div>
+                    ) : comments.map((comment) => (
+                      <div key={comment.id} className="flex gap-3">
+                        <Avatar name={comment.author} size={24} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{comment.author}</span>
+                            <span className="text-xs text-zinc-400">{formatDate(comment.createdAt)}</span>
+                          </div>
+                          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 px-3 py-2 text-sm">
+                            <Markdown content={comment.content} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Add a comment…"
+                      rows={3}
+                      className="w-full text-sm px-3 py-2 bg-transparent border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-400 dark:placeholder-zinc-600 resize-y"
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleCommentSubmit}
+                        disabled={commenting || !newComment.trim()}
+                        className="px-3 py-1.5 text-xs font-medium rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {commenting ? "Adding…" : "Add comment"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Footer hint */}
               <div className="mt-8 text-[11px] text-zinc-400">
                 Esc to go back · ⌘/Ctrl + Enter to save
@@ -321,6 +391,14 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                   value={assignee}
                   members={roomMembers}
                   onChange={(v) => { setAssignee(v); markDirty(); }}
+                />
+              </MetaRow>
+
+              <MetaRow label="Subscribers">
+                <SubscribersPicker
+                  value={subscribers}
+                  members={roomMembers}
+                  onChange={(v) => { setSubscribers(v); markDirty(); }}
                 />
               </MetaRow>
 
@@ -463,6 +541,53 @@ function AssigneePicker({
               <Avatar name={m} size={18} />
               <span className="flex-1 text-left">{m}</span>
               {value === m && <span className="text-[10px] text-zinc-400">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubscribersPicker({
+  value, members, onChange,
+}: { value: string[]; members: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = new Set(value);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const toggle = (member: string) => {
+    const next = selected.has(member) ? value.filter((v) => v !== member) : [...value, member];
+    onChange(next);
+  };
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer text-zinc-700 dark:text-zinc-200 ${open ? "bg-zinc-100 dark:bg-zinc-800" : ""}`}
+      >
+        <span className="flex-1 text-left truncate">{value.length > 0 ? value.join(", ") : "No subscribers"}</span>
+        <ChevronDown size={12} className="text-zinc-400" />
+      </button>
+      {open && (
+        <div className="absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-lg p-1 max-h-64 overflow-y-auto">
+          {members.length === 0 && <div className="px-2 py-2 text-xs text-zinc-400 italic">No members in this room</div>}
+          {members.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => toggle(m)}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer ${selected.has(m) ? "bg-zinc-50 dark:bg-zinc-800/60" : ""}`}
+            >
+              <Avatar name={m} size={18} />
+              <span className="flex-1 text-left">{m}</span>
+              {selected.has(m) && <span className="text-[10px] text-zinc-400">✓</span>}
             </button>
           ))}
         </div>

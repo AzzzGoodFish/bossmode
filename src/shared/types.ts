@@ -275,6 +275,13 @@ export interface ArchiveSummary {
 export type TaskStatus = "todo" | "in-progress" | "review" | "done";
 export type TaskPriority = "P0" | "P1" | "P2";
 
+export interface TaskComment {
+  id: string;
+  author: string;
+  content: string;
+  createdAt: number;
+}
+
 export interface Task {
   id: string;
   roomId: string;
@@ -282,18 +289,25 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   assignee?: string;       // member name
-  description?: string;   // markdown
+  description?: string;   // markdown stable spec / acceptance criteria
   references?: string[];   // soft links to knowledge docs or URLs
+  subscribers?: string[];  // passive watchers; never activates members
+  comments?: TaskComment[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;
 }
 
+export interface TaskListItem extends Omit<Task, "comments"> {
+  commentCount: number;
+}
+
 export interface TaskEventMeta {
-  action: "created" | "updated" | "status_changed" | "deleted";
+  action: "created" | "updated" | "status_changed" | "commented" | "deleted";
   taskId: string;
   taskTitle: string;
   newStatus?: TaskStatus;
+  commentId?: string;
   actor: string;
 }
 
