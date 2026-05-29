@@ -67,6 +67,7 @@ For clearly scoped small requests or obvious bugs, PM may skip Architect:
 
 - `git status` before committing.
 - Stage specific files with `git add <file>` — no `git add -A` or `git add .` blindly.
+- Review every staged change before committing — confirm each diff is intentional and belongs to the project.
 - Every file in a commit belongs to that commit's purpose.
 
 ## Handoff
