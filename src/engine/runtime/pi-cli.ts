@@ -12,6 +12,8 @@ import {
   CREATE_TASK_DESCRIPTION,
   UPDATE_TASK_DESCRIPTION,
   LIST_TASKS_DESCRIPTION,
+  GET_TASK_DESCRIPTION,
+  COMMENT_TASK_DESCRIPTION,
   WRITE_SUMMARY_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
@@ -34,6 +36,8 @@ const QUERY_ROOM_MESSAGES_DESCRIPTION = ${JSON.stringify(QUERY_ROOM_MESSAGES_DES
 const CREATE_TASK_DESCRIPTION = ${JSON.stringify(CREATE_TASK_DESCRIPTION)};
 const UPDATE_TASK_DESCRIPTION = ${JSON.stringify(UPDATE_TASK_DESCRIPTION)};
 const LIST_TASKS_DESCRIPTION = ${JSON.stringify(LIST_TASKS_DESCRIPTION)};
+const GET_TASK_DESCRIPTION = ${JSON.stringify(GET_TASK_DESCRIPTION)};
+const COMMENT_TASK_DESCRIPTION = ${JSON.stringify(COMMENT_TASK_DESCRIPTION)};
 const WRITE_SUMMARY_DESCRIPTION = ${JSON.stringify(WRITE_SUMMARY_DESCRIPTION)};
 const PARAM_DESCRIPTIONS = ${JSON.stringify(PARAM_DESCRIPTIONS)};
 
@@ -54,7 +58,6 @@ export default function (pi) {
     parameters: Type.Object({
       message: Type.String({ description: "Message to post" }),
       target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
-      mentions: Type.Optional(Type.Array(Type.String(), { description: "Agent names to activate (authoritative activation channel)" })),
       attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store. Recipients can preview/download them." })),
     }),
     async execute(id, params) {
@@ -65,12 +68,10 @@ export default function (pi) {
       });
       const data = await res.json().catch(() => ({}));
       const targetText = params.target === "user" ? "Private reply sent." : "Message sent to room.";
-      const explicit = Array.isArray(params.mentions) ? params.mentions : [];
-      const mentionText = explicit.length ? " Mentioned: " + explicit.join(", ") : "";
       const warningText = typeof data.warning === "string" && data.warning.length > 0
         ? " Warning: " + data.warning
         : "";
-      return { content: [{ type: "text", text: targetText + mentionText + warningText }], details: {} };
+      return { content: [{ type: "text", text: targetText + warningText }], details: {} };
     },
   });
 
@@ -116,6 +117,7 @@ export default function (pi) {
       priority: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskPriority })),
       assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
       references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
+      subscribers: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskSubscribers })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -141,6 +143,7 @@ export default function (pi) {
       assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
       description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskDescription })),
       references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
+      subscribers: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskSubscribers })),
     }),
     async execute(id, params) {
       const res = await fetch(SERVER + "/internal/tool-callback", {
@@ -171,8 +174,47 @@ export default function (pi) {
       const tasks = await res.json();
       if (!Array.isArray(tasks)) return { content: [{ type: "text", text: "Failed to load tasks." }], details: {} };
       if (tasks.length === 0) return { content: [{ type: "text", text: "No tasks found." }], details: {} };
-      const text = tasks.map(t => "[" + t.status + "] " + t.priority + " " + t.title + (t.assignee ? " (@" + t.assignee + ")" : "") + " id:" + t.id).join("\\n");
+      const text = tasks.map(t => "[" + t.status + "] " + t.priority + " " + t.title + (t.assignee ? " (@" + t.assignee + ")" : "") + (t.commentCount ? " comments:" + t.commentCount : "") + " id:" + t.id).join("\\n");
       return { content: [{ type: "text", text: text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "get_task",
+    label: "Get Task",
+    description: GET_TASK_DESCRIPTION,
+    parameters: Type.Object({
+      taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "get_task", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (data && data.ok === false) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: typeof data === "string" ? truncate(data) : truncate(JSON.stringify(data, null, 2)) }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "comment_task",
+    label: "Comment Task",
+    description: COMMENT_TASK_DESCRIPTION,
+    parameters: Type.Object({
+      taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
+      comment: Type.String({ description: PARAM_DESCRIPTIONS.taskComment }),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "comment_task", room: ROOM, agent: AGENT, params }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
+      return { content: [{ type: "text", text: "Comment added: " + data.commentId + " on " + data.taskId }], details: {} };
     },
   });
 

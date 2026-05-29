@@ -171,6 +171,10 @@ export async function deleteMemberApi(id: string): Promise<void> {
   await apiFetch(`/api/members/${id}`, { method: "DELETE" });
 }
 
+export async function getMemberTokenUsage(id: string): Promise<{ totalTokens: number }> {
+  return apiFetch(`/api/members/${id}/token-usage`);
+}
+
 export interface MemberInstanceInfo {
   roomId: string;
   roomName: string;
@@ -746,6 +750,13 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
 export type TaskStatus = "todo" | "in-progress" | "review" | "done";
 export type TaskPriority = "P0" | "P1" | "P2";
 
+export interface TaskComment {
+  id: string;
+  author: string;
+  content: string;
+  createdAt: number;
+}
+
 export interface Task {
   id: string;
   roomId: string;
@@ -755,6 +766,9 @@ export interface Task {
   assignee?: string;
   description?: string;
   references?: string[];
+  subscribers?: string[];
+  comments?: TaskComment[];
+  commentCount?: number;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -773,9 +787,13 @@ export async function listRoomTasks(roomId: string): Promise<Task[]> {
   return apiFetch(`/api/rooms/${roomId}/tasks`);
 }
 
+export async function getTask(roomId: string, taskId: string): Promise<Task> {
+  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`);
+}
+
 export async function createTask(
   roomId: string,
-  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string },
+  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[]; subscribers?: string[] },
 ): Promise<Task> {
   return apiFetch(`/api/rooms/${roomId}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
@@ -783,9 +801,17 @@ export async function createTask(
 export async function updateTask(
   roomId: string,
   taskId: string,
-  patch: { title?: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string | null; description?: string; updatedBy?: string },
+  patch: { title?: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string | null; description?: string; references?: string[]; subscribers?: string[]; updatedBy?: string },
 ): Promise<Task> {
   return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export async function commentTask(
+  roomId: string,
+  taskId: string,
+  input: { author: string; comment: string },
+): Promise<Task> {
+  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify(input) });
 }
 
 export async function deleteTaskApi(roomId: string, taskId: string, deletedBy?: string): Promise<void> {

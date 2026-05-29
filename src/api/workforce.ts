@@ -17,6 +17,7 @@ import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getModelCredentialProfile, normalizeModelRef } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import { setCursor } from "../workspace/room-store.js";
+import { getMemberTokenUsage } from "../workspace/token-usage-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 function isUnsupportedRuntime(runtime: unknown): boolean {
@@ -281,6 +282,12 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
 addRoute("DELETE", "/api/members/:id", async (_req, res, params) => {
   if (!deleteMember(params.id)) { sendJson(res, 404, { error: "Member not found" }); return; }
   sendJson(res, 200, { ok: true });
+});
+
+addRoute("GET", "/api/members/:id/token-usage", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  sendJson(res, 200, getMemberTokenUsage(member.name));
 });
 
 addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {

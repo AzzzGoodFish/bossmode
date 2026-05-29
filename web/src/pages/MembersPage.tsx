@@ -5,7 +5,7 @@ import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../
 import { composeManualModelPayload, getMemberModelBadge, inferMemberModelMode } from "../model-helpers";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
-  getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels,
+  getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels, getMemberTokenUsage,
 } from "../api/client";
 import { useDialog } from "../components/dialogs";
 
@@ -154,6 +154,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [agentDetail, setAgentDetail] = useState<{ description: string; skills: string[]; avatar?: string } | null>(null);
   const [instances, setInstances] = useState<MemberInstanceInfo[]>([]);
+  const [totalTokens, setTotalTokens] = useState<number | null>(null);
 
 
   const refreshStatus = () => {
@@ -168,12 +169,14 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
         setAutoModelModeInitialized(false);
       });
       refreshStatus();
+      getMemberTokenUsage(id).then((usage) => setTotalTokens(usage.totalTokens)).catch(() => setTotalTokens(null));
     } else {
       setAutoModelModeInitialized(false);
       setForm({ runtime: "pi-cli", model: undefined, thinkingLevel: "off" });
       setSavedModelSelection("");
       setManualModelInput("");
       setModelMode("agent-default");
+      setTotalTokens(null);
     }
     getAgents().then(setAgents);
   }, [id, isCreate]);
@@ -446,6 +449,15 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
           ) : (
             <div className={`${cardCls} p-4 text-center text-zinc-400 dark:text-zinc-600 text-sm`}>
               Select an agent to see preview
+            </div>
+          )}
+
+          {!isCreate && (
+            <div className={`${cardCls} p-4`}>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Historical tokens</div>
+              <div className="text-xl font-semibold text-zinc-900 dark:text-white tabular-nums">
+                {totalTokens === null ? "—" : totalTokens.toLocaleString()}
+              </div>
             </div>
           )}
 

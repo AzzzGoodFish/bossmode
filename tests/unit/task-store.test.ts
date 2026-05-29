@@ -154,4 +154,47 @@ describe("task-store", () => {
     expect(updated!.references).toEqual(["docs/y.md"]);
     expect(updated!.title).toBe("New title");
   });
+
+  it("creates default comments and creator subscriber", async () => {
+    const { createTask, getTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r14");
+    const task = createTask("r14", { title: "Defaults", createdBy: "pm" });
+    expect(task.comments).toEqual([]);
+    expect(task.subscribers).toEqual(["pm"]);
+    expect(getTask("r14", task.id)!.comments).toEqual([]);
+  });
+
+  it("dedupes subscribers on create and replacement update", async () => {
+    const { createTask, updateTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r15");
+    const task = createTask("r15", { title: "Subs", createdBy: "pm", subscribers: ["qa", "qa", "", "pm"] });
+    expect(task.subscribers).toEqual(["pm", "qa"]);
+    const updated = updateTask("r15", task.id, { subscribers: ["developer", "qa", "developer"] });
+    expect(updated!.subscribers).toEqual(["developer", "qa"]);
+  });
+
+  it("adds comments and bumps updatedAt", async () => {
+    const { createTask, addTaskComment, getTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r16");
+    const task = createTask("r16", { title: "Commented", createdBy: "pm" });
+    const result = addTaskComment("r16", task.id, { author: "developer", content: "Implemented" });
+    expect(result).not.toBeNull();
+    expect(result!.comment.id).toMatch(/^comment-/);
+    expect(result!.comment.author).toBe("developer");
+    expect(result!.comment.content).toBe("Implemented");
+    expect(result!.comment.createdAt).toBeGreaterThan(0);
+    expect(result!.task.updatedAt).toBeGreaterThanOrEqual(task.updatedAt);
+    expect(getTask("r16", task.id)!.comments).toHaveLength(1);
+  });
+
+  it("normalizes old task json without comments and subscribers", async () => {
+    const { getTask, listTaskSummaries } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r17");
+    const dir = join(tmpDir, "rooms", "r17");
+    writeFileSync(join(dir, "tasks.json"), JSON.stringify([{ id: "task-old", roomId: "r17", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 1, updatedAt: 1 }]), "utf-8");
+    const task = getTask("r17", "task-old")!;
+    expect(task.comments).toEqual([]);
+    expect(task.subscribers).toEqual([]);
+    expect(listTaskSummaries("r17")[0].commentCount).toBe(0);
+  });
 });

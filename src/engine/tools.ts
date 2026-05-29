@@ -9,7 +9,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { emitTaskEvent } from "../api/tasks.js";
-import type { TaskStatus, TaskPriority } from "../shared/types.js";
+import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
 import { emitAgentReply } from "./agent-manager.js";
 import { getActivationSource } from "./activation-context.js";
@@ -39,7 +39,6 @@ export async function handleToolCallback(
 
   switch (tool) {
     case "chat": {
-      const mentions: string[] = Array.isArray(params?.mentions) ? params.mentions : [];
       let target = params?.target || "room";
       let message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
@@ -78,37 +77,23 @@ export async function handleToolCallback(
         return warning ? { ok: true, target: "user", warning } : { ok: true, target: "user" };
       }
 
+      const room = roomStore.getRoom(roomId);
+      const mentions = room ? parseMentions(message, room.members) : [];
+
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
       postMessage(roomId, agentName, message, mentions);
 
-      // Soft warning: content contains @mentions not listed in mentions[]
-      try {
-        const room = roomStore.getRoom(roomId);
-        if (!room) return warning ? { ok: true, warning } : { ok: true };
-
-        const contentMentions = parseMentions(message, room.members).filter((m) => m !== agentName);
-        const orphanMentions = contentMentions.filter((m) => !mentions.includes(m));
-        if (orphanMentions.length > 0) {
-          const mentionList = orphanMentions.map((m) => `@${m}`).join(", ");
-          const mentionArray = orphanMentions.map((m) => `"${m}"`).join(", ");
-          const orphanWarning = `Content contains ${mentionList} but mentions[] does not include them. If you meant to activate them, resend with mentions: [${mentionArray}]. If this was only a reference, no action needed.`;
-          return {
-            ok: true,
-            warning: warning ? `${warning} ${orphanWarning}` : orphanWarning,
-          };
-        }
-      } catch {
-        // Silent degrade on warning-analysis failure
-      }
-
       return warning ? { ok: true, warning } : { ok: true };
     }
     case "mention": {
-      // Legacy — redirect to chat with mentions
+      // Legacy — redirect to chat with textual @mention.
       // Mention activation is handled by router listener.
       const target = params?.agent || "";
-      postMessage(roomId, agentName, params?.message || "", [target]);
+      const message = params?.message || "";
+      const content = target ? `@${target} ${message}`.trim() : message;
+      const room = roomStore.getRoom(roomId);
+      postMessage(roomId, agentName, content, room ? parseMentions(content, room.members) : []);
       return { ok: true };
     }
     case "query_room_messages": {
@@ -152,11 +137,9 @@ export async function handleToolCallback(
         assignee: params?.assignee ? String(params.assignee) : undefined,
         description: params?.description ? String(params.description) : undefined,
         references: Array.isArray(params?.references) ? params.references.map(String) : undefined,
+        subscribers: Array.isArray(params?.subscribers) ? params.subscribers.map(String) : undefined,
       });
-      emitTaskEvent(roomId, "created", task, agentName, {
-        activateAssignee: true,
-        previousAssignee: undefined,
-      });
+      emitTaskEvent(roomId, "created", task, agentName);
       return { ok: true, taskId: task.id, title: task.title, status: task.status };
     }
     case "update_task": {
@@ -171,13 +154,11 @@ export async function handleToolCallback(
       if (params?.assignee !== undefined) patch.assignee = params.assignee ? String(params.assignee) : undefined;
       if (params?.description !== undefined) patch.description = String(params.description);
       if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
+      if (params?.subscribers !== undefined) patch.subscribers = Array.isArray(params.subscribers) ? params.subscribers.map(String) : [];
       const updated = taskStore.updateTask(roomId, taskId, patch);
       if (!updated) return { ok: false, error: "Update failed" };
       const action = before.status !== updated.status ? "status_changed" : "updated";
-      emitTaskEvent(roomId, action, updated, agentName, {
-        activateAssignee: true,
-        previousAssignee: before.assignee,
-      });
+      emitTaskEvent(roomId, action, updated, agentName);
       return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
     }
     case "list_tasks": {
@@ -188,7 +169,26 @@ export async function handleToolCallback(
         id: t.id, title: t.title, status: t.status, priority: t.priority,
         assignee: t.assignee, createdBy: t.createdBy,
         references: t.references,
+        subscribers: t.subscribers,
+        commentCount: t.comments?.length ?? 0,
       }));
+    }
+    case "get_task": {
+      const taskId = params?.taskId ? String(params.taskId) : "";
+      if (!taskId) return { ok: false, error: "taskId is required" };
+      const task = taskStore.getTask(roomId, taskId);
+      if (!task) return { ok: false, error: `Task not found: ${taskId}` };
+      return truncateToolResult(renderTaskAsMarkdown(task));
+    }
+    case "comment_task": {
+      const taskId = params?.taskId ? String(params.taskId) : "";
+      const comment = params?.comment ? String(params.comment) : "";
+      if (!taskId) return { ok: false, error: "taskId is required" };
+      if (!comment.trim()) return { ok: false, error: "comment is required" };
+      const result = taskStore.addTaskComment(roomId, taskId, { author: agentName, content: comment });
+      if (!result) return { ok: false, error: `Task not found: ${taskId}` };
+      emitTaskEvent(roomId, "commented", result.task, agentName, { commentId: result.comment.id });
+      return { ok: true, taskId: result.task.id, commentId: result.comment.id };
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool
@@ -266,6 +266,32 @@ function parseTimeArg(input: string): number | undefined {
   if (!Number.isNaN(num) && num > 0) return num;
   const parsed = Date.parse(input);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function renderTaskAsMarkdown(task: Task | null): string {
+  if (!task) return "Task not found.";
+  const lines = [
+    `# ${task.title}`,
+    `Status: ${task.status}`,
+    `Priority: ${task.priority}`,
+    `Assignee: ${task.assignee || "Unassigned"}`,
+    `Subscribers: ${(task.subscribers || []).join(", ") || "None"}`,
+    `References: ${(task.references || []).join(", ") || "None"}`,
+    "",
+    "## Description",
+    task.description || "(none)",
+    "",
+    "## Comments",
+  ];
+  const comments = task.comments || [];
+  if (comments.length === 0) {
+    lines.push("(none)");
+  } else {
+    for (const c of comments) {
+      lines.push(`- [${new Date(c.createdAt).toISOString()}] ${c.author}: ${c.content}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.SearchOptions): string {

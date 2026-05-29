@@ -18,9 +18,9 @@ Use this tool when:
 - You hand off work to another agent and want a tracked record
 - A discussion produces an actionable item that shouldn't be forgotten
 
-A task is a unit of work that someone can complete in a focused session.
+A task is a unit of work that someone can complete in a focused session. Use description for stable requirements, scope, and acceptance criteria; use comment_task for process notes, implementation progress, QA results, blockers, and handoff records.
 
-**Side effect**: when you set assignee to an agent in this room, that agent is automatically activated and receives the task context. This replaces the need to send a separate @mention message after creating the task.
+Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name.
 
 When you should NOT create a task:
 - The work is so small it fits in a single agent turn (just do it)
@@ -36,13 +36,13 @@ Use this tool when:
 - Priority or scope changes → update fields accordingly
 - Task gets reassigned → update assignee
 
-**Side effects**:
-- Status changes are recorded as system messages in the room (others see progress).
-- Reassigning to a different agent in this room automatically activates that agent.
+Task event messages:
+- Status changes are recorded as system messages in the room so others see progress.
+- Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name.
 
 Always update task status promptly — stale task states erode the team's awareness.
 
-When updating description, **preserve previous content and append** your contribution (plans, findings, decisions). Do not overwrite — task descriptions are living records maintained by multiple actors.`;
+Description is for stable requirements, scope, and acceptance criteria. Use comment_task for process notes, implementation progress, QA results, blockers, and handoff records.`;
 
 export const LIST_TASKS_DESCRIPTION = `List tasks in the current room. Optionally filter by status or assignee.
 
@@ -52,7 +52,15 @@ Use this tool when:
 - To find a task ID before updating it
 - To compile a status report
 
-Returns id, title, status, priority, assignee, references for each match.`;
+Returns id, title, status, priority, assignee, references, subscribers, and commentCount for each match. It does not return full comment bodies; use get_task for full detail.`;
+
+export const GET_TASK_DESCRIPTION = `Get full details for a task in the current room, including description, references, subscribers, and comments.
+
+Use this before adding a subscriber, when you need task context before implementation or QA, or when list_tasks only returned a summary.`;
+
+export const COMMENT_TASK_DESCRIPTION = `Add a comment to a task in the current room.
+
+Use comments for implementation notes, QA results, blockers, decisions, and handoff records. Comments are persisted on the task but do not activate members, even if the text contains @name. To request action, send a room chat message with exact @name.`;
 
 export const WRITE_SUMMARY_DESCRIPTION = `Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.
 
@@ -75,7 +83,9 @@ export const PARAM_DESCRIPTIONS = {
   taskStatusUpdate: "New status",
   taskPriority: "P0 | P1 | P2 (default: P1)",
   taskAssignee: "Member name to assign",
-  taskId: "Task ID to update",
+  taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name to request action.",
+  taskId: "Task ID",
+  taskComment: "Markdown comment to append to the task. Does not activate members.",
   taskStatusFilter: "Filter: todo | in-progress | review | done",
   taskAssigneeFilter: "Filter by assignee name",
   taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",

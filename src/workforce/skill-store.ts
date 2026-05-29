@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
 import { logger } from "../foundation/logger.js";
@@ -8,12 +7,7 @@ import type { SkillDefinition } from "../shared/types.js";
 
 const PRIMARY_SKILLS_DIR = join(getBossmodeDir(), "skills");
 
-// Multi-directory scan: bossmode > ~/.agents > ~/.pi/agent
-const SKILL_DIRS = [
-  PRIMARY_SKILLS_DIR,
-  join(homedir(), ".agents", "skills"),
-  join(homedir(), ".pi", "agent", "skills"),
-];
+const SKILL_DIRS = [PRIMARY_SKILLS_DIR];
 
 export function getSkillsDir(): string {
   return PRIMARY_SKILLS_DIR;

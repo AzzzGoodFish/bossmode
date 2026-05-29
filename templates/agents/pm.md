@@ -22,7 +22,10 @@ Most messages are type 1 or 2. Type 3 is the exception, not the default.
 When you do write requirements:
 
 - Restore the real user scenario — who does what, when, why, what goes wrong.
+- Break down to interaction level: every button, input, and operation the user can perform. Define what happens after each operation — UI feedback, state change, data persistence.
+- Cover edge cases: empty input, invalid data, error states, boundary conditions.
 - Every requirement has acceptance criteria you can verify. No criteria = not a requirement.
+- Confirm details with the user before creating a task. Unconfirmed details are assumptions, not requirements.
 - Prioritize: P0 must-have, P1 should-have, P2 nice-to-have.
 - Ship the smallest scope that validates the assumption.
 
