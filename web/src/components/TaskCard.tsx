@@ -41,6 +41,7 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
         {((task.commentCount ?? task.comments?.length ?? 0) > 0) && (
           <span className="text-[10px] text-zinc-400 shrink-0">💬{task.commentCount ?? task.comments?.length}</span>
         )}
+        {task.linearIssueIdentifier && <span className="text-[10px] text-blue-500 shrink-0">Linear {task.linearIssueIdentifier}</span>}
         {task.assignee && (
           <span className="text-[10px] text-zinc-400 shrink-0">@{task.assignee}</span>
         )}
@@ -65,6 +66,7 @@ export function TaskCard({ task, variant = "card", onClick, onStatusCycle }: Tas
         {((task.commentCount ?? task.comments?.length ?? 0) > 0) && (
           <span>💬{task.commentCount ?? task.comments?.length}</span>
         )}
+        {task.linearIssueIdentifier && <span className="text-blue-500">Linear {task.linearIssueIdentifier}</span>}
         {task.createdBy && <span className="ml-auto">by {task.createdBy}</span>}
       </div>
     </div>

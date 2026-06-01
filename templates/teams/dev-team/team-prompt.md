@@ -39,7 +39,7 @@ For large features or cross-role work. PM drives and is the single process owner
 1. PM clarifies requirements with the user; user confirms scope.
 2. PM creates a task with clear scope and acceptance criteria, assigns Architect, and activates Architect in chat.
 3. Architect reads the codebase, assesses feasibility and risk, and records the implementation plan on the task, preferably as a task comment. Architect then @mentions PM in chat for confirmation.
-4. PM reviews the plan and, for product/user-impacting decisions, presents it to the user for confirmation.
+4. PM reviews the plan. In Hands-on mode, presents it to the user for confirmation before proceeding. In Delegate mode, PM confirms internally and proceeds.
 5. PM assigns Developer, @mentions Developer to start, and @mentions QA to prepare testing.
 6. Developer implements, records implementation notes/results on the task, updates status, then @mentions PM in chat.
 7. PM assigns QA and @mentions QA to verify.
@@ -50,7 +50,7 @@ For large features or cross-role work. PM drives and is the single process owner
 
 For clearly scoped small requests or obvious bugs, PM may skip Architect:
 
-1. PM confirms scope and priority.
+1. PM confirms scope and priority. Ask user: Hands-on or Delegate?
 2. PM assigns and @mentions Developer or Designer directly; task is optional if tracking is needed.
 3. Implementer reports back to PM in chat.
 4. PM requests QA verification if needed, then reports status to the user.

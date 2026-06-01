@@ -794,6 +794,24 @@ export async function updateRuntimeSettings(sessionResume: boolean): Promise<Run
   });
 }
 
+export interface LinearIntegrationStatus {
+  connected: boolean;
+  viewer?: { id: string; name: string };
+  error?: string;
+}
+
+export async function getLinearIntegrationStatus(): Promise<LinearIntegrationStatus> {
+  return apiFetch("/api/integrations/linear");
+}
+
+export async function connectLinearIntegration(apiKey: string): Promise<LinearIntegrationStatus> {
+  return apiFetch("/api/integrations/linear", { method: "PUT", body: JSON.stringify({ apiKey }) });
+}
+
+export async function disconnectLinearIntegration(): Promise<{ ok: true; clearedRooms: number }> {
+  return apiFetch("/api/integrations/linear", { method: "DELETE" });
+}
+
 // -- Tasks --
 
 export type TaskStatus = "todo" | "in-progress" | "review" | "done";
@@ -818,6 +836,11 @@ export interface Task {
   subscribers?: string[];
   comments?: TaskComment[];
   commentCount?: number;
+  linearIssueId?: string;
+  linearIssueUrl?: string;
+  linearIssueIdentifier?: string;
+  linearSyncedAt?: number;
+  linearSyncError?: string;
   createdBy: string;
   createdAt: number;
   updatedAt: number;

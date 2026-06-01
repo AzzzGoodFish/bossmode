@@ -62,6 +62,14 @@ export const COMMENT_TASK_DESCRIPTION = `Add a comment to a task in the current 
 
 Use comments for implementation notes, QA results, blockers, decisions, and handoff records. Comments are persisted on the task but do not activate members, even if the text contains @name. To request action, send a room chat message with exact @name.`;
 
+export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
+
+Use this to check whether Linear is connected, see the current room's Linear team/project binding, inspect recent sync errors, and list available Linear teams/projects. API keys are never returned.`;
+
+export const CONFIGURE_INTEGRATION_DESCRIPTION = `Configure an external integration for the current room.
+
+For Linear v1, use this to bind the current room to a Linear team and optional project. Do not pass API keys; Linear API keys must be configured in Settings.`;
+
 export const WRITE_SUMMARY_DESCRIPTION = `Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.
 
 Use this when a contiguous segment of messages forms a coherent topic that can be condensed into a 1-3 sentence summary. The original messages remain in storage but the summary becomes the canonical view in the merged message stream.`;
@@ -89,6 +97,12 @@ export const PARAM_DESCRIPTIONS = {
   taskStatusFilter: "Filter: todo | in-progress | review | done",
   taskAssigneeFilter: "Filter by assignee name",
   taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",
+
+  // integrations
+  integrationProvider: "Integration provider. v1 supports only 'linear'.",
+  integrationTeam: "Linear team name, key, or id. API key must already be configured in Settings.",
+  integrationProject: "Optional Linear project name or id within the selected team.",
+  integrationEnabled: "Enable or disable syncing for this room.",
 
   // write_summary
   summaryTitle: "Short topic title for this summary segment",

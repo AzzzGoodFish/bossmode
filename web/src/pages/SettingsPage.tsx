@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Plus, KeyRound, Pencil, Trash2, Download } from "lucide-react";
+import { Plus, KeyRound, Pencil, Trash2, Download, Link2 } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, PiConfigImportPreview } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, PiConfigImportPreview, LinearIntegrationStatus } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -20,6 +20,9 @@ import {
   cancelOAuthLoginJob,
   getPiConfigPreview,
   importPiConfig,
+  getLinearIntegrationStatus,
+  connectLinearIntegration,
+  disconnectLinearIntegration,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
 import { useDialog } from "../components/dialogs";
@@ -46,12 +49,14 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
 
   useEffect(() => {
     getSummarySettings().then(setSummarySettings).catch(console.error);
     getRuntimeSettings().then((v) => setSessionResume(v.sessionResume)).catch(console.error);
     getTeamUpdateSettings().then(setTeamUpdateSettings).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
+    getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
   }, []);
 
   const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
@@ -120,6 +125,8 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
       <MobileTopBar title="Settings" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 flex flex-col p-6 overflow-y-auto">
       <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-6">Settings</h1>
+
+      <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
 
       <ModelCredentialsSection
         profiles={profiles}
@@ -256,6 +263,61 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
       />
     )}
     </div>
+  );
+}
+
+function LinearIntegrationSection({ status, onStatus }: { status: LinearIntegrationStatus; onStatus: (status: LinearIntegrationStatus) => void }) {
+  const { toast, confirm } = useDialog();
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const connect = async () => {
+    if (!apiKey.trim()) { toast("Linear API key is required", "error"); return; }
+    setSaving(true);
+    try {
+      const next = await connectLinearIntegration(apiKey.trim());
+      onStatus(next);
+      setApiKey("");
+      toast("Linear connected", "success");
+    } catch (err: any) { toast(err.message, "error"); }
+    finally { setSaving(false); }
+  };
+
+  const disconnect = async () => {
+    if (!(await confirm("Disconnect Linear and clear room Linear bindings?"))) return;
+    setSaving(true);
+    try {
+      const result = await disconnectLinearIntegration();
+      onStatus({ connected: false });
+      toast(`Linear disconnected. Cleared ${result.clearedRooms} room bindings.`, "success");
+    } catch (err: any) { toast(err.message, "error"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <section className="mb-8">
+      <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Integrations</h2>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 w-8 h-8 rounded bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center"><Link2 size={16} /></div>
+            <div>
+              <div className="text-sm font-medium text-zinc-900 dark:text-white">Linear</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Sync Bossmode room tasks to Linear issues. API key is stored locally and never exposed to agents.</div>
+              {status.connected && <div className="text-xs text-emerald-500 mt-1">Connected as {status.viewer?.name || "Linear user"}</div>}
+              {!status.connected && status.error && <div className="text-xs text-amber-500 mt-1">Connection error: {status.error}</div>}
+            </div>
+          </div>
+          {status.connected && <button onClick={disconnect} disabled={saving} className="px-3 py-1.5 border rounded-lg text-sm text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer disabled:opacity-50">Disconnect</button>}
+        </div>
+        {!status.connected && (
+          <div className="flex gap-2">
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="lin_api_..." className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white" />
+            <button onClick={connect} disabled={saving || !apiKey.trim()} className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{saving ? "Connecting..." : "Connect Linear"}</button>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

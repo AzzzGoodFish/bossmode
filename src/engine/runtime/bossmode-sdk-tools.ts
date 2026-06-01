@@ -8,6 +8,8 @@ import {
   LIST_TASKS_DESCRIPTION,
   GET_TASK_DESCRIPTION,
   COMMENT_TASK_DESCRIPTION,
+  QUERY_INTEGRATION_DESCRIPTION,
+  CONFIGURE_INTEGRATION_DESCRIPTION,
   WRITE_SUMMARY_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
@@ -134,6 +136,28 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
         const data = await call("comment_task", params as any) as any;
         return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
       },
+    }),
+    defineTool({
+      name: "query_integration",
+      label: "Query Integration",
+      description: QUERY_INTEGRATION_DESCRIPTION,
+      parameters: Type.Object({
+        provider: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationProvider })),
+        team: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationTeam })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("query_integration", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "configure_integration",
+      label: "Configure Integration",
+      description: CONFIGURE_INTEGRATION_DESCRIPTION,
+      parameters: Type.Object({
+        provider: Type.String({ description: PARAM_DESCRIPTIONS.integrationProvider }),
+        team: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationTeam })),
+        project: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationProject })),
+        enabled: Type.Optional(Type.Boolean({ description: PARAM_DESCRIPTIONS.integrationEnabled })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("configure_integration", params as any), null, 2))),
     }),
     defineTool({
       name: "write_summary",

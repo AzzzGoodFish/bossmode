@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -42,7 +42,8 @@ export function readConfig(): BossmodeConfig {
 
 export function writeConfig(config: BossmodeConfig): void {
   ensureBossmodeDir();
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(CONFIG_PATH, 0o600); } catch { /* best effort */ }
 }
 
 // Password hashing: SHA-256 with salt
