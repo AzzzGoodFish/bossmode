@@ -178,14 +178,18 @@ export class PiSdkRuntime implements AgentRuntime {
 
     const safeRoom = safeSegment(opts.roomId);
     const safeMember = safeSegment(opts.member.name);
-    const agentDir = piConfig?.agentDir || join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
+    const runtimeAgentDir = piConfig?.agentDir || join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
     const sessionDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember, "sessions");
-    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
-    const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-    const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-    const settingsManager = SettingsManager.create(opts.cwd, agentDir);
+    const authStorage = piConfig
+      ? AuthStorage.create(join(runtimeAgentDir, "auth.json"))
+      : AuthStorage.create();
+    const modelRegistry = piConfig
+      ? ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"))
+      : ModelRegistry.create(authStorage);
+    const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
     const model = modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);
 
@@ -205,7 +209,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const extensionPaths = piConfig?.extensionPaths ?? [];
     const resourceLoader = new DefaultResourceLoader({
       cwd: opts.cwd,
-      agentDir,
+      agentDir: runtimeAgentDir,
       settingsManager,
       noExtensions: true,
       noSkills: true,
@@ -219,7 +223,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
     const { session } = await createAgentSession({
       cwd: opts.cwd,
-      agentDir,
+      agentDir: runtimeAgentDir,
       authStorage,
       modelRegistry,
       model,
@@ -237,7 +241,7 @@ export class PiSdkRuntime implements AgentRuntime {
       model: resolvedModel,
       thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
       systemPrompt: [rolePrompt, ...appendSystemPrompt].filter(Boolean).join("\n\n"),
-      skills: skillPaths,
+      skills: opts.skillNames ?? skillPaths,
       extensions: ["bossmode-sdk-tools", ...extensionPaths],
     };
     const handle = new PiSdkAgentHandle(session, modelRegistry, runtimeParams);
