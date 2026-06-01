@@ -48,6 +48,7 @@ export interface CreateAgentOpts {
   agentPrompt: string;       // Layer 1: agent definition role prompt only. Empty for builtin/general.
   envPrompt: string;         // Bossmode overlays: docs index + environment info. Always appended.
   skillPaths: string[];      // Layer 2: skill directory paths
+  skillNames?: string[];     // Resolved skill names for status display
   rulesPrompt?: string;      // Layer 3: rules from knowledge base
 
   roomMembers: string[];

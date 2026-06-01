@@ -258,6 +258,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         agentPrompt: assembled.agentPrompt,
         envPrompt: assembled.envPrompt,
         skillPaths,
+        skillNames: skills,
         rulesPrompt,
         roomMembers: room.members,
         resumeSession,
