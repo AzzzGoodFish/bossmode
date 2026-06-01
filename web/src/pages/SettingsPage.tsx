@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Plus, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { Plus, KeyRound, Pencil, Trash2, Download } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, PiConfigImportPreview } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -18,6 +18,8 @@ import {
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
   cancelOAuthLoginJob,
+  getPiConfigPreview,
+  importPiConfig,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
 import { useDialog } from "../components/dialogs";
@@ -43,6 +45,7 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   useEffect(() => {
     getSummarySettings().then(setSummarySettings).catch(console.error);
@@ -123,6 +126,7 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
         onAdd={() => { setEditingProfile(null); setShowProfileSheet(true); }}
         onEdit={(p) => { setEditingProfile(p); setShowProfileSheet(true); }}
         onDelete={handleDeleteProfile}
+        onImport={() => setShowImportDialog(true)}
       />
 
       {/* Session Resume */}
@@ -245,6 +249,12 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
         onSaved={async () => { setShowProfileSheet(false); await refreshProfiles(); }}
       />
     )}
+    {showImportDialog && (
+      <PiConfigImportDialog
+        onClose={() => setShowImportDialog(false)}
+        onImported={async () => { setShowImportDialog(false); await refreshProfiles(); }}
+      />
+    )}
     </div>
   );
 }
@@ -256,11 +266,12 @@ const PROTOCOLS: ModelProtocol[] = [
 ];
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
 
-function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete }: {
+function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }: {
   profiles: PublicModelCredentialProfile[];
   onAdd: () => void;
   onEdit: (profile: PublicModelCredentialProfile) => void;
   onDelete: (profile: PublicModelCredentialProfile) => void;
+  onImport: () => void;
 }) {
   return (
     <section className="mb-8">
@@ -269,9 +280,12 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete }: {
           <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Model Credentials</h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Configure provider access once, then choose available models for each member.</p>
         </div>
-        <button onClick={onAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">
-          <Plus size={14} /> Add credential
-        </button>
+        <div className="flex items-center gap-2">
+          {profiles.length > 0 && <button onClick={onImport} className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer"><Download size={14} /> Import from pi</button>}
+          <button onClick={onAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">
+            <Plus size={14} /> Add credential
+          </button>
+        </div>
       </div>
       {profiles.length === 0 ? (
         <div className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg p-8 text-center">
@@ -279,6 +293,8 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete }: {
           <div className="text-sm font-medium text-zinc-900 dark:text-white">No model credentials yet</div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">Add an API key, OAuth account, proxy endpoint, or local no-auth endpoint. Models you add here become selectable in Member settings.</p>
           <button onClick={onAdd} className="mt-4 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">Add credential</button>
+          <div className="my-3 text-xs text-zinc-400 dark:text-zinc-600">── or ──</div>
+          <button onClick={onImport} className="px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer">Import from pi config</button>
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -315,6 +331,95 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete }: {
         </div>
       )}
     </section>
+  );
+}
+
+function PiConfigImportDialog({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const { toast } = useDialog();
+  const [preview, setPreview] = useState<PiConfigImportPreview | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [overwrite, setOverwrite] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    getPiConfigPreview()
+      .then((p) => {
+        setPreview(p);
+        setSelected(new Set(p.providers.filter((provider) => provider.importable && !provider.existingProfileId).map((provider) => provider.providerSlug)));
+      })
+      .catch((err) => toast(err.message, "error"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = (slug: string) => setSelected((prev) => {
+    const next = new Set(prev);
+    next.has(slug) ? next.delete(slug) : next.add(slug);
+    return next;
+  });
+  const toggleOverwrite = (slug: string) => setOverwrite((prev) => {
+    const next = new Set(prev);
+    next.has(slug) ? next.delete(slug) : next.add(slug);
+    return next;
+  });
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      const result = await importPiConfig({ providers: Array.from(selected), overwriteProviderSlugs: Array.from(overwrite) });
+      toast(`Imported ${result.imported.length}, overwritten ${result.overwritten.length}, skipped ${result.skipped.length}`);
+      onImported();
+    } catch (err: any) {
+      toast(err.message, "error");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} size="md" closeOnOverlayClick={false}>
+      <div className="bg-white dark:bg-zinc-900 rounded-lg p-5 w-full space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Import from pi config</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Preview reads legacy pi config and copies references into Bossmode credentials. Secrets are not resolved in preview.</p>
+        </div>
+        {loading && <div className="text-sm text-zinc-500">Scanning pi config...</div>}
+        {!loading && preview && !preview.found && (
+          <div className="rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-700 dark:text-amber-300">No pi config found at {preview.piAgentDir}. Please add credentials manually.</div>
+        )}
+        {!loading && preview?.found && (
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">Found in <code>{preview.piAgentDir}</code></div>
+            {preview.providers.map((provider) => (
+              <div key={provider.providerSlug} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3">
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" checked={selected.has(provider.providerSlug)} disabled={!provider.importable} onChange={() => toggle(provider.providerSlug)} className="mt-1" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-white">{provider.displayName}</span>
+                      <code className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{provider.providerSlug}</code>
+                      {provider.existingProfileId && <Badge tone="neutral">Existing</Badge>}
+                    </div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{provider.modelCount} models · {provider.authSource} · {provider.secretPreview}</div>
+                    {provider.warnings.length > 0 && <div className="text-xs text-amber-500 mt-1">{provider.warnings.join("; ")}</div>}
+                    {provider.existingProfileId && provider.importable && (
+                      <label className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+                        <input type="checkbox" checked={overwrite.has(provider.providerSlug)} onChange={() => toggleOverwrite(provider.providerSlug)} />
+                        Overwrite existing provider
+                      </label>
+                    )}
+                  </div>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">Cancel</button>
+          <button type="button" onClick={handleImport} disabled={importing || selected.size === 0} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer">{importing ? "Importing..." : "Import"}</button>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 

@@ -175,6 +175,9 @@ export class PiSdkRuntime implements AgentRuntime {
       modelRef: resolvedModel,
       credentialId: opts.member.credentialId,
     });
+    if (!piConfig) {
+      throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
+    }
 
     const safeRoom = safeSegment(opts.roomId);
     const safeMember = safeSegment(opts.member.name);
@@ -183,12 +186,8 @@ export class PiSdkRuntime implements AgentRuntime {
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
-    const authStorage = piConfig
-      ? AuthStorage.create(join(runtimeAgentDir, "auth.json"))
-      : AuthStorage.create();
-    const modelRegistry = piConfig
-      ? ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"))
-      : ModelRegistry.create(authStorage);
+    const authStorage = AuthStorage.create(join(runtimeAgentDir, "auth.json"));
+    const modelRegistry = ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"));
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
     const model = modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);

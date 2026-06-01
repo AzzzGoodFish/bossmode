@@ -12,6 +12,7 @@ import type {
   ModelAuthType,
   ModelRequestProfile,
   ModelDefinitionConfig,
+  AvailableModelOption,
 } from "../shared/types.js";
 
 const STORE_FILE = "model-credentials.json";
@@ -90,6 +91,10 @@ function storePath(): string { return join(getBossmodeDir(), STORE_FILE); }
 
 export function getBossmodePiRuntimeRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
+}
+
+export function getBossmodePiRegistryDir(): string {
+  return join(getBossmodeDir(), "pi-agent", "model-registry");
 }
 
 function writePrivateJson(path: string, data: unknown): void {
@@ -643,6 +648,72 @@ export function listConfiguredModels(): ModelOption[] {
       metadataSource: m.metadataSource,
       credentialStatus: p.authType === "none" ? "no_auth" : p.authType === "ambient" ? "ambient" : (p.apiKey || p.oauthCredentials ? "configured" : "missing"),
     })));
+}
+
+function modelOptionFromProfile(profile: ModelCredentialProfile, model: any): AvailableModelOption {
+  const modelId = String(model.id);
+  return {
+    ref: `${profile.providerSlug}/${modelId}`,
+    provider: profile.providerSlug,
+    providerSlug: profile.providerSlug,
+    providerDisplayName: profile.name,
+    modelId,
+    displayName: model.name,
+    profileId: profile.id,
+    profileName: profile.name,
+    protocol: profile.protocol,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    reasoning: model.reasoning,
+    input: Array.isArray(model.input) ? model.input : undefined,
+    images: Array.isArray(model.input) ? model.input.includes("image") : false,
+    metadataSource: "pi_catalog",
+    credentialStatus: profile.authType === "none" ? "no_auth" : profile.authType === "ambient" ? "ambient" : "configured",
+  };
+}
+
+export function writePiConfigForProfiles(profiles: ModelCredentialProfile[], targetDir: string): { extensionPaths: string[] } {
+  mkdirSync(targetDir, { recursive: true });
+  const enabledProfiles = profiles.filter((p) => p.enabled);
+  const providers: Record<string, unknown> = {};
+  const authData: Record<string, unknown> = {};
+  const extensionPaths: string[] = [];
+  for (const profile of enabledProfiles) {
+    providers[profile.providerSlug] = piProviderConfig(profile);
+    const auth = authEntry(profile);
+    if (auth) authData[profile.providerSlug] = auth;
+    if (profile.requestProfile === "anthropic_claude_code_oauth") {
+      const extDir = join(targetDir, "extensions");
+      mkdirSync(extDir, { recursive: true });
+      const extPath = join(extDir, `${profile.providerSlug}.ts`);
+      writeFileSync(extPath, extensionSource(profile), "utf-8");
+      extensionPaths.push(extPath);
+    }
+  }
+  writePrivateJson(join(targetDir, "models.json"), { providers });
+  writePrivateJson(join(targetDir, "auth.json"), authData);
+  return { extensionPaths };
+}
+
+export function createBossmodeModelRegistry(): { authStorage: AuthStorage; modelRegistry: ModelRegistry; registryDir: string } {
+  const registryDir = getBossmodePiRegistryDir();
+  writePiConfigForProfiles(loadModelCredentialProfiles(), registryDir);
+  const authStorage = AuthStorage.create(join(registryDir, "auth.json"));
+  const modelRegistry = ModelRegistry.create(authStorage, join(registryDir, "models.json"));
+  return { authStorage, modelRegistry, registryDir };
+}
+
+export function listAvailableModels(): AvailableModelOption[] {
+  const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
+  if (profiles.length === 0) return [];
+  const { modelRegistry } = createBossmodeModelRegistry();
+  const profileByProvider = new Map(profiles.map((p) => [p.providerSlug, p]));
+  return modelRegistry.getAvailable()
+    .map((model: any) => {
+      const profile = profileByProvider.get(model.provider);
+      return profile ? modelOptionFromProfile(profile, model) : null;
+    })
+    .filter(Boolean) as AvailableModelOption[];
 }
 
 function piProviderConfig(profile: ModelCredentialProfile): Record<string, unknown> {

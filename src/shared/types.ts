@@ -120,6 +120,46 @@ export interface ModelOption {
   credentialStatus: "configured" | "missing" | "no_auth" | "ambient";
 }
 
+export interface AvailableModelOption extends ModelOption {
+  provider: string;
+  providerDisplayName?: string;
+  images: boolean;
+}
+
+export interface PiConfigImportProviderPreview {
+  providerSlug: string;
+  displayName: string;
+  protocol: ModelProtocol;
+  baseUrl?: string;
+  authType: ModelAuthType;
+  authSource: "auth_json_api_key" | "auth_json_oauth" | "models_json_key" | "models_json_command" | "environment";
+  secretPreview: string;
+  modelCount: number;
+  models: AvailableModelOption[];
+  existingProfileId?: string;
+  importable: boolean;
+  warnings: string[];
+}
+
+export interface PiConfigImportPreview {
+  piAgentDir: string;
+  found: boolean;
+  providers: PiConfigImportProviderPreview[];
+  warnings: string[];
+}
+
+export interface PiConfigImportRequest {
+  providers?: string[];
+  overwriteProviderSlugs?: string[];
+}
+
+export interface PiConfigImportResult {
+  imported: PublicModelCredentialProfile[];
+  skipped: Array<{ providerSlug: string; reason: string }>;
+  overwritten: PublicModelCredentialProfile[];
+  warnings: string[];
+}
+
 // -- Member --
 
 export interface MemberBase {

@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
 import type { MemberInfo, KnowledgeTreeNode, ModelOption, AgentInfo } from "../api/client";
+import { ModelPicker } from "./ModelPicker";
 import { Sheet } from "./Sheet";
 import { FolderPicker } from "./FolderPicker";
 import { getMembers, getKnowledgeTree, createMember, getConfiguredModels, getAgents } from "../api/client";
 import { useDialog } from "./dialogs";
 import { RulesTree } from "./RulesTree";
 import { Shield, FolderOpen } from "lucide-react";
-import { composeManualModelPayload } from "../model-helpers";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
@@ -225,27 +225,12 @@ function InlineCreateMember({
   const { toast } = useDialog();
   const [name, setName] = useState(agentName);
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
-  const [savedModelSelection, setSavedModelSelection] = useState("");
-  const [manualModelInput, setManualModelInput] = useState("");
+  const [modelValue, setModelValue] = useState<{ model: string | null; credentialId: string | null }>({ model: null, credentialId: null });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { getConfiguredModels().then(setModels).catch(() => setModels([])); }, []);
 
-  const getModelPayload = () => {
-    if (modelMode === "agent-default") {
-      return { model: null, credentialId: null };
-    }
-    if (modelMode === "saved-credential") {
-      const [profileId, ...refParts] = savedModelSelection.split("::");
-      const modelRef = refParts.join("::");
-      if (!profileId || !modelRef) throw new Error("Please select a model from configured credentials.");
-      return { model: modelRef, credentialId: profileId };
-    }
-    const payload = composeManualModelPayload(manualModelInput, null, models);
-    if (!payload.model) throw new Error("Manual model must be in provider/model format, e.g., provider/model.");
-    return payload;
-  };
+  const getModelPayload = () => ({ model: modelValue.model, credentialId: modelValue.credentialId });
 
   const handleCreate = async () => {
     setSaving(true);
@@ -271,73 +256,8 @@ function InlineCreateMember({
         </div>
         <div>
           <label className="block text-xs text-zinc-400 mb-1">Model</label>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              <input
-                type="radio"
-                name={`create-member-mode-${agentName}`}
-                checked={modelMode === "agent-default"}
-                onChange={() => setModelMode("agent-default")}
-                className="size-3.5"
-              />
-              Follow agent default
-            </label>
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              <input
-                type="radio"
-                name={`create-member-mode-${agentName}`}
-                checked={modelMode === "saved-credential"}
-                disabled={models.length === 0}
-                onChange={() => {
-                  if (models.length > 0) {
-                    const next = savedModelSelection || `${models[0].profileId}::${models[0].ref}`;
-                    setSavedModelSelection(next);
-                    setModelMode("saved-credential");
-                  }
-                }}
-                className="size-3.5"
-              />
-              Use saved credential model
-              {models.length === 0 && <span className="text-[11px] text-zinc-500">(no saved models yet)</span>}
-            </label>
-            {modelMode === "saved-credential" && models.length > 0 && (
-              <select value={savedModelSelection} onChange={(e) => setSavedModelSelection(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-                {models.map((m) => (
-                  <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>
-                    {m.profileName} — {m.ref}
-                  </option>
-                ))}
-              </select>
-            )}
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              <input
-                type="radio"
-                name={`create-member-mode-${agentName}`}
-                checked={modelMode === "manual-provider-model"}
-                onChange={() => setModelMode("manual-provider-model")}
-                className="size-3.5"
-              />
-              Advanced: manual provider/model
-            </label>
-            {modelMode === "manual-provider-model" && (
-              <input
-                autoComplete="off"
-                value={manualModelInput}
-                onChange={(e) => setManualModelInput(e.target.value)}
-                placeholder="provider/model, e.g., anthropic-proxy/claude-opus-4-6"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            )}
-          </div>
-          <p className="text-xs text-zinc-500 mt-1">
-            {modelMode === "agent-default"
-              ? "Follow agent default model configuration."
-              : modelMode === "saved-credential"
-                ? "Use a model preconfigured in Settings → Model Credentials."
-                : "Advanced mode: provide a model as provider/model and do not use saved credentials."
-            }
-          </p>
+          <ModelPicker value={modelValue} models={models} onChange={setModelValue} />
+          <p className="text-xs text-zinc-500 mt-1">Choose from Settings → Model Credentials, or follow the agent default.</p>
         </div>
         <div className="flex gap-2 justify-end pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-white cursor-pointer">Cancel</button>

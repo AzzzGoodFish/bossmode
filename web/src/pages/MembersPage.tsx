@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { Plus, Search, ArrowLeft, Save, Trash2, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
 import type { MemberInfo, AgentInfo, MemberInstanceInfo, ModelOption } from "../api/client";
-import { composeManualModelPayload, getMemberModelBadge, inferMemberModelMode } from "../model-helpers";
+import { getMemberModelBadge } from "../model-helpers";
+import { ModelPicker } from "../components/ModelPicker";
 import {
   getMembers, createMember, getMember, updateMember, deleteMemberApi,
   getAgents, getAgent, getMemberStatus, restartMember, getConfiguredModels, getMemberTokenUsage,
@@ -147,10 +148,6 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [form, setForm] = useState<Partial<MemberInfo>>(isCreate ? { model: undefined, thinkingLevel: "off" } : {});
   const models = configuredModels;
-  const [modelMode, setModelMode] = useState<"agent-default" | "saved-credential" | "manual-provider-model">("agent-default");
-  const [savedModelSelection, setSavedModelSelection] = useState("");
-  const [manualModelInput, setManualModelInput] = useState("");
-  const [autoModelModeInitialized, setAutoModelModeInitialized] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [agentDetail, setAgentDetail] = useState<{ description: string; skills: string[]; avatar?: string } | null>(null);
   const [instances, setInstances] = useState<MemberInstanceInfo[]>([]);
@@ -166,16 +163,11 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
       getMember(id).then((m) => {
         setMember(m);
         setForm(m);
-        setAutoModelModeInitialized(false);
       });
       refreshStatus();
       getMemberTokenUsage(id).then((usage) => setTotalTokens(usage.totalTokens)).catch(() => setTotalTokens(null));
     } else {
-      setAutoModelModeInitialized(false);
-      setForm({ model: undefined, thinkingLevel: "off" });
-      setSavedModelSelection("");
-      setManualModelInput("");
-      setModelMode("agent-default");
+      setForm({ model: undefined, credentialId: null, thinkingLevel: "off" });
       setTotalTokens(null);
     }
     getAgents().then(setAgents);
@@ -199,43 +191,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
     }
   }, [form.agent]);
 
-  useEffect(() => {
-    if (isCreate || autoModelModeInitialized) return;
-    if (!member && id) return;
-    if (!configuredModelsLoaded) return;
-    const mode = inferMemberModelMode(form.model || null, form.credentialId || null, models);
-    setModelMode(mode);
-    if (mode === "saved-credential") {
-      if (form.model && form.credentialId) setSavedModelSelection(`${form.credentialId}::${form.model}`);
-      setManualModelInput("");
-    } else if (mode === "manual-provider-model") {
-      setManualModelInput(form.model || "");
-      setSavedModelSelection("");
-    } else {
-      setSavedModelSelection("");
-      setManualModelInput("");
-    }
-    setAutoModelModeInitialized(true);
-  }, [form.model, form.credentialId, isCreate, member, models, autoModelModeInitialized, configuredModelsLoaded]);
-
-  const getModelPayload = () => {
-    if (modelMode === "agent-default") {
-      return { model: null, credentialId: null };
-    }
-
-    if (modelMode === "saved-credential") {
-      const [profileId, ...refParts] = savedModelSelection.split("::");
-      const modelRef = refParts.join("::");
-      if (!profileId || !modelRef) {
-        throw new Error("Please select a model from configured credentials.");
-      }
-      return { model: modelRef, credentialId: profileId };
-    }
-
-    const payload = composeManualModelPayload(manualModelInput, null, models);
-    if (!payload.model) throw new Error("Manual model must be in provider/model format, e.g., provider/model.");
-    return payload;
-  };
+  const getModelPayload = () => ({ model: form.model || null, credentialId: form.credentialId || null });
 
   const handleSave = async () => {
     setSaveState("saving");
@@ -251,7 +207,6 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
         const updated = await updateMember(id!, payload);
         setMember(updated);
         setForm(updated);
-        setAutoModelModeInitialized(false);
         setSaveState("saved");
       }
       setTimeout(() => setSaveState("idle"), 1500);
@@ -321,77 +276,13 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
             </Field>
 
             <Field label="Model">
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                  <input
-                    type="radio"
-                    name={`member-model-mode-${id ?? "new"}`}
-                    checked={modelMode === "agent-default"}
-                    onChange={() => setModelMode("agent-default")}
-                    className="size-3.5"
-                  />
-                  Follow agent default
-                </label>
-
-                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                  <input
-                    type="radio"
-                    name={`member-model-mode-${id ?? "new"}`}
-                    checked={modelMode === "saved-credential"}
-                    disabled={models.length === 0}
-                    onChange={() => {
-                      if (models.length > 0) {
-                        const next = savedModelSelection || `${models[0].profileId}::${models[0].ref}`;
-                        setSavedModelSelection(next);
-                        setModelMode("saved-credential");
-                      }
-                    }}
-                    className="size-3.5"
-                  />
-                  Use saved credential model
-                  {models.length === 0 && <span className="text-[11px] text-zinc-500 dark:text-zinc-400">(no saved models yet)</span>}
-                </label>
-
-                {modelMode === "saved-credential" && models.length > 0 && (
-                  <select value={savedModelSelection} onChange={(e) => setSavedModelSelection(e.target.value)} className={inputCls}>
-                    {models.map((m) => (
-                      <option key={`${m.profileId}:${m.ref}`} value={`${m.profileId}::${m.ref}`}>
-                        {m.profileName} — {m.ref}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ""}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                  <input
-                    type="radio"
-                    name={`member-model-mode-${id ?? "new"}`}
-                    checked={modelMode === "manual-provider-model"}
-                    onChange={() => setModelMode("manual-provider-model")}
-                    className="size-3.5"
-                  />
-                  Advanced: manual provider/model
-                </label>
-
-                {modelMode === "manual-provider-model" && (
-                  <input
-                    autoComplete="off"
-                    value={manualModelInput}
-                    onChange={(e) => setManualModelInput(e.target.value)}
-                    placeholder="provider/model, e.g., anthropic-proxy/claude-opus-4-6"
-                    className={inputCls}
-                  />
-                )}
-              </div>
-
-              <p className="text-xs text-zinc-500 mt-1">
-                {modelMode === "agent-default"
-                  ? "Follow agent default model configuration."
-                  : modelMode === "saved-credential"
-                    ? "Use a model preconfigured in Settings → Model Credentials."
-                    : "Advanced mode: provide a model as provider/model and do not use saved credentials."
-                }
-              </p>
+              <ModelPicker
+                value={{ model: form.model || null, credentialId: form.credentialId || null }}
+                models={models}
+                disabled={!configuredModelsLoaded}
+                onChange={(next) => setForm({ ...form, model: next.model || undefined, credentialId: next.credentialId })}
+              />
+              <p className="text-xs text-zinc-500 mt-1">Choose from models configured in Settings → Model Credentials, or follow the agent default.</p>
             </Field>
 
             <div className="grid grid-cols-2 gap-3">

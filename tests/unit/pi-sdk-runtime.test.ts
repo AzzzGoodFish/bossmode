@@ -109,16 +109,13 @@ describe("PiSdkRuntime", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("uses SDK default auth and model registry when no Bossmode credential profile exists", async () => {
+  it("throws setup guidance instead of falling back to SDK default auth when no Bossmode credential profile exists", async () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
-    await new PiSdkRuntime().createAgent(baseOpts());
+    await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("Go to Settings → Model Credentials");
 
-    expect(authCreate).toHaveBeenCalledWith();
-    expect(modelRegistryCreate).toHaveBeenCalledWith(expect.anything());
-    expect(authCreate).not.toHaveBeenCalledWith(expect.stringContaining("auth.json"));
-    expect(modelRegistryCreate).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining("models.json"));
-    expect(sessionManagerCreate).toHaveBeenCalledWith(dir, expect.stringContaining("pi-agent/runtime/room-a/pm/sessions"));
+    expect(authCreate).not.toHaveBeenCalled();
+    expect(modelRegistryCreate).not.toHaveBeenCalled();
   });
 
   it("uses exported Bossmode auth and model files when a credential profile exists", async () => {
@@ -133,6 +130,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts({
