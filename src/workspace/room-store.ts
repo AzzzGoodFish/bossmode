@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
-import type { Room, CursorMap } from "../shared/types.js";
+import type { Room, CursorMap, RoomLinearIntegration } from "../shared/types.js";
 
 const ROOMS_DIR = join(getBossmodeDir(), "rooms");
 
@@ -103,6 +103,31 @@ export function updateRoomCwd(roomId: string, cwd: string): Room | null {
 }
 
 /** Update the room's rule document paths (replaces any prior value). */
+export function updateRoomLinearIntegration(roomId: string, config: RoomLinearIntegration | null): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  if (config) {
+    room.integrations = { ...(room.integrations || {}), linear: config };
+  } else if (room.integrations?.linear) {
+    delete room.integrations.linear;
+    if (Object.keys(room.integrations).length === 0) delete room.integrations;
+  }
+  writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
+  return room;
+}
+
+export function clearLinearIntegrationsForAllRooms(): number {
+  let count = 0;
+  for (const room of listRooms()) {
+    if (!room.integrations?.linear) continue;
+    delete room.integrations.linear;
+    if (Object.keys(room.integrations).length === 0) delete room.integrations;
+    writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+    count += 1;
+  }
+  return count;
+}
+
 export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
   const room = getRoom(roomId);
   if (!room) return null;

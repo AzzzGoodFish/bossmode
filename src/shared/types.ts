@@ -22,6 +22,11 @@ export interface BossmodeConfig {
   runtime?: {
     sessionResume: boolean;
   };
+  integrations?: {
+    linear?: {
+      apiKey?: string;
+    };
+  };
 }
 
 // -- Agent Definition --
@@ -240,6 +245,18 @@ export interface KnowledgeTreeNode {
 
 // -- Room --
 
+export interface RoomLinearIntegration {
+  teamId: string;
+  teamName: string;
+  teamKey?: string;
+  projectId?: string;
+  projectName?: string;
+  enabled: boolean;
+  lastSyncAt?: number;
+  lastSyncError?: string;
+  syncCount?: number;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -251,6 +268,9 @@ export interface Room {
    * agents' system prompts as rules.
    */
   ruleDocs?: string[];
+  integrations?: {
+    linear?: RoomLinearIntegration;
+  };
 }
 
 // -- Message --
@@ -333,6 +353,11 @@ export interface Task {
   references?: string[];   // soft links to knowledge docs or URLs
   subscribers?: string[];  // passive watchers; never activates members
   comments?: TaskComment[];
+  linearIssueId?: string;
+  linearIssueUrl?: string;
+  linearIssueIdentifier?: string;
+  linearSyncedAt?: number;
+  linearSyncError?: string;
   createdBy: string;
   createdAt: number;
   updatedAt: number;

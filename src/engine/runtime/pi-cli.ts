@@ -14,6 +14,8 @@ import {
   LIST_TASKS_DESCRIPTION,
   GET_TASK_DESCRIPTION,
   COMMENT_TASK_DESCRIPTION,
+  QUERY_INTEGRATION_DESCRIPTION,
+  CONFIGURE_INTEGRATION_DESCRIPTION,
   WRITE_SUMMARY_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
@@ -38,6 +40,8 @@ const UPDATE_TASK_DESCRIPTION = ${JSON.stringify(UPDATE_TASK_DESCRIPTION)};
 const LIST_TASKS_DESCRIPTION = ${JSON.stringify(LIST_TASKS_DESCRIPTION)};
 const GET_TASK_DESCRIPTION = ${JSON.stringify(GET_TASK_DESCRIPTION)};
 const COMMENT_TASK_DESCRIPTION = ${JSON.stringify(COMMENT_TASK_DESCRIPTION)};
+const QUERY_INTEGRATION_DESCRIPTION = ${JSON.stringify(QUERY_INTEGRATION_DESCRIPTION)};
+const CONFIGURE_INTEGRATION_DESCRIPTION = ${JSON.stringify(CONFIGURE_INTEGRATION_DESCRIPTION)};
 const WRITE_SUMMARY_DESCRIPTION = ${JSON.stringify(WRITE_SUMMARY_DESCRIPTION)};
 const PARAM_DESCRIPTIONS = ${JSON.stringify(PARAM_DESCRIPTIONS)};
 
@@ -215,6 +219,44 @@ export default function (pi) {
       const data = await res.json();
       if (!data.ok) return { content: [{ type: "text", text: "Failed: " + data.error }], details: {} };
       return { content: [{ type: "text", text: "Comment added: " + data.commentId + " on " + data.taskId }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "query_integration",
+    label: "Query Integration",
+    description: QUERY_INTEGRATION_DESCRIPTION,
+    parameters: Type.Object({
+      provider: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationProvider })),
+      team: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationTeam })),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "query_integration", room: ROOM, agent: AGENT, params }),
+      });
+      return { content: [{ type: "text", text: truncate(JSON.stringify(await res.json(), null, 2)) }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "configure_integration",
+    label: "Configure Integration",
+    description: CONFIGURE_INTEGRATION_DESCRIPTION,
+    parameters: Type.Object({
+      provider: Type.String({ description: PARAM_DESCRIPTIONS.integrationProvider }),
+      team: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationTeam })),
+      project: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.integrationProject })),
+      enabled: Type.Optional(Type.Boolean({ description: PARAM_DESCRIPTIONS.integrationEnabled })),
+    }),
+    async execute(id, params) {
+      const res = await fetch(SERVER + "/internal/tool-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "configure_integration", room: ROOM, agent: AGENT, params }),
+      });
+      return { content: [{ type: "text", text: truncate(JSON.stringify(await res.json(), null, 2)) }], details: {} };
     },
   });
 

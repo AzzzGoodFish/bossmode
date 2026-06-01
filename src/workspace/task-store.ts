@@ -127,6 +127,24 @@ export function updateTask(
   return updated;
 }
 
+export function updateTaskLinearMetadata(
+  roomId: string,
+  taskId: string,
+  patch: Pick<Partial<Task>, "linearIssueId" | "linearIssueUrl" | "linearIssueIdentifier" | "linearSyncedAt" | "linearSyncError">,
+): Task | null {
+  const tasks = readTasks(roomId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx < 0) return null;
+  const cleanPatch: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) cleanPatch[k] = v;
+  }
+  const updated = normalizeTask({ ...tasks[idx], ...cleanPatch, updatedAt: Date.now() });
+  tasks[idx] = updated;
+  writeTasks(roomId, tasks);
+  return updated;
+}
+
 export function addTaskComment(
   roomId: string,
   taskId: string,

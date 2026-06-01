@@ -36,7 +36,7 @@ For larger features or cross-role work. Architect drives and is the process owne
 
 1. Architect clarifies requirements with the user; user confirms scope.
 2. Architect creates a task with clear scope, acceptance criteria, and implementation plan.
-3. For user-impacting decisions, Architect presents the plan to the user for confirmation.
+3. Architect reviews the plan. In Hands-on mode, presents it to the user for confirmation before proceeding. In Delegate mode, Architect confirms internally and proceeds.
 4. Architect assigns Developer, @mentions Developer to start, and @mentions QA to prepare testing.
 5. Developer implements, records implementation notes/results on the task, updates status, then @mentions Architect in chat.
 6. Architect assigns QA and @mentions QA to verify.
@@ -47,7 +47,7 @@ For larger features or cross-role work. Architect drives and is the process owne
 
 For clearly scoped small requests or obvious bugs, Architect may skip a formal plan:
 
-1. Architect confirms scope and priority.
+1. Architect confirms scope and priority. Ask user: Hands-on or Delegate?
 2. Architect assigns and @mentions Developer directly; task is optional if tracking is needed.
 3. Developer reports back to Architect in chat.
 4. Architect requests QA verification if needed, then reports status to the user.

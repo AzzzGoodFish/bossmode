@@ -190,6 +190,59 @@ export async function handleToolCallback(
       emitTaskEvent(roomId, "commented", result.task, agentName, { commentId: result.comment.id });
       return { ok: true, taskId: result.task.id, commentId: result.comment.id };
     }
+    case "query_integration": {
+      const provider = String(params?.provider || "linear");
+      if (provider !== "linear") return { ok: false, error: `Unsupported integration provider: ${provider}` };
+      const { getLinearApiKey, getRoomLinearIntegration } = await import("../integrations/linear-settings.js");
+      const { LinearClient, findTeam } = await import("../integrations/linear-client.js");
+      const apiKey = getLinearApiKey();
+      if (!apiKey) return { ok: true, provider, connected: false, guidance: "Configure Linear API key in Settings → Integrations first." };
+      try {
+        const client = new LinearClient(apiKey);
+        const [viewer, teams] = await Promise.all([client.viewer(), client.listTeams()]);
+        const config = getRoomLinearIntegration(roomId);
+        const teamQuery = params?.team ? String(params.team) : undefined;
+        const projectTeam = teamQuery ? findTeam(teams, teamQuery) : (config ? teams.find((t) => t.id === config.teamId) : undefined);
+        return {
+          ok: true,
+          provider,
+          connected: true,
+          viewer,
+          current: config || null,
+          teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })),
+          projects: projectTeam?.projects || [],
+        };
+      } catch (err: any) {
+        return { ok: false, provider, connected: false, error: err.message || String(err) };
+      }
+    }
+    case "configure_integration": {
+      const provider = String(params?.provider || "linear");
+      if (provider !== "linear") return { ok: false, error: `Unsupported integration provider: ${provider}` };
+      if (params?.apiKey || params?.api_key || params?.linear_api_key) return { ok: false, error: "API keys must be configured in Settings, not through agent tools." };
+      const { getLinearApiKey, saveRoomLinearIntegration } = await import("../integrations/linear-settings.js");
+      const { LinearClient, findTeam, findProject } = await import("../integrations/linear-client.js");
+      const apiKey = getLinearApiKey();
+      if (!apiKey) return { ok: false, error: "Configure Linear API key in Settings → Integrations first." };
+      const client = new LinearClient(apiKey);
+      const teams = await client.listTeams();
+      const teamInput = params?.team ? String(params.team) : "";
+      if (!teamInput) return { ok: false, error: "team is required", teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })) };
+      const team = findTeam(teams, teamInput);
+      if (!team) return { ok: false, error: `Linear team not found: ${teamInput}`, teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })) };
+      const projectInput = params?.project ? String(params.project) : "";
+      const project = projectInput ? findProject(team.projects || [], projectInput) : undefined;
+      if (projectInput && !project) return { ok: false, error: `Linear project not found in ${team.name}: ${projectInput}`, projects: team.projects || [] };
+      const config = saveRoomLinearIntegration(roomId, {
+        teamId: team.id,
+        teamName: team.name,
+        teamKey: team.key,
+        projectId: project?.id,
+        projectName: project?.name,
+        enabled: params?.enabled !== false,
+      });
+      return { ok: true, provider, configured: config, projects: team.projects || [] };
+    }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool
       if (agentName !== "summarizer") {

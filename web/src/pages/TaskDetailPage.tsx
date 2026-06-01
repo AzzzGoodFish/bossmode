@@ -216,6 +216,11 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                   {assignee}
                 </span>
               )}
+              {task?.linearIssueUrl && (
+                <a href={task.linearIssueUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:underline">
+                  Linear {task.linearIssueIdentifier || "↗"}
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -416,6 +421,14 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                   <MetaRow label="Updated">
                     <div className="text-xs text-zinc-500 px-2">{formatDate(task.updatedAt)}</div>
                   </MetaRow>
+                  {(task.linearIssueUrl || task.linearSyncError) && (
+                    <MetaRow label="Linear">
+                      <div className="px-2 space-y-1">
+                        {task.linearIssueUrl && <a href={task.linearIssueUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">{task.linearIssueIdentifier || "Open Linear issue"}</a>}
+                        {task.linearSyncError && <div className="text-xs text-amber-500">Sync error: {task.linearSyncError}</div>}
+                      </div>
+                    </MetaRow>
+                  )}
                 </>
               )}
             </div>
