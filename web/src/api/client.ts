@@ -271,6 +271,46 @@ export interface ModelOption {
   credentialStatus: "configured" | "missing" | "no_auth" | "ambient";
 }
 
+export interface AvailableModelOption extends ModelOption {
+  provider: string;
+  providerDisplayName?: string;
+  images: boolean;
+}
+
+export interface PiConfigImportProviderPreview {
+  providerSlug: string;
+  displayName: string;
+  protocol: ModelProtocol;
+  baseUrl?: string;
+  authType: ModelAuthType;
+  authSource: "auth_json_api_key" | "auth_json_oauth" | "models_json_key" | "models_json_command" | "environment";
+  secretPreview: string;
+  modelCount: number;
+  models: AvailableModelOption[];
+  existingProfileId?: string;
+  importable: boolean;
+  warnings: string[];
+}
+
+export interface PiConfigImportPreview {
+  piAgentDir: string;
+  found: boolean;
+  providers: PiConfigImportProviderPreview[];
+  warnings: string[];
+}
+
+export interface PiConfigImportRequest {
+  providers?: string[];
+  overwriteProviderSlugs?: string[];
+}
+
+export interface PiConfigImportResult {
+  imported: PublicModelCredentialProfile[];
+  skipped: Array<{ providerSlug: string; reason: string }>;
+  overwritten: PublicModelCredentialProfile[];
+  warnings: string[];
+}
+
 export async function getModelCredentialProfiles(): Promise<PublicModelCredentialProfile[]> {
   return apiFetch("/api/model-credential-profiles");
 }
@@ -326,8 +366,20 @@ export async function discoverModelCredentialModels(data: Partial<ModelCredentia
   return apiFetch("/api/model-credential-profiles/discover-models", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function getConfiguredModels(): Promise<ModelOption[]> {
-  return apiFetch("/api/models");
+export async function getAvailableModels(): Promise<AvailableModelOption[]> {
+  return apiFetch("/api/available-models");
+}
+
+export async function getConfiguredModels(): Promise<AvailableModelOption[]> {
+  return getAvailableModels();
+}
+
+export async function getPiConfigPreview(): Promise<PiConfigImportPreview> {
+  return apiFetch("/api/pi-config-preview");
+}
+
+export async function importPiConfig(data: PiConfigImportRequest): Promise<PiConfigImportResult> {
+  return apiFetch("/api/import-pi-config", { method: "POST", body: JSON.stringify(data) });
 }
 
 // -- Runtimes --

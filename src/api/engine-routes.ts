@@ -7,12 +7,13 @@ import {
   deleteModelCredentialProfile,
   discoverModelCredentialModels,
   getOAuthLoginJob,
-  listConfiguredModels,
+  listAvailableModels,
   listPublicModelCredentialProfiles,
   saveModelCredentialProfile,
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
 } from "../engine/model-credentials.js";
+import { importPiConfig, previewPiConfigImport } from "../engine/pi-config-import.js";
 
 // GET /api/capabilities — runtime capabilities
 addRoute("GET", "/api/capabilities", async (_req, res) => {
@@ -127,9 +128,29 @@ async function deleteModelCredentialProfileRoute(_req: any, res: any, params: Re
 addRoute("DELETE", "/api/model-credential-profiles/:id", deleteModelCredentialProfileRoute);
 addRoute("DELETE", "/api/model-providers/:id", deleteModelCredentialProfileRoute);
 
-// GET /api/models — credential-backed model options for member picker
+// GET /api/available-models — Bossmode-owned available model options for member picker
+addRoute("GET", "/api/available-models", async (_req, res) => {
+  sendJson(res, 200, listAvailableModels());
+});
+
+// GET /api/models — backward-compatible alias
 addRoute("GET", "/api/models", async (_req, res) => {
-  sendJson(res, 200, listConfiguredModels());
+  sendJson(res, 200, listAvailableModels());
+});
+
+// GET /api/pi-config-preview — explicit preview of legacy pi config import
+addRoute("GET", "/api/pi-config-preview", async (_req, res) => {
+  sendJson(res, 200, previewPiConfigImport());
+});
+
+// POST /api/import-pi-config — import selected legacy pi providers into Bossmode credentials
+addRoute("POST", "/api/import-pi-config", async (req, res) => {
+  try {
+    const body = (await parseBody(req)) as any;
+    sendJson(res, 200, importPiConfig(body || {}));
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+  }
 });
 
 // GET /api/settings/runtime — runtime behavior settings
