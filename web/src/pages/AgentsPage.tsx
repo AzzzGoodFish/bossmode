@@ -3,6 +3,7 @@ import { Bot, Plus, Search } from "lucide-react";
 import type { AgentInfo } from "../api/client";
 import { getAgents, createAgent } from "../api/client";
 import { useDialog } from "../components/dialogs";
+import { matchesWorkspaceResourceSearch } from "./resource-list-filter";
 
 interface AgentsPageProps {
   onSelectAgent: (name: string) => void;
@@ -19,11 +20,7 @@ export function AgentsPage({ onSelectAgent, onRefresh }: AgentsPageProps) {
     getAgents().then(setAgents).catch(console.error);
   }, []);
 
-  const filtered = agents.filter((a) =>
-    a.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.description.toLowerCase().includes(search.toLowerCase()) ||
-    a.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filtered = agents.filter((a) => matchesWorkspaceResourceSearch(a, search));
 
   const handleCreate = async (name: string, content: string) => {
     try {
@@ -75,17 +72,17 @@ export function AgentsPage({ onSelectAgent, onRefresh }: AgentsPageProps) {
               <span className="text-lg">{agent.avatar || "🤖"}</span>
               <span className="font-semibold text-white text-sm">{agent.name}</span>
             </div>
-            <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{agent.description}</p>
+            <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{agent.description || "No description"}</p>
             <div className="flex flex-wrap gap-1">
-              {agent.tags.includes("builtin") && (
+              {(agent.tags ?? []).includes("builtin") && (
                 <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">built-in</span>
               )}
-              {agent.tags.filter(t => t !== "builtin").map((tag) => (
+              {(agent.tags ?? []).filter(t => t !== "builtin").map((tag) => (
                 <span key={tag} className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">{tag}</span>
               ))}
-              {agent.skills.length > 0 && (
+              {(agent.skills ?? []).length > 0 && (
                 <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">
-                  {agent.skills.length} skills
+                  {(agent.skills ?? []).length} skills
                 </span>
               )}
             </div>
