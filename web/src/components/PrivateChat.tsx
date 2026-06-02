@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type KeyboardEvent } from "react";
 import { getToken, getAgentEvents } from "../api/client";
 import { Markdown } from "./Markdown";
 import { MessageBubble } from "./MessageBubble";
+import { appendStreamDelta, finalStreamContent } from "./streaming-delta";
 
 interface AgentEvent {
   type: string;
@@ -82,6 +83,8 @@ export function PrivateChat({
   const [committed, setCommitted] = useState<CommittedEvent[]>(cachedEvents ?? []);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
+  const streamingTextRef = useRef<string | null>(null);
+  const streamingThinkingRef = useRef<string | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(!cachedEvents || cachedEvents.length === 0);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -110,38 +113,52 @@ export function PrivateChat({
         break;
 
       case "agent_end": {
-        const th = streamingThinking;
+        const th = streamingThinkingRef.current;
         if (th) pushEvent({ type: "thinking", thinking: th });
+        streamingThinkingRef.current = null;
         setStreamingThinking(null);
-        const txt = streamingText;
+        const txt = streamingTextRef.current;
         if (txt) pushEvent({ type: "message", text: txt });
+        streamingTextRef.current = null;
         setStreamingText(null);
         pushEvent({ type: "agent_end" });
         break;
       }
 
       case "message_start":
+        streamingTextRef.current = "";
         setStreamingText("");
+        streamingThinkingRef.current = null;
         setStreamingThinking(null);
         break;
 
       case "message_update":
-        if (event.thinking) setStreamingThinking(event.thinking as string);
-        if (event.text) setStreamingText(event.text as string);
+        if (event.thinking) {
+          streamingThinkingRef.current = appendStreamDelta(streamingThinkingRef.current, event.thinking);
+          setStreamingThinking(streamingThinkingRef.current);
+        }
+        if (event.text) {
+          streamingTextRef.current = appendStreamDelta(streamingTextRef.current, event.text);
+          setStreamingText(streamingTextRef.current);
+        }
         break;
 
       case "message_end": {
-        const th = streamingThinking;
+        const th = finalStreamContent(event.thinking, streamingThinkingRef.current);
         if (th) pushEvent({ type: "thinking", thinking: th });
+        streamingThinkingRef.current = null;
         setStreamingThinking(null);
+        const txt = finalStreamContent(event.text, streamingTextRef.current);
+        streamingTextRef.current = null;
         setStreamingText(null);
-        if (event.text) pushEvent({ type: "message", text: event.text as string, usage: event.usage });
+        if (txt) pushEvent({ type: "message", text: txt, usage: event.usage });
         break;
       }
 
       case "tool_start": {
-        const txt = streamingText;
+        const txt = streamingTextRef.current;
         if (txt) pushEvent({ type: "message", text: txt });
+        streamingTextRef.current = null;
         setStreamingText(null);
         pushEvent({
           type: "tool",
