@@ -16,7 +16,9 @@ import {
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { Main } from "./Main";
 import { AgentDetailPage } from "./AgentDetailPage";
+import { AgentsPage } from "./AgentsPage";
 import { SkillDetailPage } from "./SkillDetailPage";
+import { SkillsPage } from "./SkillsPage";
 import { KnowledgePage } from "./KnowledgePage";
 import { MembersPage } from "./MembersPage";
 import { SettingsPage } from "./SettingsPage";
@@ -32,6 +34,12 @@ interface LayoutProps {
 // agent:event types that indicate meaningful content updates (not high-frequency streaming)
 const UNREAD_EVENT_TYPES = new Set(["message_end", "agent_end", "user_steer"]);
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "bossmode_sidebar_collapsed";
+
+export function workspaceResourceRouteMode(name: string | null): "list" | "create" | "detail" {
+  if (name === null) return "list";
+  if (name === "__new__") return "create";
+  return "detail";
+}
 
 export function Layout({ onLogout, username }: LayoutProps) {
   const [activePage, setActivePage] = useState<ActivePage>(null);
@@ -252,38 +260,47 @@ export function Layout({ onLogout, username }: LayoutProps) {
           />
         )}
 
-        {/* Agent detail / create */}
-        {activePage?.type === "agent" && activePage.name !== null && (
-          <AgentDetailPage
-            name={activePage.name}
-            onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+        {/* Agent list / detail / create */}
+        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "list" && (
+          <AgentsPage
+            onSelectAgent={(name) => setActivePage({ type: "agent", name })}
+            onRefresh={refreshSidebar}
           />
         )}
-        {activePage?.type === "agent" && activePage.name === null && (
+        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "create" && (
           <AgentDetailPage
             name=""
             isCreate
-            onBack={() => refreshSidebar()}
+            onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
             onCreated={(name) => { setActivePage({ type: "agent", name }); refreshSidebar(); }}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
-
-        {/* Skill detail / create */}
-        {activePage?.type === "skill" && activePage.name !== null && (
-          <SkillDetailPage
-            name={activePage.name}
-            onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
+        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "detail" && (
+          <AgentDetailPage
+            name={activePage.name || ""}
+            onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
-        {activePage?.type === "skill" && activePage.name === null && (
+
+        {/* Skill list / detail / create */}
+        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "list" && (
+          <SkillsPage onSelectSkill={(name) => setActivePage({ type: "skill", name })} />
+        )}
+        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "create" && (
           <SkillDetailPage
             name=""
             isCreate
-            onBack={() => refreshSidebar()}
+            onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
             onCreated={(name) => { setActivePage({ type: "skill", name }); refreshSidebar(); }}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+          />
+        )}
+        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "detail" && (
+          <SkillDetailPage
+            name={activePage.name || ""}
+            onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}

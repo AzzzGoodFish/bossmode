@@ -181,7 +181,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
           </button>
           <button
             onClick={() => {
-              onNavigate({ type: "agent", name: selectedAgentName || agents[0]?.name || null });
+              onNavigate({ type: "agent", name: selectedAgentName && selectedAgentName !== "__new__" ? selectedAgentName : null });
               onToggle();
             }}
             title="Agents"
@@ -192,7 +192,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
           </button>
           <button
             onClick={() => {
-              onNavigate({ type: "skill", name: selectedSkillName || skills[0]?.name || null });
+              onNavigate({ type: "skill", name: selectedSkillName && selectedSkillName !== "__new__" ? selectedSkillName : null });
               onToggle();
             }}
             title="Skills"
@@ -275,7 +275,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               storageKey="agents"
               defaultOpen={false}
               onSelect={(name) => onNavigate({ type: "agent", name })}
-              onCreate={() => onNavigate({ type: "agent", name: null })}
+              onCreate={() => onNavigate({ type: "agent", name: "__new__" })}
             />
           </div>
 
@@ -289,7 +289,7 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
               storageKey="skills"
               defaultOpen={false}
               onSelect={(name) => onNavigate({ type: "skill", name })}
-              onCreate={() => onNavigate({ type: "skill", name: null })}
+              onCreate={() => onNavigate({ type: "skill", name: "__new__" })}
             />
           </div>
 
