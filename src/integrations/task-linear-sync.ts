@@ -29,8 +29,7 @@ export async function syncTaskEventToLinear(args: {
 
   try {
     const client = new LinearClient(apiKey);
-    const teams = await client.listTeams();
-    const team = teams.find((t) => t.id === roomConfig.teamId);
+    const team = await client.getTeamDetails(roomConfig.teamId);
     if (!team) throw new Error(`Linear team not found: ${roomConfig.teamName}`);
     const stateId = resolveLinearStateId(args.task.status, team.states || []);
     let task = taskStore.getTask(args.roomId, args.task.id) || args.task;

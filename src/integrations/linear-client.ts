@@ -24,8 +24,8 @@ export class LinearClient {
       body: JSON.stringify({ query, variables }),
     });
     const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Linear API HTTP ${res.status}`);
     if (data.errors?.length) throw new Error(sanitizeError(data.errors.map((e: any) => e.message).join("; ")));
+    if (!res.ok) throw new Error(`Linear API HTTP ${res.status}`);
     return data.data as T;
   }
 
@@ -35,13 +35,26 @@ export class LinearClient {
   }
 
   async listTeams(): Promise<LinearTeam[]> {
-    const data = await this.gql<any>(`query Teams { teams(first: 100) { nodes { id name key states { nodes { id name type } } projects(first: 100) { nodes { id name url } } } } }`);
-    return (data.teams?.nodes || []).map((t: any) => ({ ...t, states: t.states?.nodes || [], projects: t.projects?.nodes || [] }));
+    const data = await this.gql<any>(`query Teams { teams(first: 100) { nodes { id name key } } }`);
+    return data.teams?.nodes || [];
   }
 
   async listProjects(teamId: string): Promise<LinearProject[]> {
-    const team = (await this.listTeams()).find((t) => t.id === teamId);
-    return team?.projects || [];
+    const data = await this.gql<any>(`query TeamProjects($id: String!) { team(id: $id) { projects(first: 100) { nodes { id name url } } } }`, { id: teamId });
+    return data.team?.projects?.nodes || [];
+  }
+
+  async listStates(teamId: string): Promise<LinearState[]> {
+    const data = await this.gql<any>(`query TeamStates($id: String!) { team(id: $id) { states { nodes { id name type } } } }`, { id: teamId });
+    return data.team?.states?.nodes || [];
+  }
+
+  async getTeamDetails(teamId: string): Promise<LinearTeam | undefined> {
+    const teams = await this.listTeams();
+    const team = teams.find((t) => t.id === teamId);
+    if (!team) return undefined;
+    const [projects, states] = await Promise.all([this.listProjects(teamId), this.listStates(teamId)]);
+    return { ...team, projects, states };
   }
 
   async createIssue(input: CreateLinearIssueInput): Promise<LinearIssueRef> {
