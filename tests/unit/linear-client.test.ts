@@ -19,6 +19,32 @@ describe("LinearClient", () => {
     }));
   });
 
+  it("lists teams without nested projects/states to stay under Linear complexity limits", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { teams: { nodes: [{ id: "team-1", name: "GoodFish", key: "GF" }] } } }),
+    } as any);
+
+    const teams = await new LinearClient("lin_api_secret", "http://linear.test/graphql").listTeams();
+
+    expect(teams).toEqual([{ id: "team-1", name: "GoodFish", key: "GF" }]);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.query).toContain("teams(first: 100)");
+    expect(body.query).not.toContain("projects(first: 100)");
+    expect(body.query).not.toContain("states");
+  });
+
+  it("queries projects and states separately by team", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch" as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { team: { projects: { nodes: [{ id: "p1", name: "Bossmode", url: "u" }] } } } }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { team: { states: { nodes: [{ id: "s1", name: "Done", type: "completed" }] } } } }) } as any);
+    const client = new LinearClient("lin_api_secret", "http://linear.test/graphql");
+
+    expect(await client.listProjects("team-1")).toEqual([{ id: "p1", name: "Bossmode", url: "u" }]);
+    expect(await client.listStates("team-1")).toEqual([{ id: "s1", name: "Done", type: "completed" }]);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as any).body).variables).toEqual({ id: "team-1" });
+  });
+
   it("sanitizes GraphQL errors", async () => {
     vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({
       ok: true,

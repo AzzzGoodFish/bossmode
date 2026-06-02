@@ -203,6 +203,7 @@ export async function handleToolCallback(
         const config = getRoomLinearIntegration(roomId);
         const teamQuery = params?.team ? String(params.team) : undefined;
         const projectTeam = teamQuery ? findTeam(teams, teamQuery) : (config ? teams.find((t) => t.id === config.teamId) : undefined);
+        const projects = projectTeam ? await client.listProjects(projectTeam.id) : [];
         return {
           ok: true,
           provider,
@@ -210,7 +211,7 @@ export async function handleToolCallback(
           viewer,
           current: config || null,
           teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })),
-          projects: projectTeam?.projects || [],
+          projects,
         };
       } catch (err: any) {
         return { ok: false, provider, connected: false, error: err.message || String(err) };
@@ -230,9 +231,10 @@ export async function handleToolCallback(
       if (!teamInput) return { ok: false, error: "team is required", teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })) };
       const team = findTeam(teams, teamInput);
       if (!team) return { ok: false, error: `Linear team not found: ${teamInput}`, teams: teams.map((t) => ({ id: t.id, name: t.name, key: t.key })) };
+      const projects = await client.listProjects(team.id);
       const projectInput = params?.project ? String(params.project) : "";
-      const project = projectInput ? findProject(team.projects || [], projectInput) : undefined;
-      if (projectInput && !project) return { ok: false, error: `Linear project not found in ${team.name}: ${projectInput}`, projects: team.projects || [] };
+      const project = projectInput ? findProject(projects, projectInput) : undefined;
+      if (projectInput && !project) return { ok: false, error: `Linear project not found in ${team.name}: ${projectInput}`, projects };
       const config = saveRoomLinearIntegration(roomId, {
         teamId: team.id,
         teamName: team.name,
@@ -241,7 +243,7 @@ export async function handleToolCallback(
         projectName: project?.name,
         enabled: params?.enabled !== false,
       });
-      return { ok: true, provider, configured: config, projects: team.projects || [] };
+      return { ok: true, provider, configured: config, projects };
     }
     case "write_summary": {
       // P0 security: only summarizer agent can call this tool
