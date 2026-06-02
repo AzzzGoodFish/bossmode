@@ -51,6 +51,7 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
 
       {/* Header */}
       <div className="px-6 pt-5 pb-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+        <div className="mx-auto w-full max-w-6xl">
         <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-3">All Tasks</h1>
         <div className="flex items-center gap-3 flex-wrap">
           {/* Status chips */}
@@ -78,10 +79,12 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
             />
           </div>
         </div>
+        </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
+        <div className="mx-auto w-full max-w-6xl">
         {loading ? (
           <div className="text-center py-12 text-sm text-zinc-400">Loading...</div>
         ) : tasks.length === 0 ? (
@@ -105,6 +108,7 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
             </div>
           ))
         )}
+        </div>
       </div>
     </div>
   );
