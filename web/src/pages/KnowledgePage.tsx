@@ -47,7 +47,7 @@ interface KnowledgePageProps {
 }
 
 export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePageProps = {}) {
-  const { toast, prompt } = useDialog();
+  const { toast, confirm, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -55,6 +55,9 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
 
   const [currentDoc, setCurrentDoc] = useState<KnowledgeEntry | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [isDocLoading, setIsDocLoading] = useState(false);
+  const [markdownDirty, setMarkdownDirty] = useState(false);
+  const loadDocSeqRef = useRef(0);
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: KnowledgeTreeNode } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -122,13 +125,29 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   }, [initialPath]);
 
   useEffect(() => {
-    if (!selectedPath) { setCurrentDoc(null); return; }
+    const seq = ++loadDocSeqRef.current;
+    if (!selectedPath) {
+      setCurrentDoc(null);
+      setDraftTitle("");
+      setMarkdownDirty(false);
+      setIsDocLoading(false);
+      return;
+    }
+
+    setCurrentDoc(null);
+    setDraftTitle("");
+    setMarkdownDirty(false);
+    setIsDocLoading(true);
     getKnowledgeEntry(selectedPath).then((doc) => {
+      if (seq !== loadDocSeqRef.current) return;
       setCurrentDoc(doc);
       setDraftTitle(doc.title);
+      setIsDocLoading(false);
     }).catch((err) => {
+      if (seq !== loadDocSeqRef.current) return;
       toast(String(err?.message || err), "error");
       setCurrentDoc(null);
+      setIsDocLoading(false);
     });
   }, [selectedPath, toast]);
 
@@ -227,6 +246,23 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const confirmDanger = (message: string): Promise<boolean> => new Promise((resolve) => {
     setDangerConfirmState({ message, resolve });
   });
+
+  const confirmDiscardMarkdown = useCallback(async () => {
+    if (!markdownDirty) return true;
+    return confirm("Discard unsaved markdown changes?");
+  }, [confirm, markdownDirty]);
+
+  const selectDocument = useCallback(async (path: string) => {
+    if (!(await confirmDiscardMarkdown())) return;
+    setSelectedPaths(new Set());
+    setSelectedPath(path);
+  }, [confirmDiscardMarkdown]);
+
+  const clearDocumentSelection = useCallback(async () => {
+    if (!(await confirmDiscardMarkdown())) return;
+    setSelectedPath(null);
+    setCurrentDoc(null);
+  }, [confirmDiscardMarkdown]);
 
   const handleDeleteDoc = async () => {
     if (!currentDoc) return;
@@ -380,7 +416,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     setSelectedPaths(selection);
   };
 
-  const handleNodeClick = (e: React.MouseEvent, node: KnowledgeTreeNode) => {
+  const handleNodeClick = async (e: React.MouseEvent, node: KnowledgeTreeNode) => {
     const multiMode = e.ctrlKey || e.metaKey || e.shiftKey;
 
     if (node.kind === "folder") {
@@ -395,8 +431,8 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     } else if (e.ctrlKey || e.metaKey) {
       toggleSelectPath(node.path);
     } else {
-      setSelectedPaths(new Set());
-      if (node.kind === "file") setSelectedPath(node.path);
+      if (node.kind === "file") await selectDocument(node.path);
+      else setSelectedPaths(new Set());
     }
 
     lastClickedRef.current = node.path;
@@ -590,7 +626,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
         <main className={`${isMobile ? (mobileView === "doc" ? "flex-1" : "hidden") : "flex-1"} overflow-y-auto`}>
           {isMobile && mobileView === "doc" && (
             <button
-              onClick={() => { setSelectedPath(null); setCurrentDoc(null); }}
+              onClick={() => { void clearDocumentSelection(); }}
               className="md:hidden flex items-center gap-1 px-4 py-2.5 text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white border-b border-zinc-200 dark:border-zinc-800 w-full cursor-pointer"
             >
               ← Back
@@ -628,21 +664,26 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                   </div>
                 </div>
                 <MarkdownField
+                  key={currentDoc.id}
                   value={currentDoc.content}
                   onChange={(v) => {
-                    updateKnowledgeEntry(currentDoc.id, currentDoc.title, v)
-                      .then((updated) => { setCurrentDoc(updated); })
+                    updateKnowledgeEntry(currentDoc.id, draftTitle || currentDoc.title, v)
+                      .then((updated) => { setCurrentDoc(updated); setDraftTitle(updated.title); refreshTree(); })
                       .catch((err: any) => toast(err.message, "error"));
                   }}
                   placeholder="Start writing… (markdown supported)"
+                  onDirtyChange={setMarkdownDirty}
                 />
               </div>
+          ) : isDocLoading ? (
+            <div className="h-full flex items-center justify-center text-sm text-zinc-400">
+              Loading document…
+            </div>
           ) : folderNode ? (
             <FolderOverview
               node={folderNode}
               onSelectDoc={(path) => {
-                setSelectedPaths(new Set());
-                setSelectedPath(path);
+                void selectDocument(path);
               }}
               onCreateDoc={() => handleCreateDoc(folderNode.path)}
               onCreateFolder={() => handleCreateFolder(folderNode.path)}
