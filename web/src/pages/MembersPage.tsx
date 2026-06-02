@@ -254,9 +254,9 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-4xl">
+      <div className="grid w-full max-w-7xl grid-cols-1 xl:grid-cols-[minmax(560px,720px)_minmax(320px,1fr)] gap-6">
         {/* Block 1: Configuration */}
-        <div>
+        <div className="min-w-0">
           <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-3">Configuration</h2>
           <div className={`${cardCls} p-5 space-y-4`}>
             <Field label="Name">
@@ -303,7 +303,7 @@ function MemberDetailView({ id, onBack, isCreate, onCreated, onNavigateAgent, co
         </div>
 
         {/* Block 2: Agent Preview + Status */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Agent Preview</h2>
             {agentDetail && form.agent && onNavigateAgent && (

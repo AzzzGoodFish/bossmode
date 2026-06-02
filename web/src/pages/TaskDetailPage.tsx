@@ -372,7 +372,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
           </div>
 
           {/* Right meta sidebar */}
-          <aside className="w-full md:w-72 shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 px-5 md:px-6 py-6 md:py-8 bg-zinc-50/50 dark:bg-zinc-900/30">
+          <aside className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 px-5 md:px-6 py-6 md:py-8 bg-zinc-50/50 dark:bg-zinc-900/30">
             <div className="space-y-5 max-w-md md:max-w-none">
 
               <MetaRow label="Status">

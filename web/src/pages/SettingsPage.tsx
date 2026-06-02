@@ -136,8 +136,9 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
         onImport={() => setShowImportDialog(true)}
       />
 
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
       {/* Session Resume */}
-      <div className="mb-8">
+      <div>
         <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Runtime</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-2">
           <div className="flex items-center justify-between">
@@ -166,7 +167,7 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
       </div>
 
       {/* Auto-Summary */}
-      <div className="mb-8">
+      <div>
         <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Auto-Summary</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
@@ -219,7 +220,7 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
       </div>
 
       {/* Built-in Team Updates */}
-      <div className="mb-8">
+      <div>
         <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Built-in Team Updates</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -246,6 +247,8 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
             {checkingTeamUpdates ? "Checking..." : "Check now"}
           </button>
         </div>
+      </div>
+
       </div>
 
     </div>

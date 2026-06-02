@@ -136,7 +136,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
 
       {/* Preview mode */}
       {!editing && agentData && (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto w-full max-w-7xl">
           {/* Meta badges */}
           {(agentData.tags?.length > 0 || agentData.skills?.length > 0) && (
             <div className="flex flex-wrap items-center gap-1.5 mb-4">
@@ -161,7 +161,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
           )}
           {/* Builtin agent info card */}
           {isBuiltin ? (
-            <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5">
+            <div className="max-w-5xl bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-2xl">{agentData.avatar || ">_"}</span>
                 <div>
@@ -181,7 +181,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
             </div>
           ) : (
             /* Markdown preview */
-            <div className="bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
+            <div className="max-w-5xl bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
               <Markdown content={agentData.systemPrompt || ""} />
             </div>
           )}
@@ -193,7 +193,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-base md:text-sm text-zinc-800 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 overflow-y-auto"
+          className="flex-1 w-full max-w-5xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-base md:text-sm text-zinc-800 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 overflow-y-auto"
           spellCheck={false}
         />
       )}

@@ -403,7 +403,7 @@ export function Main({
 
         {/* Member panel */}
         {/* Desktop member panel */}
-        <div className="hidden md:block w-48 border-l border-zinc-200 dark:border-zinc-800 shrink-0">
+        <div className="hidden md:block w-64 border-l border-zinc-200 dark:border-zinc-800 shrink-0">
           <MemberPanel
             members={room.members}
             agentStatus={agentStatus}
