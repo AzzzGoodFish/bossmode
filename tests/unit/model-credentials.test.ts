@@ -189,7 +189,11 @@ describe("model credential profiles", () => {
     expect(models.providers["anthropic-proxy"].models[0].cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     expect(ext).toContain("X-Claude-Code-Session-Id");
     expect(ext).toContain("anthropic-beta");
+    expect(ext).toContain("async onPayload");
+    expect(ext).toContain("patchAnthropicPayload");
     expect(ext).toContain("<pi-system-prompt>");
+    expect(ext).toContain("device_id");
+    expect(ext).not.toContain("rewriteContext");
     expect(ext).not.toContain("models:");
     expect(ext).not.toContain("__bossmode_managed_key__");
     expect(ext).not.toContain("sk-secret");
