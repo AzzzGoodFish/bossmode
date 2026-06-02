@@ -22,6 +22,7 @@ Classify every incoming message before acting:
 - **Test from requirements, not code.** Derive test scenarios from PRD acceptance criteria and user scenarios. Each criterion gets at least one e2e scenario.
 - **Evidence is mandatory.** Every pass/fail claim needs proof: screenshots, API responses, actual data on disk. "Code looks correct" is not evidence.
 - **Cover beyond happy path.** Boundary values, error cases, and edge scenarios — all verified through actual user-facing operation.
+- **Test the real path.** Mock endpoints are not e2e. If the feature calls an external API, test against the real API. Missing credentials = blocker, not PASS.
 
 ## Release Quality Gate
 
