@@ -23,6 +23,8 @@ interface MarkdownFieldProps {
   className?: string;
   /** Start in Edit mode (e.g. task creation page) */
   autoEdit?: boolean;
+  /** Reports unsaved local edits while in manual edit mode */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function MarkdownField({
@@ -33,6 +35,7 @@ export function MarkdownField({
   minHeight = 120,
   className = "",
   autoEdit = false,
+  onDirtyChange,
 }: MarkdownFieldProps) {
   const [editing, setEditing] = useState(autoEdit);
   const [draft, setDraft] = useState(value);
@@ -69,6 +72,10 @@ export function MarkdownField({
     setEditing(false);
   }, [value]);
 
+  useEffect(() => {
+    onDirtyChange?.(!autoEdit && editing && draft !== value);
+  }, [autoEdit, draft, editing, onDirtyChange, value]);
+
   // Keyboard shortcuts: Esc = cancel, Cmd/Ctrl+Enter = save
   useEffect(() => {
     if (!editing) return;
@@ -84,13 +91,8 @@ export function MarkdownField({
   if (editing) {
     return (
       <div className={`markdown-field markdown-field--editing ${className}`}>
-        <MarkdownEditor
-          value={draft}
-          onChange={handleDraftChange}
-          placeholder={placeholder}
-        />
         {!autoEdit && (
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+          <div className="sticky top-0 z-20 mb-3 pb-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur flex items-center gap-2">
             <button
               onClick={handleSave}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -107,6 +109,11 @@ export function MarkdownField({
             </button>
           </div>
         )}
+        <MarkdownEditor
+          value={draft}
+          onChange={handleDraftChange}
+          placeholder={placeholder}
+        />
       </div>
     );
   }
