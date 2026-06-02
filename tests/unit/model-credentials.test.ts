@@ -166,4 +166,27 @@ describe("model credential profiles", () => {
     expect(ext).toContain("streamSimpleAnthropic");
     expect(ext).not.toContain("sk-secret");
   });
+
+  it("generates an internal anthropic proxy Claude Code adapter with payload/header rewrites", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      providerSlug: "anthropic-proxy",
+      protocol: "anthropic-messages",
+      requestProfile: "anthropic_proxy_claude_code",
+      baseUrl: "https://console.cloudrouter.online",
+      models: [{ id: "claude-sonnet-4-6", contextWindow: 200000 }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-proxy/claude-sonnet-4-6", credentialId: saved.id });
+
+    expect(exported?.extensionPaths).toHaveLength(1);
+    const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
+    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
+    expect(modelsJson).toContain("anthropic-proxy-claude-code");
+    expect(ext).toContain("X-Claude-Code-Session-Id");
+    expect(ext).toContain("anthropic-beta");
+    expect(ext).toContain("<pi-system-prompt>");
+    expect(ext).not.toContain("sk-secret");
+  });
 });

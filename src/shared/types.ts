@@ -68,7 +68,7 @@ export type ModelProtocol =
   | "mistral-conversations";
 
 export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
-export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "openai_codex_subscription";
+export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "anthropic_proxy_claude_code" | "openai_codex_subscription";
 
 export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
 
