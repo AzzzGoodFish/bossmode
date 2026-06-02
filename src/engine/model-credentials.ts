@@ -762,9 +762,180 @@ function extensionSource(profile: ModelCredentialProfile): string {
   return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(apiForProfile(profile))},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
 }
 
-function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, normalizedBaseUrl: string): string {
-  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nconst ANTHROPIC_BETA = "claude-code-20250219,computer-use-2025-01-24,token-efficient-tools-2025-02-19,output-128k-2025-02-19,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14";\nconst BILLING_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";\n\nfunction textFromContent(content) {\n  if (!content) return "";\n  if (typeof content === "string") return content;\n  if (!Array.isArray(content)) return "";\n  return content\n    .map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "")\n    .filter(Boolean)\n    .join("\\n");\n}\n\nfunction textFromSystem(system) {\n  if (!system) return "";\n  if (typeof system === "string") return system;\n  if (!Array.isArray(system)) return "";\n  return system\n    .slice(1)\n    .map((part) => part?.type === "text" && typeof part.text === "string" ? part.text : "")\n    .filter(Boolean)\n    .join("\\n");\n}\n\nfunction prependSystemReminder(messages, systemText) {\n  if (!systemText) return messages || [];\n  const reminder = { type: "text", text: "<pi-system-prompt>\\n" + systemText + "\\n</pi-system-prompt>" };\n  const next = [...(messages || [])];\n  const firstUserIndex = next.findIndex((msg) => msg?.role === "user");\n  if (firstUserIndex < 0) return [{ role: "user", content: [reminder] }, ...next];\n  const firstUser = next[firstUserIndex];\n  const content = Array.isArray(firstUser.content)\n    ? [reminder, ...firstUser.content]\n    : [reminder, { type: "text", text: textFromContent(firstUser.content) }].filter((part) => part.text !== "");\n  next[firstUserIndex] = { ...firstUser, content };\n  return next;\n}\n\nfunction patchAnthropicPayload(payload, sessionId) {\n  if (!payload || typeof payload !== "object") return payload;\n  const systemText = textFromSystem(payload.system);\n  const userId = JSON.stringify({\n    device_id: "bossmode",\n    account_uuid: "bossmode",\n    session_id: sessionId,\n  });\n  return {\n    ...payload,\n    system: [{ type: "text", text: BILLING_SYSTEM_PROMPT }],\n    messages: prependSystemReminder(payload.messages, systemText),\n    metadata: { ...(payload.metadata || {}), user_id: userId },\n  };\n}\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    api: "anthropic-proxy-claude-code",\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      const sessionId = options?.sessionId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()));\n      const upstreamOnPayload = options?.onPayload;\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: model.baseUrl || ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: proxyKey.startsWith("sk-ant-oat-") ? proxyKey : "sk-ant-oat-" + proxyKey,\n          headers: {\n            ...(options?.headers || {}),\n            Authorization: "Bearer " + proxyKey,\n            "User-Agent": "claude-cli/1.0.0 (external, cli)",\n            "X-Claude-Code-Session-Id": sessionId,\n            "anthropic-beta": ANTHROPIC_BETA,\n          },\n          metadata: { ...(options?.metadata || {}), user_id: JSON.stringify({ device_id: "bossmode", account_uuid: "bossmode", session_id: sessionId }) },\n          sessionId,\n          async onPayload(payload, payloadModel) {\n            const upstreamPayload = upstreamOnPayload ? await upstreamOnPayload(payload, payloadModel) : undefined;\n            return patchAnthropicPayload(upstreamPayload === undefined ? payload : upstreamPayload, sessionId);\n          },\n        },\n      );\n    },\n  });\n}\n`;
+function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, _normalizedBaseUrl: string): string {
+  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
+const PROVIDER = ${JSON.stringify(profile.providerSlug)};
+const PROVIDER_API = "anthropic-proxy-claude-code";
+const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.122 (external, sdk-cli)";
+const CLAUDE_CODE_BETA = [
+  "claude-code-20250219",
+  "context-1m-2025-08-07",
+  "interleaved-thinking-2025-05-14",
+  "context-management-2025-06-27",
+  "prompt-caching-scope-2026-01-05",
+  "advisor-tool-2026-03-01",
+  "advanced-tool-use-2025-11-20",
+  "effort-2025-11-24",
+].join(",");
+const CLAUDE_CODE_BILLING_HEADER =
+  "x-anthropic-billing-header: cc_version=2.1.122.d65; cc_entrypoint=sdk-cli; cch=6b420;";
+const DEVICE_ID_PATH = join(homedir(), ".pi", "agent", "anthropic-proxy-device-id");
+
+let fallbackSessionId;
+let cachedDeviceId;
+
+function toClaudeCodeOAuthKey(apiKey) {
+  return apiKey.startsWith("sk-ant-oat-") ? apiKey : "sk-ant-oat-" + apiKey;
 }
+
+function getSessionId(options) {
+  fallbackSessionId ||= randomUUID();
+  return options?.sessionId || fallbackSessionId;
+}
+
+function findClaudeDeviceId() {
+  const roots = [join(homedir(), ".claude", "telemetry"), join(homedir(), ".claude", "statsig")];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const file of readdirSync(root).slice(-200)) {
+      const path = join(root, file);
+      try {
+        if (!statSync(path).isFile()) continue;
+        const text = readFileSync(path, "utf8");
+        const match = text.match(/"(?:device_id|userID)"\\s*:\\s*"([a-f0-9]{64})"/i);
+        if (match) return match[1].toLowerCase();
+      } catch {
+        // Ignore unreadable telemetry files.
+      }
+    }
+  }
+  return undefined;
+}
+
+function getDeviceId() {
+  if (cachedDeviceId) return cachedDeviceId;
+  try {
+    const claudeDeviceId = findClaudeDeviceId();
+    if (claudeDeviceId) {
+      cachedDeviceId = claudeDeviceId;
+      mkdirSync(dirname(DEVICE_ID_PATH), { recursive: true });
+      writeFileSync(DEVICE_ID_PATH, cachedDeviceId + "\\n", { mode: 0o600 });
+      return cachedDeviceId;
+    }
+    if (existsSync(DEVICE_ID_PATH)) {
+      const value = readFileSync(DEVICE_ID_PATH, "utf8").trim();
+      if (/^[a-f0-9]{64}$/i.test(value)) {
+        cachedDeviceId = value.toLowerCase();
+        return cachedDeviceId;
+      }
+    }
+    cachedDeviceId = randomBytes(32).toString("hex");
+    mkdirSync(dirname(DEVICE_ID_PATH), { recursive: true });
+    writeFileSync(DEVICE_ID_PATH, cachedDeviceId + "\\n", { mode: 0o600 });
+    return cachedDeviceId;
+  } catch {
+    cachedDeviceId ||= randomBytes(32).toString("hex");
+    return cachedDeviceId;
+  }
+}
+
+function patchClaudeCodePayload(payload, sessionId) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+
+  const body = payload;
+  body.metadata = {
+    ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+    user_id: JSON.stringify({
+      device_id: getDeviceId(),
+      account_uuid: "",
+      session_id: sessionId,
+    }),
+  };
+
+  const billingBlock = { type: "text", text: CLAUDE_CODE_BILLING_HEADER };
+  const existingSystem = Array.isArray(body.system)
+    ? body.system
+    : typeof body.system === "string"
+      ? [{ type: "text", text: body.system }]
+      : [];
+  const systemText = existingSystem
+    .filter(
+      (block) =>
+        block?.type === "text" &&
+        typeof block.text === "string" &&
+        !block.text.startsWith("x-anthropic-billing-header:"),
+    )
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+    .join("\\n\\n");
+
+  body.system = [billingBlock];
+  if (systemText && Array.isArray(body.messages) && body.messages.length > 0) {
+    const firstUser = body.messages.find((message) => message?.role === "user") ?? body.messages[0];
+    const reminderText = "<pi-system-prompt>\\n" + systemText + "\\n</pi-system-prompt>";
+    if (Array.isArray(firstUser.content)) {
+      const alreadyInserted = firstUser.content.some(
+        (block) => block?.type === "text" && typeof block.text === "string" && block.text.startsWith("<pi-system-prompt>"),
+      );
+      if (!alreadyInserted) firstUser.content.unshift({ type: "text", text: reminderText });
+    } else if (typeof firstUser.content === "string" && !firstUser.content.startsWith("<pi-system-prompt>")) {
+      firstUser.content = reminderText + "\\n\\n" + firstUser.content;
+    }
+  }
+
+  return body;
+}
+
+function streamClaudeCodeAnthropicProxy(model, context, options) {
+  const apiKey = options?.apiKey;
+  if (!apiKey) {
+    throw new Error("No API key for provider: " + model.provider);
+  }
+
+  const sessionId = getSessionId(options);
+  const { Authorization: _authorization, authorization: _authorizationLower, ...headers } = options?.headers ?? {};
+  const originalOnPayload = options?.onPayload;
+
+  return streamSimpleAnthropic(
+    {
+      ...model,
+      api: "anthropic-messages",
+      provider: PROVIDER,
+    },
+    context,
+    {
+      ...options,
+      apiKey: toClaudeCodeOAuthKey(apiKey),
+      headers: {
+        ...headers,
+        Authorization: "Bearer " + apiKey,
+        "User-Agent": CLAUDE_CODE_USER_AGENT,
+        "X-Claude-Code-Session-Id": sessionId,
+        "anthropic-beta": CLAUDE_CODE_BETA,
+      },
+      onPayload: async (payload, patchedModel) => {
+        const patched = patchClaudeCodePayload(payload, sessionId);
+        const nextPayload = await originalOnPayload?.(patched, patchedModel);
+        return patchClaudeCodePayload(nextPayload ?? patched, sessionId);
+      },
+    },
+  );
+}
+
+export default function (pi) {
+  pi.registerProvider(PROVIDER, {
+    api: PROVIDER_API,
+    streamSimple: streamClaudeCodeAnthropicProxy,
+  });
+}
+`;
+}
+
 export interface PiCredentialExport {
   agentDir: string;
   extensionPaths: string[];
