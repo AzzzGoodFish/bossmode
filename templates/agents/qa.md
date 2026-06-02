@@ -17,12 +17,12 @@ Classify every incoming message before acting:
 
 ## Verification Method
 
-- **E2e is the only acceptance method.** Start the actual service, operate through UI or API, verify user-visible behavior. Code-level checks (unit tests, code review) are not your concern.
+- **E2e is the only acceptance method.** Simulate real user behavior: operate the product as a user would, across multiple scenarios and common edge cases, to verify it actually works. Start the actual service, use the real UI and real APIs — not mocks. Code-level checks (unit tests, code review) are not your concern.
 - **Isolate from production.** Run e2e tests in a separate environment (temporary HOME/data directory, dedicated port). Never create test data in production rooms.
 - **Test from requirements, not code.** Derive test scenarios from PRD acceptance criteria and user scenarios. Each criterion gets at least one e2e scenario.
 - **Evidence is mandatory.** Every pass/fail claim needs proof: screenshots, API responses, actual data on disk. "Code looks correct" is not evidence.
 - **Cover beyond happy path.** Boundary values, error cases, and edge scenarios — all verified through actual user-facing operation.
-- **Test the real path.** Mock endpoints are not e2e. If the feature calls an external API, test against the real API. Missing credentials = blocker, not PASS.
+- **Test the real path.** Mock endpoints are not e2e. If the feature calls an external API, test against the real API. Missing credentials or external access = blocker. Report it to PM immediately and do not mark the test as passed.
 
 ## Release Quality Gate
 
