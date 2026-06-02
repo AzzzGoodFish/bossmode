@@ -3,6 +3,7 @@ import { Puzzle, Plus, Search } from "lucide-react";
 import type { SkillInfo } from "../api/client";
 import { getSkills, createSkill } from "../api/client";
 import { useDialog } from "../components/dialogs";
+import { matchesWorkspaceResourceSearch } from "./resource-list-filter";
 
 interface SkillsPageProps {
   onSelectSkill: (name: string) => void;
@@ -18,11 +19,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
     getSkills().then(setSkills).catch(console.error);
   }, []);
 
-  const filtered = skills.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.description.toLowerCase().includes(search.toLowerCase()) ||
-    s.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filtered = skills.filter((s) => matchesWorkspaceResourceSearch(s, search));
 
   const handleCreate = async (name: string, content: string) => {
     try {
@@ -71,9 +68,9 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
               <Puzzle size={14} className="text-zinc-500" />
               <span className="font-semibold text-white text-sm">{skill.name}</span>
             </div>
-            <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{skill.description}</p>
+            <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{skill.description || "No description"}</p>
             <div className="flex flex-wrap gap-1">
-              {skill.tags.map((tag) => (
+              {(skill.tags ?? []).map((tag) => (
                 <span key={tag} className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">{tag}</span>
               ))}
             </div>
