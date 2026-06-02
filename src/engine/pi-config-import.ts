@@ -56,7 +56,7 @@ function modelToOption(model: any, profile: { id: string; name: string; provider
   };
 }
 
-function authInfo(providerSlug: string, rawAuth: any, rawProvider: any): { authType: ModelAuthType; source: PiConfigImportProviderPreview["authSource"]; secretPreview: string; apiKey?: string; oauthCredentials?: Record<string, unknown>; oauthProviderId?: string } | null {
+function authInfo(providerSlug: string, rawAuth: any, rawProvider: any, registry?: ModelRegistry): { authType: ModelAuthType; source: PiConfigImportProviderPreview["authSource"]; secretPreview: string; apiKey?: string; oauthCredentials?: Record<string, unknown>; oauthProviderId?: string } | null {
   const auth = rawAuth?.[providerSlug];
   if (auth?.type === "api_key" && typeof auth.key === "string") {
     return { authType: "api_key", source: "auth_json_api_key", secretPreview: maskSecret(auth.key), apiKey: auth.key };
@@ -69,6 +69,10 @@ function authInfo(providerSlug: string, rawAuth: any, rawProvider: any): { authT
   if (typeof apiKey === "string" && apiKey.length > 0) {
     return { authType: "api_key", source: apiKey.startsWith("!") ? "models_json_command" : "models_json_key", secretPreview: maskSecret(apiKey), apiKey };
   }
+  const status = registry?.getProviderAuthStatus(providerSlug);
+  if (status?.source === "environment" && status.label) {
+    return { authType: "api_key", source: "environment", secretPreview: status.label, apiKey: status.label };
+  }
   return null;
 }
 
@@ -78,7 +82,12 @@ function providerName(providerSlug: string, rawProvider: any, registry: ModelReg
 
 function protocolFor(models: any[], rawProvider: any): ModelProtocol | null {
   const api = rawProvider?.api || models[0]?.api;
+  if (api === "anthropic-proxy-claude-code") return "anthropic-messages";
   return MODEL_PROTOCOLS.includes(api) ? api : null;
+}
+
+function requestProfileFor(rawProvider: any): ModelCredentialProfileInput["requestProfile"] {
+  return rawProvider?.api === "anthropic-proxy-claude-code" ? "anthropic_proxy_claude_code" : "standard";
 }
 
 function modelsForProvider(models: any[], providerSlug: string, rawProviderModels: any[] | undefined): ModelDefinitionConfig[] {
@@ -119,7 +128,7 @@ export function previewPiConfigImport(): PiConfigImportPreview {
     const rawProvider = rawModels.providers?.[providerSlug] || {};
     const providerModels = available.filter((m: any) => m.provider === providerSlug);
     const protocol = protocolFor(providerModels, rawProvider);
-    const auth = authInfo(providerSlug, rawAuth, rawProvider);
+    const auth = authInfo(providerSlug, rawAuth, rawProvider, modelRegistry);
     const warnings: string[] = [];
     if (!protocol) warnings.push(`Unsupported provider protocol: ${rawProvider?.api || providerModels[0]?.api || "unknown"}`);
     if (!auth) warnings.push("No importable credential found.");
@@ -168,7 +177,7 @@ export function importPiConfig(input: PiConfigImportRequest = {}): PiConfigImpor
     const existing = profiles.find((p) => p.providerSlug === item.providerSlug);
     if (existing && !overwrite.has(item.providerSlug)) { skipped.push({ providerSlug: item.providerSlug, reason: "already exists" }); continue; }
     const rawProvider = rawModels.providers?.[item.providerSlug] || {};
-    const auth = authInfo(item.providerSlug, rawAuth, rawProvider);
+    const auth = authInfo(item.providerSlug, rawAuth, rawProvider, modelRegistry);
     if (!auth) { skipped.push({ providerSlug: item.providerSlug, reason: "no credential" }); continue; }
     const models = modelsForProvider(available, item.providerSlug, rawProvider.models);
     const data: ModelCredentialProfileInput & { id?: string } = {
@@ -181,7 +190,9 @@ export function importPiConfig(input: PiConfigImportRequest = {}): PiConfigImpor
       apiKey: auth.apiKey,
       oauthProviderId: auth.oauthProviderId,
       oauthCredentials: auth.oauthCredentials,
-      requestProfile: "standard",
+      requestProfile: requestProfileFor(rawProvider),
+      authHeader: rawProvider?.authHeader === true ? true : undefined,
+      headers: rawProvider?.headers && typeof rawProvider.headers === "object" ? rawProvider.headers : undefined,
       enabled: true,
       isDefault: existing?.isDefault ?? false,
       models,

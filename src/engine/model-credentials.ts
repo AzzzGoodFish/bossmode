@@ -33,7 +33,7 @@ export const MODEL_PROTOCOLS: ModelProtocol[] = [
 ];
 
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
-const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "anthropic_claude_code_oauth", "openai_codex_subscription"];
+const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "anthropic_claude_code_oauth", "anthropic_proxy_claude_code", "openai_codex_subscription"];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 
 type OAuthJobStatus = "awaiting_input" | "completed" | "failed" | "cancelled";
@@ -174,8 +174,8 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
   if (!AUTH_TYPES.includes(input.authType)) throw new Error("Unsupported auth type");
   const requestProfile = input.requestProfile || "standard";
   if (!REQUEST_PROFILES.includes(requestProfile)) throw new Error("Unsupported request profile");
-  if (requestProfile === "anthropic_claude_code_oauth" && input.protocol !== "anthropic-messages") {
-    throw new Error("Anthropic Claude Code/OAuth compatibility requires anthropic-messages protocol");
+  if ((requestProfile === "anthropic_claude_code_oauth" || requestProfile === "anthropic_proxy_claude_code") && input.protocol !== "anthropic-messages") {
+    throw new Error("Anthropic Claude Code compatibility requires anthropic-messages protocol");
   }
   validateBaseUrl(input.baseUrl, input.authType);
   if (input.authType === "api_key" && !input.apiKey && !existing?.apiKey) throw new Error("apiKey is required");
@@ -682,7 +682,7 @@ export function writePiConfigForProfiles(profiles: ModelCredentialProfile[], tar
     providers[profile.providerSlug] = piProviderConfig(profile);
     const auth = authEntry(profile);
     if (auth) authData[profile.providerSlug] = auth;
-    if (profile.requestProfile === "anthropic_claude_code_oauth") {
+    if (requiresInternalExtension(profile)) {
       const extDir = join(targetDir, "extensions");
       mkdirSync(extDir, { recursive: true });
       const extPath = join(extDir, `${profile.providerSlug}.ts`);
@@ -720,7 +720,7 @@ function piProviderConfig(profile: ModelCredentialProfile): Record<string, unkno
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
   return {
     baseUrl: normalizedBaseUrl,
-    api: profile.requestProfile === "anthropic_claude_code_oauth" ? `${profile.providerSlug}-anthropic-claude-code-oauth` : profile.protocol,
+    api: apiForProfile(profile),
     apiKey: profile.authType === "none" ? DUMMY_API_KEY : API_KEY_PLACEHOLDER,
     ...(profile.authHeader ? { authHeader: true } : {}),
     ...(profile.headers ? { headers: profile.headers } : {}),
@@ -745,9 +745,24 @@ function authEntry(profile: ModelCredentialProfile): unknown | undefined {
   return undefined;
 }
 
+function requiresInternalExtension(profile: ModelCredentialProfile): boolean {
+  return profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code";
+}
+
+function apiForProfile(profile: ModelCredentialProfile): string {
+  if (profile.requestProfile === "anthropic_claude_code_oauth") return `${profile.providerSlug}-anthropic-claude-code-oauth`;
+  if (profile.requestProfile === "anthropic_proxy_claude_code") return "anthropic-proxy-claude-code";
+  return profile.protocol;
+}
+
 function extensionSource(profile: ModelCredentialProfile): string {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
-  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(`${profile.providerSlug}-anthropic-claude-code-oauth`)},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
+  if (profile.requestProfile === "anthropic_proxy_claude_code") return anthropicProxyClaudeCodeExtensionSource(profile, normalizedBaseUrl);
+  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(apiForProfile(profile))},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
+}
+
+function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, normalizedBaseUrl: string): string {
+  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nconst ANTHROPIC_BETA = "claude-code-20250219,computer-use-2025-01-24,token-efficient-tools-2025-02-19,output-128k-2025-02-19,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14";\n\nfunction textFromSystem(systemPrompt) {\n  if (!systemPrompt) return "";\n  return String(systemPrompt);\n}\n\nfunction rewriteContext(context) {\n  const systemText = textFromSystem(context?.systemPrompt);\n  if (!systemText) return context;\n  return {\n    ...context,\n    systemPrompt: undefined,\n    messages: [\n      { role: "user", content: [{ type: "text", text: "<pi-system-prompt>\\n" + systemText + "\\n</pi-system-prompt>" }] },\n      ...(context?.messages || []),\n    ],\n  };\n}\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: "anthropic-proxy-claude-code",\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      const sessionId = options?.sessionId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now()));\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        rewriteContext(context),\n        {\n          ...options,\n          apiKey: proxyKey.startsWith("sk-ant-oat-") ? proxyKey : "sk-ant-oat-" + proxyKey,\n          headers: {\n            ...(options?.headers || {}),\n            Authorization: "Bearer " + proxyKey,\n            "User-Agent": "claude-cli/1.0.0 (external, cli)",\n            "X-Claude-Code-Session-Id": sessionId,\n            "anthropic-beta": ANTHROPIC_BETA,\n          },\n          metadata: { ...(options?.metadata || {}), user_id: "claude-code:" + sessionId },\n          sessionId,\n        },\n      );\n    },\n  });\n}\n`;
 }
 
 export interface PiCredentialExport {
@@ -783,7 +798,7 @@ export function exportPiConfigForMember(args: {
   writePrivateJson(join(agentDir, "auth.json"), auth ? { [profile.providerSlug]: auth } : {});
 
   const extensionPaths: string[] = [];
-  if (profile.requestProfile === "anthropic_claude_code_oauth") {
+  if (requiresInternalExtension(profile)) {
     const extDir = join(agentDir, "extensions");
     mkdirSync(extDir, { recursive: true });
     const extPath = join(extDir, `${profile.providerSlug}.ts`);
