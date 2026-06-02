@@ -182,11 +182,16 @@ describe("model credential profiles", () => {
 
     expect(exported?.extensionPaths).toHaveLength(1);
     const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
+    const models = JSON.parse(modelsJson);
     const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
     expect(modelsJson).toContain("anthropic-proxy-claude-code");
+    expect(models.providers["anthropic-proxy"].models[0].input).toEqual(["text"]);
+    expect(models.providers["anthropic-proxy"].models[0].cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     expect(ext).toContain("X-Claude-Code-Session-Id");
     expect(ext).toContain("anthropic-beta");
     expect(ext).toContain("<pi-system-prompt>");
+    expect(ext).not.toContain("models:");
+    expect(ext).not.toContain("__bossmode_managed_key__");
     expect(ext).not.toContain("sk-secret");
   });
 });
