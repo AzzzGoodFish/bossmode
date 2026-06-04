@@ -338,6 +338,20 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
   onDelete: (profile: PublicModelCredentialProfile) => void;
   onImport: () => void;
 }) {
+  const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
+  const [expandedModelLists, setExpandedModelLists] = useState<Set<string>>(new Set());
+
+  const toggleProfile = (id: string) => setExpandedProfiles((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleModels = (id: string) => setExpandedModelLists((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-4 gap-3">
@@ -363,36 +377,55 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          {profiles.map((profile) => (
-            <div key={profile.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{profile.name}</h3>
-                    {profile.isDefault && <Badge tone="success">Default</Badge>}
-                    {!profile.enabled && <Badge tone="neutral">Disabled</Badge>}
+          {profiles.map((profile) => {
+            const expanded = expandedProfiles.has(profile.id);
+            const modelsExpanded = expandedModelLists.has(profile.id);
+            const visibleModels = modelsExpanded ? profile.models : profile.models.slice(0, 3);
+            return (
+              <div key={profile.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleProfile(profile.id)}
+                    className="min-w-0 flex-1 text-left cursor-pointer"
+                    aria-expanded={expanded}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{profile.name}</h3>
+                      {profile.isDefault && <Badge tone="success">Default</Badge>}
+                      {!profile.enabled && <Badge tone="neutral">Disabled</Badge>}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      <code className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{profile.providerSlug}</code>
+                      <span>{profile.models.length} models</span><span>·</span><span>{profile.protocol}</span><span>·</span><span>{profile.authType}</span>
+                    </div>
+                  </button>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => toggleProfile(profile.id)} className="px-2 py-1 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer" title={expanded ? "Collapse" : "Expand"}>{expanded ? "Collapse" : "Expand"}</button>
+                    <button onClick={() => onEdit(profile)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer" title="Edit"><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(profile)} className="text-zinc-400 hover:text-red-500 cursor-pointer" title="Delete"><Trash2 size={14} /></button>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                    <code className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{profile.providerSlug}</code>
-                    <span>{profile.protocol}</span><span>·</span><span>{profile.authType}</span>
-                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => onEdit(profile)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer" title="Edit"><Pencil size={14} /></button>
-                  <button onClick={() => onDelete(profile)} className="text-zinc-400 hover:text-red-500 cursor-pointer" title="Delete"><Trash2 size={14} /></button>
-                </div>
+                {expanded && (
+                  <>
+                    {profile.baseUrl && <div className="text-[11px] text-zinc-500 dark:text-zinc-500 font-mono truncate mt-3 mb-3">{profile.baseUrl}</div>}
+                    <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 p-3 mt-3">
+                      <div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Models</span><span className="text-[11px] text-zinc-400 dark:text-zinc-500">{profile.hasSecret ? "Secret configured" : profile.authType}</span></div>
+                      <div className="space-y-1">
+                        {visibleModels.map((m) => <div key={m.id} className="flex items-center justify-between gap-2 text-xs"><code className="text-zinc-700 dark:text-zinc-300 truncate">{profile.providerSlug}/{m.id}</code>{m.contextWindow ? <span className="text-zinc-400 dark:text-zinc-500 shrink-0">{Math.round(m.contextWindow / 1000)}k ctx · {m.metadataSource === "pi_catalog" ? "pi catalog" : "endpoint"}</span> : <span className="text-zinc-400 dark:text-zinc-500 shrink-0">metadata unknown</span>}</div>)}
+                        {profile.models.length > 3 && (
+                          <button type="button" onClick={() => toggleModels(profile.id)} className="text-[11px] text-blue-500 hover:text-blue-400 cursor-pointer">
+                            {modelsExpanded ? "Show less" : `+${profile.models.length - 3} more`}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-3"><button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">Edit</button></div>
+                  </>
+                )}
               </div>
-              {profile.baseUrl && <div className="text-[11px] text-zinc-500 dark:text-zinc-500 font-mono truncate mb-3">{profile.baseUrl}</div>}
-              <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 p-3">
-                <div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{profile.models.length} models</span><span className="text-[11px] text-zinc-400 dark:text-zinc-500">{profile.hasSecret ? "Secret configured" : profile.authType}</span></div>
-                <div className="space-y-1">
-                  {profile.models.slice(0, 3).map((m) => <div key={m.id} className="flex items-center justify-between gap-2 text-xs"><code className="text-zinc-700 dark:text-zinc-300 truncate">{profile.providerSlug}/{m.id}</code>{m.contextWindow ? <span className="text-zinc-400 dark:text-zinc-500 shrink-0">{Math.round(m.contextWindow / 1000)}k ctx · {m.metadataSource === "pi_catalog" ? "pi catalog" : "endpoint"}</span> : <span className="text-zinc-400 dark:text-zinc-500 shrink-0">metadata unknown</span>}</div>)}
-                  {profile.models.length > 3 && <div className="text-[11px] text-zinc-500">+{profile.models.length - 3} more</div>}
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-3"><button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">Edit</button></div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
