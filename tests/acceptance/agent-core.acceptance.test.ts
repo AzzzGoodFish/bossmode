@@ -285,6 +285,21 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       expect(systemMessages.length).toBeGreaterThanOrEqual(1);
       expect(systemMessages.some((m) => m.content.includes("error"))).toBe(true);
     });
+
+    it("maps raw OAuth accountId extraction errors to reconnect guidance", async () => {
+      setMockPromptFn(vi.fn().mockRejectedValue(new Error("Failed to extract accountId from token")));
+
+      const room = await createRoom("t61-oauth-error-test", ["pm"]);
+      await sendMessage(room.id, "@pm try oauth task");
+
+      await new Promise((r) => setTimeout(r, 500));
+
+      const messagesRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages`, { token });
+      const messages: RoomMessage[] = JSON.parse(messagesRes.body);
+      const systemMessages = messages.filter((m) => m.sender === "system");
+      expect(systemMessages.some((m) => m.content.includes("Reconnect it in Settings → Model Credentials"))).toBe(true);
+      expect(systemMessages.some((m) => m.content.includes("Failed to extract accountId"))).toBe(false);
+    });
   });
 
   // ── T6.2: Agent error → can be re-activated ──

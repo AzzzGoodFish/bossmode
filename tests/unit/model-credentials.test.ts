@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -206,5 +206,120 @@ describe("model credential profiles", () => {
     expect(ext).not.toContain("models:");
     expect(ext).not.toContain("__bossmode_managed_key__");
     expect(ext).not.toContain("sk-secret");
+  });
+
+  it("keeps newer file OAuth credentials during synced auth overlay and mirrors them to the profile", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      name: "Codex OAuth",
+      providerSlug: "openai-codex",
+      protocol: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      oauthCredentials: { access: "profile-access", refresh: "profile-refresh", expires: 10 },
+      requestProfile: "openai_codex_subscription",
+      enabled: true,
+      isDefault: true,
+      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
+    });
+
+    const authPath = join(dir, "runtime-auth.json");
+    writeFileSync(authPath, JSON.stringify({
+      "openai-codex": { type: "oauth", access: "file-new-access", refresh: "file-new-refresh", expires: 999999 },
+    }, null, 2));
+
+    const profile = mod.getModelCredentialProfile(saved.id)!;
+    const authStorage = mod.createSyncedAuthStorage(authPath, profile);
+
+    expect(authStorage.get("openai-codex")).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
+    expect(mod.getModelCredentialProfile(saved.id)!.oauthCredentials).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
+  });
+
+  it("persists OAuth refreshes from runtime auth storage back to the Bossmode profile", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      name: "Codex OAuth",
+      providerSlug: "openai-codex",
+      protocol: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      oauthCredentials: { access: "old-access", refresh: "old-refresh", expires: 1 },
+      requestProfile: "openai_codex_subscription",
+      enabled: true,
+      isDefault: true,
+      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+    const profile = mod.getModelCredentialProfile(saved.id)!;
+    const authStorage = mod.createSyncedAuthStorage(join(exported!.agentDir, "auth.json"), profile);
+
+    authStorage.set("openai-codex", { type: "oauth", access: "new-access", refresh: "new-refresh", expires: 999999 });
+
+    const stored = mod.getModelCredentialProfile(saved.id)!;
+    expect(stored.oauthCredentials).toMatchObject({ access: "new-access", refresh: "new-refresh", expires: 999999 });
+    expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toContain("new-refresh");
+  });
+
+  it("overwrites stale per-member OAuth credentials when the profile has a newer reconnect token", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      name: "Codex OAuth",
+      providerSlug: "openai-codex",
+      protocol: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      oauthCredentials: { access: "profile-new-access", refresh: "profile-new-refresh", expires: 999999 },
+      requestProfile: "openai_codex_subscription",
+      enabled: true,
+      isDefault: true,
+      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+    writeFileSync(join(exported!.agentDir, "auth.json"), JSON.stringify({
+      "openai-codex": { type: "oauth", access: "runtime-old-access", refresh: "runtime-old-refresh", expires: 1 },
+    }, null, 2));
+
+    mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+
+    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
+    const stored = mod.getModelCredentialProfile(saved.id)!;
+    expect(authJson).toContain("profile-new-refresh");
+    expect(authJson).not.toContain("runtime-old-refresh");
+    expect(stored.oauthCredentials).toMatchObject({ access: "profile-new-access", refresh: "profile-new-refresh", expires: 999999 });
+  });
+
+  it("does not overwrite newer per-member OAuth credentials with stale profile data on export", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      name: "Codex OAuth",
+      providerSlug: "openai-codex",
+      protocol: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      oauthCredentials: { access: "old-access", refresh: "old-refresh", expires: 1 },
+      requestProfile: "openai_codex_subscription",
+      enabled: true,
+      isDefault: true,
+      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+    writeFileSync(join(exported!.agentDir, "auth.json"), JSON.stringify({
+      "openai-codex": { type: "oauth", access: "runtime-access", refresh: "runtime-refresh", expires: 999999 },
+    }, null, 2));
+
+    mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+
+    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
+    const stored = mod.getModelCredentialProfile(saved.id)!;
+    expect(authJson).toContain("runtime-refresh");
+    expect(authJson).not.toContain("old-refresh");
+    expect(stored.oauthCredentials).toMatchObject({ access: "runtime-access", refresh: "runtime-refresh", expires: 999999 });
   });
 });

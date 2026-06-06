@@ -12,7 +12,7 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
-import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef } from "../model-credentials.js";
+import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams } from "./types.js";
@@ -186,7 +186,7 @@ export class PiSdkRuntime implements AgentRuntime {
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
-    const authStorage = AuthStorage.create(join(runtimeAgentDir, "auth.json"));
+    const authStorage = piConfig.profile ? createSyncedAuthStorage(join(runtimeAgentDir, "auth.json"), piConfig.profile) : AuthStorage.create(join(runtimeAgentDir, "auth.json"));
     const modelRegistry = ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"));
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
     const model = modelRegistry.find(provider, modelId);
