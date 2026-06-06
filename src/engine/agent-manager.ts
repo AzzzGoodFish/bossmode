@@ -50,6 +50,14 @@ export function getRegistry(): RuntimeRegistry | null {
 
 type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
 
+function formatRuntimeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Failed to extract accountId from token")) {
+    return "OAuth credential is invalid or expired. Reconnect it in Settings → Model Credentials.";
+  }
+  return message;
+}
+
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
@@ -308,8 +316,9 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
 
         if (event.type === "message_end" && event.stopReason === "error") {
-          const detail = typeof event.errorMessage === "string" && event.errorMessage.trim()
-            ? ` Error: ${event.errorMessage.trim()}`
+          const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
+          const detail = formattedError
+            ? ` Error: ${formattedError}`
             : " An unrecoverable provider error occurred.";
           postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
         }
@@ -332,8 +341,8 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       instances.set(key, instance);
       return instance;
     } catch (err: any) {
-      logger.error("agent", `failed to create agent`, { member: memberName, agent: member.agent, runtime: member.runtime, error: err.message || String(err) });
-      postMessage(roomId, "system", `Failed to create member "${memberName}": ${err.message || String(err)}`);
+      logger.error("agent", `failed to create agent`, { member: memberName, agent: member.agent, runtime: member.runtime, error: formatRuntimeErrorMessage(err) });
+      postMessage(roomId, "system", `Failed to create member "${memberName}": ${formatRuntimeErrorMessage(err)}`);
       return null;
     }
   })();
@@ -393,8 +402,8 @@ export async function activateAgent(roomId: string, memberName: string): Promise
     await instance.handle.prompt(formattedMessages);
     if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "activate_prompt_resolved");
   } catch (err: any) {
-    logger.error("agent", `prompt error`, { member: memberName, error: err.message || String(err) });
-    postMessage(roomId, "system", `Member "${memberName}" error: ${err.message || String(err)}`);
+    logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
+    postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
     updateDispatchState(instance, "idle", "activate_prompt_error");
     instance.queuedInputs = [];
   }
@@ -516,7 +525,7 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
     await instance.handle.prompt(userMessage);
     if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "steer_prompt_resolved");
   } catch (err: any) {
-    logger.error("agent", "steer error", { agent: agentName, error: err.message || String(err) });
+    logger.error("agent", "steer error", { agent: agentName, error: formatRuntimeErrorMessage(err) });
     updateDispatchState(instance, "idle", "steer_prompt_error");
     instance.queuedInputs = [];
   }
