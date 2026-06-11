@@ -190,6 +190,30 @@ export async function handleToolCallback(
       emitTaskEvent(roomId, "commented", result.task, agentName, { commentId: result.comment.id });
       return { ok: true, taskId: result.task.id, commentId: result.comment.id };
     }
+    case "request_approval": {
+      const title = params?.title ? String(params.title).trim() : "";
+      const summary = params?.summary ? String(params.summary).trim() : "";
+      if (!title) return { ok: false, error: "title is required" };
+      if (!summary) return { ok: false, error: "summary is required" };
+      try {
+        const { createGateAndAnnounce } = await import("../api/gates.js");
+        const gate = createGateAndAnnounce(roomId, {
+          title,
+          summary,
+          artifacts: Array.isArray(params?.artifacts) ? params.artifacts.map(String) : undefined,
+          requestedBy: agentName,
+          handoffTo: params?.handoff_to ? String(params.handoff_to) : undefined,
+        });
+        return {
+          ok: true,
+          gateId: gate.id,
+          status: "pending",
+          note: "Approval requested. STOP here — do not continue to the next stage. The user will approve or reject; you will be re-activated with their decision.",
+        };
+      } catch (err: any) {
+        return { ok: false, error: String(err?.message || err) };
+      }
+    }
     case "query_integration": {
       const provider = String(params?.provider || "linear");
       if (provider !== "linear") return { ok: false, error: `Unsupported integration provider: ${provider}` };

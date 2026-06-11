@@ -68,6 +68,7 @@ export type ModelProtocol =
   | "mistral-conversations";
 
 export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
+export type ModelCredentialProfileKind = "builtin_provider" | "custom_endpoint" | "trusted_adapter";
 export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "anthropic_proxy_claude_code" | "openai_codex_subscription";
 
 export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
@@ -79,11 +80,23 @@ export interface ModelDefinitionConfig {
   maxTokens?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
+  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh", string | null>>;
+  compat?: Record<string, unknown>;
   metadataSource?: ModelMetadataSource;
+}
+
+export interface ModelMetadataOverride {
+  contextWindow?: number;
+}
+
+export interface ModelCredentialModelCustomizations {
+  disabled?: string[];
+  contextWindowOverride?: Record<string, number>;
 }
 
 export interface ModelCredentialProfile {
   id: string;
+  profileKind?: ModelCredentialProfileKind;
   name: string;
   providerSlug: string;
   protocol: ModelProtocol;
@@ -98,6 +111,7 @@ export interface ModelCredentialProfile {
   enabled: boolean;
   isDefault: boolean;
   models: ModelDefinitionConfig[];
+  modelCustomizations?: ModelCredentialModelCustomizations;
   createdAt: number;
   updatedAt: number;
 }
@@ -107,6 +121,63 @@ export type ModelCredentialProfileInput = Omit<ModelCredentialProfile, "id" | "c
 export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfile, "apiKey" | "oauthCredentials"> {
   hasSecret: boolean;
   modelRefs: string[];
+  catalogModels?: ModelDefinitionConfig[];
+}
+
+export interface PublicModelProvider {
+  providerSlug: string;
+  displayName: string;
+  authModes: Array<"api_key" | "oauth">;
+  defaultAuthMode: "api_key" | "oauth";
+  modelCount: number;
+  sampleModels: string[];
+  protocol?: ModelProtocol;
+  logoKey?: string;
+}
+
+export interface ConnectApiKeyRequest {
+  providerSlug: string;
+  apiKey: string;
+  name?: string;
+  baseUrlOverride?: string;
+  requestProfile?: ModelRequestProfile;
+  isDefault?: boolean;
+}
+
+export type OAuthLoginJobStatus = "starting" | "awaiting_input" | "awaiting_device" | "completed" | "failed" | "cancelled";
+
+export interface OAuthDeviceCodeInfo {
+  userCode: string;
+  verificationUri: string;
+  expiresInSeconds?: number;
+  intervalSeconds?: number;
+}
+
+export interface OAuthSelectPrompt {
+  message: string;
+  options: Array<{ id: string; label: string }>;
+}
+
+export interface OAuthLoginJobPublic {
+  id: string;
+  status: OAuthLoginJobStatus;
+  providerId: string;
+  authUrl?: string;
+  userCode?: string;
+  deviceCode?: OAuthDeviceCodeInfo;
+  selectPrompt?: OAuthSelectPrompt;
+  prompt: string;
+  error?: string;
+  profileId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StartOAuthConnectionRequest {
+  providerId: string;
+  profileId?: string;
+  name?: string;
+  requestProfile?: ModelRequestProfile;
 }
 
 export interface ModelOption {
@@ -129,40 +200,6 @@ export interface AvailableModelOption extends ModelOption {
   provider: string;
   providerDisplayName?: string;
   images: boolean;
-}
-
-export interface PiConfigImportProviderPreview {
-  providerSlug: string;
-  displayName: string;
-  protocol: ModelProtocol;
-  baseUrl?: string;
-  authType: ModelAuthType;
-  authSource: "auth_json_api_key" | "auth_json_oauth" | "models_json_key" | "models_json_command" | "environment";
-  secretPreview: string;
-  modelCount: number;
-  models: AvailableModelOption[];
-  existingProfileId?: string;
-  importable: boolean;
-  warnings: string[];
-}
-
-export interface PiConfigImportPreview {
-  piAgentDir: string;
-  found: boolean;
-  providers: PiConfigImportProviderPreview[];
-  warnings: string[];
-}
-
-export interface PiConfigImportRequest {
-  providers?: string[];
-  overwriteProviderSlugs?: string[];
-}
-
-export interface PiConfigImportResult {
-  imported: PublicModelCredentialProfile[];
-  skipped: Array<{ providerSlug: string; reason: string }>;
-  overwritten: PublicModelCredentialProfile[];
-  warnings: string[];
 }
 
 // -- Member --
@@ -295,9 +332,11 @@ export interface RoomMessage {
   content: string;
   mentions: string[];
   ts: number;
-  type?: "summary" | "task_event";
+  type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
   summary_meta?: SummaryMeta;
   task_event_meta?: TaskEventMeta;
+  knowledge_event_meta?: KnowledgeEventMeta;
+  gate_event_meta?: GateEventMeta;
 }
 
 // -- Agent Status --
@@ -374,6 +413,56 @@ export interface TaskEventMeta {
   newStatus?: TaskStatus;
   commentId?: string;
   actor: string;
+  /** Short excerpt of the task description / comment body, surfaced inline in chat. */
+  snippet?: string;
+}
+
+// -- Knowledge activity (agent doc writes surfaced into chat) --
+
+export interface KnowledgeEventMeta {
+  /** Path relative to knowledge docs root, e.g. "bossmode/architecture/x.md" */
+  path: string;
+  /** Doc title (frontmatter title, first heading, or filename) */
+  title: string;
+  /** Acting member name */
+  actor: string;
+  /** Which tool produced the write */
+  tool: "write" | "edit";
+}
+
+// -- Artifact Gates (stage approval checkpoints) --
+
+export type GateStatus = "pending" | "approved" | "rejected";
+
+export interface Gate {
+  id: string;
+  roomId: string;
+  title: string;
+  /** Markdown delivery note from the requesting agent */
+  summary: string;
+  /** Knowledge doc paths, file paths, or URLs backing this deliverable */
+  artifacts: string[];
+  /** Member name that requested approval */
+  requestedBy: string;
+  /** Member to activate when approved (next stage in the pipeline) */
+  handoffTo?: string;
+  status: GateStatus;
+  /** User's note on approve/reject */
+  decisionNote?: string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
+export interface GateEventMeta {
+  action: "requested" | "approved" | "rejected";
+  gateId: string;
+  gateTitle: string;
+  requestedBy: string;
+  handoffTo?: string;
+  /** Present on requested: summary + artifacts for inline card rendering */
+  summary?: string;
+  artifacts?: string[];
+  decisionNote?: string;
 }
 
 // -- WebSocket Events (server → client) --

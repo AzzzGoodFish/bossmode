@@ -604,11 +604,58 @@ export interface SummaryMeta {
 }
 
 export interface TaskEventMeta {
-  action: "created" | "updated" | "status_changed" | "deleted";
+  action: "created" | "updated" | "status_changed" | "commented" | "deleted";
   taskId: string;
   taskTitle: string;
   newStatus?: string;
   actor: string;
+  snippet?: string;
+}
+
+export interface KnowledgeEventMeta {
+  path: string;
+  title: string;
+  actor: string;
+  tool: "write" | "edit";
+}
+
+export type GateStatus = "pending" | "approved" | "rejected";
+
+export interface Gate {
+  id: string;
+  roomId: string;
+  title: string;
+  summary: string;
+  artifacts: string[];
+  requestedBy: string;
+  handoffTo?: string;
+  status: GateStatus;
+  decisionNote?: string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
+export interface GateEventMeta {
+  action: "requested" | "approved" | "rejected";
+  gateId: string;
+  gateTitle: string;
+  requestedBy: string;
+  handoffTo?: string;
+  summary?: string;
+  artifacts?: string[];
+  decisionNote?: string;
+}
+
+export async function decideGate(
+  roomId: string,
+  gateId: string,
+  action: "approve" | "reject",
+  note?: string,
+): Promise<Gate> {
+  return apiFetch(`/api/rooms/${roomId}/gates/${gateId}/decision`, {
+    method: "POST",
+    body: JSON.stringify({ action, note }),
+  });
 }
 
 export interface RoomMessage {
@@ -617,9 +664,11 @@ export interface RoomMessage {
   content: string;
   mentions: string[];
   ts: number;
-  type?: "summary" | "task_event";
+  type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
   summary_meta?: SummaryMeta;
   task_event_meta?: TaskEventMeta;
+  knowledge_event_meta?: KnowledgeEventMeta;
+  gate_event_meta?: GateEventMeta;
 }
 
 export interface MessageSearchResult {
