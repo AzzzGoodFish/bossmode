@@ -89,22 +89,22 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
   }, [onClose]);
 
   return (
-    <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col shrink-0">
+    <div className="border-b border-line-soft bg-surface-1 flex flex-col shrink-0">
       {/* Search controls */}
       <div className="flex items-center gap-2 px-3 py-2">
-        <Search size={14} className="text-zinc-400 shrink-0" />
+        <Search size={14} className="text-ink-4 shrink-0" />
         <input
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search messages..."
-          className="flex-1 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none"
+          className="flex-1 bg-transparent text-sm text-ink-1 placeholder:text-ink-4 focus:outline-none"
         />
         {/* Sender filter */}
         <select
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="text-xs bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-zinc-700 dark:text-zinc-300 cursor-pointer focus:outline-none"
+          className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-ink-2 cursor-pointer focus:outline-none"
         >
           <option value="">All senders</option>
           {members.map((m) => (
@@ -115,30 +115,30 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
         <select
           value={dateRange}
           onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-          className="text-xs bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-zinc-700 dark:text-zinc-300 cursor-pointer focus:outline-none"
+          className="text-xs bg-surface-2 border border-line rounded px-2 py-1 text-ink-2 cursor-pointer focus:outline-none"
         >
           <option value="all">All time</option>
           <option value="today">Today</option>
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
         </select>
-        <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer p-0.5">
+        <button onClick={onClose} className="text-ink-4 hover:text-ink-1 cursor-pointer p-0.5">
           <X size={14} />
         </button>
       </div>
 
       {/* Results */}
       {(result || loading) && (
-        <div className="border-t border-zinc-200 dark:border-zinc-800 max-h-72 overflow-y-auto">
+        <div className="border-t border-line-soft max-h-72 overflow-y-auto">
           {loading && (
-            <div className="text-center py-4 text-xs text-zinc-400">Searching…</div>
+            <div className="text-center py-4 text-xs text-ink-4">Searching…</div>
           )}
           {!loading && result && result.total === 0 && (
-            <div className="text-center py-4 text-xs text-zinc-400">No results</div>
+            <div className="text-center py-4 text-xs text-ink-4">No results</div>
           )}
           {!loading && result && result.total > 0 && (
             <>
-              <div className="px-3 py-1.5 text-[10px] text-zinc-500 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="px-3 py-1.5 text-[10px] text-ink-3 border-b border-line-soft">
                 {result.total} result{result.total === 1 ? "" : "s"}
                 {result.total > 50 ? " (showing 50)" : ""}
               </div>
@@ -163,13 +163,13 @@ function MessageResult({ msg, query, onJump }: { msg: RoomMessage; query: string
   return (
     <button
       onClick={onJump}
-      className="w-full text-left px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 border-b border-zinc-100 dark:border-zinc-900 cursor-pointer"
+      className="w-full text-left px-3 py-2 hover:bg-surface-2/50 border-b border-line-soft cursor-pointer"
     >
       <div className="flex items-center gap-2 mb-0.5">
-        <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{msg.sender}</span>
-        <span className="text-[10px] text-zinc-400 tabular-nums">{formatTs(msg.ts)}</span>
+        <span className="text-xs font-semibold text-ink-2">{msg.sender}</span>
+        <span className="text-[10px] text-ink-4 tabular-nums">{formatTs(msg.ts)}</span>
       </div>
-      <div className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed truncate">
+      <div className="text-xs text-ink-3 leading-relaxed truncate">
         {highlight(preview, query)}
       </div>
     </button>

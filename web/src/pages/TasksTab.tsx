@@ -53,24 +53,24 @@ export function TasksTab({ roomId, members, onOpenTaskDetail }: TasksTabProps) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="h-10 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 shrink-0">
+      <div className="h-10 border-b border-line-soft flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setView("board")}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer ${view === "board" ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer ${view === "board" ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}
           >
             <LayoutGrid size={12} /> Board
           </button>
           <button
             onClick={() => setView("list")}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer ${view === "list" ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer ${view === "list" ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}
           >
             <List size={12} /> List
           </button>
         </div>
         <button
           onClick={() => onOpenTaskDetail("")}
-          className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-accent text-accent-contrast hover:opacity-90 rounded cursor-pointer"
         >
           <Plus size={12} /> New task
         </button>
@@ -79,7 +79,7 @@ export function TasksTab({ roomId, members, onOpenTaskDetail }: TasksTabProps) {
       {/* Content */}
       <div className="flex-1 overflow-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-zinc-400">Loading tasks...</div>
+          <div className="flex items-center justify-center h-32 text-sm text-ink-4">Loading tasks...</div>
         ) : view === "board" ? (
           <TaskBoard
             tasks={tasks}

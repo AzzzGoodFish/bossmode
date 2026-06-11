@@ -18,7 +18,7 @@ import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MoveToDialog } from "../components/MoveToDialog";
 
-const inputCls = "w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600";
+const inputCls = "w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors";
 
 const WIDTH_STORAGE_KEY = "bossmode.knowledge.sidebarWidth";
 const EXPANDED_STORAGE_KEY = "bossmode.knowledge.expandedFolders";
@@ -522,10 +522,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <MobileTopBar title="Knowledge" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
-      <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-line-soft">
         <div>
-          <h1 className="text-lg font-bold text-zinc-900 dark:text-white">Knowledge</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
+          <h1 className="text-lg font-bold text-ink-1">Knowledge</h1>
+          <p className="text-xs text-ink-3 mt-0.5">
             Markdown documents organized by folders. Use top-level folders to separate projects.
           </p>
         </div>
@@ -534,35 +534,35 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       <div className="flex-1 flex overflow-hidden">
         <aside
           style={{ width: isMobile ? undefined : `${sidebarWidth}px` }}
-          className={`${isMobile ? (mobileView === "tree" ? "flex-1" : "hidden") : "shrink-0"} border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col`}
+          className={`${isMobile ? (mobileView === "tree" ? "flex-1" : "hidden") : "shrink-0"} border-r border-line-soft overflow-y-auto bg-surface-1/50 flex flex-col`}
         >
-          <div className="px-3 pt-3 pb-2 flex items-center justify-between sticky top-0 bg-zinc-50/90 dark:bg-zinc-900/90 backdrop-blur-sm z-10">
-            <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Documents</span>
+          <div className="px-3 pt-3 pb-2 flex items-center justify-between sticky top-0 bg-surface-1/90 backdrop-blur-sm z-10">
+            <span className="text-xs font-semibold text-ink-3 uppercase tracking-wider">Documents</span>
             <div className="flex items-center gap-1">
               <button title="New folder at root" onClick={() => handleCreateFolder("")}
-                className="p-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
+                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
                 <FolderPlus size={14} />
               </button>
               <button title="New document at root" onClick={() => handleCreateDoc("")}
-                className="p-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
+                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
                 <Plus size={14} />
               </button>
             </div>
           </div>
 
           {selectedPaths.size > 0 && (
-            <div className="px-3 py-2 border-y border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/50 flex items-center justify-between text-xs">
-              <span className="text-zinc-700 dark:text-zinc-200 font-medium flex items-center gap-1">
+            <div className="px-3 py-2 border-y border-line-soft bg-surface-2/50 flex items-center justify-between text-xs">
+              <span className="text-ink-2 font-medium flex items-center gap-1">
                 <CheckSquare size={12} /> {selectedPaths.size} selected
               </span>
               <div className="flex items-center gap-2">
-                <button onClick={() => openMoveDialogFor([...selectedPaths])} className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white cursor-pointer">
+                <button onClick={() => openMoveDialogFor([...selectedPaths])} className="text-ink-3 hover:text-ink-1 cursor-pointer">
                   Move to...
                 </button>
-                <button onClick={handleBatchDelete} className="text-red-500 hover:text-red-400 cursor-pointer">
+                <button onClick={handleBatchDelete} className="text-blocked hover:opacity-80 cursor-pointer">
                   Delete
                 </button>
-                <button onClick={() => setSelectedPaths(new Set())} className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer">
+                <button onClick={() => setSelectedPaths(new Set())} className="text-ink-3 hover:text-ink-2 cursor-pointer">
                   <X size={12} />
                 </button>
               </div>
@@ -607,7 +607,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
               cancelRenameRef={cancelRenameRef}
             />
           ) : (
-            <div className="px-3 py-8 text-center text-xs text-zinc-400">
+            <div className="px-3 py-8 text-center text-xs text-ink-4">
               Knowledge is empty.
               <br />
               Click + to add your first document.
@@ -618,7 +618,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
         {!isMobile && (
           <div
             onMouseDown={onDragStart}
-            className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
+            className="w-1 shrink-0 cursor-col-resize bg-transparent hover:opacity-90/40 transition-colors"
             title="Drag to resize"
           />
         )}
@@ -627,7 +627,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
           {isMobile && mobileView === "doc" && (
             <button
               onClick={() => { void clearDocumentSelection(); }}
-              className="md:hidden flex items-center gap-1 px-4 py-2.5 text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white border-b border-zinc-200 dark:border-zinc-800 w-full cursor-pointer"
+              className="md:hidden flex items-center gap-1 px-4 py-2.5 text-sm text-ink-2 hover:text-ink-1 border-b border-line-soft w-full cursor-pointer"
             >
               ← Back
             </button>
@@ -647,18 +647,18 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                         }
                       }}
                       placeholder="Untitled"
-                      className="w-full text-lg font-bold text-zinc-900 dark:text-white bg-transparent focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 leading-tight"
+                      className="w-full text-lg font-bold text-ink-1 bg-transparent focus:outline-none placeholder-ink-4 leading-tight"
                     />
-                    <div className="text-xs text-zinc-500 mt-0.5 font-mono truncate">{currentDoc.id} · by {currentDoc.source}</div>
+                    <div className="text-xs text-ink-3 mt-0.5 font-mono truncate">{currentDoc.id} · by {currentDoc.source}</div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={() => downloadDoc(currentDoc)}
                       title="Download as .md file"
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm border border-line rounded text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer">
                       <Download size={14} /> Download
                     </button>
                     <button onClick={handleDeleteDoc}
-                      className="flex items-center gap-1 px-3 py-1.5 text-red-500 dark:text-red-400 hover:text-red-400 dark:hover:text-red-300 text-sm cursor-pointer">
+                      className="flex items-center gap-1 px-3 py-1.5 text-blocked hover:opacity-80 text-sm cursor-pointer">
                       <Trash2 size={14} /> Delete
                     </button>
                   </div>
@@ -676,7 +676,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                 />
               </div>
           ) : isDocLoading ? (
-            <div className="h-full flex items-center justify-center text-sm text-zinc-400">
+            <div className="h-full flex items-center justify-center text-sm text-ink-4">
               Loading document…
             </div>
           ) : folderNode ? (
@@ -689,7 +689,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
               onCreateFolder={() => handleCreateFolder(folderNode.path)}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-sm text-zinc-400">
+            <div className="h-full flex items-center justify-center text-sm text-ink-4">
               Select a document from the tree to view it.
             </div>
           )}
@@ -705,7 +705,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
             setContextMenu(null);
           }} />
           <ContextMenuItem icon={<Pencil size={14} />} label="Rename" onClick={() => handleStartRename(contextMenu.node.path)} />
-          <div className="h-px my-1 bg-zinc-200 dark:bg-zinc-700" />
+          <div className="h-px my-1 bg-surface-3" />
           <ContextMenuItem icon={<Trash2 size={14} />} label="Delete" danger onClick={() => {
             void handleDeletePath(contextMenu.node.path);
             setContextMenu(null);
@@ -729,17 +729,17 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
           setDangerConfirmState(null);
         }}>
           <div
-            className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl p-5"
+            className="w-full max-w-sm bg-surface-1 border border-line rounded-lg shadow-xl p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-5 whitespace-pre-wrap">{dangerConfirmState.message}</p>
+            <p className="text-sm text-ink-1 mb-5 whitespace-pre-wrap">{dangerConfirmState.message}</p>
             <div className="flex items-center justify-end gap-2">
               <button
                 onClick={() => {
                   dangerConfirmState.resolve(false);
                   setDangerConfirmState(null);
                 }}
-                className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white cursor-pointer"
+                className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer"
               >
                 Cancel
               </button>
@@ -749,7 +749,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                   dangerConfirmState.resolve(true);
                   setDangerConfirmState(null);
                 }}
-                className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-500 cursor-pointer"
+                className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-blocked hover:opacity-90 cursor-pointer"
               >
                 Delete
               </button>
@@ -907,11 +907,11 @@ function TreeNode({
 
   const rowBase = "group relative flex items-center justify-between py-2.5 md:py-1 pr-1 cursor-pointer";
   const rowSelect = openedSelected
-    ? "bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-300"
+    ? "bg-accent-dim text-accent-ink"
     : multiSelected
-      ? "bg-blue-50 dark:bg-blue-900/20 text-zinc-800 dark:text-zinc-200 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-blue-500"
-      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
-  const dropCls = isDropTarget ? "outline outline-2 outline-blue-500 outline-offset-[-1px] bg-blue-50 dark:bg-blue-900/20" : "";
+      ? "bg-accent-dim text-ink-1 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-accent"
+      : "text-ink-2 hover:bg-surface-2/60";
+  const dropCls = isDropTarget ? "outline outline-2 outline-accent outline-offset-[-1px] bg-accent-dim" : "";
 
   if (node.kind === "folder") {
     const isOpen = expanded.has(node.path);
@@ -930,11 +930,11 @@ function TreeNode({
           {...(isMobile ? lp : {})}
           className={`${rowBase} ${rowSelect} ${dropCls} ${isDragging ? "opacity-40" : ""}`}
         >
-          <span className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300 min-w-0">
-            {isOpen ? <ChevronDown size={12} className="text-zinc-400 shrink-0" /> : <ChevronRight size={12} className="text-zinc-400 shrink-0" />}
+          <span className="flex items-center gap-1 text-ink-2 min-w-0">
+            {isOpen ? <ChevronDown size={12} className="text-ink-4 shrink-0" /> : <ChevronRight size={12} className="text-ink-4 shrink-0" />}
             {isOpen
-              ? <FolderOpen size={13} className="text-amber-500 shrink-0" />
-              : <Folder size={13} className="text-amber-500 shrink-0" />}
+              ? <FolderOpen size={13} className="text-think shrink-0" />
+              : <Folder size={13} className="text-think shrink-0" />}
             {renamingPath === node.path ? (
               <input
                 autoFocus
@@ -959,7 +959,7 @@ function TreeNode({
                     onStartRename(null);
                   }
                 }}
-                className="text-xs bg-transparent border border-blue-500 rounded px-1 py-0.5 outline-none w-full min-w-0"
+                className="text-xs bg-transparent border border-accent rounded px-1 py-0.5 outline-none w-full min-w-0"
               />
             ) : (
               <span className="font-medium text-xs truncate" onDoubleClick={() => onStartRename(node.path)}>{node.name}</span>
@@ -967,11 +967,11 @@ function TreeNode({
           </span>
           <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
             <button title="New folder" onClick={(e) => { e.stopPropagation(); onCreateFolder(node.path); }}
-              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
+              className="p-0.5 text-ink-3 hover:text-ink-1 cursor-pointer">
               <FolderPlus size={12} />
             </button>
             <button title="New document" onClick={(e) => { e.stopPropagation(); onCreateDoc(node.path); }}
-              className="p-0.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
+              className="p-0.5 text-ink-3 hover:text-ink-1 cursor-pointer">
               <Plus size={12} />
             </button>
           </span>
@@ -1025,7 +1025,7 @@ function TreeNode({
       >
         <span className="flex items-center gap-1.5 min-w-0">
           <span className="w-3 shrink-0" />
-          <FileIcon size={12} className="text-zinc-400 dark:text-zinc-600 shrink-0" />
+          <FileIcon size={12} className="text-ink-4 shrink-0" />
           {renamingPath === node.path ? (
             <input
               autoFocus
@@ -1050,7 +1050,7 @@ function TreeNode({
                   onStartRename(null);
                 }
               }}
-              className="text-xs bg-transparent border border-blue-500 rounded px-1 py-0.5 outline-none w-full min-w-0"
+              className="text-xs bg-transparent border border-accent rounded px-1 py-0.5 outline-none w-full min-w-0"
             />
           ) : (
             <span className="text-xs truncate" title={node.title || node.name} onDoubleClick={() => onStartRename(node.path)}>
@@ -1067,7 +1067,7 @@ function ContextMenuOverlay({ x, y, onClose, children }: { x: number; y: number;
   return (
     <div className="fixed inset-0 z-40" onMouseDown={onClose}>
       <div
-        className="absolute min-w-[170px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg p-1"
+        className="absolute min-w-[170px] bg-surface-1 border border-line rounded-lg shadow-lg p-1"
         style={{ left: `${x}px`, top: `${y}px` }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -1082,8 +1082,8 @@ function ContextMenuItem({ icon, label, onClick, danger }: { icon: React.ReactNo
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded cursor-pointer ${danger
-        ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-        : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+        ? "text-blocked hover:bg-blocked-dim"
+        : "text-ink-2 hover:bg-surface-2"}`}
     >
       {icon}
       {label}
@@ -1112,10 +1112,10 @@ function FolderOverview({
       <div className="flex items-start justify-between mb-6">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <Folder size={20} className="text-zinc-500 shrink-0" />
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-white truncate">{node.name}</h2>
+            <Folder size={20} className="text-ink-3 shrink-0" />
+            <h2 className="text-lg font-bold text-ink-1 truncate">{node.name}</h2>
           </div>
-          <div className="text-xs text-zinc-500">
+          <div className="text-xs text-ink-3">
             {totalDocs} document{totalDocs !== 1 ? "s" : ""}
             {subfolders.length > 0 && ` · ${subfolders.length} subfolder${subfolders.length !== 1 ? "s" : ""}`}
           </div>
@@ -1123,13 +1123,13 @@ function FolderOverview({
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={onCreateFolder}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer"
+            className="flex items-center gap-1 px-3 py-1.5 text-sm border border-line rounded text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer"
           >
             <FolderPlus size={14} /> New folder
           </button>
           <button
             onClick={onCreateDoc}
-            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded cursor-pointer"
+            className="flex items-center gap-1 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm rounded cursor-pointer"
           >
             <Plus size={14} /> New document
           </button>
@@ -1138,7 +1138,7 @@ function FolderOverview({
 
       {rootDocs.length > 0 && (
         <div className="mb-6">
-          <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Documents</div>
+          <div className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider mb-2">Documents</div>
           <div className="space-y-1">
             {rootDocs.map((doc) => (
               <DocRow key={doc.path} node={doc} onClick={() => onSelectDoc(doc.path)} />
@@ -1152,7 +1152,7 @@ function FolderOverview({
       ))}
 
       {totalDocs === 0 && subfolders.length === 0 && (
-        <div className="text-center py-12 text-sm text-zinc-400">
+        <div className="text-center py-12 text-sm text-ink-4">
           This folder is empty. Click "New document" to add one.
         </div>
       )}
@@ -1170,8 +1170,8 @@ function FolderGroup({ node, onSelectDoc }: { node: KnowledgeTreeNode; onSelectD
   return (
     <div className="mb-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{node.name}</div>
-        <span className="text-[10px] text-zinc-400 tabular-nums">{docs.length}</span>
+        <div className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider">{node.name}</div>
+        <span className="text-[10px] text-ink-4 tabular-nums">{docs.length}</span>
       </div>
       <div className="space-y-1">
         {visible.map((doc) => (
@@ -1180,7 +1180,7 @@ function FolderGroup({ node, onSelectDoc }: { node: KnowledgeTreeNode; onSelectD
         {shouldCollapse && !expanded && (
           <button
             onClick={() => setExpanded(true)}
-            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 px-3 py-1.5 cursor-pointer"
+            className="text-xs text-ink-3 hover:text-ink-2 px-3 py-1.5 cursor-pointer"
           >
             Show {docs.length - 3} more…
           </button>
@@ -1194,10 +1194,10 @@ function DocRow({ node, onClick }: { node: KnowledgeTreeNode; onClick: () => voi
   return (
     <button
       onClick={onClick}
-      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer group"
+      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-line-soft dark:hover:border-line-soft hover:bg-surface-2/50 transition-colors cursor-pointer group"
     >
-      <FileIcon size={14} className="text-zinc-400 dark:text-zinc-600 shrink-0" />
-      <span className="text-sm text-zinc-800 dark:text-zinc-300 group-hover:text-zinc-900 dark:group-hover:text-white truncate">
+      <FileIcon size={14} className="text-ink-4 shrink-0" />
+      <span className="text-sm text-ink-2 group-hover:text-ink-1 truncate">
         {node.title || node.name.replace(/\.md$/i, "")}
       </span>
     </button>

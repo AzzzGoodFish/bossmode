@@ -32,9 +32,9 @@ export function TaskList({ tasks, onUpdateTaskStatus, onOpenTaskDetail }: TaskLi
         if (group.length === 0) return null;
         return (
           <div key={status} className="mb-4">
-            <div className="sticky top-0 bg-zinc-50/95 dark:bg-zinc-950/95 backdrop-blur-sm z-10 flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800">
-              <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{STATUS_LABELS[status]}</span>
-              <span className="text-[10px] text-zinc-400 tabular-nums">{group.length}</span>
+            <div className="sticky top-0 bg-surface-0/95 backdrop-blur-sm z-10 flex items-center gap-2 px-3 py-1.5 border-b border-line-soft">
+              <span className="text-xs font-semibold text-ink-3 uppercase tracking-wider">{STATUS_LABELS[status]}</span>
+              <span className="text-[10px] text-ink-4 tabular-nums">{group.length}</span>
             </div>
             {group.map((task) => (
               <TaskCard
@@ -49,7 +49,7 @@ export function TaskList({ tasks, onUpdateTaskStatus, onOpenTaskDetail }: TaskLi
         );
       })}
       {tasks.length === 0 && (
-        <div className="text-center py-12 text-sm text-zinc-400">No tasks yet</div>
+        <div className="text-center py-12 text-sm text-ink-4">No tasks yet</div>
       )}
     </div>
   );

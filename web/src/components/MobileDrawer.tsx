@@ -75,7 +75,7 @@ export function MobileDrawer({ open, side, onClose, width = "w-72", children }: 
       <div
         ref={drawerRef}
         className={`absolute inset-y-0 ${positionCls} ${width} max-w-[85vw] flex flex-col
-          bg-white dark:bg-zinc-950 shadow-xl
+          bg-surface-0 shadow-xl
           transform transition-transform duration-300 ease-out
           ${open ? "translate-x-0" : translateOut}
           overflow-y-auto overscroll-contain

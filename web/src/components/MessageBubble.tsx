@@ -68,23 +68,23 @@ export function MessageBubble({
 
   if (isSystem) {
     return (
-      <div className="text-xs text-zinc-500 italic py-1 px-1 flex items-center gap-2">
+      <div className="text-xs text-ink-4 italic py-1 px-1 flex items-center gap-2">
         <span>{content}</span>
-        {time && <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums ml-auto" title={fullTime}>{time}</span>}
+        {time && <span className="text-[11px] text-ink-4 tabular-nums ml-auto" title={fullTime}>{time}</span>}
       </div>
     );
   }
 
-  const avatarBg = isUser ? "bg-blue-100 dark:bg-blue-900/50 border-blue-200 dark:border-blue-800/50" : "bg-emerald-100 dark:bg-emerald-900/50 border-emerald-200 dark:border-emerald-800/50";
-  const avatarText = isUser ? "text-blue-600 dark:text-blue-400" : "text-emerald-600 dark:text-emerald-400";
-  const nameColor = isUser ? "text-blue-600 dark:text-blue-400" : "text-emerald-600 dark:text-emerald-400";
-  const bubbleBg = isUser ? "bg-blue-50 dark:bg-blue-600/10 border-blue-200/50 dark:border-blue-800/20" : "bg-white dark:bg-zinc-800/60 border-zinc-200/50 dark:border-zinc-700/30";
+  const avatarBg = isUser ? "bg-accent-dim border-accent/20" : "bg-surface-3 border-line";
+  const avatarText = isUser ? "text-accent-ink" : "text-ink-2";
+  const nameColor = isUser ? "text-accent-ink" : "text-ink-1";
+  const bubbleBg = isUser ? "bg-accent-dim border-accent/15" : "bg-surface-2/60 border-line-soft";
   const displayName = isUser ? "you" : sender;
 
   const hasAttachments = ATTACHMENT_RE_M.test(content);
 
   return (
-    <div className={`group flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-zinc-100/70 dark:hover:bg-zinc-800/40 transition-colors`}>
+    <div className={`group flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-surface-2/40 transition-colors`}>
       {grouped
         ? <div className="w-8 shrink-0" />
         : <div className={`w-8 h-8 rounded-full ${avatarBg} border flex items-center justify-center text-xs ${avatarText} font-semibold shrink-0 mt-0.5`}>
@@ -96,7 +96,7 @@ export function MessageBubble({
         {!grouped && (
           <div className="flex items-baseline gap-2 mb-1">
             <span className={`text-sm font-semibold ${nameColor}`}>{displayName}</span>
-            {time && <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums">{time}</span>}
+            {time && <span className="text-[11px] text-ink-4 tabular-nums">{time}</span>}
           </div>
         )}
 
@@ -108,13 +108,13 @@ export function MessageBubble({
             roomId={roomId}
           />
         ) : (
-          <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-zinc-800 dark:text-zinc-300 break-words leading-relaxed inline-block max-w-full`}>
+          <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
             {isMarkdown ? <Markdown content={content} /> : <MentionText content={content} />}
           </div>
         )}
 
         {grouped && (
-          <span className="text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity ml-2" title={fullTime}>
+          <span className="text-[11px] text-ink-4 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity ml-2" title={fullTime}>
             {time}
           </span>
         )}
@@ -143,7 +143,7 @@ function MessageWithAttachments({
   return (
     <div className="max-w-full">
       {hasBody && (
-        <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-zinc-800 dark:text-zinc-300 break-words leading-relaxed inline-block max-w-full`}>
+        <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
           {isMarkdown ? <Markdown content={bodyText} /> : <MentionText content={bodyText} />}
         </div>
       )}
@@ -175,7 +175,7 @@ function AttachmentRow({
   const url = attachmentUrl(path, roomId);
   const isImage = isImagePath(path);
   const Icon = isImage ? ImageIcon : FileText;
-  const iconColor = isImage ? "text-blue-500" : "text-zinc-500";
+  const iconColor = isImage ? "text-accent-ink" : "text-ink-3";
 
   const handleNameClick = (e: React.MouseEvent) => {
     if (!url) return;
@@ -185,13 +185,13 @@ function AttachmentRow({
   };
 
   return (
-    <div className="group/att flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
+    <div className="group/att flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line bg-surface-0/40 hover:border-line-strong transition-colors">
       <Icon size={14} className={`${iconColor} shrink-0`} />
       <button
         type="button"
         disabled={!url}
         onClick={handleNameClick}
-        className="text-xs text-zinc-700 dark:text-zinc-300 truncate flex-1 min-w-0 text-left hover:text-zinc-900 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        className="text-xs text-ink-2 truncate flex-1 min-w-0 text-left hover:text-ink-1 disabled:cursor-not-allowed disabled:opacity-60"
         title={name}
       >
         {name}
@@ -203,7 +203,7 @@ function AttachmentRow({
             onClick={() => onPreview(url)}
             title="Preview"
             aria-label="Preview"
-            className="w-6 h-6 flex items-center justify-center rounded text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+            className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2"
           >
             <Eye size={12} />
           </button>
@@ -215,7 +215,7 @@ function AttachmentRow({
             title="Download"
             aria-label="Download"
             onClick={(e) => e.stopPropagation()}
-            className="w-6 h-6 flex items-center justify-center rounded text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+            className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2"
           >
             <Download size={12} />
           </a>
@@ -280,7 +280,7 @@ function MentionText({ content }: { content: string }) {
     <span className="whitespace-pre-wrap">
       {parts.map((part, i) => {
         if (part.startsWith("@")) {
-          return <span key={i} className="text-blue-500 dark:text-blue-400 font-medium">{part}</span>;
+          return <span key={i} className="text-accent-ink font-medium">{part}</span>;
         }
         return part;
       })}

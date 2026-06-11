@@ -92,20 +92,20 @@ export function MarkdownField({
     return (
       <div className={`markdown-field markdown-field--editing ${className}`}>
         {!autoEdit && (
-          <div className="sticky top-0 z-20 mb-3 pb-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur flex items-center gap-2">
+          <div className="sticky top-0 z-20 mb-3 pb-3 border-b border-line-soft bg-white/95 bg-surface-0/95 backdrop-blur flex items-center gap-2">
             <button
               onClick={handleSave}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Check size={14} /> Save
-              <span className="hidden md:inline ml-1 text-[10px] text-blue-100/80 font-mono">⌘↵</span>
+              <span className="hidden md:inline ml-1 text-[10px] text-accent-contrast/80 font-mono">⌘↵</span>
             </button>
             <button
               onClick={handleCancel}
-              className="px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 text-sm text-ink-2 hover:text-ink-1 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               Cancel
-              <span className="hidden md:inline text-[10px] text-zinc-400 font-mono">Esc</span>
+              <span className="hidden md:inline text-[10px] text-ink-4 font-mono">Esc</span>
             </button>
           </div>
         )}
@@ -126,7 +126,7 @@ export function MarkdownField({
         onClick={enterEdit}
         disabled={readOnly}
         style={{ minHeight }}
-        className={`markdown-field markdown-field--empty group/field w-full flex items-center justify-start text-left px-3 py-2 rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/30 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/40 transition-colors text-sm text-zinc-400 dark:text-zinc-500 disabled:cursor-not-allowed disabled:opacity-60 cursor-text ${className}`}
+        className={`markdown-field markdown-field--empty group/field w-full flex items-center justify-start text-left px-3 py-2 rounded-md border border-dashed border-line bg-surface-0/40 hover:border-line-strong hover:bg-surface-2/40 transition-colors text-sm text-ink-4 disabled:cursor-not-allowed disabled:opacity-60 cursor-text ${className}`}
       >
         {placeholder}
       </button>
@@ -147,7 +147,7 @@ export function MarkdownField({
           type="button"
           onClick={enterEdit}
           aria-label="Edit"
-          className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
+          className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-white/90 dark:bg-surface-1/90 backdrop-blur-sm border border-line text-ink-2 hover:text-ink-1 hover:bg-white dark:hover:bg-surface-2 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
         >
           <Pencil size={12} /> Edit
         </button>

@@ -346,21 +346,21 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Sub-view tabs */}
-      <div className="flex items-center border-b border-zinc-200 dark:border-zinc-800 px-4 gap-1 shrink-0">
+      <div className="flex items-center border-b border-line-soft px-4 gap-1 shrink-0">
         <SubTab label="Chat" active={view === "chat"} onClick={() => setView("chat")} />
         <SubTab label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
         {(headerControls.showActivityModeToggle || headerControls.showInterrupt) && (
           <div className="ml-auto flex items-center gap-2">
             {headerControls.showActivityModeToggle && (
-              <div className="inline-flex rounded-md border border-zinc-300 dark:border-zinc-700 overflow-hidden" role="radiogroup" aria-label="Output format">
+              <div className="inline-flex rounded-md border border-line overflow-hidden" role="radiogroup" aria-label="Output format">
                 <button
                   onClick={() => setActivityMode("formatted")}
                   role="radio"
                   aria-checked={activityMode === "formatted"}
                   className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                     activityMode === "formatted"
-                      ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                      : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                      ? "bg-surface-3 text-ink-1"
+                      : "bg-transparent text-ink-3 hover:text-ink-2"
                   }`}
                 >Formatted</button>
                 <button
@@ -369,8 +369,8 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
                   aria-checked={activityMode === "raw"}
                   className={`px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                     activityMode === "raw"
-                      ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                      : "bg-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                      ? "bg-surface-3 text-ink-1"
+                      : "bg-transparent text-ink-3 hover:text-ink-2"
                   }`}
                 >Raw</button>
               </div>
@@ -378,7 +378,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
             {headerControls.showInterrupt && (
               <button
                 onClick={() => { abortAgent(roomId, agentName).catch(console.error); }}
-                className="px-2.5 py-1 text-[11px] font-medium bg-red-600 hover:bg-red-500 text-white rounded transition-colors cursor-pointer"
+                className="px-2.5 py-1 text-[11px] font-semibold bg-blocked hover:opacity-90 text-white rounded transition-opacity cursor-pointer"
                 title={`Interrupt ${agentName}`}
               >Interrupt</button>
             )}
@@ -424,8 +424,8 @@ function SubTab({ label, active, onClick }: { label: string; active: boolean; on
       onClick={onClick}
       className={`px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
         active
-          ? "text-blue-500 dark:text-blue-400 border-b-2 border-blue-500"
-          : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          ? "text-accent-ink border-b-2 border-accent"
+          : "text-ink-3 hover:text-ink-2"
       }`}
     >
       {label}
@@ -748,16 +748,16 @@ function AgentChat({
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 text-sm" onScroll={handleScroll}>
         <div ref={contentRef} className="space-y-2">
           {hasMore === false && chatEvents.length > 0 && (
-            <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of conversation</div>
+            <div className="text-center text-xs text-ink-4 py-2">Beginning of conversation</div>
           )}
           {loadingOlder && (
             <div className="flex items-center justify-center gap-1.5 py-2">
-              <Loader2 size={14} className="animate-spin text-zinc-400" />
-              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
+              <Loader2 size={14} className="animate-spin text-ink-4" />
+              <span className="text-[11px] text-ink-4">Loading earlier messages</span>
             </div>
           )}
           {chatEvents.length === 0 && !isWorking && (
-            <div className="text-zinc-600 text-center py-8">
+            <div className="text-ink-4 text-center py-8">
               Send a private instruction to {agentName}...
             </div>
           )}
@@ -778,7 +778,7 @@ function AgentChat({
             );
           })}
           {isWorking && (
-            <div className="text-zinc-500 text-xs flex items-center gap-2 py-1">
+            <div className="text-ink-3 text-xs flex items-center gap-2 py-1">
               <span className="animate-pulse">●</span> {agentName} is working...
             </div>
           )}
@@ -792,15 +792,15 @@ function AgentChat({
           {pendingFiles.map((pf, idx) => (
             <div key={idx} className="relative group">
               {pf.preview ? (
-                <img src={pf.preview} alt={pf.file.name} className="w-12 h-12 object-cover rounded border border-zinc-300 dark:border-zinc-600" />
+                <img src={pf.preview} alt={pf.file.name} className="w-12 h-12 object-cover rounded border border-line" />
               ) : (
-                <div className="w-12 h-12 flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-700">
-                  <span className="text-[9px] text-zinc-500 truncate px-0.5">{pf.file.name.split(".").pop()}</span>
+                <div className="w-12 h-12 flex items-center justify-center rounded border border-line bg-surface-2">
+                  <span className="text-[9px] text-ink-3 truncate px-0.5">{pf.file.name.split(".").pop()}</span>
                 </div>
               )}
               <button
                 onClick={() => removeFile(idx)}
-                className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-blocked text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
               >
                 <X size={8} />
               </button>
@@ -809,13 +809,14 @@ function AgentChat({
         </div>
       )}
 
-      <div className="relative border-t border-zinc-200 dark:border-zinc-800 p-3 flex gap-2 items-end">
+      <div className="relative border-t border-line-soft p-3 flex gap-2 items-end">
         {/* Slash command menu */}
         {showCommandMenu && filteredCommands.length > 0 && (
           <div
             role="listbox"
             aria-label="Slash commands"
-            className="absolute bottom-full left-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden w-72 z-20 max-h-60 overflow-y-auto"
+            className="absolute bottom-full left-3 mb-1 bg-surface-3 border border-line-strong rounded-lg overflow-hidden w-72 z-20 max-h-60 overflow-y-auto"
+            style={{ boxShadow: "var(--shadow-pop)" }}
           >
             {filteredCommands.map((cmd, idx) => {
               const active = idx === commandIdx;
@@ -826,15 +827,15 @@ function AgentChat({
                   aria-selected={active}
                   className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
                     active
-                      ? "bg-blue-50 dark:bg-blue-600/20"
-                      : "hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      ? "bg-accent-dim"
+                      : "hover:bg-surface-2"
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
                   onMouseEnter={() => setCommandIdx(idx)}
                   onClick={() => { setInput(cmd.name); setShowCommandMenu(false); }}
                 >
-                  <span className={`font-mono ${active ? "text-blue-700 dark:text-blue-300" : "text-zinc-900 dark:text-white"}`}>{cmd.name}</span>
-                  <span className={`ml-2 text-xs ${active ? "text-blue-500/80 dark:text-blue-400/80" : "text-zinc-400 dark:text-zinc-500"}`}>{cmd.description}</span>
+                  <span className={`font-mono ${active ? "text-accent-ink" : "text-ink-1"}`}>{cmd.name}</span>
+                  <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>{cmd.description}</span>
                 </button>
               );
             })}
@@ -844,7 +845,7 @@ function AgentChat({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
           aria-label="Attach files"
         >
@@ -865,13 +866,13 @@ function AgentChat({
           disabled={uploading}
           rows={1}
           placeholder={uploading ? "Uploading..." : "Type / for commands, or send instruction..."}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
-                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 disabled:opacity-50 max-h-[120px]"
+          className="flex-1 bg-inset border border-line rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
+                     resize-none focus:outline-none focus:border-line-strong placeholder:text-ink-4 transition-colors disabled:opacity-50 max-h-[120px]"
         />
         <button
           onClick={handleSend}
           disabled={uploading || (!input.trim() && pendingFiles.length === 0)}
-          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
+          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-accent disabled:opacity-40
                      text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
         >
           {uploading ? "..." : "Send"}
@@ -1014,16 +1015,16 @@ function AgentActivity({
     <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 text-sm" onScroll={handleScroll}>
       <div ref={contentRef} className="space-y-2">
         {hasMore === false && hasVisibleContent && (
-          <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-2">Beginning of activity</div>
+          <div className="text-center text-xs text-ink-4 py-2">Beginning of activity</div>
         )}
         {loadingOlder && (
           <div className="flex items-center justify-center gap-1.5 py-2">
-            <Loader2 size={14} className="animate-spin text-zinc-400" />
-            <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier events</span>
+            <Loader2 size={14} className="animate-spin text-ink-4" />
+            <span className="text-[11px] text-ink-4">Loading earlier events</span>
           </div>
         )}
         {!hasVisibleContent && streamingText === null && (
-          <div className="text-zinc-600 text-center py-8">
+          <div className="text-ink-4 text-center py-8">
             {loading ? "Loading history..." : "Waiting for agent activity..."}
           </div>
         )}
@@ -1040,9 +1041,9 @@ function AgentActivity({
           <ThinkingCard thinking={streamingThinking} isStreaming />
         )}
         {streamingText !== null && streamingText.length > 0 && (
-          <div className="text-zinc-300 whitespace-pre-wrap">
+          <div className="text-ink-2 whitespace-pre-wrap">
             {streamingText}
-            <span className="text-zinc-600 animate-pulse">▊</span>
+            <span className="text-ink-4 animate-pulse">▊</span>
           </div>
         )}
         <div ref={bottomRef} />
@@ -1051,7 +1052,7 @@ function AgentActivity({
   );
 }
 
-const TS_CLS = "text-[11px] text-zinc-400 dark:text-zinc-600 tabular-nums";
+const TS_CLS = "text-[11px] text-ink-4 tabular-nums";
 
 function ActivityItem({ event, agentName, roomId }: { event: CommittedEvent; agentName: string; roomId?: string }) {
   const ts = event.ts ? formatTime(event.ts) : undefined;
@@ -1060,9 +1061,9 @@ function ActivityItem({ event, agentName, roomId }: { event: CommittedEvent; age
 
   switch (event.type) {
     case "agent_start":
-      return <div className="text-[11px] text-zinc-500 flex items-center gap-1">▶ Agent started {inlineTs}</div>;
+      return <div className="text-[11px] text-ink-3 flex items-center gap-1">▶ Agent started {inlineTs}</div>;
     case "agent_end":
-      return <div className="text-[11px] text-zinc-500 flex items-center gap-1">■ Agent finished {inlineTs}</div>;
+      return <div className="text-[11px] text-ink-3 flex items-center gap-1">■ Agent finished {inlineTs}</div>;
     case "thinking":
       return <ThinkingCard thinking={event.thinking || ""} time={ts} fullTime={fullTs} />;
     case "message":
@@ -1088,19 +1089,19 @@ function MessageCard({ text, label, time, fullTime }: { text: string; label?: st
   const [expanded, setExpanded] = useState(false);
   const preview = text.length > 80 ? text.slice(0, 80) + "..." : text;
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-line-soft rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-ink-3 hover:bg-surface-2/50 transition-colors cursor-pointer"
       >
-        <span className="text-blue-400">💬</span>
-        {label && <span className="text-blue-500 font-medium shrink-0">{label}</span>}
-        <span className="text-zinc-400 truncate max-w-[160px] md:max-w-md">{preview}</span>
+        <span className="text-accent-ink">💬</span>
+        {label && <span className="text-accent-ink font-medium shrink-0">{label}</span>}
+        <span className="text-ink-4 truncate max-w-[160px] md:max-w-md">{preview}</span>
         {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
-        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
+        <span className={`${time ? "ml-2" : "ml-auto"} text-ink-3`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
-        <div className="px-3 py-2 border-t border-zinc-800 text-sm text-zinc-300">
+        <div className="px-3 py-2 border-t border-line-soft text-sm text-ink-2">
           <Markdown content={text} />
         </div>
       )}
@@ -1111,18 +1112,18 @@ function MessageCard({ text, label, time, fullTime }: { text: string; label?: st
 function ThinkingCard({ thinking, isStreaming, time, fullTime }: { thinking: string; isStreaming?: boolean; time?: string; fullTime?: string }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-line-soft rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs text-ink-3 hover:bg-surface-2/50 transition-colors cursor-pointer"
       >
         <span className={isStreaming ? "animate-pulse" : ""}>💭</span>
         <span>{isStreaming ? "Thinking..." : "Thought process"}</span>
         {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
-        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
+        <span className={`${time ? "ml-2" : "ml-auto"} text-ink-3`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
-        <div className="px-3 py-2 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 whitespace-pre-wrap max-h-40 overflow-y-auto">
+        <div className="px-3 py-2 border-t border-line-soft text-xs text-ink-3 whitespace-pre-wrap max-h-40 overflow-y-auto">
           {thinking}
           {isStreaming && <span className="animate-pulse">▊</span>}
         </div>
@@ -1134,34 +1135,34 @@ function ThinkingCard({ thinking, isStreaming, time, fullTime }: { thinking: str
 function ToolCard({ event, time, fullTime }: { event: CommittedEvent; time?: string; fullTime?: string }) {
   const [expanded, setExpanded] = useState(false);
   const isDone = event.result !== undefined;
-  const statusColor = !isDone ? "text-amber-500" : event.isError ? "text-red-400" : "text-emerald-400";
+  const statusColor = !isDone ? "text-think" : event.isError ? "text-blocked" : "text-onair";
   const statusIcon = !isDone ? "⏳" : event.isError ? "✗" : "✓";
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-line-soft rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs hover:bg-surface-2/50 transition-colors cursor-pointer"
       >
         <span className={statusColor}>{statusIcon}</span>
-        <span className="text-zinc-400 font-mono">{event.toolName}</span>
-        <span className="text-zinc-600 truncate max-w-[80px] md:max-w-48">{truncateArgs(event.args)}</span>
+        <span className="text-ink-4 font-mono">{event.toolName}</span>
+        <span className="text-ink-4 truncate max-w-[80px] md:max-w-48">{truncateArgs(event.args)}</span>
         {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
-        <span className={`${time ? "ml-2" : "ml-auto"} text-zinc-700`}>{expanded ? "▼" : "▶"}</span>
+        <span className={`${time ? "ml-2" : "ml-auto"} text-ink-3`}>{expanded ? "▼" : "▶"}</span>
       </button>
       {expanded && (
-        <div className="border-t border-zinc-200 dark:border-zinc-800 text-xs">
+        <div className="border-t border-line-soft text-xs">
           <div className="px-3 py-2">
-            <div className="text-zinc-500 mb-1">Arguments:</div>
-            <pre className="text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded p-2 overflow-x-auto max-h-32">
+            <div className="text-ink-3 mb-1">Arguments:</div>
+            <pre className="text-ink-4 bg-inset rounded p-2 overflow-x-auto max-h-32">
               {JSON.stringify(event.args, null, 2)}
             </pre>
           </div>
           {isDone && (
-            <div className="px-3 py-2 border-t border-zinc-800">
-              <div className={`mb-1 ${event.isError ? "text-red-400" : "text-zinc-500"}`}>
+            <div className="px-3 py-2 border-t border-line-soft">
+              <div className={`mb-1 ${event.isError ? "text-blocked" : "text-ink-3"}`}>
                 {event.isError ? "Error:" : "Result:"}
               </div>
-              <pre className="text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded p-2 overflow-x-auto max-h-32">
+              <pre className="text-ink-4 bg-inset rounded p-2 overflow-x-auto max-h-32">
                 {typeof event.result === "string" ? event.result : JSON.stringify(event.result, null, 2)}
               </pre>
             </div>
@@ -1206,8 +1207,8 @@ function RawOutput({ events }: { events: RawAgentEventLine[] }) {
 
   if (events.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-zinc-950">
-        <span className="text-zinc-600 italic text-sm">Waiting for output...</span>
+      <div className="flex-1 flex items-center justify-center bg-inset">
+        <span className="text-ink-4 italic text-sm">Waiting for output...</span>
       </div>
     );
   }
@@ -1216,7 +1217,7 @@ function RawOutput({ events }: { events: RawAgentEventLine[] }) {
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto bg-zinc-950 px-4 py-2 font-mono text-[13px] leading-[1.6]"
+      className="flex-1 overflow-y-auto bg-inset px-4 py-2 font-mono text-[13px] leading-[1.6]"
       role="log"
       aria-live="polite"
     >
@@ -1225,16 +1226,16 @@ function RawOutput({ events }: { events: RawAgentEventLine[] }) {
         const isStdout = line.type === "cli:stdout";
         return (
           <div key={i} className="py-[1px] whitespace-pre-wrap break-all">
-            <span className="text-zinc-500">[{formatTime(line.ts)}] </span>
-            <span className={isStderr ? "text-red-500 font-semibold" : isStdout ? "text-emerald-400 font-semibold" : "text-blue-400 font-semibold"}>
+            <span className="text-ink-3">[{formatTime(line.ts)}] </span>
+            <span className={isStderr ? "text-blocked font-semibold" : isStdout ? "text-onair font-semibold" : "text-accent-ink font-semibold"}>
               {line.type}
             </span>
-            <span className="text-zinc-600"> </span>
-            <span className={isStderr ? "text-red-400" : "text-zinc-300"}>{compactEventJson(line.event)}</span>
+            <span className="text-ink-4"> </span>
+            <span className={isStderr ? "text-blocked" : "text-ink-2"}>{compactEventJson(line.event)}</span>
           </div>
         );
       })}
-      <span className="text-zinc-500 animate-pulse">▊</span>
+      <span className="text-ink-3 animate-pulse">▊</span>
     </div>
   );
 }

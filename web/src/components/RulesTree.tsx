@@ -32,11 +32,11 @@ function RulesTreeNode({ node, depth, selected, onToggle }: {
       <li>
         <div
           style={indent}
-          className="flex items-center gap-1 py-0.5 cursor-pointer text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white"
+          className="flex items-center gap-1 py-0.5 cursor-pointer text-ink-2 hover:text-ink-1"
           onClick={() => setOpen(!open)}
         >
-          {open ? <ChevronDown size={12} className="text-zinc-400 dark:text-zinc-500 shrink-0" /> : <ChevronRight size={12} className="text-zinc-400 dark:text-zinc-500 shrink-0" />}
-          {open ? <FolderOpen size={12} className="text-amber-500 shrink-0" /> : <Folder size={12} className="text-amber-500 shrink-0" />}
+          {open ? <ChevronDown size={12} className="text-ink-4 shrink-0" /> : <ChevronRight size={12} className="text-ink-4 shrink-0" />}
+          {open ? <FolderOpen size={12} className="text-think shrink-0" /> : <Folder size={12} className="text-think shrink-0" />}
           <span className="text-xs truncate">{node.name}</span>
         </div>
         {open && node.children && (
@@ -55,7 +55,7 @@ function RulesTreeNode({ node, depth, selected, onToggle }: {
     <li>
       <label
         style={indent}
-        className="flex items-center gap-1.5 py-0.5 cursor-pointer rounded hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+        className="flex items-center gap-1.5 py-0.5 cursor-pointer rounded hover:bg-surface-2/60"
       >
         <span className="w-3 shrink-0" />
         <input
@@ -64,11 +64,11 @@ function RulesTreeNode({ node, depth, selected, onToggle }: {
           onChange={() => onToggle(node.path)}
           className="shrink-0"
         />
-        <FileIcon size={11} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
-        <span className={`text-xs truncate ${isSelected ? "text-amber-500 dark:text-amber-400" : "text-zinc-600 dark:text-zinc-300"}`}>
+        <FileIcon size={11} className="text-ink-4 shrink-0" />
+        <span className={`text-xs truncate ${isSelected ? "text-think dark:text-think" : "text-ink-2"}`}>
           {node.title || node.name}
         </span>
-        <span className="text-[10px] text-zinc-400 dark:text-zinc-600 ml-auto font-mono truncate pl-2">{node.path}</span>
+        <span className="text-[10px] text-ink-4 ml-auto font-mono truncate pl-2">{node.path}</span>
       </label>
     </li>
   );

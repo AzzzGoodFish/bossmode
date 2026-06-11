@@ -110,10 +110,10 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
     <Sheet open={open} onClose={onClose} size="lg" closeOnOverlayClick={false}>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Room Settings</h2>
+          <h2 className="text-lg font-semibold text-ink-1">Room Settings</h2>
           <button
             onClick={onClose}
-            className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-white text-lg transition-colors cursor-pointer"
+            className="text-ink-4 hover:text-ink-1 text-lg transition-colors cursor-pointer"
             aria-label="Close"
           >
             ×
@@ -122,62 +122,62 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
 
         <div className="space-y-5">
           <div>
-            <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-1">Room Name</label>
+            <label className="block text-sm text-ink-2 mb-1">Room Name</label>
             <input
               autoFocus
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`w-full bg-zinc-50 dark:bg-zinc-800 border rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 ${
+              className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors ${
                 name.trim().length === 0
-                  ? "border-red-400 dark:border-red-500"
-                  : "border-zinc-200 dark:border-zinc-700"
+                  ? "border-blocked"
+                  : "border-line"
               }`}
             />
           </div>
 
           <div>
-            <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-1">Working Directory</label>
+            <label className="block text-sm text-ink-2 mb-1">Working Directory</label>
             <input
               type="text"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+              className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors font-mono"
             />
             {cwdChanged && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+              <p className="text-xs text-think mt-1 flex items-center gap-1">
                 <AlertCircle size={12} />
                 Running agents need restart to use new directory
               </p>
             )}
             {error === "Directory does not exist" && (
-              <p className="text-xs text-red-500 dark:text-red-400 mt-1">Directory does not exist</p>
+              <p className="text-xs text-blocked mt-1">Directory does not exist</p>
             )}
           </div>
 
           <div>
-            <label className="text-sm text-zinc-600 dark:text-zinc-400 mb-1 flex items-center gap-1.5">
-              <Shield size={13} className="text-amber-500" />
+            <label className="text-sm text-ink-2 mb-1 flex items-center gap-1.5">
+              <Shield size={13} className="text-think" />
               Rule Documents ({selectedRuleDocs.size} selected)
             </label>
-            <p className="text-xs text-zinc-500 dark:text-zinc-600 mb-2">
+            <p className="text-xs text-ink-3 dark:text-ink-3 mb-2">
               Selected docs are injected into every agent's system prompt.
             </p>
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded p-2 max-h-56 overflow-y-auto">
+            <div className="border border-line-soft rounded p-2 max-h-56 overflow-y-auto">
               {tree?.children && tree.children.length > 0 ? (
                 <RulesTree nodes={tree.children} selected={selectedRuleDocs} onToggle={toggleRuleDoc} />
               ) : (
-                <p className="text-xs text-zinc-500 dark:text-zinc-600 py-4 text-center">No knowledge documents found</p>
+                <p className="text-xs text-ink-3 dark:text-ink-3 py-4 text-center">No knowledge documents found</p>
               )}
             </div>
           </div>
         </div>
 
-        <div className="flex gap-2 justify-end pt-3 border-t border-zinc-100 dark:border-zinc-800/50 mt-4">
+        <div className="flex gap-2 justify-end pt-3 border-t border-line-soft/50 mt-4">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors"
+            className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer transition-colors"
           >
             Cancel
           </button>
@@ -185,7 +185,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
             type="button"
             disabled={!canSave}
             onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors"
+            className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer transition-colors"
           >
             {saving ? "Saving..." : "Save"}
           </button>
