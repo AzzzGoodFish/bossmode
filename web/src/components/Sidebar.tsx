@@ -1,50 +1,85 @@
-import { useState, useEffect } from "react";
-import { Hash, LogOut, Bot, Puzzle, BookOpen, MessageSquare, UserCircle, Settings, Sun, Moon, PanelLeftClose, PanelLeftOpen, CheckSquare } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import {
+  LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
+  CheckSquare, Plus, Users,
+} from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
-import type { Room, AgentInfo, MemberInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
-import { getRooms, getAgents, getMembers, getSkills, getKnowledgeTree } from "../api/client";
-import { SidebarSection, type SidebarItem } from "./SidebarSection";
+import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
+import { getRooms, getAgents, getSkills, getKnowledgeTree } from "../api/client";
 import { RoomMenu } from "./RoomMenu";
 import { RoomSettingsDialog } from "./RoomSettingsDialog";
+import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { useDialog } from "./dialogs";
+
+export type SettingsSection = "models" | "runtime" | "summary" | "integrations" | "team-updates";
 
 export type ActivePage =
   | { type: "room"; id: string }
-  | { type: "member"; id: string | null }
   | { type: "agent"; name: string | null }
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
-  | { type: "settings" }
+  | { type: "settings"; section?: SettingsSection }
   | { type: "all-tasks" }
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
+
+type Domain = "rooms" | "team" | "library" | "system";
+
+export function domainOf(page: ActivePage): Domain {
+  switch (page?.type) {
+    case "agent":
+    case "skill":
+      return "team";
+    case "knowledge":
+      return "library";
+    case "settings":
+      return "system";
+    default:
+      return "rooms";
+  }
+}
 
 interface SidebarProps {
   activePage: ActivePage;
   username: string;
   onNavigate: (page: ActivePage) => void;
   onLogout: () => void;
-  refreshKey?: number; // increment to trigger data refresh
+  refreshKey?: number;
   unreadRoomIds?: Set<string>;
   onRoomsLoaded?: (rooms: Room[]) => void;
   collapsed: boolean;
   onToggle: () => void;
 }
 
-export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey, unreadRoomIds, onRoomsLoaded, collapsed, onToggle }: SidebarProps) {
+const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string }> = [
+  { id: "models", title: "Models", desc: "凭证 · provider · per-model 定制" },
+  { id: "runtime", title: "Runtime", desc: "pi SDK · session resume" },
+  { id: "summary", title: "Summarization", desc: "自动摘要阈值与保留数" },
+  { id: "integrations", title: "Integrations", desc: "Linear 同步" },
+  { id: "team-updates", title: "Team Updates", desc: "内置团队版本" },
+];
+
+export function Sidebar({
+  activePage, username, onNavigate, onLogout, refreshKey,
+  unreadRoomIds, onRoomsLoaded, collapsed, onToggle,
+}: SidebarProps) {
   const isMobile = useIsMobile();
   const { toast, confirm, prompt } = useDialog();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [members, setMembers] = useState<MemberInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
 
+  // 当前域：由 activePage 推导，但允许用户点 rail 切换浏览域（不改变页面，直到点选具体条目）
+  const pageDomain = domainOf(activePage);
+  const [browseDomain, setBrowseDomain] = useState<Domain | null>(null);
+  const domain: Domain = browseDomain ?? pageDomain;
+  useEffect(() => { setBrowseDomain(null); }, [activePage]);
+
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
     getAgents().then(setAgents).catch(console.error);
-    getMembers().then(setMembers).catch(console.error);
     getSkills().then(setSkills).catch(console.error);
     getKnowledgeTree()
       .then((root) => {
@@ -56,337 +91,246 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
 
   useEffect(() => { refresh(); }, [refreshKey]);
 
-  // Expose rooms for Layout
   useEffect(() => {
     (window as any).__bossmode_rooms = rooms;
     (window as any).__bossmode_refreshSidebar = refresh;
     onRoomsLoaded?.(rooms);
   }, [rooms, onRoomsLoaded]);
 
-  // Selected IDs
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
-  const selectedMemberId = activePage?.type === "member" ? activePage.id : null;
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
-  const isKnowledgeActive = activePage?.type === "knowledge";
   const selectedKnowledgeFolder =
-    activePage?.type === "knowledge" && activePage.path
-      ? activePage.path.split("/")[0]
-      : null;
-
-  // Map data to SidebarItems
-  const roomItems: SidebarItem[] = rooms.map((r) => ({
-    id: r.id,
-    icon: <Hash size={14} />,
-    label: r.name,
-    sublabel: r.cwd.split("/").slice(-2).join("/"),
-    hasUnread: unreadRoomIds?.has(r.id),
-  }));
-
-  const memberItems: SidebarItem[] = members.map((m) => ({
-    id: m.id,
-    label: m.name,
-    sublabel: m.model || "Use agent default",
-  }));
-
-  const agentItems: SidebarItem[] = agents.map((a) => ({
-    id: a.name,
-    label: a.name,
-    sublabel: a.description?.slice(0, 40),
-  }));
-
-  const skillItems: SidebarItem[] = skills.map((s) => ({
-    id: s.name,
-    label: s.name,
-    sublabel: s.description?.slice(0, 40),
-  }));
-
-  const knowledgeItems: SidebarItem[] = knowledgeFolders.map((f) => ({
-    id: f.path,
-    label: f.name,
-  }));
+    activePage?.type === "knowledge" && activePage.path ? activePage.path.split("/")[0] : null;
+  const activeSettingsSection = activePage?.type === "settings" ? (activePage.section ?? "models") : null;
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
   const settingsRoom = settingsRoomId ? rooms.find((r) => r.id === settingsRoomId) || null : null;
+
+  const openTasksLabel = useMemo(() => "All Tasks", []);
 
   const toggleTheme = () => {
     const isDark = document.documentElement.classList.toggle("dark");
     localStorage.setItem("bossmode_theme", isDark ? "dark" : "light");
   };
 
-  const collapsedIconBtn = (active: boolean) =>
-    `w-full h-10 flex items-center justify-center transition-colors cursor-pointer relative ${
-      active
-        ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white"
-        : "text-zinc-500 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300"
+  /* ── Rail ── */
+  const railBtn = (active: boolean) =>
+    `relative w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
+      active ? "bg-surface-2 text-ink-1" : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
     }`;
 
-  return (
-    <div className={`${collapsed ? "w-12" : "w-56"} border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out`}>
-      {/* Header */}
-      <div className="h-12 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
-        {collapsed ? (
-          <div className="h-full flex items-center justify-center">
-            <button
-              onClick={onToggle}
-              title="Expand sidebar"
-              aria-label="Expand sidebar"
-              className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            >
-              <PanelLeftOpen size={16} />
-            </button>
-          </div>
-        ) : (
-          <div className="h-full flex items-center justify-between px-4">
-            <span className="font-bold text-sm text-zinc-900 dark:text-white tracking-tight whitespace-nowrap">Bossmode</span>
-            {!isMobile && (
-              <button
-                onClick={onToggle}
-                title="Collapse sidebar"
-                aria-label="Collapse sidebar"
-                className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <PanelLeftClose size={16} />
-              </button>
-            )}
-          </div>
+  const rail = (
+    <nav className="w-[52px] shrink-0 bg-surface-0 border-r border-line-soft flex flex-col items-center py-2.5 gap-1">
+      <button
+        onClick={onToggle}
+        title={collapsed ? "Expand panel" : "Collapse panel"}
+        className="w-[30px] h-[30px] rounded-lg bg-accent-dim text-accent-ink flex items-center justify-center font-bold text-sm mb-2 cursor-pointer"
+      >
+        B
+      </button>
+      <button onClick={() => setBrowseDomain("rooms")} title="Rooms" aria-label="Rooms" className={railBtn(domain === "rooms")}>
+        {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <MessageSquare size={18} />
+        {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
+      </button>
+      <button onClick={() => setBrowseDomain("team")} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
+        {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Users size={18} />
+      </button>
+      <button onClick={() => setBrowseDomain("library")} title="Library" aria-label="Library" className={railBtn(domain === "library")}>
+        {domain === "library" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <BookOpen size={18} />
+      </button>
+      <div className="flex-1" />
+      <button onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme" className={railBtn(false)}>
+        <Sun size={16} className="hidden dark:block" />
+        <Moon size={16} className="block dark:hidden" />
+      </button>
+      <button
+        onClick={() => setBrowseDomain("system")}
+        title="System"
+        aria-label="System"
+        className={railBtn(domain === "system")}
+      >
+        {domain === "system" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Settings size={18} />
+      </button>
+      <button onClick={onLogout} title="Sign out" aria-label="Sign out" className={railBtn(false)}>
+        <LogOut size={15} />
+      </button>
+      <div
+        className="w-7 h-7 rounded-full bg-surface-3 flex items-center justify-center text-[11px] text-ink-2 mt-1 select-none"
+        title={username}
+      >
+        {username.charAt(0).toUpperCase()}
+      </div>
+    </nav>
+  );
+
+  /* ── Context panel ── */
+  const panelTitle = { rooms: "Rooms", team: "Team", library: "Library", system: "System" }[domain];
+
+  const itemCls = (active: boolean) =>
+    `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
+      active ? "bg-surface-2" : "hover:bg-surface-1"
+    }`;
+
+  const panel = (
+    <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
+      <div className="h-12 shrink-0 flex items-center justify-between px-3.5 border-b border-line-soft">
+        <h1 className="text-[13px] font-semibold text-ink-1">{panelTitle}</h1>
+        {domain === "rooms" && (
+          <button
+            onClick={() => onNavigate({ type: "room", id: "__new__" })}
+            title="New room"
+            className="w-6 h-6 border border-line rounded-md text-ink-3 hover:text-accent-ink hover:border-line-strong flex items-center justify-center cursor-pointer transition-colors"
+          >
+            <Plus size={13} />
+          </button>
         )}
       </div>
 
-      {/* Body */}
-      {collapsed ? (
-        <div className="flex-1 min-h-0 flex flex-col py-1">
-          <button
-            onClick={() => {
-              onNavigate({ type: "room", id: selectedRoomId || rooms[0]?.id || "__new__" });
-              onToggle();
-            }}
-            title="Rooms"
-            aria-label="Rooms"
-            className={collapsedIconBtn(activePage?.type === "room")}
-          >
-            <MessageSquare size={18} />
-            {hasAnyUnreadRoom && <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-red-500" />}
-          </button>
-          <button
-            onClick={() => {
-              onNavigate({ type: "member", id: selectedMemberId || members[0]?.id || null });
-              onToggle();
-            }}
-            title="Members"
-            aria-label="Members"
-            className={collapsedIconBtn(activePage?.type === "member")}
-          >
-            <UserCircle size={18} />
-          </button>
-          <button
-            onClick={() => {
-              onNavigate({ type: "agent", name: selectedAgentName && selectedAgentName !== "__new__" ? selectedAgentName : null });
-              onToggle();
-            }}
-            title="Agents"
-            aria-label="Agents"
-            className={collapsedIconBtn(activePage?.type === "agent")}
-          >
-            <Bot size={18} />
-          </button>
-          <button
-            onClick={() => {
-              onNavigate({ type: "skill", name: selectedSkillName && selectedSkillName !== "__new__" ? selectedSkillName : null });
-              onToggle();
-            }}
-            title="Skills"
-            aria-label="Skills"
-            className={collapsedIconBtn(activePage?.type === "skill")}
-          >
-            <Puzzle size={18} />
-          </button>
-          <button
-            onClick={() => {
-              onNavigate({ type: "knowledge" });
-              onToggle();
-            }}
-            title="Knowledge"
-            aria-label="Knowledge"
-            className={collapsedIconBtn(isKnowledgeActive)}
-          >
-            <BookOpen size={18} />
-          </button>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          <div className="mt-1">
-            <SidebarSection
-              icon={<MessageSquare size={14} />}
-              label="Rooms"
-              count={rooms.length}
-              items={roomItems}
-              selectedId={selectedRoomId}
-              storageKey="rooms"
-              onSelect={(id) => onNavigate({ type: "room", id })}
-              onCreate={() => onNavigate({ type: "room", id: "__new__" })}
-              renderMenu={(id) => (
-                <RoomMenu
-                  onRename={async () => {
-                    const newName = await prompt("New room name:");
-                    if (!newName) return;
-                    try {
-                      const { updateRoomSettings } = await import("../api/client");
-                      await updateRoomSettings(id, { name: newName });
-                      refresh();
-                    } catch (err: any) { toast(err.message, "error"); }
-                  }}
-                  onSettings={() => setSettingsRoomId(id)}
-                  onDelete={async () => {
-                    if (!(await confirm("Delete this room?"))) return;
-                    try {
-                      const { deleteRoom } = await import("../api/client");
-                      await deleteRoom(id);
-                      refresh();
-                      if (selectedRoomId === id) onNavigate(null);
-                    } catch (err: any) { toast(err.message, "error"); }
-                  }}
-                />
-              )}
-            />
-          </div>
+      <div className="flex-1 overflow-y-auto min-h-0 p-2">
+        {domain === "rooms" && (
+          <>
+            {rooms.map((r) => {
+              const statuses = Object.values(r.agentStatuses ?? {});
+              return (
+                <div key={r.id} className="group relative">
+                  <button onClick={() => onNavigate({ type: "room", id: r.id })} className={itemCls(selectedRoomId === r.id)}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[12.5px] font-medium truncate flex-1 ${selectedRoomId === r.id ? "text-ink-1" : "text-ink-2"}`}>
+                        {r.name}
+                      </span>
+                      <span className="flex gap-[3px] shrink-0">
+                        {r.members.slice(0, 4).map((m) => {
+                          const st = r.agentStatuses?.[m];
+                          return (
+                            <span
+                              key={m}
+                              title={`${m}${st ? ` · ${st}` : ""}`}
+                              className={`w-[5px] h-[5px] rounded-full ${
+                                st === "working" ? "bg-onair" : st === "thinking" ? "bg-think" : "bg-idleg"
+                              }`}
+                            />
+                          );
+                        })}
+                      </span>
+                      {unreadRoomIds?.has(r.id) && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                    </div>
+                    <div className="font-mono text-[10.5px] text-ink-4 truncate mt-px">
+                      ~{r.cwd.replace(/^\/home\/[^/]+/, "")}
+                    </div>
+                  </button>
+                  <div className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <RoomMenu
+                      onRename={async () => {
+                        const newName = await prompt("New room name:");
+                        if (!newName) return;
+                        try {
+                          const { updateRoomSettings } = await import("../api/client");
+                          await updateRoomSettings(r.id, { name: newName });
+                          refresh();
+                        } catch (err: any) { toast(err.message, "error"); }
+                      }}
+                      onSettings={() => setSettingsRoomId(r.id)}
+                      onDelete={async () => {
+                        if (!(await confirm("Delete this room?"))) return;
+                        try {
+                          const { deleteRoom } = await import("../api/client");
+                          await deleteRoom(r.id);
+                          refresh();
+                          if (selectedRoomId === r.id) onNavigate(null);
+                        } catch (err: any) { toast(err.message, "error"); }
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+            {rooms.length === 0 && (
+              <p className="text-xs text-ink-4 px-2.5 py-2">还没有房间 — 点上方 + 创建。</p>
+            )}
+          </>
+        )}
 
-          <div className="border-t border-zinc-200 dark:border-zinc-800 mt-1">
-            <SidebarSection
-              icon={<UserCircle size={14} />}
-              label="Members"
-              count={members.length}
-              items={memberItems}
-              selectedId={selectedMemberId}
-              storageKey="members"
-              defaultOpen={true}
-              onSelect={(id) => onNavigate({ type: "member", id })}
-              onCreate={() => onNavigate({ type: "member", id: null })}
-            />
-          </div>
+        {domain === "team" && (
+          <>
+            <SectionHead label={`AGENTS · ${agents.length}`} onCreate={() => onNavigate({ type: "agent", name: "__new__" })} />
+            {agents.map((a) => (
+              <button key={a.name} onClick={() => onNavigate({ type: "agent", name: a.name })} className={itemCls(selectedAgentName === a.name)}>
+                <div className="flex items-center gap-2.5">
+                  <StaffBadge name={a.name} avatar={a.avatar} status="idle" size="sm" />
+                  <span className={`text-[12.5px] font-medium truncate ${selectedAgentName === a.name ? "text-ink-1" : "text-ink-2"}`}>{a.name}</span>
+                </div>
+              </button>
+            ))}
+            <div className="h-3" />
+            <SectionHead label={`SKILLS · ${skills.length}`} onCreate={() => onNavigate({ type: "skill", name: "__new__" })} />
+            {skills.map((s) => (
+              <button key={s.name} onClick={() => onNavigate({ type: "skill", name: s.name })} className={itemCls(selectedSkillName === s.name)}>
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-md bg-surface-2 text-ink-3 flex items-center justify-center text-[10px] shrink-0">◆</span>
+                  <span className={`text-[12.5px] font-medium truncate ${selectedSkillName === s.name ? "text-ink-1" : "text-ink-2"}`}>{s.name}</span>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
 
-          <div className="border-t border-zinc-200 dark:border-zinc-800">
-            <SidebarSection
-              icon={<Bot size={14} />}
-              label="Agents"
-              count={agents.length}
-              items={agentItems}
-              selectedId={selectedAgentName}
-              storageKey="agents"
-              defaultOpen={false}
-              onSelect={(name) => onNavigate({ type: "agent", name })}
-              onCreate={() => onNavigate({ type: "agent", name: "__new__" })}
-            />
-          </div>
+        {domain === "library" && (
+          <>
+            <SectionHead label="KNOWLEDGE" onCreate={() => onNavigate({ type: "knowledge", path: "__new__" })} />
+            <button onClick={() => onNavigate({ type: "knowledge" })} className={itemCls(activePage?.type === "knowledge" && !activePage.path)}>
+              <span className="text-[12.5px] font-medium text-ink-2">All documents</span>
+            </button>
+            {knowledgeFolders.map((f) => (
+              <button key={f.path} onClick={() => onNavigate({ type: "knowledge", path: f.path })} className={itemCls(selectedKnowledgeFolder === f.name)}>
+                <span className={`text-[12.5px] font-medium truncate ${selectedKnowledgeFolder === f.name ? "text-ink-1" : "text-ink-2"}`}>{f.name}</span>
+              </button>
+            ))}
+          </>
+        )}
 
-          <div className="border-t border-zinc-200 dark:border-zinc-800">
-            <SidebarSection
-              icon={<Puzzle size={14} />}
-              label="Skills"
-              count={skills.length}
-              items={skillItems}
-              selectedId={selectedSkillName}
-              storageKey="skills"
-              defaultOpen={false}
-              onSelect={(name) => onNavigate({ type: "skill", name })}
-              onCreate={() => onNavigate({ type: "skill", name: "__new__" })}
-            />
-          </div>
+        {domain === "system" && (
+          <>
+            {SYSTEM_SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => onNavigate({ type: "settings", section: s.id })}
+                className={itemCls(activeSettingsSection === s.id)}
+              >
+                <div className={`text-[12.5px] font-medium ${activeSettingsSection === s.id ? "text-ink-1" : "text-ink-2"}`}>{s.title}</div>
+                <div className="text-[10.5px] text-ink-4 mt-px">{s.desc}</div>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
 
-          <div className="border-t border-zinc-200 dark:border-zinc-800">
-            <SidebarSection
-              icon={<BookOpen size={14} />}
-              label="Knowledge"
-              count={knowledgeFolders.length}
-              items={knowledgeItems}
-              selectedId={selectedKnowledgeFolder}
-              storageKey="knowledge"
-              defaultOpen={false}
-              onSelect={(path) => onNavigate({ type: "knowledge", path })}
-              onCreate={() => onNavigate({ type: "knowledge", path: "__new__" })}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Bottom */}
-      {collapsed ? (
-        <div className="border-t border-zinc-200 dark:border-zinc-800 shrink-0 flex flex-col items-center py-2 gap-1">
-          <button
-            onClick={() => {
-              onNavigate({ type: "settings" });
-              onToggle();
-            }}
-            title="Settings"
-            aria-label="Settings"
-            className={`w-10 h-10 flex items-center justify-center rounded transition-colors cursor-pointer ${
-              activePage?.type === "settings"
-                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white"
-                : "text-zinc-500 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300"
-            }`}
-          >
-            <Settings size={18} />
-          </button>
-          <button
-            onClick={toggleTheme}
-            title="Toggle theme"
-            aria-label="Toggle theme"
-            className="w-10 h-10 flex items-center justify-center rounded text-zinc-500 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer"
-          >
-            <Sun size={16} className="hidden dark:block" />
-            <Moon size={16} className="block dark:hidden" />
-          </button>
-          <button
-            onClick={onLogout}
-            title="Sign out"
-            aria-label="Sign out"
-            className="w-10 h-10 flex items-center justify-center rounded text-zinc-500 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer"
-          >
-            <LogOut size={16} />
-          </button>
-          <div className="w-7 h-7 rounded-full bg-zinc-300 dark:bg-zinc-700 flex items-center justify-center text-xs text-zinc-600 dark:text-zinc-400 mt-1">
-            {username.charAt(0).toUpperCase()}
-          </div>
-        </div>
-      ) : (
-        <div className="border-t border-zinc-200 dark:border-zinc-800 shrink-0">
+      {domain === "rooms" && (
+        <div className="border-t border-line-soft shrink-0 p-2">
           <button
             onClick={() => onNavigate({ type: "all-tasks" })}
-            className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
-              activePage?.type === "all-tasks" || activePage?.type === "task" ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300"
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
+              activePage?.type === "all-tasks" || activePage?.type === "task"
+                ? "bg-surface-2 text-ink-1"
+                : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
             }`}
           >
-            <CheckSquare size={14} className="text-zinc-500" />
-            <span>All Tasks</span>
+            <CheckSquare size={14} />
+            <span>{openTasksLabel}</span>
           </button>
-          <button
-            onClick={() => onNavigate({ type: "settings" })}
-            className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors cursor-pointer ${
-              activePage?.type === "settings" ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300"
-            }`}
-          >
-            <Settings size={14} className="text-zinc-500" />
-            <span>Settings</span>
-          </button>
-          <div className="px-3 py-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-full bg-zinc-300 dark:bg-zinc-700 flex items-center justify-center text-xs text-zinc-600 dark:text-zinc-400 shrink-0">
-                {username.charAt(0).toUpperCase()}
-              </div>
-              <span className="text-sm text-zinc-600 dark:text-zinc-400 truncate">{username}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button onClick={toggleTheme} className="text-zinc-500 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer p-0.5" title="Toggle theme">
-                <Sun size={14} className="hidden dark:block" />
-                <Moon size={14} className="block dark:hidden" />
-              </button>
-              <button onClick={onLogout} className="text-zinc-500 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer p-0.5" title="Sign out">
-                <LogOut size={14} />
-              </button>
-            </div>
-          </div>
         </div>
       )}
+    </aside>
+  );
+
+  return (
+    <div className="flex h-full min-h-0">
+      {rail}
+      {(!collapsed || isMobile) && panel}
 
       {settingsRoom && (
         <RoomSettingsDialog
@@ -399,6 +343,19 @@ export function Sidebar({ activePage, username, onNavigate, onLogout, refreshKey
             refresh();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function SectionHead({ label, onCreate }: { label: string; onCreate?: () => void }) {
+  return (
+    <div className="flex items-center justify-between px-2.5 pt-1 pb-1.5">
+      <span className="text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">{label}</span>
+      {onCreate && (
+        <button onClick={onCreate} className="text-ink-4 hover:text-accent-ink cursor-pointer transition-colors" title="Create">
+          <Plus size={12} />
+        </button>
       )}
     </div>
   );

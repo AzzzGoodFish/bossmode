@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Plus, KeyRound, Pencil, Trash2, Download, Link2 } from "lucide-react";
+import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, PiConfigImportPreview, LinearIntegrationStatus } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -14,24 +14,39 @@ import {
   createModelCredentialProfile,
   updateModelCredentialProfile,
   deleteModelCredentialProfile,
+  refreshModelCredentialProfileModels,
   discoverModelCredentialModels,
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
   cancelOAuthLoginJob,
-  getPiConfigPreview,
-  importPiConfig,
+  getModelProviderCatalog,
+  connectModelProviderApiKey,
+  startOAuthConnection,
+  getOAuthConnectionJob,
+  submitOAuthConnectionInput,
+  cancelOAuthConnection,
   getLinearIntegrationStatus,
   connectLinearIntegration,
   disconnectLinearIntegration,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
 import { useDialog } from "../components/dialogs";
+import type { SettingsSection } from "../components/Sidebar";
 
 interface SettingsPageProps {
+  section?: SettingsSection;
   onOpenMobileSidebar?: () => void;
 }
 
-export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
+const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
+  models: { title: "Models", desc: "模型凭证与可用模型。per-model 定制在 catalog 刷新后保留。" },
+  runtime: { title: "Runtime", desc: "pi SDK 运行时与会话行为。" },
+  summary: { title: "Summarization", desc: "智能消息摘要的自动触发与保留策略。" },
+  integrations: { title: "Integrations", desc: "外部系统连接。" },
+  "team-updates": { title: "Team Updates", desc: "内置 agents / skills / rules 的版本更新。" },
+};
+
+export function SettingsPage({ section = "models", onOpenMobileSidebar }: SettingsPageProps = {}) {
   const { toast, confirm } = useDialog();
   const [summarySettings, setSummarySettings] = useState<SummarySettings>({
     autoEnabled: false,
@@ -48,7 +63,7 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showConnectProvider, setShowConnectProvider] = useState(false);
   const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
 
   useEffect(() => {
@@ -108,6 +123,16 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
     catch (err: any) { toast(err.message, "error"); }
   };
 
+  const handleRefreshProfileModels = async (profile: PublicModelCredentialProfile) => {
+    try {
+      const refreshed = await refreshModelCredentialProfileModels(profile.id);
+      await refreshProfiles();
+      toast(`Refreshed ${refreshed.models.length} model${refreshed.models.length === 1 ? "" : "s"}.`, "success");
+    } catch (err: any) {
+      toast(err.message, "error");
+    }
+  };
+
   const handleCheckTeamUpdates = async () => {
     setCheckingTeamUpdates(true);
     try {
@@ -120,26 +145,36 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
     }
   };
 
+  const meta = SECTION_META[section];
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <MobileTopBar title="Settings" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
-      <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-      <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-6">Settings</h1>
+    <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
+      <MobileTopBar title={meta.title} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 flex flex-col overflow-y-auto">
+      <div className="w-full max-w-3xl mx-auto px-6 pt-7 pb-20">
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold tracking-tight text-ink-1">{meta.title}</h1>
+        <p className="text-xs text-ink-3 mt-1">{meta.desc}</p>
+      </div>
 
-      <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
+      {section === "integrations" && (
+        <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
+      )}
 
-      <ModelCredentialsSection
-        profiles={profiles}
-        onAdd={() => { setEditingProfile(null); setShowProfileSheet(true); }}
-        onEdit={(p) => { setEditingProfile(p); setShowProfileSheet(true); }}
-        onDelete={handleDeleteProfile}
-        onImport={() => setShowImportDialog(true)}
-      />
+      {section === "models" && (
+        <ModelCredentialsSection
+          profiles={profiles}
+          onAdd={() => setShowConnectProvider(true)}
+          onCustom={() => { setEditingProfile(null); setShowProfileSheet(true); }}
+          onEdit={(p) => { setEditingProfile(p); setShowProfileSheet(true); }}
+          onDelete={handleDeleteProfile}
+          onRefreshModels={handleRefreshProfileModels}
+        />
+      )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
       {/* Session Resume */}
+      {section === "runtime" && (
       <div>
-        <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Runtime</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-2">
           <div className="flex items-center justify-between">
             <div>
@@ -165,10 +200,11 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Auto-Summary */}
+      {section === "summary" && (
       <div>
-        <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Auto-Summary</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -213,15 +249,16 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
           </div>
 
           <div className="text-xs text-zinc-400 dark:text-zinc-500">
-            Summarizer's model can be configured in the Members page.
+            Summarizer's model can be configured from its workstation card in any room.
             {summarySaved && <span className="ml-2 text-emerald-500">Saved!</span>}
           </div>
         </div>
       </div>
+      )}
 
       {/* Built-in Team Updates */}
+      {section === "team-updates" && (
       <div>
-        <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-4">Built-in Team Updates</h2>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
@@ -248,21 +285,21 @@ export function SettingsPage({ onOpenMobileSidebar }: SettingsPageProps = {}) {
           </button>
         </div>
       </div>
+      )}
 
       </div>
-
     </div>
+    {showConnectProvider && (
+      <ConnectProviderSheet
+        onClose={() => setShowConnectProvider(false)}
+        onSaved={async () => { setShowConnectProvider(false); await refreshProfiles(); }}
+      />
+    )}
     {showProfileSheet && (
       <CredentialProfileSheet
         profile={editingProfile}
         onClose={() => setShowProfileSheet(false)}
         onSaved={async () => { setShowProfileSheet(false); await refreshProfiles(); }}
-      />
-    )}
-    {showImportDialog && (
-      <PiConfigImportDialog
-        onClose={() => setShowImportDialog(false)}
-        onImported={async () => { setShowImportDialog(false); await refreshProfiles(); }}
       />
     )}
     </div>
@@ -331,12 +368,13 @@ const PROTOCOLS: ModelProtocol[] = [
 ];
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
 
-function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }: {
+function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, onRefreshModels }: {
   profiles: PublicModelCredentialProfile[];
   onAdd: () => void;
+  onCustom: () => void;
   onEdit: (profile: PublicModelCredentialProfile) => void;
   onDelete: (profile: PublicModelCredentialProfile) => void;
-  onImport: () => void;
+  onRefreshModels: (profile: PublicModelCredentialProfile) => void;
 }) {
   const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
   const [expandedModelLists, setExpandedModelLists] = useState<Set<string>>(new Set());
@@ -360,9 +398,11 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Configure provider access once, then choose available models for each member.</p>
         </div>
         <div className="flex items-center gap-2">
-          {profiles.length > 0 && <button onClick={onImport} className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer"><Download size={14} /> Import from pi</button>}
+          <button onClick={onCustom} className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer">
+            Custom Endpoint
+          </button>
           <button onClick={onAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">
-            <Plus size={14} /> Add credential
+            <PlugZap size={14} /> Connect Provider
           </button>
         </div>
       </div>
@@ -370,10 +410,9 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
         <div className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg p-8 text-center">
           <KeyRound size={22} className="mx-auto text-zinc-400 dark:text-zinc-600 mb-3" />
           <div className="text-sm font-medium text-zinc-900 dark:text-white">No model credentials yet</div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">Add an API key, OAuth account, proxy endpoint, or local no-auth endpoint. Models you add here become selectable in Member settings.</p>
-          <button onClick={onAdd} className="mt-4 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">Add credential</button>
-          <div className="my-3 text-xs text-zinc-400 dark:text-zinc-600">── or ──</div>
-          <button onClick={onImport} className="px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer">Import from pi config</button>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">Connect an official provider, or add a custom endpoint for proxy/local models.</p>
+          <button onClick={onAdd} className="mt-4 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer">Connect Provider</button>
+          <button onClick={onCustom} className="ml-2 mt-4 px-3 py-1.5 border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 text-sm cursor-pointer">Custom Endpoint</button>
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -402,6 +441,7 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
                   </button>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => toggleProfile(profile.id)} className="px-2 py-1 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer" title={expanded ? "Collapse" : "Expand"}>{expanded ? "Collapse" : "Expand"}</button>
+                    {profile.profileKind === "builtin_provider" && <button onClick={() => onRefreshModels(profile)} className="text-zinc-400 hover:text-blue-500 cursor-pointer" title="Refresh models"><RefreshCw size={14} /></button>}
                     <button onClick={() => onEdit(profile)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer" title="Edit"><Pencil size={14} /></button>
                     <button onClick={() => onDelete(profile)} className="text-zinc-400 hover:text-red-500 cursor-pointer" title="Delete"><Trash2 size={14} /></button>
                   </div>
@@ -420,7 +460,10 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
                         )}
                       </div>
                     </div>
-                    <div className="flex justify-end gap-2 mt-3"><button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">Edit</button></div>
+                    <div className="flex justify-end gap-2 mt-3">
+                      {profile.profileKind === "builtin_provider" && <button onClick={() => onRefreshModels(profile)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer"><RefreshCw size={12} /> Refresh models</button>}
+                      <button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer">Edit</button>
+                    </div>
                   </>
                 )}
               </div>
@@ -432,102 +475,251 @@ function ModelCredentialsSection({ profiles, onAdd, onEdit, onDelete, onImport }
   );
 }
 
-function PiConfigImportDialog({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { toast } = useDialog();
-  const [preview, setPreview] = useState<PiConfigImportPreview | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [overwrite, setOverwrite] = useState<Set<string>>(new Set());
+  const [providers, setProviders] = useState<PublicModelProvider[]>([]);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
+  const [selected, setSelected] = useState<PublicModelProvider | null>(null);
+  const [authMode, setAuthMode] = useState<"api_key" | "oauth">("api_key");
+  const [apiKey, setApiKey] = useState("");
+  const [name, setName] = useState("");
+  const [enableClaudeCodeFingerprint, setEnableClaudeCodeFingerprint] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [oauthJob, setOauthJob] = useState<OAuthLoginJob | null>(null);
+  const [oauthInput, setOauthInput] = useState("");
 
   useEffect(() => {
-    getPiConfigPreview()
-      .then((p) => {
-        setPreview(p);
-        setSelected(new Set(p.providers.filter((provider) => provider.importable && !provider.existingProfileId).map((provider) => provider.providerSlug)));
-      })
+    getModelProviderCatalog()
+      .then((items) => setProviders(items))
       .catch((err) => toast(err.message, "error"))
       .finally(() => setLoading(false));
   }, []);
 
-  const toggle = (slug: string) => setSelected((prev) => {
-    const next = new Set(prev);
-    next.has(slug) ? next.delete(slug) : next.add(slug);
-    return next;
-  });
-  const toggleOverwrite = (slug: string) => setOverwrite((prev) => {
-    const next = new Set(prev);
-    next.has(slug) ? next.delete(slug) : next.add(slug);
-    return next;
-  });
+  useEffect(() => {
+    if (!selected) return;
+    setAuthMode(selected.defaultAuthMode);
+    setName(selected.displayName);
+    setApiKey("");
+    setEnableClaudeCodeFingerprint(false);
+    setOauthJob(null);
+    setOauthInput("");
+  }, [selected?.providerSlug]);
 
-  const handleImport = async () => {
-    setImporting(true);
+  useEffect(() => {
+    if (!oauthJob || ["completed", "failed", "cancelled"].includes(oauthJob.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await getOAuthConnectionJob(oauthJob.id);
+        setOauthJob(next);
+        if (next.status === "completed") {
+          toast("Provider connected", "success");
+          window.clearInterval(timer);
+          onSaved();
+        }
+      } catch (err: any) {
+        window.clearInterval(timer);
+        toast(err.message, "error");
+      }
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [oauthJob?.id, oauthJob?.status]);
+
+  const connectApiKey = async () => {
+    if (!selected) return;
+    if (!apiKey.trim()) { toast("API key is required", "error"); return; }
+    setBusy(true);
     try {
-      const result = await importPiConfig({ providers: Array.from(selected), overwriteProviderSlugs: Array.from(overwrite) });
-      toast(`Imported ${result.imported.length}, overwritten ${result.overwritten.length}, skipped ${result.skipped.length}`);
-      onImported();
-    } catch (err: any) {
-      toast(err.message, "error");
-    } finally {
-      setImporting(false);
-    }
+      await connectModelProviderApiKey({
+        providerSlug: selected.providerSlug,
+        apiKey: apiKey.trim(),
+        name: name.trim() || selected.displayName,
+        requestProfile: selected.providerSlug === "anthropic" && enableClaudeCodeFingerprint ? "anthropic_proxy_claude_code" : "standard",
+      });
+      toast("Provider connected", "success");
+      onSaved();
+    } catch (err: any) { toast(err.message, "error"); }
+    finally { setBusy(false); }
+  };
+
+  const startOAuth = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      setOauthJob(await startOAuthConnection({
+        providerId: selected.providerSlug,
+        name: name.trim() || selected.displayName,
+        requestProfile: selected.providerSlug === "anthropic" && enableClaudeCodeFingerprint ? "anthropic_proxy_claude_code" : "standard",
+      }));
+    } catch (err: any) { toast(err.message, "error"); }
+    finally { setBusy(false); }
+  };
+
+  const submitOAuthInput = async () => {
+    if (!oauthJob || !oauthInput.trim()) return;
+    setBusy(true);
+    try {
+      const next = await submitOAuthConnectionInput(oauthJob.id, oauthInput.trim());
+      setOauthJob(next);
+      if (next.status === "completed") {
+        toast("Provider connected", "success");
+        onSaved();
+      }
+    } catch (err: any) { toast(err.message, "error"); }
+    finally { setBusy(false); }
+  };
+
+  const cancelOAuth = async () => {
+    if (!oauthJob) { onClose(); return; }
+    setBusy(true);
+    try { setOauthJob(await cancelOAuthConnection(oauthJob.id)); }
+    catch (err: any) { toast(err.message, "error"); }
+    finally { setBusy(false); }
   };
 
   return (
-    <Sheet open onClose={onClose} size="md" closeOnOverlayClick={false}>
-      <div className="bg-white dark:bg-zinc-900 rounded-lg p-5 w-full space-y-4">
+    <Sheet open onClose={onClose} size="2xl" closeOnOverlayClick={false}>
+      <div className="p-5 space-y-5">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Import from pi config</h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Preview reads legacy pi config and copies references into Bossmode credentials. Secrets are not resolved in preview.</p>
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Connect Provider</h3>
+          <p className="text-xs text-zinc-500 mt-1">Choose an official provider. No base URL, protocol, or manual model setup required.</p>
         </div>
-        {loading && <div className="text-sm text-zinc-500">Scanning pi config...</div>}
-        {!loading && preview && !preview.found && (
-          <div className="rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-700 dark:text-amber-300">No pi config found at {preview.piAgentDir}. Please add credentials manually.</div>
-        )}
-        {!loading && preview?.found && (
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">Found in <code>{preview.piAgentDir}</code></div>
-            {preview.providers.map((provider) => (
-              <div key={provider.providerSlug} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3">
-                <label className="flex items-start gap-2">
-                  <input type="checkbox" checked={selected.has(provider.providerSlug)} disabled={!provider.importable} onChange={() => toggle(provider.providerSlug)} className="mt-1" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-white">{provider.displayName}</span>
-                      <code className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">{provider.providerSlug}</code>
-                      {provider.existingProfileId && <Badge tone="neutral">Existing</Badge>}
+
+        {loading ? <div className="text-sm text-zinc-500">Loading providers...</div> : (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,340px)_1fr] gap-5">
+            <div className="space-y-2 max-h-[62vh] overflow-y-auto pr-1">
+              {providers.map((provider) => {
+                const active = selected?.providerSlug === provider.providerSlug;
+                return (
+                  <button
+                    key={provider.providerSlug}
+                    type="button"
+                    onClick={() => setSelected(provider)}
+                    className={`w-full text-left rounded-lg border p-3 cursor-pointer transition-colors ${active ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30" : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700"}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-sm font-semibold text-zinc-700 dark:text-zinc-200">{provider.displayName.slice(0, 1)}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{provider.displayName}</div>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {provider.authModes.map((mode) => <Badge key={mode} tone="neutral">{mode === "api_key" ? "API Key" : "OAuth"}</Badge>)}
+                          <Badge tone="neutral">{provider.modelCount} models</Badge>
+                        </div>
+                        {provider.sampleModels.length > 0 && <div className="mt-1 text-[11px] text-zinc-500 truncate">{provider.sampleModels.slice(0, 2).join(", ")}</div>}
+                      </div>
                     </div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{provider.modelCount} models · {provider.authSource} · {provider.secretPreview}</div>
-                    {provider.warnings.length > 0 && <div className="text-xs text-amber-500 mt-1">{provider.warnings.join("; ")}</div>}
-                    {provider.existingProfileId && provider.importable && (
-                      <label className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-                        <input type="checkbox" checked={overwrite.has(provider.providerSlug)} onChange={() => toggleOverwrite(provider.providerSlug)} />
-                        Overwrite existing provider
-                      </label>
-                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 min-h-[360px]">
+              {!selected ? (
+                <div className="h-full flex items-center justify-center text-sm text-zinc-500">Select a provider to continue.</div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-white">{selected.displayName}</div>
+                    <div className="text-xs text-zinc-500 mt-1">{selected.modelCount} models available from provider catalog.</div>
                   </div>
-                </label>
-              </div>
-            ))}
+
+                  <Field label="Credential name"><input className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+
+                  {selected.authModes.length > 1 && (
+                    <Field label="Authentication"><select className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white" value={authMode} onChange={(e) => setAuthMode(e.target.value as "api_key" | "oauth")}>{selected.authModes.map((mode) => <option key={mode} value={mode}>{mode === "api_key" ? "API Key" : "OAuth login"}</option>)}</select></Field>
+                  )}
+
+                  {selected.providerSlug === "anthropic" && <div className="rounded border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+                    <label className="flex items-center justify-between gap-3 text-xs text-zinc-700 dark:text-zinc-300">
+                      <span>
+                        <span className="block font-medium text-zinc-900 dark:text-white">Enable Claude Code fingerprint</span>
+                        <span className="block mt-1 text-zinc-500 dark:text-zinc-400">Turn on when this credential requires Claude Code-compatible request headers and payload shaping. Leave off for regular Anthropic API keys.</span>
+                      </span>
+                      <input type="checkbox" checked={enableClaudeCodeFingerprint} onChange={(e) => setEnableClaudeCodeFingerprint(e.target.checked)} />
+                    </label>
+                  </div>}
+
+                  {authMode === "api_key" ? (
+                    <div className="space-y-3">
+                      <Field label="API key"><input type="password" className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste provider API key" /></Field>
+                      <button type="button" onClick={connectApiKey} disabled={busy || !apiKey.trim()} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Connecting..." : "Connect"}</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {!oauthJob && <button type="button" onClick={startOAuth} disabled={busy} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Starting..." : "Start login"}</button>}
+                      {oauthJob && <div className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-3 space-y-2 text-xs text-zinc-600 dark:text-zinc-300">
+                        <div>Status: <span className="font-medium">{oauthJob.status}</span></div>
+                        {oauthJob.prompt && <div>{oauthJob.prompt}</div>}
+                        {oauthJob.authUrl && <a className="text-blue-500 hover:underline break-all" href={oauthJob.authUrl} target="_blank" rel="noreferrer">Open login page</a>}
+                        {oauthJob.deviceCode && <div className="space-y-1"><div>Code: <code>{oauthJob.deviceCode.userCode}</code></div><a className="text-blue-500 hover:underline break-all" href={oauthJob.deviceCode.verificationUri} target="_blank" rel="noreferrer">{oauthJob.deviceCode.verificationUri}</a></div>}
+                        {oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}
+                        {oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-blue-600 text-white rounded text-xs disabled:bg-zinc-700">Submit</button></div>}
+                        {oauthJob.error && <div className="text-red-500">{oauthJob.error}</div>}
+                        {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-zinc-500 hover:text-zinc-300">Cancel login</button>}
+                      </div>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">Cancel</button>
-          <button type="button" onClick={handleImport} disabled={importing || selected.size === 0} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer">{importing ? "Importing..." : "Import"}</button>
-        </div>
+
+        <div className="flex justify-end gap-2 pt-2"><button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer">Close</button></div>
       </div>
     </Sheet>
   );
 }
 
+
 function Badge({ tone, children }: { tone: "success" | "neutral"; children: React.ReactNode }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded ${tone === "success" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"}`}>{children}</span>;
+}
+
+function usesClaudeCodeFingerprint(profile: Pick<ModelCredentialProfileInput, "requestProfile">): boolean {
+  return profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code";
+}
+
+function parseIntegerInput(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return Number(trimmed);
+}
+
+function modelCustomizations(profile: ModelCredentialProfileInput): NonNullable<ModelCredentialProfileInput["modelCustomizations"]> {
+  return profile.modelCustomizations || {};
+}
+
+function isModelHidden(profile: ModelCredentialProfileInput, id: string): boolean {
+  return (profile.modelCustomizations?.disabled || []).includes(id);
+}
+
+function modelOverride(profile: ModelCredentialProfileInput, id: string): { contextWindow?: number; maxTokens?: number } {
+  return profile.modelCustomizations?.contextWindowOverride?.[id] !== undefined ? { contextWindow: modelCustomizations(profile).contextWindowOverride?.[id] } : {};
+}
+
+function formatK(value?: number): string {
+  return value ? `${Math.round(value / 1000)}k` : "unavailable";
+}
+
+function mergeFetchedModelsWithOverrides(current: ModelCredentialProfileInput["models"], fetched: ModelCredentialProfileInput["models"]): ModelCredentialProfileInput["models"] {
+  const byId = new Map(current.map((m) => [m.id, m]));
+  return fetched.map((m) => {
+    const existing = byId.get(m.id);
+    if (!existing) return m;
+    return {
+      ...m,
+      name: existing.name || m.name,
+      contextWindow: existing.contextWindow ?? m.contextWindow,
+      maxTokens: existing.maxTokens ?? m.maxTokens,
+      metadataSource: existing.contextWindow !== undefined || existing.maxTokens !== undefined ? "endpoint" : m.metadataSource,
+    };
+  });
 }
 
 function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: PublicModelCredentialProfile | null; onClose: () => void; onSaved: () => void }) {
   const { toast } = useDialog();
   const [form, setForm] = useState<ModelCredentialProfileInput>(() => ({
+    profileKind: profile?.profileKind || "custom_endpoint",
     name: profile?.name || "",
     providerSlug: profile?.providerSlug || "",
     protocol: profile?.protocol || "openai-responses",
@@ -537,7 +729,8 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     requestProfile: profile?.requestProfile || "standard",
     enabled: profile?.enabled ?? true,
     isDefault: profile?.isDefault ?? false,
-    models: profile?.models?.length ? profile.models : [{ id: "", input: ["text"], metadataSource: "unknown" }],
+    models: profile?.profileKind === "builtin_provider" && profile.catalogModels?.length ? profile.catalogModels : (profile?.models?.length ? profile.models : [{ id: "", input: ["text"], metadataSource: "unknown" }]),
+    modelCustomizations: profile?.modelCustomizations,
   }));
   const [saving, setSaving] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -546,6 +739,21 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const [oauthCode, setOauthCode] = useState("");
   const [oauthBusy, setOauthBusy] = useState(false);
   const inputCls = "w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600";
+  const builtinProvider = form.profileKind === "builtin_provider";
+  const updateModelCustomizations = (next: ModelCredentialProfileInput["modelCustomizations"]) => setForm({ ...form, modelCustomizations: next });
+  const setModelVisible = (id: string, visible: boolean) => {
+    const current = modelCustomizations(form);
+    const disabled = new Set(current.disabled || []);
+    visible ? disabled.delete(id) : disabled.add(id);
+    updateModelCustomizations({ ...current, disabled: Array.from(disabled) });
+  };
+  const setModelOverride = (id: string, field: "contextWindow", value: number | undefined) => {
+    const current = modelCustomizations(form);
+    const contextWindowOverride = { ...(current.contextWindowOverride || {}) };
+    if (value === undefined) delete contextWindowOverride[id];
+    else contextWindowOverride[id] = value;
+    updateModelCustomizations({ ...current, contextWindowOverride });
+  };
   const fetchModels = async () => {
     setFetchingModels(true);
     setFetchError(null);
@@ -554,7 +762,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
       if (result.models.length === 0) {
         setFetchError("No models found. You can still add models manually.");
       } else {
-        setForm({ ...form, models: result.models });
+        setForm({ ...form, models: mergeFetchedModelsWithOverrides(form.models, result.models) });
         toast(`Fetched ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`, "success");
         if (result.warnings.length > 0) setFetchError(result.warnings.join(" "));
       }
@@ -596,7 +804,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const save = async () => {
     setSaving(true);
     try {
-      const payload = { ...form, requestProfile: form.protocol === "anthropic-messages" ? form.requestProfile : "standard" as const };
+      const payload = { ...form, requestProfile: form.protocol === "anthropic-messages" && usesClaudeCodeFingerprint(form) ? "anthropic_proxy_claude_code" as const : "standard" as const };
       if (profile) await updateModelCredentialProfile(profile.id, payload);
       else await createModelCredentialProfile(payload);
       onSaved();
@@ -622,17 +830,52 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
               <p className="text-xs text-zinc-500">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
             <div className="text-xs rounded border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 p-3">Secrets are stored locally in plaintext with 0600 file permissions. Use a scoped key when possible.</div>
-            {form.protocol === "anthropic-messages" && <div className="rounded border border-zinc-200 dark:border-zinc-800 p-3 space-y-2"><label className="flex gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.requestProfile === "anthropic_claude_code_oauth"} onChange={(e) => setForm({ ...form, requestProfile: e.target.checked ? "anthropic_claude_code_oauth" : "standard" })} /> Enable Claude Code / OAuth-compatible request handling</label><p className="text-xs text-zinc-500 dark:text-zinc-400">Only enable this if your proxy explicitly requires Anthropic OAuth or Claude Code compatible requests. It changes auth headers, beta headers, system identity, and tool naming. Leave off for standard Anthropic-compatible proxies.</p></div>}
+            {form.protocol === "anthropic-messages" && <div className="rounded border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+              <label className="flex items-center justify-between gap-3 text-xs text-zinc-700 dark:text-zinc-300">
+                <span>
+                  <span className="block font-medium text-zinc-900 dark:text-white">Enable Claude Code fingerprint</span>
+                  <span className="block mt-1 text-zinc-500 dark:text-zinc-400">Turn on for Claude Code/OAuth-style keys or proxies that require Claude Code-compatible headers and payload shaping. Leave off for standard Anthropic API keys.</span>
+                </span>
+                <input type="checkbox" checked={usesClaudeCodeFingerprint(form)} onChange={(e) => setForm({ ...form, requestProfile: e.target.checked ? "anthropic_proxy_claude_code" : "standard" })} />
+              </label>
+            </div>}
           </div>
           <div className="space-y-3">
-            <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-zinc-900 dark:text-white">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-blue-500 hover:text-blue-400 disabled:text-zinc-400 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", input: ["text"], metadataSource: "unknown" }] })} className="text-xs text-blue-500">Add model manually</button></div></div>
-            {fetchError && <div className="text-xs rounded border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 p-2">{fetchError} Manual add remains available.</div>}
-            {form.models.map((m, i) => <div key={i} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
-              <input className={inputCls} value={m.id} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, id: e.target.value }; setForm({ ...form, models }); }} placeholder="model id" />
-              <input className={inputCls} value={m.name || ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, name: e.target.value }; setForm({ ...form, models }); }} placeholder="display name (optional)" />
-              <div className="text-[11px] text-zinc-500 dark:text-zinc-500">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx · ${m.metadataSource === "pi_catalog" ? "from pi catalog" : "from endpoint"}` : "metadata unknown"}</div>
-              <button type="button" className="text-xs text-red-500" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
-            </div>)}
+            {builtinProvider ? (
+              <>
+                <div><h4 className="text-sm font-medium text-zinc-900 dark:text-white">Models</h4><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Provider catalog models for this credential.</p></div>
+                {form.models.map((m) => {
+                  const hidden = isModelHidden(form, m.id);
+                  const override = modelOverride(form, m.id);
+                  return <div key={m.id} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
+                    <div className={hidden ? "opacity-50" : ""}>
+                      <code className="block text-xs text-zinc-800 dark:text-zinc-200 break-all whitespace-normal">{m.id}</code>
+                      <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-0.5">Provider catalog · Default: {formatK(m.contextWindow)} ctx</div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                      <input type="checkbox" checked={!hidden} onChange={(e) => setModelVisible(m.id, e.target.checked)} />
+                      Enabled
+                    </label>
+                    <Field label="Context window"><div className="space-y-1"><input type="number" min={1} step={1} className={inputCls} value={override.contextWindow ?? ""} onChange={(e) => setModelOverride(m.id, "contextWindow", parseIntegerInput(e.target.value))} placeholder={m.contextWindow ? String(m.contextWindow) : "Default"} /><div className="text-[11px] text-zinc-500 dark:text-zinc-500">Leave empty for default.</div></div></Field>
+                  </div>;
+                })}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-zinc-900 dark:text-white">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-blue-500 hover:text-blue-400 disabled:text-zinc-400 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", input: ["text"], metadataSource: "unknown" }] })} className="text-xs text-blue-500">Add model manually</button></div></div>
+                {fetchError && <div className="text-xs rounded border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 p-2">{fetchError} Manual add remains available.</div>}
+                {form.models.map((m, i) => <div key={i} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
+                  <input className={inputCls} value={m.id} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, id: e.target.value }; setForm({ ...form, models }); }} placeholder="model id" />
+                  <input className={inputCls} value={m.name || ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, name: e.target.value }; setForm({ ...form, models }); }} placeholder="display name (optional)" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 1000000" /></Field>
+                    <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 128000" /></Field>
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-500">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max` : ""} · ${m.metadataSource === "pi_catalog" ? "from pi catalog" : "custom"}` : "metadata unknown"}</div>
+                  <button type="button" className="text-xs text-red-500" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
+                </div>)}
+              </>
+            )}
           </div>
         </div>
         <div className="flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500">Cancel</button><button onClick={save} disabled={saving} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg">{saving ? "Saving..." : "Save"}</button></div>

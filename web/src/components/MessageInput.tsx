@@ -28,7 +28,7 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const upload = useUpload(onError);
+  const upload = useUpload(onError, roomId ? `room:${roomId}` : null);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Mention menu navigation takes priority when open

@@ -1,8 +1,16 @@
-import { useState, useEffect } from "react";
-import { ArrowLeft, Save, Trash2, Pencil, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { ArrowLeft, Save, X, ChevronDown } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import { getAgent, updateAgent, deleteAgent, createAgent } from "../api/client";
+import {
+  getAgent, updateAgent, deleteAgent, createAgent,
+  getMembers, getRooms, getConfiguredModels, updateMember,
+  getAgentContextUsage, getMemberTokenUsage,
+  type MemberInfo, type Room, type AvailableModelOption, type ContextUsageData,
+} from "../api/client";
 import { Markdown } from "../components/Markdown";
+import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
+import { ModelPop } from "../components/StationPanel";
+import { formatTokens } from "../components/StationPanel";
 import { useDialog } from "../components/dialogs";
 
 interface AgentDetailPageProps {
@@ -11,11 +19,22 @@ interface AgentDetailPageProps {
   isCreate?: boolean;
   onCreated?: (name: string) => void;
   onOpenMobileSidebar?: () => void;
+  /** 跳转到房间；lensAgent 用于落地后直接打开该成员的工位镜头 */
+  onOpenRoom?: (roomId: string, lensAgent?: string) => void;
 }
 
-const editBtnCls = "px-3 py-1.5 text-sm border rounded bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:border-zinc-700 cursor-pointer transition-colors";
+interface DutyRow {
+  member: MemberInfo;
+  room: Room;
+  status: string;
+  usage?: ContextUsageData;
+}
 
-export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobileSidebar }: AgentDetailPageProps) {
+const btnCls =
+  "px-3.5 py-1.5 text-xs font-medium border border-line rounded-md text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer transition-colors";
+
+/** Team 页 — 员工档案：profile + meta strip + 跨房间在岗（含模型热切换）+ skills + prompt */
+export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobileSidebar, onOpenRoom }: AgentDetailPageProps) {
   const { toast, confirm } = useDialog();
   const [agentName, setAgentName] = useState(name);
   const [agentData, setAgentData] = useState<any>(null);
@@ -24,6 +43,13 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   const [loading, setLoading] = useState(!isCreate);
   const [editing, setEditing] = useState(!!isCreate);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [promptExpanded, setPromptExpanded] = useState(false);
+
+  // on-duty 数据
+  const [duty, setDuty] = useState<DutyRow[]>([]);
+  const [tokens30d, setTokens30d] = useState<number | null>(null);
+  const [models, setModels] = useState<AvailableModelOption[]>([]);
+  const [openChip, setOpenChip] = useState<string | null>(null);
 
   const loadAgent = () => {
     setLoading(true);
@@ -42,6 +68,60 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     if (!isCreate) loadAgent();
   }, [name, isCreate]);
 
+  // 加载跨房间在岗：members(agent==name) × rooms(含该 member)
+  const loadDuty = useCallback(async () => {
+    if (isCreate) return;
+    try {
+      const [allMembers, allRooms] = await Promise.all([getMembers(), getRooms()]);
+      const mine = allMembers.filter((m) => m.agent === name);
+      const rows: DutyRow[] = [];
+      for (const m of mine) {
+        for (const r of allRooms) {
+          if (!r.members.includes(m.name)) continue;
+          rows.push({ member: m, room: r, status: r.agentStatuses?.[m.name] || "inactive" });
+        }
+      }
+      setDuty(rows);
+      // context usage（逐行拉取，失败忽略）
+      rows.forEach((row, i) => {
+        getAgentContextUsage(row.room.id, row.member.name)
+          .then((usage) => setDuty((prev) => prev.map((p, j) => (j === i ? { ...p, usage } : p))))
+          .catch(() => {});
+      });
+      // token 用量合计
+      const usages = await Promise.all(
+        mine.map((m) => getMemberTokenUsage(m.id).then((u) => u.totalTokens).catch(() => 0)),
+      );
+      setTokens30d(usages.reduce((a, b) => a + b, 0));
+    } catch (err) {
+      console.error(err);
+    }
+  }, [name, isCreate]);
+
+  useEffect(() => { loadDuty(); }, [loadDuty]);
+  useEffect(() => {
+    if (!isCreate) getConfiguredModels().then(setModels).catch(console.error);
+  }, [isCreate]);
+
+  // 点击外部关闭模型弹层
+  useEffect(() => {
+    if (!openChip) return;
+    const close = () => setOpenChip(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [openChip]);
+
+  const handleSwitchModel = async (member: MemberInfo, model: string, credentialId: string) => {
+    setOpenChip(null);
+    try {
+      await updateMember(member.id, { model, credentialId });
+      toast(`${member.name} → ${model}（下一回合生效）`, "success");
+      loadDuty();
+    } catch (err: any) {
+      toast(`切换失败: ${err.message}`, "error");
+    }
+  };
+
   const handleSave = async () => {
     setSaveState("saving");
     try {
@@ -53,7 +133,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
         await updateAgent(name, content);
         setOriginalContent(content);
         setEditing(false);
-        loadAgent(); // refresh preview data
+        loadAgent();
       }
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
@@ -73,132 +153,240 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   const handleCancel = () => {
     setContent(originalContent);
     setEditing(false);
+    setSaveState("idle");
   };
 
   const isBuiltin = agentData?.tags?.includes("builtin");
+  const anyWorking = duty.some((d) => d.status === "working");
+  const skills: string[] = agentData?.skills ?? [];
 
-  if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500">Loading...</div>;
+  if (loading) {
+    return <div className="flex-1 flex items-center justify-center text-ink-4 text-sm">Loading…</div>;
+  }
 
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <MobileTopBar title={isCreate ? "New Agent" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
-      <div className="flex-1 flex flex-col p-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <button onClick={onBack} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer">
-            <ArrowLeft size={18} />
-          </button>
-          {isCreate ? (
-            <input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="agent-name"
-              className="text-lg font-bold text-zinc-900 dark:text-white bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-blue-500 outline-none px-1" />
-          ) : (
-            <>
-              {agentData?.avatar && <span className="text-lg">{agentData.avatar}</span>}
-              <h1 className="text-lg font-bold text-zinc-900 dark:text-white">{name}</h1>
-              <span className="text-xs text-zinc-400 dark:text-zinc-500">Agent · {name}.md</span>
-              {isBuiltin && (
-                <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">built-in</span>
+  /* ---- 编辑 / 创建模式：保持 markdown 源编辑 ---- */
+  if (editing) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
+        <MobileTopBar title={isCreate ? "New Agent" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+        <div className="flex-1 flex flex-col min-h-0 w-full max-w-[880px] mx-auto px-6 md:px-9 py-6">
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <div className="flex items-center gap-3">
+              <button onClick={isCreate ? onBack : handleCancel} className="text-ink-4 hover:text-ink-1 transition-colors cursor-pointer">
+                <ArrowLeft size={17} />
+              </button>
+              {isCreate ? (
+                <input
+                  value={agentName}
+                  onChange={(e) => setAgentName(e.target.value)}
+                  placeholder="agent-name"
+                  autoFocus
+                  className="text-base font-semibold text-ink-1 bg-transparent border-b border-line focus:border-accent outline-none px-1"
+                />
+              ) : (
+                <h1 className="text-base font-semibold text-ink-1">{name}</h1>
               )}
-            </>
-          )}
-          {editing && !isCreate && <span className="text-xs text-amber-500 font-medium">Editing</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          {!isCreate && !editing && !isBuiltin && (
-            <>
-              <button onClick={() => setEditing(true)} className={`flex items-center gap-1 ${editBtnCls}`}>
-                <Pencil size={14} /> Edit
-              </button>
-              <button onClick={handleDelete}
-                className="flex items-center gap-1 px-3 py-1.5 text-red-500 dark:text-red-400 hover:text-red-400 dark:hover:text-red-300 text-sm cursor-pointer">
-                <Trash2 size={14} /> Delete
-              </button>
-            </>
-          )}
-          {editing && (
-            <>
+              <span className="text-[10px] font-semibold tracking-[0.05em] text-think bg-think-dim px-2 py-0.5 rounded-full">EDITING</span>
+            </div>
+            <div className="flex items-center gap-2">
               {!isCreate && (
-                <button onClick={handleCancel} className={`flex items-center gap-1 ${editBtnCls}`}>
-                  <X size={14} /> Cancel
+                <button onClick={handleCancel} className={`flex items-center gap-1.5 ${btnCls}`}>
+                  <X size={13} /> Cancel
                 </button>
               )}
-              <button onClick={handleSave} disabled={saveState === "saving"}
-                className={`flex items-center gap-1 px-3 py-1.5 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer ${
-                  saveState === "saved" ? "bg-emerald-600" : saveState === "error" ? "bg-red-600" : "bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-500"
-                }`}>
-                <Save size={14} /> {saveState === "saving" ? "Saving..." : saveState === "saved" ? "✓ Saved" : saveState === "error" ? "✗ Failed" : isCreate ? "Create" : "Save"}
+              <button
+                onClick={handleSave}
+                disabled={saveState === "saving" || (isCreate && !agentName)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-md bg-accent text-accent-contrast cursor-pointer disabled:opacity-40 transition-opacity"
+              >
+                <Save size={13} />
+                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved" : saveState === "error" ? "✗ Failed" : isCreate ? "Create" : "Save"}
               </button>
-            </>
-          )}
+            </div>
+          </div>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            spellCheck={false}
+            className="flex-1 w-full bg-inset border border-line rounded-lg px-4 py-3 text-base md:text-xs text-ink-2 font-mono leading-relaxed resize-none focus:outline-none focus:border-line-strong overflow-y-auto"
+          />
         </div>
       </div>
+    );
+  }
 
-      {/* Preview mode */}
-      {!editing && agentData && (
-        <div className="flex-1 overflow-y-auto w-full max-w-7xl">
-          {/* Meta badges */}
-          {(agentData.tags?.length > 0 || agentData.skills?.length > 0) && (
-            <div className="flex flex-wrap items-center gap-1.5 mb-4">
-              {agentData.tags?.length > 0 && (
-                <>
-                  <span className="text-xs text-zinc-500">Tags:</span>
-                  {agentData.tags.filter((t: string) => t !== "builtin").map((t: string) => (
-                    <span key={t} className="text-xs px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded">{t}</span>
-                  ))}
-                  {agentData.skills?.length > 0 && <span className="text-zinc-300 dark:text-zinc-600">·</span>}
-                </>
-              )}
-              {agentData.skills?.length > 0 && (
-                <>
-                  <span className="text-xs text-zinc-500">Skills:</span>
-                  {agentData.skills.map((s: string) => (
-                    <span key={s} className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">{s}</span>
-                  ))}
-                </>
-              )}
+  /* ---- 档案模式 ---- */
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
+      <MobileTopBar title={name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="w-full max-w-[880px] mx-auto px-6 md:px-9 pt-7 pb-16">
+
+          {/* Profile header */}
+          <div className="flex items-start gap-4.5">
+            <StaffBadge name={name} avatar={agentData?.avatar} status={anyWorking ? "working" : "idle"} size="lg" />
+            <div className="min-w-0">
+              <h2 className="text-[19px] font-semibold tracking-tight text-ink-1 flex items-center gap-2.5 flex-wrap">
+                {name}
+                {isBuiltin && (
+                  <span className="text-[10px] font-semibold tracking-[0.05em] px-2 py-0.5 rounded-full bg-accent-dim text-accent-ink">
+                    BUILT-IN
+                  </span>
+                )}
+              </h2>
+              <p className="text-[13px] text-ink-2 mt-1 max-w-[560px]">{agentData?.description || "No description"}</p>
             </div>
-          )}
-          {/* Builtin agent info card */}
-          {isBuiltin ? (
-            <div className="max-w-5xl bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5">
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">{agentData.avatar || ">_"}</span>
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-white">{agentData.description}</div>
-                </div>
+            {!isBuiltin && (
+              <div className="ml-auto flex gap-2 shrink-0">
+                <button onClick={() => setEditing(true)} className={btnCls}>Edit</button>
+                <button onClick={handleDelete} className={`${btnCls} hover:!text-blocked hover:!border-blocked/40`}>Delete</button>
               </div>
-              <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
-                <p>A general-purpose CLI agent that preserves the runtime&apos;s default system prompt.</p>
-                <ul className="list-disc list-inside space-y-1 mt-3">
-                  <li>No custom system prompt injected</li>
-                  <li>No skills pre-loaded</li>
-                  <li>Bossmode tools (chat, knowledge) are available</li>
-                  <li>Define roles dynamically in conversation</li>
-                </ul>
-                <p className="text-xs text-zinc-500 dark:text-zinc-600 mt-4 italic">This agent cannot be edited or deleted.</p>
-              </div>
-            </div>
+            )}
+          </div>
+
+          {/* Meta strip */}
+          <div className="flex flex-wrap gap-x-6 gap-y-3 py-3.5 mt-4.5 mb-5 border-y border-line-soft">
+            <Meta k="DEFAULT MODEL" v={agentData?.model || "—"} mono />
+            <Meta k="SKILLS" v={skills.length ? skills.join(" · ") : "—"} />
+            <Meta k="ON DUTY" v={duty.length ? `${duty.length} 个房间` : "未上岗"} />
+            <Meta k="TOKENS" v={tokens30d != null ? formatTokens(tokens30d) : "—"} mono />
+          </div>
+
+          {/* On-duty table */}
+          <h3 className="text-[11px] font-semibold tracking-[0.06em] text-ink-3 mb-2.5">
+            ON DUTY — 跨房间在岗（含模型热切换）
+          </h3>
+          {duty.length === 0 ? (
+            <p className="text-xs text-ink-4 border border-line rounded-lg px-4 py-5 bg-surface-0/40">
+              该员工还没有被加入任何房间 — 在房间里 Add member 时选择此 agent 即可上岗。
+            </p>
           ) : (
-            /* Markdown preview */
-            <div className="max-w-5xl bg-white dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800 rounded-lg px-6 py-5 text-sm text-zinc-800 dark:text-zinc-300 leading-relaxed">
-              <Markdown content={agentData.systemPrompt || ""} />
+            <div className="border border-line rounded-lg bg-surface-1 overflow-x-auto">
+              <div className="min-w-[640px]">
+                <div className="grid grid-cols-[1fr_1.5fr_92px_0.9fr_130px] gap-3 items-center px-4 py-2 bg-surface-2 rounded-t-lg">
+                  {["ROOM", "MODEL · CREDENTIAL", "STATUS", "CONTEXT", ""].map((h, i) => (
+                    <span key={i} className="text-[10px] font-semibold tracking-[0.06em] text-ink-4">{h}</span>
+                  ))}
+                </div>
+                {duty.map((row) => {
+                  const chipKey = `${row.room.id}:${row.member.id}`;
+                  const pct = row.usage?.supported && row.usage.percentage !== undefined ? Math.round(row.usage.percentage) : null;
+                  return (
+                    <div key={chipKey} className="grid grid-cols-[1fr_1.5fr_92px_0.9fr_130px] gap-3 items-center px-4 py-2.5 border-t border-line-soft">
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-medium text-ink-2 truncate">{row.room.name}</div>
+                        <div className="font-mono text-[10px] text-ink-4 truncate">~{row.room.cwd.replace(/^\/home\/[^/]+/, "")}</div>
+                      </div>
+                      <div className="relative min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setOpenChip(openChip === chipKey ? null : chipKey); }}
+                          title="热切换模型 · 下一回合生效"
+                          className="font-mono text-[10.5px] text-ink-3 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 -mx-1.5 py-0.5 flex items-center gap-1 cursor-pointer transition-colors max-w-full"
+                        >
+                          <span className="truncate">{row.member.model || "agent default"}</span>
+                          <ChevronDown size={9} className="shrink-0 opacity-70" />
+                        </button>
+                        {openChip === chipKey && (
+                          <ModelPop
+                            models={models}
+                            current={{ model: row.member.model ?? null, credentialId: row.member.credentialId ?? null }}
+                            onSelect={(model, credentialId) => handleSwitchModel(row.member, model, credentialId)}
+                          />
+                        )}
+                      </div>
+                      <StatusTag status={row.status} />
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-[3px] rounded-full bg-surface-3 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${pct !== null && pct >= 85 ? "bg-think" : "bg-ink-3"}`}
+                            style={{ width: `${pct ?? 0}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-[10px] text-ink-4 whitespace-nowrap">
+                          {pct !== null ? `${pct}%${row.usage?.totalTokens ? ` · ${formatTokens(row.usage.totalTokens)}` : ""}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5 justify-end">
+                        <DutyBtn onClick={() => onOpenRoom?.(row.room.id)}>Open room</DutyBtn>
+                        <DutyBtn onClick={() => onOpenRoom?.(row.room.id, row.member.name)}>Lens</DutyBtn>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Edit mode */}
-      {editing && (
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="flex-1 w-full max-w-5xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-base md:text-sm text-zinc-800 dark:text-zinc-300 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 overflow-y-auto"
-          spellCheck={false}
-        />
-      )}
+          {/* Skills */}
+          {skills.length > 0 && (
+            <>
+              <h3 className="text-[11px] font-semibold tracking-[0.06em] text-ink-3 mt-7 mb-2.5">SKILLS</h3>
+              <div className="flex gap-2 flex-wrap">
+                {skills.map((s) => (
+                  <span key={s} className="text-[11.5px] text-ink-2 border border-line rounded-full px-3 py-1">{s}</span>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Prompt */}
+          <h3 className="text-[11px] font-semibold tracking-[0.06em] text-ink-3 mt-7 mb-2.5">PROMPT</h3>
+          {isBuiltin && !agentData?.systemPrompt ? (
+            <p className="text-xs text-ink-4 border border-line rounded-lg px-4 py-4 bg-inset">
+              内置通用 agent：不注入自定义 system prompt，保留 runtime 默认提示词；角色在对话中动态定义。此 agent 不可编辑或删除。
+            </p>
+          ) : (
+            <div className={`relative border border-line rounded-lg bg-inset px-4 py-3.5 ${promptExpanded ? "" : "max-h-[180px] overflow-hidden"}`}>
+              <div className="text-xs text-ink-2 leading-relaxed [&_pre]:bg-transparent">
+                <Markdown content={agentData?.systemPrompt || ""} />
+              </div>
+              {!promptExpanded && (
+                <div className="absolute inset-x-0 bottom-0 h-16 rounded-b-lg bg-gradient-to-t from-[var(--inset)] to-transparent flex items-end justify-center pb-2">
+                  <button onClick={() => setPromptExpanded(true)} className="text-[11px] text-accent-ink cursor-pointer">展开全文</button>
+                </div>
+              )}
+              {promptExpanded && (
+                <button onClick={() => setPromptExpanded(false)} className="block mx-auto mt-2 text-[11px] text-accent-ink cursor-pointer">收起</button>
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
     </div>
+  );
+}
+
+function Meta({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10.5px] tracking-[0.04em] text-ink-4 mb-0.5">{k}</div>
+      <div className={`text-[12.5px] text-ink-2 truncate ${mono ? "font-mono text-[11.5px]" : ""}`}>{v}</div>
     </div>
+  );
+}
+
+function StatusTag({ status }: { status: string }) {
+  const cls =
+    status === "working" ? "text-onair bg-onair-dim"
+    : status === "idle" ? "text-ink-3 bg-surface-2"
+    : "text-ink-4 bg-surface-2";
+  const label = status === "working" ? "WORKING" : status === "idle" ? "IDLE" : "OFF";
+  return (
+    <span className={`text-[10px] font-semibold tracking-[0.05em] px-2 py-0.5 rounded-full justify-self-start whitespace-nowrap ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function DutyBtn({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="border border-line text-ink-3 text-[10.5px] font-medium px-2.5 py-1 rounded-md hover:text-accent-ink hover:border-line-strong cursor-pointer transition-colors whitespace-nowrap"
+    >
+      {children}
+    </button>
   );
 }
 
