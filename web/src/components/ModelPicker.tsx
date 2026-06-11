@@ -55,7 +55,7 @@ export function ModelPicker({ value, models, onChange, disabled }: {
           const [profileId, ...refParts] = selected.split("::");
           onChange({ credentialId: profileId, model: refParts.join("::") });
         }}
-        className="w-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+        className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
       >
         <option value="">Follow agent default</option>
         {value.model && !matched && <option value={`legacy::${value.model}`}>{value.model} (not in available models)</option>}
@@ -66,8 +66,8 @@ export function ModelPicker({ value, models, onChange, disabled }: {
         ))}
         {models.length === 0 && <option disabled value="__none">No models available</option>}
       </select>
-      {models.length === 0 && <p className="text-xs text-amber-500">No models available. Import credentials in Settings → Model Credentials.</p>}
-      {value.model && !matched && <p className="text-xs text-amber-500">Model not found in available list. Saving will keep the existing value unless you choose another model.</p>}
+      {models.length === 0 && <p className="text-xs text-think">No models available. Import credentials in Settings → Model Credentials.</p>}
+      {value.model && !matched && <p className="text-xs text-think">Model not found in available list. Saving will keep the existing value unless you choose another model.</p>}
     </div>
   );
 }

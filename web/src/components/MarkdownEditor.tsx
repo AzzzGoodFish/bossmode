@@ -17,8 +17,8 @@ interface MarkdownEditorProps {
 
 function EditorFallback({ value, placeholder }: { value?: string; placeholder?: string }) {
   return (
-    <div className="min-h-[200px] rounded-md text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap p-1">
-      {value || <span className="text-zinc-400 dark:text-zinc-600">{placeholder || "Loading editor..."}</span>}
+    <div className="min-h-[200px] rounded-md text-sm text-ink-2 whitespace-pre-wrap p-1">
+      {value || <span className="text-ink-4">{placeholder || "Loading editor..."}</span>}
     </div>
   );
 }

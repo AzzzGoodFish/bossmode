@@ -99,14 +99,14 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       {confirmState && (
         <Sheet open={!!confirmState} onClose={() => handleConfirm(false)} size="sm">
           <div className="p-5">
-            <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
+            <p className="text-sm text-ink-1 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => handleConfirm(false)}
-                className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors">
+                className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer transition-colors">
                 Cancel
               </button>
               <button onClick={() => handleConfirm(true)} autoFocus
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+                className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer transition-colors">
                 Confirm
               </button>
             </div>
@@ -125,10 +125,10 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 function Toast({ item, onDismiss }: { item: ToastItem; onDismiss: () => void }) {
   const Icon = item.type === "error" ? AlertCircle : item.type === "success" ? CheckCircle : Info;
   const colors = item.type === "error"
-    ? "border-red-500/30 bg-red-950/80 text-red-200"
+    ? "border-blocked/30 bg-blocked-dim text-blocked"
     : item.type === "success"
-    ? "border-emerald-500/30 bg-emerald-950/80 text-emerald-200"
-    : "border-zinc-500/30 bg-zinc-900/90 text-zinc-200";
+    ? "border-onair/30 bg-onair-dim text-onair"
+    : "border-line-strong bg-surface-1/90 text-ink-1";
 
   return (
     <div className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-lg border shadow-lg text-sm backdrop-blur-sm animate-slide-in ${colors}`}>
@@ -162,21 +162,21 @@ function PromptDialog({ state, onClose }: { state: PromptState; onClose: (value:
   return (
     <Sheet open onClose={() => onClose(null)} size="sm" closeOnOverlayClick={false}>
       <div className="p-5">
-        <p className="text-sm text-zinc-800 dark:text-zinc-200 mb-3">{state.message}</p>
+        <p className="text-sm text-ink-1 mb-3">{state.message}</p>
         <input
           ref={inputRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onClose(null); }}
-          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 mb-4"
+          className="w-full bg-inset border border-line rounded px-3 py-2 text-base md:text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors mb-4"
         />
         <div className="flex gap-2 justify-end">
           <button onClick={() => onClose(null)}
-            className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors">
+            className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer transition-colors">
             Cancel
           </button>
           <button onClick={handleSubmit} disabled={!value.trim()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+            className="px-4 py-2 bg-accent hover:opacity-90 disabled:opacity-40 text-accent-contrast text-sm font-semibold rounded-lg cursor-pointer transition-opacity">
             OK
           </button>
         </div>

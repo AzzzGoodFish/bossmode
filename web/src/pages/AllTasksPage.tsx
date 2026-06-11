@@ -50,9 +50,9 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
       <MobileTopBar title="All Tasks" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
 
       {/* Header */}
-      <div className="px-6 pt-5 pb-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+      <div className="px-6 pt-5 pb-3 border-b border-line-soft shrink-0">
         <div className="mx-auto w-full max-w-6xl">
-        <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-3">All Tasks</h1>
+        <h1 className="text-lg font-bold text-ink-1 mb-3">All Tasks</h1>
         <div className="flex items-center gap-3 flex-wrap">
           {/* Status chips */}
           <div className="flex items-center gap-1">
@@ -61,21 +61,21 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
                 key={chip.value}
                 onClick={() => setStatusFilter(chip.value as TaskStatus | "")}
                 className={`px-2.5 py-1 rounded-full text-xs cursor-pointer ${statusFilter === chip.value
-                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"}`}
+                  ? "bg-accent text-accent-contrast"
+                  : "bg-surface-2 text-ink-2 hover:bg-surface-2"}`}
               >
                 {chip.label}
               </button>
             ))}
           </div>
           {/* Search */}
-          <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1">
-            <Search size={12} className="text-zinc-400" />
+          <div className="flex items-center gap-1 bg-surface-2 rounded px-2 py-1">
+            <Search size={12} className="text-ink-4" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search tasks..."
-              className="bg-transparent text-xs text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none w-40"
+              className="bg-transparent text-xs text-ink-1 placeholder:text-ink-4 focus:outline-none w-40"
             />
           </div>
         </div>
@@ -86,16 +86,16 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto w-full max-w-6xl">
         {loading ? (
-          <div className="text-center py-12 text-sm text-zinc-400">Loading...</div>
+          <div className="text-center py-12 text-sm text-ink-4">Loading...</div>
         ) : tasks.length === 0 ? (
-          <div className="text-center py-12 text-sm text-zinc-400">No tasks found</div>
+          <div className="text-center py-12 text-sm text-ink-4">No tasks found</div>
         ) : (
           Array.from(grouped.entries()).map(([roomId, group]) => (
             <div key={roomId} className="mb-6">
-              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+              <div className="text-xs font-semibold text-ink-3 uppercase tracking-wider mb-2">
                 # {group.roomName}
               </div>
-              <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+              <div className="border border-line-soft rounded-lg overflow-hidden">
                 {group.tasks.map((task) => (
                   <TaskCard
                     key={task.id}

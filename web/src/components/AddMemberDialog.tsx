@@ -30,31 +30,31 @@ export function AddMemberDialog({ currentMembers, onAdd, onClose }: AddMemberDia
       <div className="p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white">Add Member</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-white text-lg transition-colors cursor-pointer">×</button>
+          <button onClick={onClose} className="text-ink-3 hover:text-ink-1 text-lg transition-colors cursor-pointer">×</button>
         </div>
 
         <input
           type="text" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Search members..."
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-white mb-3
-                     focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-600"
+          className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-white mb-3
+                     focus:outline-none focus:border-line-strong transition-colors placeholder:text-ink-4"
           autoFocus
         />
 
         <div className="space-y-1 max-h-56 overflow-y-auto">
           {available.length === 0 ? (
-            <div className="text-center py-6 text-xs text-zinc-600">
+            <div className="text-center py-6 text-xs text-ink-3">
               {members.length === 0 ? "No members configured" : "No matching members"}
             </div>
           ) : (
             available.map((m) => (
-              <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 transition-colors">
+              <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded hover:bg-surface-2 transition-colors">
                 <div className="min-w-0">
-                  <div className="text-sm text-zinc-300">{m.name}</div>
-                  <div className="text-xs text-zinc-600 truncate">{m.agent} · {m.model || "agent default"}</div>
+                  <div className="text-sm text-ink-2">{m.name}</div>
+                  <div className="text-xs text-ink-3 truncate">{m.agent} · {m.model || "agent default"}</div>
                 </div>
                 <button onClick={() => handleAdd(m.name)} disabled={adding === m.name}
-                  className="text-xs text-blue-400 hover:text-blue-300 disabled:text-zinc-600 cursor-pointer shrink-0 ml-2">
+                  className="text-xs text-accent-ink hover:opacity-80 disabled:text-ink-3 cursor-pointer shrink-0 ml-2">
                   {adding === m.name ? "Adding..." : "Invite"}
                 </button>
               </div>

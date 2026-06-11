@@ -387,13 +387,13 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
       <div className="w-full max-w-2xl px-6 pt-20 pb-12">
         {hasRooms ? (
           <>
-            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Your Rooms</h1>
-            <p className="text-sm text-zinc-500 mb-8">Pick up where you left off, or start something new.</p>
+            <h1 className="text-2xl font-semibold text-ink-1 mb-1">Your Rooms</h1>
+            <p className="text-sm text-ink-3 mb-8">Pick up where you left off, or start something new.</p>
           </>
         ) : (
           <>
-            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Get started</h1>
-            <p className="text-sm text-zinc-500 mb-8">Create your first room to begin.</p>
+            <h1 className="text-2xl font-semibold text-ink-1 mb-1">Get started</h1>
+            <p className="text-sm text-ink-3 mb-8">Create your first room to begin.</p>
           </>
         )}
 
@@ -425,7 +425,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
         )}
 
         {updateResultNote && (
-          <div className="mb-3 text-xs text-emerald-600 dark:text-emerald-400">{updateResultNote}</div>
+          <div className="mb-3 text-xs text-onair">{updateResultNote}</div>
         )}
 
         <div className="space-y-2">
@@ -438,28 +438,28 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
               <button
                 key={room.id}
                 onClick={() => onSelectRoom(room.id)}
-                className="w-full text-left group rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all px-4 py-3.5 cursor-pointer"
+                className="w-full text-left group rounded-lg border border-line-soft hover:border-line-strong bg-surface-0/40 hover:bg-surface-1 transition-all px-4 py-3.5 cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 group-hover:text-black dark:group-hover:text-white transition-colors">
+                      <span className="text-sm font-medium text-ink-1 group-hover:text-black dark:group-hover:text-white transition-colors">
                         {room.name}
                       </span>
                       {unreadRoomIds?.has(room.id) && (
-                        <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                        <span className="w-2 h-2 rounded-full bg-accent shrink-0" />
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                    <div className="flex items-center gap-3 text-xs text-ink-3">
                       <span className="font-mono truncate">{room.cwd.split("/").slice(-2).join("/")}</span>
-                      <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                      <span className="text-ink-2 dark:text-ink-2">·</span>
                       <span>{room.members.length} member{room.members.length !== 1 ? "s" : ""}</span>
                     </div>
                   </div>
 
                   {workingCount > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5 shrink-0 mt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+                    <span className="inline-flex items-center gap-1 text-[10px] text-onair bg-onair/10 border border-onair/20 rounded px-1.5 py-0.5 shrink-0 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-onair animate-pulse" />
                       {workingCount} working
                     </span>
                   )}
@@ -470,9 +470,9 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
 
           <button
             onClick={onCreateRoom}
-            className="w-full text-left group rounded-lg border border-dashed border-zinc-300 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-900/30 transition-all px-4 py-3.5 cursor-pointer"
+            className="w-full text-left group rounded-lg border border-dashed border-line hover:border-line-strong hover:bg-surface-1/30 transition-all px-4 py-3.5 cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors">
+            <div className="flex items-center gap-2 text-ink-4 group-hover:text-ink-3 dark:group-hover:text-ink-2 transition-colors">
               <Plus size={14} />
               <span className="text-sm">New Room</span>
             </div>
@@ -528,27 +528,27 @@ function UpdateBanner({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div className="mb-4 rounded-lg border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-950/30 px-4 py-3">
+    <div className="mb-4 rounded-lg border border-accent/30 bg-accent-dim px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <RefreshCw size={14} className="text-blue-500 shrink-0" />
-            <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
+            <RefreshCw size={14} className="text-accent-ink shrink-0" />
+            <span className="text-sm font-medium text-accent-ink">
               Built-in team update available ({check.installedVersion} → {check.currentVersion})
             </span>
           </div>
-          <p className="text-xs text-blue-600 dark:text-blue-400">{buildSummaryText(check.candidates)}</p>
+          <p className="text-xs text-accent-ink">{buildSummaryText(check.candidates)}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onReview} className="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">Review</button>
-          <button onClick={() => void onUpdateAll()} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded cursor-pointer">Update All</button>
+          <button onClick={onReview} className="text-xs text-accent-ink hover:underline cursor-pointer">Review</button>
+          <button onClick={() => void onUpdateAll()} className="text-xs bg-accent text-accent-contrast hover:opacity-90 px-2.5 py-1 rounded cursor-pointer">Update All</button>
           <div className="relative">
-            <button onClick={() => setMenuOpen((v) => !v)} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer">Dismiss ▾</button>
+            <button onClick={() => setMenuOpen((v) => !v)} className="text-xs text-ink-3 hover:text-ink-2 cursor-pointer">Dismiss ▾</button>
             {menuOpen && (
-              <div className="absolute right-0 top-6 z-20 w-48 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg py-1">
-                <button onClick={() => { onDismiss(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Dismiss</button>
-                <button onClick={() => { void onDismissVersion(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Skip this version</button>
-                <button onClick={() => { void onDismissPermanent(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer">Don't check for updates</button>
+              <div className="absolute right-0 top-6 z-20 w-48 rounded border border-line bg-surface-3 shadow-lg py-1">
+                <button onClick={() => { onDismiss(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Dismiss</button>
+                <button onClick={() => { void onDismissVersion(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Skip this version</button>
+                <button onClick={() => { void onDismissPermanent(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Don't check for updates</button>
               </div>
             )}
           </div>
@@ -589,9 +589,9 @@ function ReviewDialog({
   return (
     <Sheet open onClose={onClose} size="xl" closeOnOverlayClick={false}>
       <div>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line-soft">
           <h3 className="text-sm font-semibold">Review Updates</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer"><X size={14} /></button>
+          <button onClick={onClose} className="text-ink-3 hover:text-ink-1 cursor-pointer"><X size={14} /></button>
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-4 space-y-4">
           {groups.map((g) => {
@@ -599,13 +599,13 @@ function ReviewDialog({
             if (items.length === 0) return null;
             return (
               <div key={g.key}>
-                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">{g.label}</div>
+                <div className="text-xs font-semibold text-ink-3 uppercase tracking-wider mb-2">{g.label}</div>
                 <div className="space-y-2">
                   {items.map((c) => (
                     <label key={c.relativePath} className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={selected.has(c.relativePath)} onChange={() => toggle(c.relativePath)} className="cursor-pointer" />
                       <span className="flex-1 truncate">{c.name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.status === "new" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400" : c.status === "updated" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"}`}>{c.status}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.status === "new" ? "bg-onair-dim text-onair" : c.status === "updated" ? "bg-accent-dim text-accent-ink" : "bg-think-dim text-think"}`}>{c.status}</span>
                     </label>
                   ))}
                 </div>
@@ -613,9 +613,9 @@ function ReviewDialog({
             );
           })}
         </div>
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer">Cancel</button>
-          <button onClick={() => void onApply([...selected])} className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">Apply {selected.size} selected</button>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-line-soft">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm text-ink-3 hover:text-ink-1 cursor-pointer">Cancel</button>
+          <button onClick={() => void onApply([...selected])} className="px-3 py-1.5 text-sm rounded bg-accent text-accent-contrast hover:opacity-90 cursor-pointer">Apply {selected.size} selected</button>
         </div>
       </div>
     </Sheet>

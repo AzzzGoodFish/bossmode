@@ -161,20 +161,20 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
       <div ref={contentRef}>
         {/* Top indicator */}
         {hasMore === false && messages.length > 0 && (
-          <div className="text-center text-xs text-zinc-400 dark:text-zinc-600 py-4">Beginning of conversation</div>
+          <div className="text-center text-xs text-ink-4 py-4">Beginning of conversation</div>
         )}
         {loadingOlder && (
           <div className="flex items-center justify-center gap-1.5 py-3">
-            <Loader2 size={14} className="animate-spin text-zinc-400" />
-            <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Loading earlier messages</span>
+            <Loader2 size={14} className="animate-spin text-ink-4" />
+            <span className="text-[11px] text-ink-4">Loading earlier messages</span>
           </div>
         )}
 
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
-              <p className="text-zinc-400 dark:text-zinc-500 text-lg"># {roomName}</p>
-              <p className="text-zinc-400 dark:text-zinc-600 text-sm mt-1">
+              <p className="text-ink-3 text-lg"># {roomName}</p>
+              <p className="text-ink-4 text-sm mt-1">
                 Start a conversation by sending a message
               </p>
             </div>
@@ -228,7 +228,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         <div className="absolute bottom-4 right-4 z-10">
           <button
             onClick={onReturnToLatest}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-accent text-accent-contrast rounded-full shadow-lg hover:opacity-90 transition-opacity"
           >
             ↓ Jump to latest
           </button>
@@ -243,12 +243,12 @@ function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMet
   const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
   const activatedAgent = mentions?.length ? mentions[0] : null;
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 mt-3 bg-zinc-50/50 dark:bg-zinc-900/30">
-      <div className="flex items-center gap-2 text-xs text-zinc-500">
+    <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
+      <div className="flex items-center gap-2 text-xs text-ink-3">
         <span>{icon}</span>
         <span className="flex-1">
           {onJump && meta.action !== "deleted" ? (
-            <button onClick={onJump} className="text-blue-500 hover:text-blue-400 cursor-pointer underline-offset-2 hover:underline">
+            <button onClick={onJump} className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline">
               {content}
             </button>
           ) : (
@@ -256,13 +256,13 @@ function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMet
           )}
         </span>
         {meta.newStatus && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-2 text-ink-3">
             {meta.newStatus}
           </span>
         )}
       </div>
       {activatedAgent && (
-        <div className="mt-1 text-[10px] text-zinc-400">→ assigned to @{activatedAgent}</div>
+        <div className="mt-1 text-[10px] text-ink-4">→ assigned to @{activatedAgent}</div>
       )}
     </div>
   );
@@ -290,9 +290,9 @@ function DateSeparator({ ts }: { ts: number }) {
   });
   return (
     <div className="flex items-center gap-3 my-4">
-      <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
-      <span className="text-xs text-zinc-400 dark:text-zinc-600">{formatted}</span>
-      <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
+      <div className="flex-1 border-t border-line-soft" />
+      <span className="text-xs text-ink-4">{formatted}</span>
+      <div className="flex-1 border-t border-line-soft" />
     </div>
   );
 }

@@ -105,13 +105,13 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
     <Sheet open onClose={onCancel} size="md" closeOnOverlayClick={false}>
       <div className="flex flex-col" style={{ minHeight: "60vh", maxHeight: "80vh" }}>
         {/* PathBar (VS Code style) */}
-        <div className="px-3 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+        <div className="px-3 py-3 border-b border-line-soft shrink-0">
           <form onSubmit={handlePathSubmit} className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => navigate("")}
               title="Go to home"
-              className="shrink-0 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer p-1 rounded"
+              className="shrink-0 text-ink-4 hover:text-ink-1 cursor-pointer p-1 rounded"
             >
               <Home size={15} />
             </button>
@@ -120,13 +120,13 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
               value={pathInput}
               onChange={(e) => setPathInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Escape") { e.currentTarget.blur(); onCancel(); } }}
-              className="flex-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
+              className="flex-1 bg-surface-2 border border-line rounded px-2 py-1 text-xs font-mono text-ink-1 focus:outline-none focus:border-line-strong min-w-0"
               placeholder="Path..."
               spellCheck={false}
             />
             <button
               type="submit"
-              className="shrink-0 px-2 py-1 text-xs bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded cursor-pointer"
+              className="shrink-0 px-2 py-1 text-xs bg-surface-3 hover:bg-surface-2 text-ink-2 rounded cursor-pointer"
             >
               OK
             </button>
@@ -141,24 +141,24 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
           className="flex-1 overflow-y-auto p-1 focus:outline-none"
         >
           {loading && (
-            <div className="flex items-center justify-center py-8 text-zinc-400 text-sm">Loading…</div>
+            <div className="flex items-center justify-center py-8 text-ink-4 text-sm">Loading…</div>
           )}
           {error && (
-            <div className="text-red-500 text-xs px-3 py-4">{error}</div>
+            <div className="text-blocked text-xs px-3 py-4">{error}</div>
           )}
           {!loading && !error && current && (
             <>
               {current.parent && (
                 <button
                   onClick={() => navigate(current.parent!)}
-                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded text-xs text-ink-3 hover:bg-surface-2 cursor-pointer"
                 >
-                  <Folder size={13} className="text-zinc-400 shrink-0" />
+                  <Folder size={13} className="text-ink-4 shrink-0" />
                   <span className="font-mono">..</span>
                 </button>
               )}
               {current.dirs.length === 0 && (
-                <div className="text-center py-8 text-xs text-zinc-400">No subfolders</div>
+                <div className="text-center py-8 text-xs text-ink-4">No subfolders</div>
               )}
               {current.dirs.map((dir, i) => (
                 <FolderRow
@@ -170,7 +170,7 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
                 />
               ))}
               {current.truncated && (
-                <div className="text-center py-2 text-xs text-zinc-400">
+                <div className="text-center py-2 text-xs text-ink-4">
                   Showing first 200 folders
                 </div>
               )}
@@ -179,21 +179,21 @@ export function FolderPicker({ open, initialPath, onConfirm, onCancel }: FolderP
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
-          <span className="text-[10px] text-zinc-400 hidden sm:block">
+        <div className="px-4 py-2 border-t border-line-soft flex items-center justify-between shrink-0">
+          <span className="text-[10px] text-ink-4 hidden sm:block">
             ↑↓ navigate · Enter open · Cmd+Enter select · Backspace up · Esc cancel
           </span>
           <div className="flex items-center gap-2 ml-auto">
             <button
               onClick={onCancel}
-              className="px-3 py-1.5 text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white cursor-pointer"
+              className="px-3 py-1.5 text-sm text-ink-3 hover:text-ink-1 cursor-pointer"
             >
               Cancel
             </button>
             <button
               disabled={!current}
               onClick={confirmSelected}
-              className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white cursor-pointer"
+              className="px-3 py-1.5 text-sm rounded bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 cursor-pointer"
             >
               Select folder
             </button>
@@ -222,13 +222,13 @@ function FolderRow({
       onDoubleClick={(e) => { e.preventDefault(); onDoubleClick(); }}
       className={`w-full text-left flex items-center gap-2 px-3 py-1.5 rounded text-xs cursor-pointer transition-colors ${
         isSelected
-          ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+          ? "bg-accent-dim text-accent-ink"
           : dir.name.startsWith(".")
-            ? "text-zinc-400 dark:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            ? "text-ink-4 hover:bg-surface-2"
+            : "text-ink-2 hover:bg-surface-2"
       }`}
     >
-      <FolderOpen size={13} className={`shrink-0 ${isSelected ? "text-blue-500" : "text-amber-500"}`} />
+      <FolderOpen size={13} className={`shrink-0 ${isSelected ? "text-accent-ink" : "text-think"}`} />
       <span className="truncate font-mono">{dir.name}</span>
     </button>
   );

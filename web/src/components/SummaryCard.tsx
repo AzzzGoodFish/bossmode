@@ -42,21 +42,21 @@ export function SummaryCard({ message, roomId }: SummaryCardProps) {
     <div
       role="article"
       aria-expanded={expanded}
-      className="my-2 rounded-lg border border-violet-200 dark:border-violet-900/50 bg-violet-50 dark:bg-violet-950/30 overflow-hidden"
+      className="my-2 rounded-lg border border-accent/20 bg-accent-dim/50 overflow-hidden"
     >
       {/* Accent bar + content */}
       <div className="flex">
-        <div className="w-1 bg-violet-400 dark:bg-violet-600 shrink-0" />
+        <div className="w-1 bg-accent shrink-0" />
         <div className="flex-1 min-w-0 px-3 py-2">
           {/* Title row */}
           <div className="flex items-center gap-2">
-            <span className="text-violet-600 dark:text-violet-400 text-sm">📖</span>
-            <span className="text-sm font-medium text-violet-900 dark:text-violet-200 truncate">
+            <span className="text-accent-ink text-sm">📖</span>
+            <span className="text-sm font-medium text-ink-1 truncate">
               {meta.title}
             </span>
             <button
               onClick={handleToggle}
-              className="ml-auto text-xs text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors cursor-pointer shrink-0"
+              className="ml-auto text-xs text-accent-ink/70 hover:text-accent-ink transition-colors cursor-pointer shrink-0"
               aria-label={expanded ? "Collapse original messages" : "Expand original messages"}
             >
               {expanded ? "▼ Collapse" : "▶ Expand"}
@@ -64,12 +64,12 @@ export function SummaryCard({ message, roomId }: SummaryCardProps) {
           </div>
 
           {/* Summary body */}
-          <div className="mt-1 text-sm text-violet-800 dark:text-violet-300">
+          <div className="mt-1 text-sm text-ink-2">
             <Markdown content={message.content.split("\n").slice(1).join("\n").replace(/^## .+\n/, "")} />
           </div>
 
           {/* Meta info */}
-          <div className="mt-1.5 flex items-center gap-3 text-[11px] text-violet-500 dark:text-violet-500">
+          <div className="mt-1.5 flex items-center gap-3 text-[11px] text-ink-3">
             <span>{meta.covered_range.count} messages</span>
             <span>{dateRange}</span>
             <span className="truncate">{meta.participants.join(", ")}</span>
@@ -77,9 +77,9 @@ export function SummaryCard({ message, roomId }: SummaryCardProps) {
 
           {/* Expanded original messages */}
           {expanded && (
-            <div className="mt-2 border-t border-violet-200 dark:border-violet-800 pt-2">
+            <div className="mt-2 border-t border-accent/20 pt-2">
               {loading ? (
-                <div className="text-xs text-violet-400 animate-pulse py-2">Loading original messages...</div>
+                <div className="text-xs text-accent-ink animate-pulse py-2">Loading original messages...</div>
               ) : originalMessages && originalMessages.length > 0 ? (
                 <div className="max-h-96 overflow-y-auto space-y-1">
                   {originalMessages.map((msg) => (
@@ -93,7 +93,7 @@ export function SummaryCard({ message, roomId }: SummaryCardProps) {
                   ))}
                 </div>
               ) : (
-                <div className="text-xs text-violet-400 py-2">No messages found.</div>
+                <div className="text-xs text-accent-ink py-2">No messages found.</div>
               )}
             </div>
           )}

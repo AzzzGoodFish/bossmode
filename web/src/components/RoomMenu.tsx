@@ -30,20 +30,20 @@ export function RoomMenu({ onRename, onSettings, onDelete }: RoomMenuProps) {
           e.stopPropagation();
           setOpen(!open);
         }}
-        className="p-0.5 rounded hover:bg-zinc-700 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+        className="p-0.5 rounded hover:bg-surface-3 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
       >
-        <MoreHorizontal size={14} className="text-zinc-500" />
+        <MoreHorizontal size={14} className="text-ink-3" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-1 w-36 bg-surface-3 border border-line-strong rounded-lg shadow-lg overflow-hidden z-50">
           <button
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
               onRename();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-2 hover:bg-surface-2 transition-colors cursor-pointer"
           >
             <Pencil size={14} />
             Rename
@@ -54,7 +54,7 @@ export function RoomMenu({ onRename, onSettings, onDelete }: RoomMenuProps) {
               setOpen(false);
               onSettings();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-2 hover:bg-surface-2 transition-colors cursor-pointer"
           >
             <Settings size={14} />
             Settings
@@ -65,7 +65,7 @@ export function RoomMenu({ onRename, onSettings, onDelete }: RoomMenuProps) {
               setOpen(false);
               onDelete();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blocked hover:bg-surface-2 transition-colors cursor-pointer"
           >
             <Trash2 size={14} />
             Delete

@@ -108,7 +108,7 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
           ref={panelRef}
           aria-modal="true"
           role="dialog"
-          className={`w-full ${SIZE_CLS[size]} bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl max-h-[80vh] overflow-y-auto`}
+          className={`w-full ${SIZE_CLS[size]} bg-surface-1 border border-line rounded-lg shadow-xl max-h-[80vh] overflow-y-auto`}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {children}
@@ -131,7 +131,7 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
         ref={panelRef}
         aria-modal="true"
         role="dialog"
-        className="relative w-full rounded-t-2xl bg-white dark:bg-zinc-900 shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain
+        className="relative w-full rounded-t-2xl bg-surface-1 shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain
                    animate-sheet-up pb-[env(safe-area-inset-bottom)]"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
@@ -139,7 +139,7 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
       >
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-1 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+          <div className="w-10 h-1 rounded-full bg-surface-3" />
         </div>
         {children}
       </div>

@@ -159,7 +159,7 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
 
   return (
     <div
-      className={`relative border-t border-zinc-200 dark:border-zinc-800 p-3 pb-[max(12px,env(safe-area-inset-bottom))] ${dragOver ? "bg-blue-50 dark:bg-blue-900/20 border-blue-400 dark:border-blue-600" : ""}`}
+      className={`relative border-t border-line-soft p-3 pb-[max(12px,env(safe-area-inset-bottom))] ${dragOver ? "bg-accent-dim border-accent" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -169,7 +169,8 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
         <div
           role="listbox"
           aria-label="Mention suggestions"
-          className="absolute bottom-full left-3 right-3 mb-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden max-h-60 overflow-y-auto"
+          className="absolute bottom-full left-3 right-3 mb-1 bg-surface-3 border border-line-strong rounded-lg overflow-hidden max-h-60 overflow-y-auto"
+          style={{ boxShadow: "var(--shadow-pop)" }}
         >
           {filteredMembers.map((name, idx) => {
             const active = idx === mentionIdx;
@@ -183,13 +184,13 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
                 onClick={() => insertMention(name)}
                 className={`w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer ${
                   active
-                    ? "bg-blue-50 dark:bg-blue-600/20 text-blue-700 dark:text-blue-300"
-                    : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                    ? "bg-accent-dim text-accent-ink"
+                    : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
                 @{name}
                 {name === "all" && (
-                  <span className={`ml-2 text-xs ${active ? "text-blue-500/80 dark:text-blue-400/80" : "text-zinc-400 dark:text-zinc-500"}`}>activate all agents</span>
+                  <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>activate all agents</span>
                 )}
               </button>
             );
@@ -208,8 +209,8 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
 
       {/* Drag overlay hint */}
       {dragOver && (
-        <div className="absolute inset-0 flex items-center justify-center bg-blue-50/80 dark:bg-blue-900/40 rounded pointer-events-none z-10">
-          <span className="text-blue-600 dark:text-blue-400 text-sm font-medium">Drop files here</span>
+        <div className="absolute inset-0 flex items-center justify-center bg-accent-dim rounded pointer-events-none z-10">
+          <span className="text-accent-ink text-sm font-medium">Drop files here</span>
         </div>
       )}
 
@@ -217,7 +218,7 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || upload.isUploading}
-          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
           title="Attach files"
           aria-label="Attach files"
         >
@@ -234,15 +235,15 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
           disabled={disabled || upload.isUploading}
           placeholder={upload.isUploading ? "Uploading..." : "Type a message... (@ to mention, Ctrl+V to paste image)"}
           rows={1}
-          className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-base md:text-sm text-zinc-900 dark:text-white
-                     resize-none focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent
-                     placeholder:text-zinc-400 dark:placeholder:text-zinc-600 disabled:opacity-50 max-h-[200px]"
+          className="flex-1 bg-inset border border-line rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
+                     resize-none focus:outline-none focus:border-line-strong
+                     placeholder:text-ink-4 disabled:opacity-50 max-h-[200px] transition-colors"
         />
         <button
           onClick={handleSend}
           disabled={disabled || upload.isUploading || (!value.trim() && !upload.hasPending)}
-          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500
-                     text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
+          className="min-h-[44px] md:min-h-0 px-4 py-2 bg-accent text-accent-contrast disabled:opacity-40
+                     text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
         >
           {upload.isUploading ? "..." : "Send"}
         </button>

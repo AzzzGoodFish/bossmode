@@ -4,10 +4,10 @@ import type { Task, TaskStatus } from "../api/client";
 import { TaskCard } from "./TaskCard";
 
 const COLUMNS: Array<{ status: TaskStatus; label: string; color: string }> = [
-  { status: "todo", label: "Todo", color: "text-zinc-500" },
-  { status: "in-progress", label: "In Progress", color: "text-amber-500" },
-  { status: "review", label: "Review", color: "text-violet-500" },
-  { status: "done", label: "Done", color: "text-emerald-500" },
+  { status: "todo", label: "Todo", color: "text-ink-3" },
+  { status: "in-progress", label: "In Progress", color: "text-think" },
+  { status: "review", label: "Review", color: "text-accent-ink" },
+  { status: "done", label: "Done", color: "text-onair" },
 ];
 
 interface TaskBoardProps {
@@ -79,18 +79,18 @@ function BoardColumn({
 
   return (
     <div
-      className={`flex-1 min-w-[220px] max-w-[360px] flex flex-col rounded-lg bg-zinc-100/50 dark:bg-zinc-900/30 ${dragOverThis ? "ring-2 ring-blue-500/50" : ""}`}
+      className={`flex-1 min-w-[220px] max-w-[360px] flex flex-col rounded-lg bg-surface-1/30 ${dragOverThis ? "ring-2 ring-accent/50" : ""}`}
       onDragOver={(e) => { e.preventDefault(); setDragOverThis(true); }}
       onDragLeave={() => setDragOverThis(false)}
       onDrop={handleDrop}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-200/50 dark:border-zinc-800/50">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line-soft/50 dark:border-line-soft/50">
         <div className="flex items-center gap-2">
           <span className={`text-xs font-semibold uppercase tracking-wider ${color}`}>{label}</span>
-          <span className="text-[10px] text-zinc-400 tabular-nums">{tasks.length}</span>
+          <span className="text-[10px] text-ink-4 tabular-nums">{tasks.length}</span>
         </div>
-        <button onClick={() => setQuickAdd(true)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer">
+        <button onClick={() => setQuickAdd(true)} className="text-ink-4 hover:text-ink-2 cursor-pointer">
           <Plus size={14} />
         </button>
       </div>
@@ -108,7 +108,7 @@ function BoardColumn({
             }}
             onBlur={handleQuickCreate}
             placeholder="Task title..."
-            className="w-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-surface-3 border border-line rounded px-2 py-1.5 text-xs text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
           />
         </div>
       )}
@@ -125,7 +125,7 @@ function BoardColumn({
           </div>
         ))}
         {tasks.length === 0 && !quickAdd && (
-          <div className="text-center py-6 text-xs text-zinc-400">No tasks</div>
+          <div className="text-center py-6 text-xs text-ink-4">No tasks</div>
         )}
       </div>
     </div>
