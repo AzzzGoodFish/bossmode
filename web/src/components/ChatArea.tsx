@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2 } from "lucide-react";
-import type { RoomMessage, TaskEventMeta } from "../api/client";
+import { Loader2, BookOpen, FileText, ShieldCheck } from "lucide-react";
+import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, GateEventMeta } from "../api/client";
+import { decideGate } from "../api/client";
+import { Markdown } from "./Markdown";
+import { useDialog } from "./dialogs";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
@@ -16,6 +19,7 @@ interface ChatAreaProps {
   onCloseSearch?: () => void;
   members?: string[];
   onNavigateToTask?: (taskId: string) => void;
+  onNavigateToKnowledge?: (path: string) => void;
   onJumpToMessage?: (messageId: string) => Promise<void>;
   onReturnToLatest?: () => void;
   inHistoryView?: boolean;
@@ -23,13 +27,22 @@ interface ChatAreaProps {
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(messages.length);
   const isNearBottom = useRef(true);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+
+  // Gates already decided — derived from later gate_event messages in the stream,
+  // so old "requested" cards render read-only without polling.
+  const decidedGateIds = new Set<string>();
+  for (const m of messages) {
+    if (m.type === "gate_event" && m.gate_event_meta && m.gate_event_meta.action !== "requested") {
+      decidedGateIds.add(m.gate_event_meta.gateId);
+    }
+  }
 
   const scrollToMessage = useCallback(async (messageId: string) => {
     let el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
@@ -204,6 +217,10 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                   {showDateSep && <DateSeparator ts={msg.ts} />}
                   {msg.type === "task_event" && msg.task_event_meta ? (
                     <TaskEventCard meta={msg.task_event_meta} content={msg.content} mentions={msg.mentions} onJump={onNavigateToTask ? () => onNavigateToTask(msg.task_event_meta!.taskId) : undefined} />
+                  ) : msg.type === "knowledge_event" && msg.knowledge_event_meta ? (
+                    <KnowledgeEventCard meta={msg.knowledge_event_meta} onJump={onNavigateToKnowledge ? () => onNavigateToKnowledge(msg.knowledge_event_meta!.path) : undefined} />
+                  ) : msg.type === "gate_event" && msg.gate_event_meta ? (
+                    <GateEventCard meta={msg.gate_event_meta} roomId={roomId} decided={msg.gate_event_meta.action === "requested" ? decidedGateIds.has(msg.gate_event_meta.gateId) : true} onNavigateToKnowledge={onNavigateToKnowledge} />
                   ) : msg.type === "summary" ? (
                     <SummaryCard message={msg} roomId={roomId || ""} />
                   ) : (
@@ -261,9 +278,142 @@ function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMet
           </span>
         )}
       </div>
+      {meta.snippet && (
+        <div className="mt-1.5 pl-6 text-xs text-ink-4 border-l-2 border-line ml-1 leading-relaxed">{meta.snippet}</div>
+      )}
       {activatedAgent && (
         <div className="mt-1 text-[10px] text-ink-4">→ assigned to @{activatedAgent}</div>
       )}
+    </div>
+  );
+}
+
+/** 📚 agent 写了知识库文档 — 记录自动成为沟通 */
+function KnowledgeEventCard({ meta, onJump }: { meta: KnowledgeEventMeta; onJump?: () => void }) {
+  const verb = meta.tool === "write" ? "更新了文档" : "修改了文档";
+  return (
+    <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
+      <div className="flex items-center gap-2 text-xs text-ink-3">
+        <BookOpen size={13} className="text-accent-ink shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="font-medium text-ink-2">{meta.actor}</span> {verb}{" "}
+          {onJump ? (
+            <button onClick={onJump} className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline">
+              {meta.title}
+            </button>
+          ) : (
+            <span className="text-ink-2">{meta.title}</span>
+          )}
+        </span>
+        <span className="font-mono text-[10px] text-ink-4 truncate max-w-[200px]" title={meta.path}>{meta.path}</span>
+      </div>
+    </div>
+  );
+}
+
+/** 🛡 阶段交付验收卡 — 批准即移交，打回即反馈 */
+function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge }: { meta: GateEventMeta; roomId?: string; decided: boolean; onNavigateToKnowledge?: (path: string) => void }) {
+  const { toast, prompt } = useDialog();
+  const [busy, setBusy] = useState(false);
+  const [localDecision, setLocalDecision] = useState<"approved" | "rejected" | null>(null);
+
+  // 决断后的审计卡（approved / rejected 事件）：一行状态
+  if (meta.action !== "requested") {
+    const ok = meta.action === "approved";
+    return (
+      <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
+        <div className="flex items-center gap-2 text-xs">
+          <ShieldCheck size={13} className={ok ? "text-onair" : "text-blocked"} />
+          <span className="flex-1 text-ink-3">
+            <span className={`font-semibold ${ok ? "text-onair" : "text-blocked"}`}>{ok ? "已批准" : "已打回"}</span>
+            {" · "}{meta.gateTitle}
+            {meta.handoffTo && ok && <span className="text-ink-4"> → 移交 @{meta.handoffTo}</span>}
+          </span>
+        </div>
+        {meta.decisionNote && <div className="mt-1 pl-6 text-[11px] text-ink-4">{meta.decisionNote}</div>}
+      </div>
+    );
+  }
+
+  const settled = decided || localDecision !== null;
+
+  const decide = async (action: "approve" | "reject") => {
+    if (!roomId || busy) return;
+    let note: string | undefined;
+    if (action === "reject") {
+      const input = await prompt("打回意见（将反馈给提交人）:");
+      if (input === null) return;
+      note = input || undefined;
+    }
+    setBusy(true);
+    try {
+      await decideGate(roomId, meta.gateId, action, note);
+      setLocalDecision(action === "approve" ? "approved" : "rejected");
+    } catch (err: any) {
+      toast(`操作失败: ${err.message}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border border-accent/30 rounded-lg mt-3 bg-accent-dim/30 overflow-hidden">
+      <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-line-soft">
+        <ShieldCheck size={14} className="text-accent-ink shrink-0" />
+        <span className="text-[10px] font-semibold tracking-[0.06em] text-accent-ink">STAGE GATE</span>
+        <span className="text-xs font-semibold text-ink-1 flex-1 truncate">{meta.gateTitle}</span>
+        <span className="text-[10px] text-ink-4">由 {meta.requestedBy} 提交</span>
+      </div>
+      {meta.summary && (
+        <div className="px-3.5 py-2.5 text-xs text-ink-2 leading-relaxed [&_p]:my-1">
+          <Markdown content={meta.summary} />
+        </div>
+      )}
+      {(meta.artifacts?.length ?? 0) > 0 && (
+        <div className="px-3.5 pb-2 flex flex-col gap-1">
+          {meta.artifacts!.map((a, i) => {
+            const isDoc = /\.md$/i.test(a) && !a.startsWith("http") && !a.startsWith("/");
+            return (
+              <button
+                key={i}
+                onClick={isDoc && onNavigateToKnowledge ? () => onNavigateToKnowledge(a) : undefined}
+                className={`flex items-center gap-1.5 text-[11px] text-left ${isDoc && onNavigateToKnowledge ? "text-accent-ink hover:underline cursor-pointer" : "text-ink-3 cursor-default"}`}
+              >
+                <FileText size={11} className="shrink-0" />
+                <span className="font-mono truncate">{a}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="px-3.5 py-2 border-t border-line-soft flex items-center gap-2">
+        {meta.handoffTo && (
+          <span className="text-[10px] text-ink-4">批准后移交 → <span className="text-ink-2 font-medium">@{meta.handoffTo}</span></span>
+        )}
+        <div className="flex-1" />
+        {settled ? (
+          <span className={`text-[11px] font-semibold ${localDecision === "rejected" ? "text-blocked" : "text-onair"}`}>
+            {localDecision === "rejected" ? "已打回" : localDecision === "approved" ? "已批准" : "已处理"}
+          </span>
+        ) : (
+          <>
+            <button
+              onClick={() => decide("reject")}
+              disabled={busy}
+              className="px-3 py-1 text-[11px] font-medium border border-line rounded-md text-ink-2 hover:text-blocked hover:border-blocked/40 cursor-pointer disabled:opacity-40 transition-colors"
+            >
+              打回
+            </button>
+            <button
+              onClick={() => decide("approve")}
+              disabled={busy}
+              className="px-3 py-1 text-[11px] font-semibold bg-accent text-accent-contrast rounded-md cursor-pointer hover:opacity-90 disabled:opacity-40 transition-opacity"
+            >
+              {busy ? "…" : "批准"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

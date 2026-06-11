@@ -239,6 +239,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
             onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
+            onNavigateToKnowledge={(path) => setActivePage({ type: "knowledge", path })}
           />
         )}
 

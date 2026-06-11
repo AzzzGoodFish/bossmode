@@ -5,6 +5,8 @@ import { logger } from "../foundation/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { refreshContextUsageOnIdle } from "./agent-manager.js";
+import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
+import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 
@@ -51,6 +53,8 @@ export function loadEventsPaginated(roomId: string, agentName: string, limit: nu
 // -- Stream state accumulation --
 
 // Accumulate streaming text/thinking so message_end has complete content
+const toolArgsCache = new Map<string, unknown>();
+
 const streamState = new Map<string, { text: string; thinking: string }>();
 
 /**
@@ -75,8 +79,30 @@ export function handleAgentEvent(
     logger.info("runtime", "event", { agent: agentName, type: event.type });
   } else if (event.type === "tool_start") {
     logger.info("runtime", "event", { agent: agentName, type: "tool_start", tool: event.toolName });
+    // Cache args for the matching tool_end (tool_end events don't carry args).
+    if ((event as any).toolCallId) {
+      toolArgsCache.set(`${instanceKey}:${(event as any).toolCallId}`, (event as any).args);
+      if (toolArgsCache.size > 200) {
+        const firstKey = toolArgsCache.keys().next().value;
+        if (firstKey) toolArgsCache.delete(firstKey);
+      }
+    }
   } else if (event.type === "tool_end") {
     logger.info("runtime", "event", { agent: agentName, type: "tool_end", tool: event.toolName, isError: !!(event as any).isError });
+    // Surface knowledge doc writes into the room chat stream (event cards).
+    const cacheKey = `${instanceKey}:${(event as any).toolCallId}`;
+    const cachedArgs = toolArgsCache.get(cacheKey);
+    toolArgsCache.delete(cacheKey);
+    try {
+      const room = getRoom(roomId);
+      maybeEmitKnowledgeActivity(
+        roomId, agentName, event.toolName,
+        cachedArgs,
+        !!(event as any).isError, room?.cwd,
+      );
+    } catch (err) {
+      logger.error("knowledge-activity", "hook failed", { roomId, error: String(err) });
+    }
   }
 
   // cli:stdout / cli:stderr — forward via WS only, no disk persistence, no status change

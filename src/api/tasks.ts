@@ -7,6 +7,14 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
 import type { Task, TaskEventMeta } from "../shared/types.js";
 
+/** Trim a body of text to a one-line-ish chat snippet. */
+function toSnippet(text: string | undefined, max = 280): string | undefined {
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > max ? collapsed.slice(0, max - 1) + "…" : collapsed;
+}
+
 /** Emit a structured task_event system message + ws broadcast. */
 export function emitTaskEvent(
   roomId: string,
@@ -15,6 +23,16 @@ export function emitTaskEvent(
   actor: string,
   opts: { commentId?: string } = {},
 ): void {
+  // Inline snippet: surface the actual content into chat so the timeline
+  // stays informative without forcing a jump to the task page.
+  let snippet: string | undefined;
+  if (action === "created") {
+    snippet = toSnippet(task.description);
+  } else if (action === "commented" && opts.commentId) {
+    const comment = task.comments?.find((c) => c.id === opts.commentId);
+    snippet = toSnippet(comment?.content);
+  }
+
   const meta: TaskEventMeta = {
     action,
     taskId: task.id,
@@ -22,6 +40,7 @@ export function emitTaskEvent(
     newStatus: action === "status_changed" ? task.status : undefined,
     commentId: opts.commentId,
     actor,
+    snippet,
   };
 
   // Human-readable system message

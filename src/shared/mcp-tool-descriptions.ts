@@ -74,6 +74,15 @@ export const WRITE_SUMMARY_DESCRIPTION = `Create a topic-based summary message t
 
 Use this when a contiguous segment of messages forms a coherent topic that can be condensed into a 1-3 sentence summary. The original messages remain in storage but the summary becomes the canonical view in the merged message stream.`;
 
+export const REQUEST_APPROVAL_DESCRIPTION = `Submit a finished stage deliverable for user approval (an "artifact gate").
+
+Use this when you complete a stage-level deliverable that the next stage depends on — e.g. PM finishes the requirement spec, architect finishes the design doc, developer finishes implementation ready for QA. Reference deliverable docs/files in 'artifacts' and name the member who should take over next in 'handoff_to'.
+
+IMPORTANT WORKFLOW RULES:
+- After calling this tool, STOP working. Do not start the next stage yourself and do not activate other members.
+- The user will review your deliverable in the chat. If approved, the handoff member is activated automatically; if rejected, you will be re-activated with the user's feedback — revise and submit again.
+- Skip this tool for trivial changes where the user asked for direct execution.`;
+
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   // query_room_messages
@@ -94,6 +103,11 @@ export const PARAM_DESCRIPTIONS = {
   taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name to request action.",
   taskId: "Task ID",
   taskComment: "Markdown comment to append to the task. Does not activate members.",
+  // request_approval
+  gateTitle: "Short deliverable name, e.g. '需求细则 v1' or 'Architecture design for X'",
+  gateSummary: "Markdown delivery note: what was produced, key decisions, what the reviewer should check",
+  gateArtifacts: "Knowledge doc paths (relative to docs root), file paths, or URLs backing this deliverable",
+  gateHandoffTo: "Member name to activate when the user approves (the next stage owner). Must be a room member.",
   taskStatusFilter: "Filter: todo | in-progress | review | done",
   taskAssigneeFilter: "Filter by assignee name",
   taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",

@@ -39,6 +39,7 @@ interface MainProps {
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
+  onNavigateToKnowledge?: (path: string) => void;
 }
 
 type RoomView = "chat" | "tasks";
@@ -50,6 +51,7 @@ export function Main({
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
   onNavigateToTask,
+  onNavigateToKnowledge,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -354,7 +356,7 @@ export function Main({
           <div className="flex-1 flex flex-col min-w-0">
             {view === "chat" ? (
               <>
-                <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+                <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
                 <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
               </>
             ) : selectedRoomId ? (

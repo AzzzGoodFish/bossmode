@@ -11,6 +11,7 @@ import {
   QUERY_INTEGRATION_DESCRIPTION,
   CONFIGURE_INTEGRATION_DESCRIPTION,
   WRITE_SUMMARY_DESCRIPTION,
+  REQUEST_APPROVAL_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 
@@ -135,6 +136,22 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       execute: async (_id, params) => {
         const data = await call("comment_task", params as any) as any;
         return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
+      },
+    }),
+    defineTool({
+      name: "request_approval",
+      label: "Request Approval",
+      description: REQUEST_APPROVAL_DESCRIPTION,
+      parameters: Type.Object({
+        title: Type.String({ description: PARAM_DESCRIPTIONS.gateTitle }),
+        summary: Type.String({ description: PARAM_DESCRIPTIONS.gateSummary }),
+        artifacts: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.gateArtifacts })),
+        handoff_to: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gateHandoffTo })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("request_approval", params as any) as any;
+        if (data?.ok === false) return textResult("Failed: " + data.error);
+        return textResult(`Approval requested (gate ${data.gateId}). ${data.note}`);
       },
     }),
     defineTool({
