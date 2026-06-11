@@ -20,7 +20,6 @@ import { AgentsPage } from "./AgentsPage";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsPage } from "./SkillsPage";
 import { KnowledgePage } from "./KnowledgePage";
-import { MembersPage } from "./MembersPage";
 import { SettingsPage } from "./SettingsPage";
 import { AllTasksPage } from "./AllTasksPage";
 import { TaskDetailPage } from "./TaskDetailPage";
@@ -213,7 +212,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <div className="h-[100dvh] bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex" data-1p-ignore>
+    <div className="h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
 
@@ -265,6 +264,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <AgentsPage
             onSelectAgent={(name) => setActivePage({ type: "agent", name })}
             onRefresh={refreshSidebar}
+            onCreateAgent={() => setActivePage({ type: "agent", name: "__new__" })}
           />
         )}
         {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "create" && (
@@ -281,6 +281,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
             name={activePage.name || ""}
             onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+            onOpenRoom={(roomId, lensAgent) => {
+              if (lensAgent) sessionStorage.setItem("bossmode_main_open_lens", lensAgent);
+              setActivePage({ type: "room", id: roomId });
+            }}
           />
         )}
 
@@ -310,19 +314,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <KnowledgePage initialPath={activePage.path} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
         )}
 
-        {/* Members */}
-        {activePage?.type === "member" && (
-          <MembersPage
-            selectedId={activePage.id}
-            onSelect={(id) => setActivePage({ type: "member", id })}
-            onRefresh={refreshSidebar}
-            onNavigateAgent={(name) => setActivePage({ type: "agent", name })}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          />
-        )}
-
         {/* Settings */}
-        {activePage?.type === "settings" && <SettingsPage onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />}
+        {activePage?.type === "settings" && (
+          <SettingsPage section={activePage.section ?? "models"} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
+        )}
         {activePage?.type === "all-tasks" && (
           <AllTasksPage
             onSelectTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId, from: "all-tasks" })}

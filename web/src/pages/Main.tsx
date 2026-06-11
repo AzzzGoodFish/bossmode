@@ -5,7 +5,7 @@ import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
-import { Search } from "lucide-react";
+import { Search, Plus, ScrollText, Maximize2, Minimize2, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
@@ -17,17 +17,12 @@ import {
 import { useRoom } from "../hooks/useRoom";
 import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
-import { MemberPanel } from "../components/MemberPanel";
+import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
 import { AgentTab, type CommittedEvent } from "../components/AgentTab";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { useDialog } from "../components/dialogs";
-
-interface Tab {
-  type: "room" | "tasks" | "agent";
-  agentName?: string;
-}
 
 interface MainProps {
   selectedRoomId: string | null;
@@ -36,17 +31,17 @@ interface MainProps {
   username: string;
   externalShowCreateRoom?: boolean;
   onCreateRoomShown?: () => void;
-  // WebSocket props (lifted to Layout)
   connected: boolean;
   reconnecting: boolean;
   onRegisterWsHandler: (handler: (event: WsEvent) => void) => void;
-  // Unread state
   unreadTabs: Set<string> | null;
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
 }
+
+type RoomView = "chat" | "tasks";
 
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, username,
@@ -64,7 +59,6 @@ export function Main({
 
   useEdgeSwipe({ side: "right", onTrigger: useCallback(() => setMobileMembersOpen(true), []) });
 
-  // Open dialog when triggered from sidebar + button
   useEffect(() => {
     if (externalShowCreateRoom) {
       setShowCreateRoom(true);
@@ -72,19 +66,10 @@ export function Main({
     }
   }, [externalShowCreateRoom, onCreateRoomShown]);
 
-  const [tabs, setTabs] = useState<Tab[]>(() => {
-    if (!selectedRoomId) return [{ type: "room" as const }, { type: "tasks" as const }];
-    try {
-      const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      if (saved.length > 0) {
-        // Migrate: ensure tasks tab exists at idx 1
-        if (!saved.some((t) => t.type === "tasks")) saved.splice(1, 0, { type: "tasks" });
-        return saved;
-      }
-      return [{ type: "room" as const }, { type: "tasks" as const }];
-    } catch { return [{ type: "room" as const }, { type: "tasks" as const }]; }
-  });
-  const [activeTabIdx, setActiveTabIdx] = useState(0);
+  // 视图：Chat | Tasks；镜头：lensAgent（分屏）+ lensExpanded（全幅工位视图）
+  const [view, setView] = useState<RoomView>("chat");
+  const [lensAgent, setLensAgent] = useState<string | null>(null);
+  const [lensExpanded, setLensExpanded] = useState(false);
   const [agentEventsCache, setAgentEventsCache] = useState<Record<string, CommittedEvent[]>>({});
 
   const {
@@ -104,88 +89,46 @@ export function Main({
     inHistoryView,
   } = useRoom(selectedRoomId);
 
-  // Register useRoom's WS handler with Layout
   useEffect(() => {
     onRegisterWsHandler(handleWsEvent);
   }, [handleWsEvent, onRegisterWsHandler]);
 
-  // Restore tabs when room changes
+  // 房间切换时重置视图
   useEffect(() => {
-    if (!selectedRoomId) {
-      setTabs([{ type: "room" }]);
-      setActiveTabIdx(0);
-      setAgentEventsCache({});
-      return;
-    }
-    try {
-      const saved = JSON.parse(localStorage.getItem(`bossmode_tabs_${selectedRoomId}`) || "[]") as Tab[];
-      if (saved.length > 0) {
-        if (!saved.some((t) => t.type === "tasks")) saved.splice(1, 0, { type: "tasks" });
-        setTabs(saved);
-      } else {
-        setTabs([{ type: "room" }, { type: "tasks" }]);
-      }
-    } catch { setTabs([{ type: "room" }, { type: "tasks" }]); }
-    // Restore tab from sessionStorage (e.g. after back from TaskDetailPage)
+    setLensExpanded(false);
+    setAgentEventsCache({});
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
     sessionStorage.removeItem("bossmode_main_restore_tab");
-    if (restoreTab === "tasks") {
-      setActiveTabIdx(1);
-    } else {
-      setActiveTabIdx(0);
-    }
-    setAgentEventsCache({});
+    setView(restoreTab === "tasks" ? "tasks" : "chat");
+    // 从 Team 页 "Lens" 跳转过来时直接打开对应工位镜头
+    const openLensAgent = sessionStorage.getItem("bossmode_main_open_lens");
+    sessionStorage.removeItem("bossmode_main_open_lens");
+    setLensAgent(openLensAgent || null);
   }, [selectedRoomId]);
 
-  // Persist tabs to localStorage
+  // 通知 Layout 当前关注的 tab key（unread 逻辑）
   useEffect(() => {
-    if (selectedRoomId) {
-      localStorage.setItem(`bossmode_tabs_${selectedRoomId}`, JSON.stringify(tabs));
-    }
-  }, [tabs, selectedRoomId]);
-
-  // Notify Layout of active tab changes (for unread logic)
-  const activeTab = tabs[activeTabIdx];
-  useEffect(() => {
-    const key = activeTab?.type === "room" ? "room" : activeTab?.agentName ?? "room";
+    const key = lensAgent ?? (view === "chat" ? "room" : "tasks");
     onActiveTabKeyChange(key);
-  }, [activeTab, onActiveTabKeyChange]);
+  }, [view, lensAgent, onActiveTabKeyChange]);
 
-  const handleTabSwitch = useCallback((idx: number) => {
-    setActiveTabIdx(idx);
-    // F4: Clear unread when switching to a tab
-    if (selectedRoomId) {
-      const tab = tabs[idx];
-      const tabKey = tab?.type === "room" ? "room" : tab?.agentName;
-      if (tabKey) onClearUnreadTab(selectedRoomId, tabKey);
-    }
-  }, [tabs, selectedRoomId, onClearUnreadTab]);
+  const openLens = useCallback((agentName: string) => {
+    setLensAgent(agentName);
+    if (isMobile) setLensExpanded(true);
+    setMobileMembersOpen(false);
+    if (selectedRoomId) onClearUnreadTab(selectedRoomId, agentName);
+  }, [isMobile, selectedRoomId, onClearUnreadTab]);
 
-  const openAgentTab = useCallback((agentName: string) => {
-    setTabs((prev) => {
-      const existingIdx = prev.findIndex((t) => t.type === "agent" && t.agentName === agentName);
-      if (existingIdx !== -1) {
-        handleTabSwitch(existingIdx);
-        return prev;
-      }
-      const newTabs = [...prev, { type: "agent" as const, agentName }];
-      handleTabSwitch(newTabs.length - 1);
-      return newTabs;
-    });
-  }, [handleTabSwitch]);
+  const closeLens = useCallback(() => {
+    setLensAgent(null);
+    setLensExpanded(false);
+    if (selectedRoomId) onClearUnreadTab(selectedRoomId, "room");
+  }, [selectedRoomId, onClearUnreadTab]);
 
-  const closeTab = useCallback((idx: number) => {
-    if (idx === 0) return;
-    setTabs((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      setActiveTabIdx((current) => {
-        if (current >= next.length) return next.length - 1;
-        if (current > idx) return current - 1;
-        return current;
-      });
-      return next;
-    });
-  }, []);
+  const switchView = useCallback((v: RoomView) => {
+    setView(v);
+    if (selectedRoomId) onClearUnreadTab(selectedRoomId, v === "chat" ? "room" : "tasks");
+  }, [selectedRoomId, onClearUnreadTab]);
 
   const handleSteer = useCallback(
     async (agentName: string, content: string) => {
@@ -213,11 +156,10 @@ export function Main({
   );
 
   const handleAgentEventsChange = useCallback((events: CommittedEvent[]) => {
-    const tab = tabs[activeTabIdx];
-    if (tab?.type === "agent" && tab.agentName) {
-      setAgentEventsCache((prev) => ({ ...prev, [tab.agentName!]: events }));
+    if (lensAgent) {
+      setAgentEventsCache((prev) => ({ ...prev, [lensAgent]: events }));
     }
-  }, [tabs, activeTabIdx]);
+  }, [lensAgent]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [summarizeDialog, setSummarizeDialog] = useState<{ status: SummarizeStatus; totalMessages: number } | null>(null);
@@ -254,7 +196,6 @@ export function Main({
     }
   }, [selectedRoomId, summarizeKeepCount, toast]);
 
-  // Refresh preview when keepCount changes in dialog
   useEffect(() => {
     if (!summarizeDialog || !selectedRoomId) return;
     const total = summarizeDialog.totalMessages;
@@ -266,7 +207,6 @@ export function Main({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summarizeKeepCount]);
 
-  // Ctrl/Cmd+F keyboard shortcut for search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
@@ -290,12 +230,12 @@ export function Main({
 
   if (!room) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center bg-surface-1">
         <div className="text-center">
-          <p className="text-zinc-500 text-lg mb-3">No room selected</p>
+          <p className="text-ink-3 text-lg mb-3">No room selected</p>
           <button
             onClick={() => setShowCreateRoom(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
+            className="px-4 py-2 bg-accent text-accent-contrast text-sm font-semibold rounded-md transition-opacity hover:opacity-90 cursor-pointer"
           >
             Create a room
           </button>
@@ -311,9 +251,51 @@ export function Main({
     );
   }
 
+  const segBtn = (active: boolean) =>
+    `px-3.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+      active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"
+    }`;
+  const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
+
+  const lensFull = lensAgent && (lensExpanded || isMobile);
+  const lensSplit = lensAgent && !lensFull;
+
+  const lensPanel = lensAgent && (
+    <div className={`flex flex-col min-h-0 min-w-0 bg-surface-1 ${lensFull ? "flex-1" : "w-[440px] shrink-0 border-l border-line"}`}>
+      {/* lens 头部：工位标识 + 展开/收起 + 关闭 */}
+      <div className="h-9 shrink-0 border-b border-line-soft flex items-center gap-2 px-3 bg-surface-0">
+        <span className="text-[10px] font-semibold tracking-[0.06em] text-accent-ink">WORKSTATION</span>
+        <span className="text-xs font-semibold text-ink-1">{lensAgent}</span>
+        <span className="flex-1" />
+        {!isMobile && (
+          <button
+            onClick={() => setLensExpanded((v) => !v)}
+            className={toolBtn}
+            title={lensExpanded ? "收起为分屏镜头" : "打开完整工位视图"}
+          >
+            {lensExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        )}
+        <button onClick={closeLens} className={toolBtn} title="关闭镜头">
+          <X size={14} />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        <AgentTab
+          key={`${selectedRoomId}:${lensAgent}`}
+          roomId={selectedRoomId!}
+          agentName={lensAgent}
+          onClose={closeLens}
+          onSteer={(content) => handleSteer(lensAgent, content)}
+          cachedEvents={agentEventsCache[lensAgent]}
+          onEventsChange={handleAgentEventsChange}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <>
-      {/* Mobile top bar */}
       {room && (
         <MobileTopBar
           title={room.name}
@@ -323,105 +305,93 @@ export function Main({
         />
       )}
 
-      {/* Tab bar */}
-      <div className="h-9 border-b border-zinc-200 dark:border-zinc-800 flex items-end px-2 shrink-0 gap-0.5 overflow-x-auto scrollbar-hide">
-        {tabs.map((tab, idx) => {
-          const isActive = idx === activeTabIdx;
-          const label = tab.type === "room" ? `# ${room.name}` : tab.type === "tasks" ? "Tasks" : tab.agentName!;
-          const tabKey = tab.type === "room" ? "room" : tab.type === "tasks" ? "tasks" : tab.agentName!;
-          const hasUnread = !isActive && unreadTabs?.has(tabKey);
-          return (
-            <button
-              key={tab.type === "room" ? "room" : tab.type === "tasks" ? "tasks" : tab.agentName}
-              onClick={() => handleTabSwitch(idx)}
-              className={`group flex items-center gap-1 px-3 py-1.5 text-xs rounded-t transition-colors cursor-pointer ${
-                isActive ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
-              }`}
-            >
-              <span className="truncate max-w-24">{label}</span>
-              {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
-              {tab.type === "agent" && (
-                <span
-                  onClick={(e) => { e.stopPropagation(); closeTab(idx); }}
-                  className="text-zinc-400 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 ml-1 cursor-pointer"
-                >
-                  ×
-                </span>
-              )}
-            </button>
-          );
-        })}
-        <span className="ml-auto mb-2.5 flex items-center gap-1">
-          {reconnecting && <span className="text-[10px] text-amber-500 animate-pulse">Reconnecting...</span>}
-          {!connected && !reconnecting && <span className="text-[10px] text-red-400">Disconnected</span>}
-          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-            connected ? "bg-emerald-500" : reconnecting ? "bg-amber-500 animate-pulse" : "bg-red-400"
-          }`} title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"} />
-        </span>
+      {/* 台口：房间名 + cwd + rule + segmented + 工具组 */}
+      <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
+        <div className="flex items-baseline gap-2.5 min-w-0">
+          <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{room.name}</h2>
+          <span className="font-mono text-[11px] text-ink-4 truncate hidden sm:block">{room.cwd}</span>
+          {(room.ruleDocs?.length ?? 0) > 0 && (
+            <span className="text-[10px] px-2 py-px rounded-full border border-line text-ink-3 whitespace-nowrap hidden md:block">
+              rule · {room.ruleDocs!.length}
+            </span>
+          )}
+        </div>
+
+        <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">
+          <button onClick={() => switchView("chat")} className={segBtn(view === "chat" && !lensFull)}>
+            Chat
+            {unreadTabs?.has("room") && view !== "chat" && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent ml-1.5 align-middle" />}
+          </button>
+          <button onClick={() => switchView("tasks")} className={segBtn(view === "tasks" && !lensFull)}>
+            Tasks
+          </button>
+        </div>
+
+        <div className="ml-auto flex items-center gap-1 shrink-0">
+          <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
+            {reconnecting && <span className="text-[10px] text-think animate-pulse hidden sm:block">reconnecting</span>}
+            {!connected && !reconnecting && <span className="text-[10px] text-blocked hidden sm:block">offline</span>}
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+              connected ? "bg-onair" : reconnecting ? "bg-think animate-pulse" : "bg-blocked"
+            }`} />
+            {connected && <span className="text-[10px] text-ink-4 hidden sm:block">live</span>}
+          </span>
+          <button onClick={() => setShowAddMember(true)} className={toolBtn} title="Add member">
+            <Plus size={14} />
+          </button>
+          <button onClick={handleSummarize} className={toolBtn} title="Summarize messages">
+            <ScrollText size={13} />
+          </button>
+          <button onClick={() => setSearchOpen((v) => !v)} className={toolBtn} title="Search messages (Ctrl+F)">
+            <Search size={13} />
+          </button>
+        </div>
       </div>
 
-      {/* Room header */}
-      {activeTab?.type === "room" && (
-        <div className="h-8 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 shrink-0">
-          <span className="text-xs text-zinc-500 dark:text-zinc-600 truncate">{room.cwd}</span>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => setShowAddMember(true)} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">+ Member</button>
-            <button onClick={handleSummarize} className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">Summarize</button>
-            <button onClick={() => setSearchOpen((v) => !v)} title="Search messages (Ctrl+F)" className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer">
-              <Search size={13} />
-            </button>
+      {/* 内容区：chat/tasks + lens 分屏 + 工位墙 */}
+      <div className="flex-1 flex min-h-0 bg-surface-1">
+        {!lensFull && (
+          <div className="flex-1 flex flex-col min-w-0">
+            {view === "chat" ? (
+              <>
+                <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+                <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
+              </>
+            ) : selectedRoomId ? (
+              <TasksTab
+                roomId={selectedRoomId}
+                members={room.members}
+                onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId, "tasks")}
+              />
+            ) : null}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Content */}
-      <div className="flex-1 flex min-h-0">
-        <div className="flex-1 flex flex-col min-w-0">
-          {activeTab?.type === "room" ? (
-            <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
-              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
-            </>
-          ) : activeTab?.type === "tasks" && selectedRoomId ? (
-            <TasksTab
-              roomId={selectedRoomId}
-              members={room.members}
-              onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId, "tasks")}
-            />
-          ) : activeTab?.type === "agent" && selectedRoomId ? (
-            <AgentTab
-              key={`${selectedRoomId}:${activeTab.agentName}`}
-              roomId={selectedRoomId}
-              agentName={activeTab.agentName!}
-              onClose={() => closeTab(activeTabIdx)}
-              onSteer={(content) => handleSteer(activeTab.agentName!, content)}
-              cachedEvents={agentEventsCache[activeTab.agentName!]}
-              onEventsChange={handleAgentEventsChange}
-            />
-          ) : null}
-        </div>
+        {/* lens（分屏或全幅） */}
+        {lensPanel}
 
-        {/* Member panel */}
-        {/* Desktop member panel */}
-        <div className="hidden md:block w-64 border-l border-zinc-200 dark:border-zinc-800 shrink-0">
-          <MemberPanel
+        {/* 工位墙（桌面） */}
+        <div className={`hidden ${lensSplit ? "xl:block" : "md:block"} w-[280px] border-l border-line shrink-0`}>
+          <StationPanel
             members={room.members}
             agentStatus={agentStatus}
             contextUsage={contextUsage}
             roomId={room.id}
-            onOpenPrivateChat={openAgentTab}
+            onOpenLens={openLens}
+            unreadAgents={unreadTabs}
           />
         </div>
 
-        {/* Mobile member drawer */}
+        {/* 工位墙（移动端抽屉） */}
         {isMobile && (
-          <MobileDrawer open={mobileMembersOpen} side="right" onClose={() => setMobileMembersOpen(false)} width="w-72">
-            <MemberPanel
+          <MobileDrawer open={mobileMembersOpen} side="right" onClose={() => setMobileMembersOpen(false)} width="w-80">
+            <StationPanel
               members={room.members}
               agentStatus={agentStatus}
               contextUsage={contextUsage}
               roomId={room.id}
-              onOpenPrivateChat={(name) => { openAgentTab(name); setMobileMembersOpen(false); }}
+              onOpenLens={openLens}
+              unreadAgents={unreadTabs}
             />
           </MobileDrawer>
         )}
@@ -436,14 +406,14 @@ export function Main({
       {summarizeDialog && (
         <Sheet open={!!summarizeDialog} onClose={() => setSummarizeDialog(null)} size="sm">
           <div className="p-5">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-3">Summarize Messages</h3>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-4">
+            <h3 className="text-sm font-semibold text-ink-1 mb-3">Summarize Messages</h3>
+            <p className="text-sm text-ink-2 mb-4">
               {summarizeKeepCount === 0
                 ? `Summarize all ${summarizeDialog.totalMessages} messages into topic summaries.`
                 : `Summarize ${summarizeDialog.status.toSummarize} of ${summarizeDialog.totalMessages} messages into topic summaries. Latest ${summarizeKeepCount} will be kept as-is.`}
             </p>
             <div className="mb-4">
-              <label className="text-xs text-zinc-500 dark:text-zinc-400 block mb-1.5">Keep latest messages</label>
+              <label className="text-xs text-ink-3 block mb-1.5">Keep latest messages</label>
               <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -451,7 +421,7 @@ export function Main({
                   max={summarizeDialog.totalMessages}
                   value={summarizeKeepCount}
                   onChange={(e) => setSummarizeKeepCount(parseInt(e.target.value))}
-                  className="flex-1 accent-violet-500"
+                  className="flex-1 accent-(--accent)"
                 />
                 <input
                   type="number"
@@ -459,20 +429,20 @@ export function Main({
                   max={summarizeDialog.totalMessages}
                   value={summarizeKeepCount}
                   onChange={(e) => setSummarizeKeepCount(Math.min(summarizeDialog.totalMessages, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-16 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-sm text-zinc-900 dark:text-white text-center"
+                  className="w-16 bg-inset border border-line rounded px-2 py-1 text-sm text-ink-1 text-center"
                 />
               </div>
               {summarizeKeepCount === 0 && (
-                <p className="text-xs text-amber-500 dark:text-amber-400 mt-1.5">All messages will be summarized — agents will lose raw context.</p>
+                <p className="text-xs text-think mt-1.5">All messages will be summarized — agents will lose raw context.</p>
               )}
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setSummarizeDialog(null)}
-                className="px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition-colors">
+                className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer transition-colors">
                 Cancel
               </button>
               <button onClick={handleSummarizeConfirm} disabled={summarizeDialog.status.toSummarize === 0}
-                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-700 disabled:text-zinc-400 dark:disabled:text-zinc-500 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors">
+                className="px-4 py-2 bg-accent text-accent-contrast disabled:opacity-40 text-sm font-semibold rounded-md cursor-pointer transition-opacity hover:opacity-90">
                 Summarize
               </button>
             </div>

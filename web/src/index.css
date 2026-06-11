@@ -2,6 +2,144 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ─────────────────────────────────────────────
+   Bossmode 设计 token 体系 —— 「指挥室」语义层
+   表面 surface-0..3 + inset / 文字 ink-1..4 / 边界 line-* /
+   署名色 accent / 状态灯 on-air · thinking · blocked · idle
+   亮色为默认（日班），.dark 为夜班。新组件一律用 token 类，
+   无需 dark: 双写。
+   ───────────────────────────────────────────── */
+:root {
+  /* 日班（亮色） */
+  --surface-0: #f5f6f8;
+  --surface-1: #fbfcfd;
+  --surface-2: #eef0f4;
+  --surface-3: #e4e7ec;
+  --inset: #eceef2;
+
+  --ink-1: #1b212a;
+  --ink-2: #454e5c;
+  --ink-3: #76808f;
+  --ink-4: #a3acb9;
+
+  --line: rgba(30, 45, 70, 0.12);
+  --line-soft: rgba(30, 45, 70, 0.07);
+  --line-strong: rgba(30, 45, 70, 0.22);
+
+  --accent: #0fa897;
+  --accent-dim: rgba(15, 168, 151, 0.12);
+  --accent-ink: #0b8d7f;
+  --accent-contrast: #ffffff;
+
+  --on-air: #1d9e58;
+  --on-air-dim: rgba(29, 158, 88, 0.13);
+  --thinking: #b3821c;
+  --thinking-dim: rgba(179, 130, 28, 0.13);
+  --blocked: #cf4848;
+  --blocked-dim: rgba(207, 72, 72, 0.12);
+  --idle-g: #aab2bd;
+
+  --shadow-pop: 0 8px 24px rgba(25, 35, 55, 0.16);
+}
+.dark {
+  /* 夜班（暗色）：石墨近黑，微冷偏 */
+  --surface-0: #0c0e11;
+  --surface-1: #11141a;
+  --surface-2: #171b22;
+  --surface-3: #1e232c;
+  --inset: #0a0c0f;
+
+  --ink-1: #e8ebef;
+  --ink-2: #a7afbb;
+  --ink-3: #6b7480;
+  --ink-4: #454d59;
+
+  --line: rgba(160, 175, 200, 0.10);
+  --line-soft: rgba(160, 175, 200, 0.06);
+  --line-strong: rgba(160, 175, 200, 0.20);
+
+  --accent: #37d6c4;
+  --accent-dim: rgba(55, 214, 196, 0.14);
+  --accent-ink: #5ee6d5;
+  --accent-contrast: #06231f;
+
+  --on-air: #3fd07a;
+  --on-air-dim: rgba(63, 208, 122, 0.15);
+  --thinking: #e8b03f;
+  --thinking-dim: rgba(232, 176, 63, 0.15);
+  --blocked: #e85f5f;
+  --blocked-dim: rgba(232, 95, 95, 0.14);
+  --idle-g: #4a525e;
+
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-inset: var(--inset);
+
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-contrast: var(--accent-contrast);
+
+  --color-onair: var(--on-air);
+  --color-onair-dim: var(--on-air-dim);
+  --color-think: var(--thinking);
+  --color-think-dim: var(--thinking-dim);
+  --color-blocked: var(--blocked);
+  --color-blocked-dim: var(--blocked-dim);
+  --color-idleg: var(--idle-g);
+}
+
+/* Staff Badge 状态环：签名组件。用法：<div class="badge-ring ring-onair">…avatar…</div> */
+.badge-ring { position: relative; }
+.badge-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--idle-g);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.badge-ring.ring-onair::after {
+  border-color: var(--on-air);
+  opacity: 1;
+  animation: badge-breath 2.2s ease-in-out infinite;
+}
+.badge-ring.ring-think::after {
+  border-color: var(--thinking);
+  opacity: 1;
+  animation: badge-breath 1.6s ease-in-out infinite;
+}
+.badge-ring.ring-blocked::after { border-color: var(--blocked); opacity: 1; }
+.badge-ring.ring-boss::after { border-color: var(--accent); opacity: 0.7; }
+@keyframes badge-breath {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 流式光标 */
+.streaming-cursor::after {
+  content: "▍";
+  color: var(--accent);
+  animation: stream-blink 1s steps(1) infinite;
+}
+@keyframes stream-blink { 50% { opacity: 0; } }
+
 /* Custom scrollbar */
 * {
   scrollbar-width: thin;

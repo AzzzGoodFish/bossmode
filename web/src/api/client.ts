@@ -216,7 +216,8 @@ export type ModelProtocol =
   | "mistral-conversations";
 
 export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
-export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "openai_codex_subscription";
+export type ModelCredentialProfileKind = "builtin_provider" | "custom_endpoint" | "trusted_adapter";
+export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "anthropic_proxy_claude_code" | "openai_codex_subscription";
 
 export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
 
@@ -227,11 +228,23 @@ export interface ModelDefinitionConfig {
   maxTokens?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
+  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh", string | null>>;
+  compat?: Record<string, unknown>;
   metadataSource?: ModelMetadataSource;
+}
+
+export interface ModelMetadataOverride {
+  contextWindow?: number;
+}
+
+export interface ModelCredentialModelCustomizations {
+  disabled?: string[];
+  contextWindowOverride?: Record<string, number>;
 }
 
 export interface PublicModelCredentialProfile {
   id: string;
+  profileKind?: ModelCredentialProfileKind;
   name: string;
   providerSlug: string;
   protocol: ModelProtocol;
@@ -244,15 +257,58 @@ export interface PublicModelCredentialProfile {
   enabled: boolean;
   isDefault: boolean;
   models: ModelDefinitionConfig[];
+  modelCustomizations?: ModelCredentialModelCustomizations;
   createdAt: number;
   updatedAt: number;
   hasSecret: boolean;
   modelRefs: string[];
+  catalogModels?: ModelDefinitionConfig[];
 }
 
 export interface ModelCredentialProfileInput extends Omit<PublicModelCredentialProfile, "id" | "createdAt" | "updatedAt" | "hasSecret" | "modelRefs"> {
   apiKey?: string;
   oauthCredentials?: Record<string, unknown>;
+}
+
+export interface PublicModelProvider {
+  providerSlug: string;
+  displayName: string;
+  authModes: Array<"api_key" | "oauth">;
+  defaultAuthMode: "api_key" | "oauth";
+  modelCount: number;
+  sampleModels: string[];
+  protocol?: ModelProtocol;
+  logoKey?: string;
+}
+
+export interface ConnectApiKeyRequest {
+  providerSlug: string;
+  apiKey: string;
+  name?: string;
+  baseUrlOverride?: string;
+  requestProfile?: ModelRequestProfile;
+  isDefault?: boolean;
+}
+
+export type OAuthLoginJobStatus = "starting" | "awaiting_input" | "awaiting_device" | "completed" | "failed" | "cancelled";
+
+export interface OAuthDeviceCodeInfo {
+  userCode: string;
+  verificationUri: string;
+  expiresInSeconds?: number;
+  intervalSeconds?: number;
+}
+
+export interface OAuthSelectPrompt {
+  message: string;
+  options: Array<{ id: string; label: string }>;
+}
+
+export interface StartOAuthConnectionRequest {
+  providerId: string;
+  profileId?: string;
+  name?: string;
+  requestProfile?: ModelRequestProfile;
 }
 
 export interface ModelOption {
@@ -277,42 +333,16 @@ export interface AvailableModelOption extends ModelOption {
   images: boolean;
 }
 
-export interface PiConfigImportProviderPreview {
-  providerSlug: string;
-  displayName: string;
-  protocol: ModelProtocol;
-  baseUrl?: string;
-  authType: ModelAuthType;
-  authSource: "auth_json_api_key" | "auth_json_oauth" | "models_json_key" | "models_json_command" | "environment";
-  secretPreview: string;
-  modelCount: number;
-  models: AvailableModelOption[];
-  existingProfileId?: string;
-  importable: boolean;
-  warnings: string[];
-}
-
-export interface PiConfigImportPreview {
-  piAgentDir: string;
-  found: boolean;
-  providers: PiConfigImportProviderPreview[];
-  warnings: string[];
-}
-
-export interface PiConfigImportRequest {
-  providers?: string[];
-  overwriteProviderSlugs?: string[];
-}
-
-export interface PiConfigImportResult {
-  imported: PublicModelCredentialProfile[];
-  skipped: Array<{ providerSlug: string; reason: string }>;
-  overwritten: PublicModelCredentialProfile[];
-  warnings: string[];
-}
-
 export async function getModelCredentialProfiles(): Promise<PublicModelCredentialProfile[]> {
   return apiFetch("/api/model-credential-profiles");
+}
+
+export async function getModelProviderCatalog(): Promise<PublicModelProvider[]> {
+  return apiFetch("/api/model-provider-catalog");
+}
+
+export async function connectModelProviderApiKey(data: ConnectApiKeyRequest): Promise<PublicModelCredentialProfile> {
+  return apiFetch("/api/model-credential-profiles/connect-api-key", { method: "POST", body: JSON.stringify(data) });
 }
 
 export async function createModelCredentialProfile(data: ModelCredentialProfileInput): Promise<PublicModelCredentialProfile> {
@@ -321,6 +351,10 @@ export async function createModelCredentialProfile(data: ModelCredentialProfileI
 
 export async function updateModelCredentialProfile(id: string, data: Partial<ModelCredentialProfileInput>): Promise<PublicModelCredentialProfile> {
   return apiFetch(`/api/model-credential-profiles/${id}`, { method: "PUT", body: JSON.stringify(data) });
+}
+
+export async function refreshModelCredentialProfileModels(id: string): Promise<PublicModelCredentialProfile> {
+  return apiFetch(`/api/model-credential-profiles/${id}/refresh-models`, { method: "POST" });
 }
 
 export async function deleteModelCredentialProfile(id: string): Promise<void> {
@@ -335,10 +369,12 @@ export interface ModelDiscoveryResult {
 
 export interface OAuthLoginJob {
   id: string;
-  status: "awaiting_input" | "completed" | "failed" | "cancelled";
+  status: OAuthLoginJobStatus;
   providerId: string;
   authUrl?: string;
   userCode?: string;
+  deviceCode?: OAuthDeviceCodeInfo;
+  selectPrompt?: OAuthSelectPrompt;
   prompt: string;
   error?: string;
   profileId?: string;
@@ -346,16 +382,32 @@ export interface OAuthLoginJob {
   updatedAt: number;
 }
 
+export async function startOAuthConnection(data: StartOAuthConnectionRequest): Promise<OAuthLoginJob> {
+  return apiFetch("/api/model-credential-profiles/oauth/start", { method: "POST", body: JSON.stringify(data) });
+}
+
 export async function startOAuthLoginJob(data: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string }): Promise<OAuthLoginJob> {
   return apiFetch("/api/model-credential-profiles/oauth-login/start", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function getOAuthConnectionJob(id: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth/${id}`);
 }
 
 export async function getOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth-login/${id}`);
 }
 
+export async function submitOAuthConnectionInput(id: string, code: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
+}
+
 export async function submitOAuthLoginJobInput(id: string, code: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
+}
+
+export async function cancelOAuthConnection(id: string): Promise<OAuthLoginJob> {
+  return apiFetch(`/api/model-credential-profiles/oauth/${id}/cancel`, { method: "POST" });
 }
 
 export async function cancelOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
@@ -372,14 +424,6 @@ export async function getAvailableModels(): Promise<AvailableModelOption[]> {
 
 export async function getConfiguredModels(): Promise<AvailableModelOption[]> {
   return getAvailableModels();
-}
-
-export async function getPiConfigPreview(): Promise<PiConfigImportPreview> {
-  return apiFetch("/api/pi-config-preview");
-}
-
-export async function importPiConfig(data: PiConfigImportRequest): Promise<PiConfigImportResult> {
-  return apiFetch("/api/import-pi-config", { method: "POST", body: JSON.stringify(data) });
 }
 
 // -- Runtimes --

@@ -12,6 +12,12 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
+export interface RawAgentEventLine {
+  type: string;
+  event: AgentEvent;
+  ts: number;
+}
+
 // Committed events — finalized items in the stream
 export interface CommittedEvent {
   type: "agent_start" | "agent_end" | "message" | "thinking" | "tool" | "user_steer" | "agent_reply" | "system";
@@ -97,6 +103,20 @@ export function getAgentHistorySyncPlan(cachedEvents?: CommittedEvent[]): {
   };
 }
 
+function isDurableRawEvent(event: AgentEvent): boolean {
+  return event.type !== "message_update" && event.type !== "tool_update";
+}
+
+export function buildRawEventLines(events: AgentEvent[]): RawAgentEventLine[] {
+  return events
+    .filter(isDurableRawEvent)
+    .map((event) => ({
+      type: event.type,
+      event,
+      ts: (event.ts as number) || now(),
+    }));
+}
+
 export function buildAgentHistoryState(events: AgentEvent[]): {
   committed: CommittedEvent[];
   isWorking: boolean;
@@ -132,8 +152,11 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   const { toast } = useDialog();
   const [view, setView] = useState<"chat" | "activity">("chat");
   const [activityMode, setActivityMode] = useState<"formatted" | "raw">("formatted");
-  const [rawLines, setRawLines] = useState<Array<{ type: "stdout" | "stderr"; text: string; ts: number }>>([]);
   const MAX_RAW_LINES = 2000;
+
+  // Raw structured event state
+  const rawEventsRef = useRef<RawAgentEventLine[]>([]);
+  const [rawEvents, setRawEvents] = useState<RawAgentEventLine[]>([]);
 
   // Shared event state
   const eventsRef = useRef<CommittedEvent[]>(cachedEvents ?? []);
@@ -153,6 +176,14 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   const streamingThinkingRef = useRef<string | null>(null);
 
   const flushEvents = useCallback(() => setCommitted([...eventsRef.current]), []);
+  const flushRawEvents = useCallback(() => setRawEvents([...rawEventsRef.current]), []);
+
+  const pushRawEvent = useCallback((event: AgentEvent) => {
+    const line = buildRawEventLines([event])[0];
+    if (!line) return;
+    rawEventsRef.current = [...rawEventsRef.current, line].slice(-MAX_RAW_LINES);
+    flushRawEvents();
+  }, [flushRawEvents]);
 
   const pushEvent = useCallback((event: CommittedEvent) => {
     eventsRef.current = [...eventsRef.current, event];
@@ -164,6 +195,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
   // Stream event handler — uses refs to avoid stale closures
   const handleStreamEventRef = useRef<(event: AgentEvent) => void>(() => {});
   handleStreamEventRef.current = (event: AgentEvent) => {
+    pushRawEvent(event);
     const ts = now();
     switch (event.type) {
       case "agent_start":
@@ -236,14 +268,8 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
         pushEvent({ type: "system", text: event.text as string, ts });
         break;
       case "cli:stdout":
-      case "cli:stderr": {
-        const lineType = event.type === "cli:stdout" ? "stdout" as const : "stderr" as const;
-        setRawLines((prev) => {
-          const next = [...prev, { type: lineType, text: event.text as string, ts }];
-          return next.length > MAX_RAW_LINES ? next.slice(-MAX_RAW_LINES) : next;
-        });
+      case "cli:stderr":
         break;
-      }
     }
   };
 
@@ -254,7 +280,10 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
     try {
       const result = await getAgentEventsPaginated(roomId, agentName, EVENTS_PAGE_SIZE, oldestEventIndex.current);
       if (result.events.length > 0) {
-        const olderCommitted = buildFromHistory(result.events as AgentEvent[]);
+        const rawOlder = result.events as AgentEvent[];
+        const olderCommitted = buildFromHistory(rawOlder);
+        rawEventsRef.current = [...buildRawEventLines(rawOlder), ...rawEventsRef.current].slice(-MAX_RAW_LINES);
+        flushRawEvents();
         eventsRef.current = [...olderCommitted, ...eventsRef.current];
         flushEvents();
         oldestEventIndex.current = Math.max(0, (oldestEventIndex.current ?? 0) - result.events.length);
@@ -265,7 +294,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
     } finally {
       setLoadingOlderEvents(false);
     }
-  }, [roomId, agentName, loadingOlderEvents, hasMoreEvents, flushEvents]);
+  }, [roomId, agentName, loadingOlderEvents, hasMoreEvents, flushEvents, flushRawEvents]);
 
   // WS + history — uses ref so WS always calls latest handler
   useEffect(() => {
@@ -290,7 +319,10 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
     if (historySyncPlan.shouldFetchHistory) {
       getAgentEventsPaginated(roomId, agentName, EVENTS_PAGE_SIZE)
         .then((result) => {
-          const historyState = buildAgentHistoryState(result.events as AgentEvent[]);
+          const rawHistory = result.events as AgentEvent[];
+          const historyState = buildAgentHistoryState(rawHistory);
+          rawEventsRef.current = buildRawEventLines(rawHistory).slice(-MAX_RAW_LINES);
+          flushRawEvents();
           eventsRef.current = historyState.committed;
           flushEvents();
           setIsWorking(historyState.isWorking);
@@ -380,7 +412,7 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
               loadingOlder={loadingOlderEvents}
               onLoadOlder={loadOlderEvents}
             />
-          : <RawOutput lines={rawLines} />
+          : <RawOutput events={rawEvents} />
       }
     </div>
   );
@@ -1146,10 +1178,14 @@ function truncateArgs(args: unknown): string {
 }
 
 // ============================================================================
-// RawOutput — terminal-style CLI stdout/stderr viewer
+// RawOutput — structured runtime event viewer
 // ============================================================================
 
-function RawOutput({ lines }: { lines: Array<{ type: "stdout" | "stderr"; text: string; ts: number }> }) {
+function compactEventJson(event: AgentEvent): string {
+  return JSON.stringify(event);
+}
+
+function RawOutput({ events }: { events: RawAgentEventLine[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isAutoScroll = useRef(true);
 
@@ -1161,14 +1197,14 @@ function RawOutput({ lines }: { lines: Array<{ type: "stdout" | "stderr"; text: 
     isAutoScroll.current = atBottom;
   }, []);
 
-  // Scroll to bottom when new lines arrive (if auto-scroll enabled)
+  // Scroll to bottom when new events arrive (if auto-scroll enabled)
   useEffect(() => {
     if (isAutoScroll.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [lines.length]);
+  }, [events.length]);
 
-  if (lines.length === 0) {
+  if (events.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-zinc-950">
         <span className="text-zinc-600 italic text-sm">Waiting for output...</span>
@@ -1184,15 +1220,20 @@ function RawOutput({ lines }: { lines: Array<{ type: "stdout" | "stderr"; text: 
       role="log"
       aria-live="polite"
     >
-      {lines.map((line, i) => (
-        <div key={i} className="py-[1px] whitespace-pre-wrap break-all">
-          {line.type === "stderr" ? (
-            <><span className="text-red-500 font-semibold">[stderr] </span><span className="text-red-400">{line.text}</span></>
-          ) : (
-            <span className="text-zinc-300">{line.text}</span>
-          )}
-        </div>
-      ))}
+      {events.map((line, i) => {
+        const isStderr = line.type === "cli:stderr";
+        const isStdout = line.type === "cli:stdout";
+        return (
+          <div key={i} className="py-[1px] whitespace-pre-wrap break-all">
+            <span className="text-zinc-500">[{formatTime(line.ts)}] </span>
+            <span className={isStderr ? "text-red-500 font-semibold" : isStdout ? "text-emerald-400 font-semibold" : "text-blue-400 font-semibold"}>
+              {line.type}
+            </span>
+            <span className="text-zinc-600"> </span>
+            <span className={isStderr ? "text-red-400" : "text-zinc-300"}>{compactEventJson(line.event)}</span>
+          </div>
+        );
+      })}
       <span className="text-zinc-500 animate-pulse">▊</span>
     </div>
   );
