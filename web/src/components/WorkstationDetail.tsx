@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search, RotateCcw, RefreshCw, X, Send } from "lucide-react";
 import { abortAgent, getAgentEventsPaginated, getMembers, getMemberTokenUsage, getToken, resetAgentSession, restartMember, type ContextUsageData, type MemberInfo } from "../api/client";
 import { useDialog } from "./dialogs";
@@ -8,9 +8,10 @@ import { diffStatForTool, eventSearchText, formatEventTime, isReplyEvent, isTool
 const PAGE_SIZE = 120;
 type FilterMode = "all" | "tools" | "replies";
 
-export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, onSteer }: {
+export function WorkstationDetail({ roomId, agentName, status, contextUsage, onClose, onSteer }: {
   roomId: string;
   agentName: string;
+  status?: string;
   contextUsage?: ContextUsageData;
   onClose: () => void;
   onSteer: (content: string) => void;
@@ -25,8 +26,22 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
   const [steer, setSteer] = useState("");
   const [members, setMembers] = useState<Record<string, MemberInfo>>({});
   const [tokenTotal, setTokenTotal] = useState<number | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const member = members[agentName];
+  const isWorking = status === "working";
+
+  const scrollToLatest = useCallback(() => {
+    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: "end" }));
+  }, []);
+
+  const isNearBottom = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  }, []);
 
   const loadInitial = useCallback(async () => {
     setLoading(true);
@@ -62,16 +77,18 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
       try {
         const data = JSON.parse(e.data);
         if (data.type === "agent:event" && data.roomId === roomId && data.agent === agentName) {
+          shouldAutoScrollRef.current = isNearBottom();
           setEvents((prev) => [...prev, data.event as AgentEvent]);
         }
       } catch {}
     };
     return () => ws.close();
-  }, [roomId, agentName]);
+  }, [roomId, agentName, isNearBottom]);
 
   const loadOlder = async () => {
     if (!hasMore || oldestIndex === undefined) return;
     const result = await getAgentEventsPaginated(roomId, agentName, PAGE_SIZE, oldestIndex);
+    shouldAutoScrollRef.current = false;
     setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
     setHasMore(result.hasMore);
     setOldestIndex(Math.max(0, oldestIndex - result.events.length));
@@ -95,10 +112,17 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
 
   const turns = useMemo(() => groupTurns(filteredEvents), [filteredEvents]);
 
+  useEffect(() => {
+    if (loading) return;
+    if (!shouldAutoScrollRef.current) return;
+    scrollToLatest();
+  }, [events.length, loading, scrollToLatest]);
+
   const sendSteer = () => {
     const text = steer.trim();
     if (!text) return;
     onSteer(text);
+    shouldAutoScrollRef.current = isNearBottom();
     setEvents((prev) => [...prev, { type: "user_steer", text, ts: Date.now() }]);
     setSteer("");
   };
@@ -123,7 +147,7 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
         <h3 className="text-sm font-semibold text-ink-1">{agentName}</h3>
         <span className="font-mono text-[10px] text-ink-4 truncate">{member?.model || "agent default"}</span>
         <span className="flex-1" />
-        <button onClick={() => abortAgent(roomId, agentName).catch(console.error)} className="px-2.5 py-1 text-[11px] font-semibold bg-blocked text-white rounded cursor-pointer">Abort</button>
+        {isWorking && <button onClick={() => abortAgent(roomId, agentName).catch(console.error)} className="px-2.5 py-1 text-[11px] font-semibold bg-blocked text-white rounded cursor-pointer">Abort</button>}
         <button onClick={restart} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2"><RefreshCw size={12} />Restart</button>
         <button onClick={reset} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2"><RotateCcw size={12} />Reset session</button>
         <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:bg-surface-2 cursor-pointer"><X size={14} /></button>
@@ -131,7 +155,7 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
 
       <div className="flex-1 min-h-0 flex">
         <main className="flex-1 min-w-0 flex flex-col">
-          <div className="px-4 py-3 border-b border-line-soft flex items-center gap-3 shrink-0">
+          <div className="w-full max-w-[860px] mx-auto px-4 py-3 border-b border-line-soft flex items-center gap-3 shrink-0">
             <div className="flex bg-inset border border-line-soft rounded-lg p-0.5">
               <FilterButton label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
               <FilterButton label="Tools" count={counts.tools} active={filter === "tools"} onClick={() => setFilter("tools")} />
@@ -142,13 +166,14 @@ export function WorkstationDetail({ roomId, agentName, contextUsage, onClose, on
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search loaded activity: command, tool, file path…" className="bg-transparent outline-none text-xs text-ink-1 placeholder:text-ink-4 flex-1" />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 w-full max-w-[860px] mx-auto">
             {hasMore && <button onClick={loadOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80">Load earlier activity</button>}
             {loading && <div className="text-center text-sm text-ink-4 py-8">Loading workstation history…</div>}
             {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
             {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
+            <div ref={bottomRef} />
           </div>
-          <div className="border-t border-line bg-surface-0 p-3 flex gap-2 shrink-0">
+          <div className="border-t border-line bg-surface-0 p-3 flex gap-2 shrink-0 w-full max-w-[860px] mx-auto">
             <input value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendSteer(); }} placeholder={`Private steer @${agentName}…`} className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong" />
             <button onClick={sendSteer} className="inline-flex items-center gap-1 px-3 py-2 bg-accent text-accent-contrast text-sm font-medium rounded cursor-pointer"><Send size={14} />Send</button>
           </div>

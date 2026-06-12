@@ -280,7 +280,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
                       <div className="relative min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setOpenChip(openChip === chipKey ? null : chipKey); }}
-                          title="热切换模型 · 下一回合生效"
+                          title={row.member.model || "agent default"}
                           className="font-mono text-[10.5px] text-ink-3 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 -mx-1.5 py-0.5 flex items-center gap-1 cursor-pointer transition-colors max-w-full"
                         >
                           <span className="truncate">{row.member.model || "agent default"}</span>

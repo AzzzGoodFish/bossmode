@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Square, ChevronDown, ExternalLink } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Square, ChevronDown } from "lucide-react";
 import {
   abortAgent, getMembers, getConfiguredModels, updateMember, getAgentEventsPaginated, getToken,
   type MemberInfo, type AvailableModelOption, type ContextUsageData,
@@ -43,6 +44,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [openChip, setOpenChip] = useState<string | null>(null);
+  const [chipAnchor, setChipAnchor] = useState<DOMRect | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
 
@@ -127,7 +129,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0" onScroll={() => { setOpenChip(null); setChipAnchor(null); }}>
         {members.map((name) => {
           const status = agentStatus[name] || "inactive";
           const info = memberInfos[name];
@@ -142,25 +144,33 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           return (
             <div key={name} className="border-b border-line-soft px-3.5 py-3">
               <div className="flex items-center gap-2.5">
-                <div>
+                <button onClick={() => onOpenLens?.(name)} className="cursor-pointer rounded-full focus:outline-none focus:ring-2 focus:ring-accent" title={`打开 ${name} 工位`}>
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
-                </div>
+                </button>
                 <div className="flex-1 min-w-0">
-                  <div
-                    className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5"
+                  <button
+                    onClick={() => onOpenLens?.(name)}
+                    className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors max-w-full"
+                    title={`打开 ${name} 工位`}
                   >
-                    {name}
+                    <span className="truncate">{name}</span>
                     {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                  </div>
+                  </button>
                   {/* 模型热切换 chip */}
                   <div className="relative">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!info) return;
-                        setOpenChip(openChip === name ? null : name);
+                        if (openChip === name) {
+                          setOpenChip(null);
+                          setChipAnchor(null);
+                        } else {
+                          setOpenChip(name);
+                          setChipAnchor(e.currentTarget.getBoundingClientRect());
+                        }
                       }}
-                      title="热切换模型 · 下一回合生效"
+                      title={modelLabel}
                       className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex items-center gap-1 cursor-pointer transition-colors max-w-full"
                     >
                       <span className="truncate">{modelLabel}</span>
@@ -168,10 +178,15 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                     </button>
                     {openChip === name && info && (
                       <ModelPop
-                        align="right"
+                        anchorRect={chipAnchor}
                         models={models}
                         current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
-                        onSelect={(model, credentialId) => handleSwitchModel(info, model, credentialId)}
+                        onClose={() => { setOpenChip(null); setChipAnchor(null); }}
+                        onSelect={(model, credentialId) => {
+                          setOpenChip(null);
+                          setChipAnchor(null);
+                          handleSwitchModel(info, model, credentialId);
+                        }}
                       />
                     )}
                   </div>
@@ -201,9 +216,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                 <div className="mt-2.5 border-l-2 border-accent bg-surface-1 rounded-r-lg p-2 space-y-1.5">
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-[9px] font-semibold tracking-[0.08em] text-ink-4">RECENT ACTIVITY</span>
-                    <button onClick={() => onOpenLens?.(name)} className="inline-flex items-center gap-1 text-[10px] text-accent-ink hover:opacity-80 cursor-pointer">
-                      完整工位 <ExternalLink size={10} />
-                    </button>
                   </div>
                   {(recentEvents[name] || []).filter(isStationActionEvent).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} />)}
                   {(recentEvents[name] || []).length === 0 && <div className="text-[11px] text-ink-4 py-1">No recent activity</div>}
@@ -280,31 +292,50 @@ function MiniEvent({ event }: { event: AgentEvent }) {
 export function ModelPop({
   models,
   current,
+  anchorRect = null,
   onSelect,
-  align = "left",
+  onClose,
 }: {
   models: AvailableModelOption[];
   current: { model: string | null; credentialId: string | null };
+  anchorRect?: DOMRect | null;
   onSelect: (model: string, credentialId: string) => void;
-  align?: "left" | "right";
+  onClose?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const width = 260;
+  const gap = 6;
+  const maxHeight = 288;
   const grouped = models.reduce<Record<string, AvailableModelOption[]>>((acc, m) => {
     const key = m.profileName || m.providerSlug;
     (acc[key] ||= []).push(m);
     return acc;
   }, {});
 
-  return (
-    <div
-      ref={ref}
-      onClick={(e) => e.stopPropagation()}
-      className={`absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto ${align === "right" ? "right-0 w-[204px]" : "left-0 w-[248px]"}`}
-      style={{ boxShadow: "var(--shadow-pop)" }}
-    >
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose?.();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    const onResize = () => onClose?.();
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [onClose]);
+
+  const content = (
+    <>
       {Object.entries(grouped).map(([group, items]) => (
         <div key={group}>
-          <div className="px-2 pt-1.5 pb-0.5 text-[9px] font-semibold tracking-[0.05em] text-ink-4">{group}</div>
+          <div className="px-2 pt-1.5 pb-0.5 text-[9px] font-semibold tracking-[0.05em] text-ink-4 truncate" title={group}>{group}</div>
           {items.map((m) => {
             const isCurrent = current.model === m.ref && (!current.credentialId || current.credentialId === m.profileId);
             return (
@@ -315,7 +346,7 @@ export function ModelPop({
                   isCurrent ? "text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"
                 }`}
               >
-                <span className="truncate flex-1">{m.displayName || m.modelId}</span>
+                <span className="truncate flex-1" title={m.displayName || m.modelId}>{m.displayName || m.modelId}</span>
                 {isCurrent && <span className="text-[9px] text-ink-4 shrink-0">当前</span>}
               </button>
             );
@@ -326,6 +357,30 @@ export function ModelPop({
       <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">
         热切换：不中断当前回合，下一 turn 生效；可跨凭证/provider。
       </p>
-    </div>
+    </>
+  );
+
+  if (!anchorRect) {
+    return (
+      <div ref={ref} onClick={(e) => e.stopPropagation()} className="absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto w-[260px]" style={{ boxShadow: "var(--shadow-pop)" }}>
+        {content}
+      </div>
+    );
+  }
+
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.right - width));
+  const opensUp = window.innerHeight - anchorRect.bottom < maxHeight + gap && anchorRect.top > maxHeight + gap;
+  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
+
+  return createPortal(
+    <div
+      ref={ref}
+      onClick={(e) => e.stopPropagation()}
+      className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto w-[260px]"
+      style={{ left, ...vertical, boxShadow: "var(--shadow-pop)" }}
+    >
+      {content}
+    </div>,
+    document.body,
   );
 }
