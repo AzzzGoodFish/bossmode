@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.12.21] — 2026-06-10
+
+### Added
+- Connect Provider model rows now support per-credential `Enabled` toggles and `contextWindow` overrides while keeping Custom Endpoint editing unchanged.
+
+### Fixed
+- Connect Provider model enablement and context window edits now persist across save, settings reload, catalog refresh, member model picker listing, and runtime export.
+
+### Tests
+- `npx tsc --noEmit`
+- `npm run build`
+- `npm test`
+- Clean global install from packed tarball.
+
 ## [0.12.3] — 2026-05-28
 
 ### Changed

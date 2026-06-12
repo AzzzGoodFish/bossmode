@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, vi } from "vitest";
 let getAgentHistorySyncPlan: typeof import("../../web/src/components/AgentTab").getAgentHistorySyncPlan;
 let buildAgentHistoryState: typeof import("../../web/src/components/AgentTab").buildAgentHistoryState;
 let getAgentTabHeaderControls: typeof import("../../web/src/components/AgentTab").getAgentTabHeaderControls;
+let buildRawEventLines: typeof import("../../web/src/components/AgentTab").buildRawEventLines;
 
 beforeAll(async () => {
   vi.stubGlobal("localStorage", {
@@ -10,7 +11,7 @@ beforeAll(async () => {
     setItem: () => {},
     removeItem: () => {},
   });
-  ({ getAgentHistorySyncPlan, buildAgentHistoryState, getAgentTabHeaderControls } = await import("../../web/src/components/AgentTab"));
+  ({ getAgentHistorySyncPlan, buildAgentHistoryState, getAgentTabHeaderControls, buildRawEventLines } = await import("../../web/src/components/AgentTab"));
 }, 30000);
 
 describe("agent tab history sync", () => {
@@ -44,6 +45,25 @@ describe("agent tab history sync", () => {
       expect.objectContaining({ type: "agent_start" }),
       expect.objectContaining({ type: "agent_end" }),
     ]);
+  });
+
+  it("builds raw rows from durable structured SDK events without CLI stdout/stderr", () => {
+    const raw = buildRawEventLines([
+      { type: "agent_start", ts: 1 },
+      { type: "message_update", text: "hi", ts: 2 },
+      { type: "tool_update", toolName: "read", toolCallId: "t1", partialResult: "delta", ts: 3 },
+      { type: "tool_start", toolName: "read", toolCallId: "t1", args: { path: "x" }, ts: 4 },
+      { type: "message_end", text: "done", ts: 5 },
+    ]);
+
+    expect(raw.map((line) => line.type)).toEqual(["agent_start", "tool_start", "message_end"]);
+    expect(raw.some((line) => line.type === "message_update" || line.type === "tool_update")).toBe(false);
+  });
+
+  it("keeps legacy CLI stdout/stderr as raw event rows", () => {
+    const raw = buildRawEventLines([{ type: "cli:stdout", text: "legacy", ts: 9 }]);
+
+    expect(raw).toEqual([expect.objectContaining({ type: "cli:stdout", event: expect.objectContaining({ text: "legacy" }), ts: 9 })]);
   });
 
   it("keeps activity mode toggle visible while interrupt is available", () => {

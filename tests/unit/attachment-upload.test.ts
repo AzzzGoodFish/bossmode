@@ -290,3 +290,28 @@ describe("isImagePath", () => {
     expect(isImagePath("/path/to/file.JPG")).toBe(true);
   });
 });
+
+// -- Room-keyed in-memory attachment draft store --
+
+describe("attachment draft store", () => {
+  it("preserves pending files by room key and isolates rooms", async () => {
+    const mod = await import("../../web/src/hooks/useUpload.js");
+    mod.clearAttachmentDraftForTests("room:a");
+    mod.clearAttachmentDraftForTests("room:b");
+
+    const fileA = new File(["a"], "a.txt", { type: "text/plain" });
+    const fileB = new File(["b"], "b.txt", { type: "text/plain" });
+
+    mod.addAttachmentDraftFilesForTests("room:a", [fileA]);
+    mod.addAttachmentDraftFilesForTests("room:b", [fileB]);
+
+    expect(mod.getAttachmentDraftItemsForTests("room:a").map((i) => i.file.name)).toEqual(["a.txt"]);
+    expect(mod.getAttachmentDraftItemsForTests("room:b").map((i) => i.file.name)).toEqual(["b.txt"]);
+
+    mod.clearAttachmentDraftForTests("room:a");
+    expect(mod.getAttachmentDraftItemsForTests("room:a")).toHaveLength(0);
+    expect(mod.getAttachmentDraftItemsForTests("room:b").map((i) => i.file.name)).toEqual(["b.txt"]);
+
+    mod.clearAttachmentDraftForTests("room:b");
+  });
+});
