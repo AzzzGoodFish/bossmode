@@ -32,6 +32,41 @@ function resolveModelLabel(modelRef: string): string {
   return `${provider}/${modelId}`;
 }
 
+function getSessionContextModel(sessionManager: SessionManager): { provider: string; modelId: string } | null {
+  try {
+    const model = (sessionManager as any).buildSessionContext?.().model;
+    if (!model || typeof model.provider !== "string" || typeof model.modelId !== "string") return null;
+    return { provider: model.provider, modelId: model.modelId };
+  } catch {
+    return null;
+  }
+}
+
+function getSessionLeafAssistantError(sessionManager: SessionManager): string | null {
+  try {
+    const leaf = (sessionManager as any).getLeafEntry?.() ?? (sessionManager as any).getBranch?.().slice(-1)[0];
+    const message = leaf?.type === "message" ? leaf.message : undefined;
+    if (message?.role === "assistant" && message.stopReason === "error") {
+      return typeof message.errorMessage === "string" && message.errorMessage.trim() ? message.errorMessage : "provider error";
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function freshSessionReason(sessionManager: SessionManager): { reason: string; previous?: string } | null {
+  const leafError = getSessionLeafAssistantError(sessionManager);
+  if (leafError) return { reason: "previous assistant turn ended with provider error", previous: leafError };
+  return null;
+}
+
+function sessionModelDiffers(sessionManager: SessionManager, provider: string, modelId: string): { provider: string; modelId: string } | null {
+  const sessionModel = getSessionContextModel(sessionManager);
+  if (!sessionModel) return null;
+  return sessionModel.provider !== provider || sessionModel.modelId !== modelId ? sessionModel : null;
+}
+
 class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
@@ -102,14 +137,19 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
-  setModel(modelRef: string): void {
+  refreshModelRegistry(): void {
+    this.modelRegistry.refresh();
+  }
+
+  async setModel(modelRef: string): Promise<void> {
     const { provider, modelId } = splitModelRef(modelRef);
     const model = this.modelRegistry.find(provider, modelId);
     if (!model) {
       logger.warn("runtime:pi-sdk", "setModel target not found", { modelRef });
-      return;
+      throw new Error(`Model not found: ${modelRef}`);
     }
-    this.session.setModel(model).catch((err) => logger.warn("runtime:pi-sdk", "setModel failed", { modelRef, error: String(err) }));
+    await this.session.setModel(model);
+    this.runtimeParams.model = resolveModelLabel(modelRef);
   }
 
   setThinkingLevel(level: string): void {
@@ -193,10 +233,34 @@ export class PiSdkRuntime implements AgentRuntime {
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);
 
     let sessionManager: SessionManager;
+    let appendConfiguredModelChange = false;
     try {
-      sessionManager = opts.resumeSession?.sessionFile
-        ? SessionManager.open(opts.resumeSession.sessionFile, sessionDir, opts.cwd)
-        : SessionManager.create(opts.cwd, sessionDir);
+      if (opts.resumeSession?.sessionFile) {
+        const resumed = SessionManager.open(opts.resumeSession.sessionFile, sessionDir, opts.cwd);
+        const freshReason = freshSessionReason(resumed);
+        if (freshReason) {
+          logger.warn("runtime:pi-sdk", "resume session skipped, starting fresh", {
+            agent: opts.member.name,
+            reason: freshReason.reason,
+            previous: freshReason.previous,
+            configured: resolvedModel,
+          });
+          sessionManager = SessionManager.create(opts.cwd, sessionDir);
+        } else {
+          const previous = sessionModelDiffers(resumed, provider, modelId);
+          if (previous) {
+            appendConfiguredModelChange = true;
+            logger.info("runtime:pi-sdk", "resuming session with configured model switch", {
+              agent: opts.member.name,
+              previous: `${previous.provider}/${previous.modelId}`,
+              configured: resolvedModel,
+            });
+          }
+          sessionManager = resumed;
+        }
+      } else {
+        sessionManager = SessionManager.create(opts.cwd, sessionDir);
+      }
     } catch (err) {
       logger.warn("runtime:pi-sdk", "session resume failed, starting fresh", { agent: opts.member.name, error: String(err) });
       sessionManager = SessionManager.create(opts.cwd, sessionDir);
@@ -233,6 +297,10 @@ export class PiSdkRuntime implements AgentRuntime {
       customTools,
       tools: ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)],
     });
+
+    if (appendConfiguredModelChange) {
+      await session.setModel(model);
+    }
 
     opts.onSessionChanged?.({ sessionId: session.sessionId, sessionFile: session.sessionFile });
 
