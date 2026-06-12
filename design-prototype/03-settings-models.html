@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bossmode — 设计方向原型 ③ System / Models（分区导航 + 凭证卡片）</title>
+<style>
+  :root{
+    --surface-0:#0c0e11; --surface-1:#11141a; --surface-2:#171b22; --surface-3:#1e232c; --inset:#0a0c0f;
+    --text-primary:#e8ebef; --text-secondary:#a7afbb; --text-tertiary:#6b7480; --text-muted:#454d59;
+    --border:rgba(160,175,200,.10); --border-soft:rgba(160,175,200,.06); --border-strong:rgba(160,175,200,.20);
+    --accent:#37d6c4; --accent-dim:rgba(55,214,196,.14); --accent-text:#5ee6d5;
+    --on-air:#3fd07a; --on-air-dim:rgba(63,208,122,.15);
+    --thinking:#e8b03f; --thinking-dim:rgba(232,176,63,.15);
+    --blocked:#e85f5f; --idle:#4a525e;
+    --radius-s:6px; --radius-m:9px; --radius-l:12px;
+    --font-ui:"Inter","PingFang SC",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;
+    --shadow-pop:0 8px 24px rgba(0,0,0,.45);
+  }
+  html.light{
+    --surface-0:#f5f6f8; --surface-1:#fbfcfd; --surface-2:#eef0f4; --surface-3:#e4e7ec; --inset:#eceef2;
+    --text-primary:#1b212a; --text-secondary:#454e5c; --text-tertiary:#76808f; --text-muted:#a3acb9;
+    --border:rgba(30,45,70,.12); --border-soft:rgba(30,45,70,.07); --border-strong:rgba(30,45,70,.22);
+    --accent:#0fa897; --accent-dim:rgba(15,168,151,.12); --accent-text:#0b8d7f;
+    --on-air:#1d9e58; --on-air-dim:rgba(29,158,88,.13);
+    --thinking:#b3821c; --thinking-dim:rgba(179,130,28,.13);
+    --blocked:#cf4848; --idle:#aab2bd;
+    --shadow-pop:0 8px 24px rgba(25,35,55,.16);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--font-ui);font-size:13px;line-height:1.55;background:var(--surface-0);
+    color:var(--text-primary);-webkit-font-smoothing:antialiased;overflow:hidden}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:4px;border:2px solid var(--surface-0)}
+  body,.rail button,.ctx,.stage{transition:background-color .18s ease,color .18s ease,border-color .18s ease}
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+  .label{font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--text-tertiary)}
+  .app{display:flex;height:100vh}
+
+  /* Rail */
+  .rail{width:52px;background:var(--surface-0);border-right:1px solid var(--border-soft);
+    display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px}
+  .rail .logo{width:30px;height:30px;border-radius:8px;background:var(--accent-dim);
+    color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:14px;margin-bottom:10px}
+  .rail button{width:38px;height:38px;border:0;border-radius:var(--radius-m);background:transparent;
+    color:var(--text-tertiary);cursor:pointer;display:grid;place-items:center;position:relative}
+  .rail button:hover{background:var(--surface-2);color:var(--text-secondary)}
+  .rail button.active{background:var(--surface-2);color:var(--text-primary)}
+  .rail button.active::before{content:"";position:absolute;left:-7px;top:9px;bottom:9px;width:2px;
+    border-radius:2px;background:var(--accent)}
+  .rail .spacer{flex:1}
+  .rail .user{width:28px;height:28px;border-radius:50%;background:var(--surface-3);
+    display:grid;place-items:center;font-size:11px;color:var(--text-secondary);margin-top:6px}
+  .rail svg{width:18px;height:18px;stroke-width:1.6}
+  html.light .icon-moon{display:none}
+  html:not(.light) .icon-sun{display:none}
+
+  /* Context panel = System 分区导航 */
+  .ctx{width:236px;background:var(--surface-0);border-right:1px solid var(--border);display:flex;flex-direction:column}
+  .ctx-head{height:48px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--border-soft)}
+  .ctx-head h1{font-size:13px;font-weight:600}
+  .ctx-list{flex:1;overflow-y:auto;padding:8px}
+  .nav-it{display:block;width:100%;text-align:left;border:0;background:transparent;cursor:pointer;
+    padding:9px 11px;border-radius:var(--radius-m);margin-bottom:2px}
+  .nav-it:hover{background:var(--surface-1)}
+  .nav-it.active{background:var(--surface-2)}
+  .nav-it .t{font-size:12.5px;font-weight:550;color:var(--text-secondary);display:flex;align-items:center;gap:7px}
+  .nav-it.active .t{color:var(--text-primary)}
+  .nav-it .d{font-size:10.5px;color:var(--text-muted);margin-top:1px;padding-left:0}
+  .nav-it .pill{margin-left:auto;font-size:9px;font-weight:600;padding:1px 6px;border-radius:99px;
+    background:var(--accent-dim);color:var(--accent-text)}
+
+  /* Stage */
+  .stage{flex:1;min-width:0;background:var(--surface-1);overflow-y:auto}
+  .doc{max-width:760px;width:100%;margin:0 auto;padding:28px 36px 80px}
+  .page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:22px}
+  .page-head h2{font-size:18px;font-weight:650;letter-spacing:-.01em}
+  .page-head p{color:var(--text-tertiary);font-size:12.5px;margin-top:3px}
+  .page-head .ops{margin-left:auto;display:flex;gap:8px;flex-shrink:0}
+  .btn{border:1px solid var(--border);background:transparent;color:var(--text-secondary);
+    font-size:12px;font-weight:550;padding:6px 14px;border-radius:var(--radius-s);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .btn:hover{border-color:var(--border-strong);color:var(--text-primary)}
+  .btn.primary{background:var(--accent);border-color:transparent;color:#06231f;font-weight:600}
+
+  /* 凭证卡片（0.12.21 竖排卡片模式的演进） */
+  .cred-card{border:1px solid var(--border);border-radius:var(--radius-m);background:var(--surface-1);margin-bottom:16px}
+  .cred-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border-soft)}
+  .prov-ic{width:34px;height:34px;border-radius:8px;background:var(--surface-2);display:grid;
+    place-items:center;font-weight:700;font-size:13px;color:var(--text-secondary)}
+  .cred-head .nm{flex:1;min-width:0}
+  .cred-head .nm b{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .cred-head .nm small{font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)}
+  .auth-tag{font-size:9.5px;font-weight:600;letter-spacing:.05em;padding:2px 7px;border-radius:99px;
+    background:var(--surface-2);color:var(--text-tertiary)}
+  .live{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--on-air);white-space:nowrap}
+  .live .led{width:6px;height:6px;border-radius:50%;background:var(--on-air)}
+  .live.err{color:var(--blocked)}.live.err .led{background:var(--blocked)}
+  .cred-head .tools{display:flex;gap:6px}
+  .cred-head .tools button{border:1px solid var(--border);background:transparent;color:var(--text-tertiary);
+    font-size:10.5px;font-weight:550;padding:3px 10px;border-radius:var(--radius-s);cursor:pointer;font-family:inherit}
+  .cred-head .tools button:hover{color:var(--text-secondary);border-color:var(--border-strong)}
+
+  /* per-model rows */
+  .mrow{display:grid;grid-template-columns:34px 1fr 150px 110px 70px;gap:12px;align-items:center;
+    padding:9px 18px;border-bottom:1px solid var(--border-soft)}
+  .mrow:last-child{border-bottom:0;border-radius:0 0 var(--radius-m) var(--radius-m)}
+  .mrow.cols span{font-size:9.5px;font-weight:600;letter-spacing:.06em;color:var(--text-muted)}
+  .mrow.cols{padding-top:10px;padding-bottom:6px;border-bottom:0}
+  .mrow .mn{font-family:var(--font-mono);font-size:11.5px;color:var(--text-secondary)}
+  .mrow .mn small{color:var(--text-muted);font-size:9.5px;margin-left:6px}
+  .mrow.off .mn{color:var(--text-muted);text-decoration:line-through;text-decoration-color:var(--border-strong)}
+  .num{font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);background:var(--inset);
+    border:1px solid var(--border-soft);border-radius:var(--radius-s);padding:3px 8px;width:110px;text-align:right}
+  .num.edited{color:var(--accent-text);border-color:rgba(55,214,196,.3)}
+  .num-ro{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-align:right;width:110px;padding:3px 8px}
+
+  /* toggle */
+  .tg{width:30px;height:17px;border-radius:99px;background:var(--surface-3);border:1px solid var(--border);
+    position:relative;cursor:pointer;justify-self:start}
+  .tg::after{content:"";position:absolute;top:1.5px;left:2px;width:12px;height:12px;border-radius:50%;
+    background:var(--text-tertiary);transition:transform .15s ease}
+  .tg.on{background:var(--accent-dim);border-color:rgba(55,214,196,.35)}
+  .tg.on::after{background:var(--accent);transform:translateX(13px)}
+
+  .more-models{padding:9px 18px;font-size:11px;color:var(--text-muted)}
+  .more-models button{border:0;background:transparent;color:var(--accent-text);cursor:pointer;font-size:11px;font-family:inherit}
+
+  .footnote{font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.6}
+  .footnote code{font-family:var(--font-mono);font-size:10px;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail">
+    <div class="logo">B</div>
+    <button title="Rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg></button>
+    <button title="Team"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6S13.9 16 14.5 19"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.6c2.3.2 3.9 1.6 4.4 4"/></svg></button>
+    <button title="Library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></svg></button>
+    <div class="spacer"></div>
+    <button title="切换主题" onclick="document.documentElement.classList.toggle('light')">
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>
+    </button>
+    <button class="active" title="System"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.7-1.6L13.4 2h-2.8l-.4 2.9a7 7 0 0 0-2.7 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.7 1.6l.4 2.9h2.8l.4-2.9a7 7 0 0 0 2.7-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1 .2-1.6z"/></svg></button>
+    <div class="user">F</div>
+  </nav>
+
+  <!-- System 分区导航：替代 868 行长页 -->
+  <aside class="ctx">
+    <div class="ctx-head"><h1>System</h1></div>
+    <div class="ctx-list">
+      <button class="nav-it active">
+        <span class="t">Models</span>
+        <span class="d">凭证 · provider · per-model 定制</span>
+      </button>
+      <button class="nav-it">
+        <span class="t">Runtime</span>
+        <span class="d">pi SDK · session resume</span>
+      </button>
+      <button class="nav-it">
+        <span class="t">Summarization</span>
+        <span class="d">自动摘要阈值与保留数</span>
+      </button>
+      <button class="nav-it">
+        <span class="t">Integrations</span>
+        <span class="d">Linear 同步</span>
+      </button>
+      <button class="nav-it">
+        <span class="t">Team Updates <span class="pill">1 NEW</span></span>
+        <span class="d">内置团队版本</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <div class="doc">
+
+      <div class="page-head">
+        <div>
+          <h2>Models</h2>
+          <p>模型凭证与可用模型。per-model 定制在 catalog 刷新后保留。</p>
+        </div>
+        <div class="ops">
+          <button class="btn">+ Custom Endpoint</button>
+          <button class="btn primary">Connect Provider</button>
+        </div>
+      </div>
+
+      <!-- Provider: Anthropic (api_key) -->
+      <div class="cred-card">
+        <div class="cred-head">
+          <div class="prov-ic">A</div>
+          <div class="nm">
+            <b>Anthropic <span class="auth-tag">API KEY</span></b>
+            <small>anthropic·main · sk-ant-…f92K</small>
+          </div>
+          <span class="live"><span class="led"></span>connected</span>
+          <div class="tools"><button>Fetch models</button><button>Edit</button><button>Remove</button></div>
+        </div>
+        <div class="mrow cols"><span></span><span>MODEL</span><span>CONTEXT WINDOW</span><span>MAX TOKENS</span><span>ENABLED</span></div>
+        <div class="mrow">
+          <span></span>
+          <span class="mn">claude-opus-4 <small>5 members</small></span>
+          <input class="num" value="200,000">
+          <span class="num-ro">32,000</span>
+          <span class="tg on"></span>
+        </div>
+        <div class="mrow">
+          <span></span>
+          <span class="mn">claude-sonnet-4 <small>8 members</small></span>
+          <input class="num edited" value="500,000" title="已覆盖 catalog 默认值 200,000">
+          <span class="num-ro">64,000</span>
+          <span class="tg on"></span>
+        </div>
+        <div class="mrow off">
+          <span></span>
+          <span class="mn">claude-haiku-3.5</span>
+          <span class="num-ro">200,000</span>
+          <span class="num-ro">8,192</span>
+          <span class="tg"></span>
+        </div>
+        <div class="more-models">还有 4 个模型已禁用 · <button>展开全部</button></div>
+      </div>
+
+      <!-- Provider: OpenAI (OAuth) -->
+      <div class="cred-card">
+        <div class="cred-head">
+          <div class="prov-ic">O</div>
+          <div class="nm">
+            <b>OpenAI <span class="auth-tag">OAUTH</span></b>
+            <small>openai·plus · fish@…  · token 23 天后过期</small>
+          </div>
+          <span class="live"><span class="led"></span>connected</span>
+          <div class="tools"><button>Re-login</button><button>Fetch models</button><button>Remove</button></div>
+        </div>
+        <div class="mrow cols"><span></span><span>MODEL</span><span>CONTEXT WINDOW</span><span>MAX TOKENS</span><span>ENABLED</span></div>
+        <div class="mrow">
+          <span></span>
+          <span class="mn">gpt-5.2 <small>2 members</small></span>
+          <input class="num" value="400,000">
+          <span class="num-ro">128,000</span>
+          <span class="tg on"></span>
+        </div>
+        <div class="mrow">
+          <span></span>
+          <span class="mn">gpt-5.2-mini</span>
+          <input class="num" value="400,000">
+          <span class="num-ro">128,000</span>
+          <span class="tg on"></span>
+        </div>
+      </div>
+
+      <!-- Custom Endpoint -->
+      <div class="cred-card">
+        <div class="cred-head">
+          <div class="prov-ic">⌁</div>
+          <div class="nm">
+            <b>local proxy <span class="auth-tag">CUSTOM</span></b>
+            <small>http://127.0.0.1:8787/v1 · openai-compatible</small>
+          </div>
+          <span class="live err"><span class="led"></span>unreachable · 2 min ago</span>
+          <div class="tools"><button>Test</button><button>Discover models</button><button>Edit</button><button>Remove</button></div>
+        </div>
+        <div class="mrow cols"><span></span><span>MODEL（手动配置）</span><span>CONTEXT WINDOW</span><span>MAX TOKENS</span><span>ENABLED</span></div>
+        <div class="mrow">
+          <span></span>
+          <span class="mn">glm-5-air <small>1 member</small></span>
+          <input class="num" value="128,000">
+          <input class="num" value="16,384" style="width:80px">
+          <span class="tg on"></span>
+        </div>
+      </div>
+
+      <p class="footnote">
+        Enabled 关闭的模型不会出现在成员的模型选择器与热切换列表中；<code>context window</code> 覆盖值用于 context usage 计算，catalog 刷新不会重置（0.12.21）。
+      </p>
+
+    </div>
+  </main>
+</div>
+</body>
+</html>
