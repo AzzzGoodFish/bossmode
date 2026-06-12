@@ -1,6 +1,6 @@
 {
   "name": "bossmode",
-  "version": "0.12.7",
+  "version": "0.13.0",
   "description": "Discord-style AI team chat room",
   "type": "module",
   "license": "ISC",
@@ -35,8 +35,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.74.2",
-    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@earendil-works/pi-ai": "^0.79.1",
+    "@earendil-works/pi-coding-agent": "^0.79.1",
     "typebox": "^1.1.39",
     "ws": "^8.18.0",
     "yaml": "^2.8.3"
