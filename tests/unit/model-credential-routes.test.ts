@@ -10,6 +10,163 @@ async function login(port: number): Promise<string> {
 }
 
 describe("model credential profile API routes", () => {
+
+  it("runs native Anthropic OAuth connection with explicit enhanced Claude Code fingerprint", async () => {
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"], compat: { forceAdaptiveThinking: true }, thinkingLevelMap: { xhigh: "xhigh" } },
+    ]);
+    setOAuthLoginAdapterForTests({
+      async login(providerId, callbacks) {
+        callbacks.onAuth({ url: `https://provider.example/${providerId}/authorize`, instructions: "Authorize with provider." });
+        const code = await callbacks.onManualCodeInput!();
+        if (code !== "valid-anthropic-code") throw new Error("invalid code");
+        return { access: "anthropic-access-token", refresh: "anthropic-refresh-token", expires: Date.now() + 3600_000 };
+      },
+    });
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const start = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/oauth/start", {
+      token,
+      body: { providerId: "anthropic", name: "Anthropic Enhanced", requestProfile: "anthropic_proxy_claude_code" },
+    });
+    expect(start.status).toBe(200);
+    const job = JSON.parse(start.body);
+
+    const input = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "valid-anthropic-code" } });
+    expect(input.status).toBe(200);
+    const completed = JSON.parse(input.body);
+
+    const profiles = JSON.parse((await jsonRequest(ts.port, "GET", "/api/model-credential-profiles", { token })).body);
+    const saved = profiles.find((pr: any) => pr.id === completed.profileId);
+    expect(saved).toEqual(expect.objectContaining({
+      profileKind: "builtin_provider",
+      providerSlug: "anthropic",
+      authType: "oauth",
+      oauthProviderId: "anthropic",
+      requestProfile: "anthropic_proxy_claude_code",
+      hasSecret: true,
+    }));
+    expect(saved.modelRefs).toEqual(["anthropic/claude-fable-5"]);
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${completed.profileId}`, { token });
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+    setOAuthLoginAdapterForTests(null);
+    setPiCatalogModelsForTests(null);
+  });
+
+  it("runs native OAuth provider connection without custom endpoint fields", async () => {
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests([
+      { provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", api: "openai-codex-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 128000, input: ["text"] },
+    ]);
+    setOAuthLoginAdapterForTests({
+      async login(providerId, callbacks) {
+        callbacks.onAuth({ url: `https://provider.example/${providerId}/authorize`, instructions: "Authorize with provider." });
+        const code = await callbacks.onManualCodeInput!();
+        if (code !== "valid-native-code") throw new Error("Failed to extract accountId from token");
+        return { access: "native-access-token", refresh: "native-refresh-token", expires: Date.now() + 3600_000, accountId: "acct_native" };
+      },
+    });
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const start = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/oauth/start", {
+      token,
+      body: { providerId: "openai-codex", name: "Codex Native" },
+    });
+    expect(start.status).toBe(200);
+    const job = JSON.parse(start.body);
+    expect(job.status).toBe("awaiting_input");
+    expect(job.authUrl).toBeTruthy();
+
+    const input = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "valid-native-code" } });
+    expect(input.status).toBe(200);
+    expect(input.body).not.toContain("native-access-token");
+    const completed = JSON.parse(input.body);
+    expect(completed.status).toBe("completed");
+
+    const profiles = JSON.parse((await jsonRequest(ts.port, "GET", "/api/model-credential-profiles", { token })).body);
+    const saved = profiles.find((pr: any) => pr.id === completed.profileId);
+    expect(saved).toEqual(expect.objectContaining({
+      profileKind: "builtin_provider",
+      name: "Codex Native",
+      providerSlug: "openai-codex",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      hasSecret: true,
+    }));
+    expect(saved.modelRefs).toEqual(["openai-codex/gpt-5-codex"]);
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${completed.profileId}`, { token });
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+    setOAuthLoginAdapterForTests(null);
+    setPiCatalogModelsForTests(null);
+  });
+
+  it("surfaces device-code OAuth jobs for polling", async () => {
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests([
+      { provider: "github-copilot", id: "claude-sonnet-4", name: "Claude Sonnet", api: "openai-responses", baseUrl: "https://api.githubcopilot.com", contextWindow: 128000, input: ["text"] },
+    ]);
+    setOAuthLoginAdapterForTests({
+      async login(_providerId, callbacks) {
+        callbacks.onDeviceCode?.({ userCode: "ABCD-1234", verificationUri: "https://github.com/login/device", expiresInSeconds: 900, intervalSeconds: 5 });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return { access: "device-access", refresh: "device-refresh", expires: Date.now() + 3600_000 };
+      },
+    });
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const start = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/oauth/start", { token, body: { providerId: "github-copilot" } });
+    expect(start.status).toBe(200);
+    const job = JSON.parse(start.body);
+    expect(job.status).toBe("awaiting_device");
+    expect(job.deviceCode).toEqual(expect.objectContaining({ userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const polled = JSON.parse((await jsonRequest(ts.port, "GET", `/api/model-credential-profiles/oauth/${job.id}`, { token })).body);
+    expect(polled.status).toBe("completed");
+    expect(polled.profileId).toBeTruthy();
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${polled.profileId}`, { token });
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+    setOAuthLoginAdapterForTests(null);
+    setPiCatalogModelsForTests(null);
+  });
+
+  it("connects a built-in provider API key through native Connect Provider endpoints", async () => {
+    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests([
+      { provider: "openai", id: "gpt-4.1", name: "GPT 4.1", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, maxTokens: 32768, reasoning: true, input: ["text", "image"] },
+      { provider: "openai", id: "gpt-4.1-mini", name: "GPT 4.1 Mini", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, input: ["text"] },
+    ]);
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const catalog = await jsonRequest(ts.port, "GET", "/api/model-provider-catalog", { token });
+    expect(catalog.status).toBe(200);
+    expect(JSON.parse(catalog.body)).toEqual(expect.arrayContaining([expect.objectContaining({ providerSlug: "openai", modelCount: 2 })]));
+
+    const connected = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/connect-api-key", {
+      token,
+      body: { providerSlug: "openai", apiKey: "sk-openai", isDefault: true },
+    });
+    expect(connected.status).toBe(200);
+    const profile = JSON.parse(connected.body);
+    expect(profile.profileKind).toBe("builtin_provider");
+    expect(profile.modelRefs).toEqual(["openai/gpt-4.1", "openai/gpt-4.1-mini"]);
+    expect(connected.body).not.toContain("sk-openai");
+
+    const models = JSON.parse((await jsonRequest(ts.port, "GET", "/api/models", { token })).body);
+    expect(models).toEqual(expect.arrayContaining([expect.objectContaining({ ref: "openai/gpt-4.1", profileId: profile.id })]));
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${profile.id}`, { token });
+    setPiCatalogModelsForTests(null);
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+  });
   it("creates, lists, redacts, lists models, updates, and deletes profiles", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
@@ -255,7 +412,8 @@ describe("model credential profile API routes", () => {
     expect(input.status).toBe(200);
     const failed = JSON.parse(input.body);
     expect(failed.status).toBe("failed");
-    expect(failed.error).toContain("invalid_grant");
+    expect(failed.error).toContain("请在 Settings 重新连接");
+    expect(failed.error).not.toContain("invalid_grant");
     const profiles = JSON.parse((await jsonRequest(ts.port, "GET", "/api/model-credential-profiles", { token })).body);
     expect(profiles.find((p: any) => p.providerSlug === providerSlug)).toBeUndefined();
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));

@@ -11,8 +11,16 @@ import type {
   ModelProtocol,
   ModelAuthType,
   ModelRequestProfile,
+  ModelCredentialProfileKind,
   ModelDefinitionConfig,
   AvailableModelOption,
+  PublicModelProvider,
+  ConnectApiKeyRequest,
+  StartOAuthConnectionRequest,
+  OAuthLoginJobPublic,
+  OAuthLoginJobStatus,
+  OAuthDeviceCodeInfo,
+  OAuthSelectPrompt,
 } from "../shared/types.js";
 
 const STORE_FILE = "model-credentials.json";
@@ -34,22 +42,11 @@ export const MODEL_PROTOCOLS: ModelProtocol[] = [
 
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
 const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "anthropic_claude_code_oauth", "anthropic_proxy_claude_code", "openai_codex_subscription"];
+const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom_endpoint", "trusted_adapter"];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
+const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together"]);
 
-type OAuthJobStatus = "awaiting_input" | "completed" | "failed" | "cancelled";
-
-export interface OAuthLoginJobPublic {
-  id: string;
-  status: OAuthJobStatus;
-  providerId: string;
-  authUrl?: string;
-  userCode?: string;
-  prompt: string;
-  error?: string;
-  profileId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+type OAuthJobStatus = OAuthLoginJobStatus;
 
 type OAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown };
 type OAuthInputWaiter = { resolve: (value: string) => void; reject: (error: Error) => void };
@@ -58,7 +55,8 @@ type OAuthLoginCallbacks = {
   onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
   onProgress?: (message: string) => void;
   onManualCodeInput?: () => Promise<string>;
-  onSelect?: (prompt: { message: string; options: Array<{ id: string; label: string }> }) => Promise<string | undefined>;
+  onDeviceCode: (deviceCode: OAuthDeviceCodeInfo) => void;
+  onSelect: (prompt: OAuthSelectPrompt) => Promise<string | undefined>;
   signal?: AbortSignal;
 };
 
@@ -71,6 +69,8 @@ type ModelDiscoveredMetadata = {
   maxTokens?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
+  thinkingLevelMap?: ModelDefinitionConfig["thinkingLevelMap"];
+  compat?: ModelDefinitionConfig["compat"];
 };
 
 type OAuthLoginJob = OAuthLoginJobPublic & {
@@ -117,10 +117,14 @@ function writeStore(profiles: ModelCredentialProfile[]): void {
 
 function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredentialProfile {
   const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, ...rest } = profile;
+  const catalogModels = isBuiltinProviderProfile(profile)
+    ? applyBuiltinMetadataOverrides(modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl), profile.modelCustomizations)
+    : undefined;
   return {
     ...rest,
     hasSecret: !!profile.apiKey || !!profile.oauthCredentials,
     modelRefs: profile.models.map((m) => `${profile.providerSlug}/${m.id}`),
+    ...(catalogModels ? { catalogModels } : {}),
   };
 }
 
@@ -141,15 +145,74 @@ function validateBaseUrl(baseUrl: string | undefined, authType: ModelAuthType): 
 
 function validateModel(model: ModelDefinitionConfig): ModelDefinitionConfig {
   if (!model.id?.trim()) throw new Error("model id is required");
-  if (model.contextWindow !== undefined && (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0)) throw new Error("contextWindow must be greater than 0");
-  if (model.maxTokens !== undefined && (!Number.isFinite(model.maxTokens) || model.maxTokens <= 0)) throw new Error("maxTokens must be greater than 0");
+  if (model.contextWindow !== undefined && (!Number.isInteger(model.contextWindow) || model.contextWindow <= 0)) throw new Error("contextWindow must be a positive integer");
+  if (model.maxTokens !== undefined && (!Number.isInteger(model.maxTokens) || model.maxTokens <= 0)) throw new Error("maxTokens must be a positive integer");
   const input = model.input?.length ? model.input : ["text" as const];
-  return { ...model, id: model.id.trim(), name: model.name?.trim() || undefined, input, metadataSource: model.metadataSource || (model.contextWindow || model.maxTokens || model.reasoning !== undefined ? "endpoint" : "unknown") };
+  return {
+    ...model,
+    id: model.id.trim(),
+    name: model.name?.trim() || undefined,
+    input,
+    ...modelSdkMetadata(model),
+    metadataSource: model.metadataSource || (model.contextWindow || model.maxTokens || model.reasoning !== undefined ? "endpoint" : "unknown"),
+  };
+}
+
+function validateOverrideValue(value: number | undefined, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${field} must be a positive integer`);
+  return value;
+}
+
+function hasModelCustomizations(profile: Pick<ModelCredentialProfile, "modelCustomizations">): boolean {
+  const disabled = profile.modelCustomizations?.disabled || [];
+  const overrides = profile.modelCustomizations?.contextWindowOverride || {};
+  return disabled.length > 0 || Object.keys(overrides).length > 0;
+}
+
+function sanitizeModelCustomizations(customizations: ModelCredentialProfile["modelCustomizations"] | undefined, catalogModels: ModelDefinitionConfig[]): ModelCredentialProfile["modelCustomizations"] | undefined {
+  const catalogById = new Map(catalogModels.map((m) => [m.id, m]));
+  const disabled = Array.from(new Set((customizations?.disabled || []).filter((id) => catalogById.has(id))));
+  const overrides: Record<string, number> = {};
+  for (const [id, value] of Object.entries(customizations?.contextWindowOverride || {})) {
+    if (!catalogById.has(id)) continue;
+    const contextWindow = validateOverrideValue(value, "contextWindow");
+    if (contextWindow !== undefined) overrides[id] = contextWindow;
+  }
+  return disabled.length > 0 || Object.keys(overrides).length > 0 ? { ...(disabled.length ? { disabled } : {}), ...(Object.keys(overrides).length ? { contextWindowOverride: overrides } : {}) } : undefined;
+}
+
+function deriveBuiltinModelCustomizations(inputModels: ModelDefinitionConfig[] | undefined, catalogModels: ModelDefinitionConfig[]): ModelCredentialProfile["modelCustomizations"] | undefined {
+  if (!inputModels) return undefined;
+  const inputById = new Map(inputModels.filter((m) => m.id?.trim()).map((m) => [m.id.trim(), m]));
+  const disabled = catalogModels.filter((m) => !inputById.has(m.id)).map((m) => m.id);
+  const overrides: Record<string, number> = {};
+  for (const catalog of catalogModels) {
+    const input = inputById.get(catalog.id);
+    if (!input) continue;
+    const contextWindow = validateOverrideValue(input.contextWindow, "contextWindow");
+    if (contextWindow !== undefined && contextWindow !== catalog.contextWindow) overrides[catalog.id] = contextWindow;
+  }
+  return sanitizeModelCustomizations({ disabled, contextWindowOverride: overrides }, catalogModels);
+}
+
+function applyBuiltinMetadataOverrides(catalogModels: ModelDefinitionConfig[], customizations?: ModelCredentialProfile["modelCustomizations"]): ModelDefinitionConfig[] {
+  const overrides = customizations?.contextWindowOverride || {};
+  return catalogModels.map((m) => ({
+    ...m,
+    ...(overrides[m.id] !== undefined ? { contextWindow: overrides[m.id], metadataSource: "endpoint" as const } : {}),
+  }));
+}
+
+function applyBuiltinModelCustomizations(catalogModels: ModelDefinitionConfig[], customizations?: ModelCredentialProfile["modelCustomizations"]): ModelDefinitionConfig[] {
+  const disabled = new Set(customizations?.disabled || []);
+  return applyBuiltinMetadataOverrides(catalogModels, customizations).filter((m) => !disabled.has(m.id));
 }
 
 function validateOAuthProvider(providerId: string | undefined): string {
   const value = providerId || "";
-  if (!(OAUTH_PROVIDERS as readonly string[]).includes(value)) throw new Error("Unsupported OAuth provider");
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value)) throw new Error("Unsupported OAuth provider");
+  if (!oauthProviderIds().has(value)) throw new Error("Unsupported OAuth provider");
   return value;
 }
 
@@ -260,17 +323,79 @@ export function createSyncedAuthStorage(authPath: string, profile: Pick<ModelCre
 }
 
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
-  const { profileInput: _profileInput, ...publicJob } = job;
-  return publicJob;
+  return {
+    id: job.id,
+    status: job.status,
+    providerId: job.providerId,
+    authUrl: job.authUrl,
+    userCode: job.userCode,
+    deviceCode: job.deviceCode,
+    selectPrompt: job.selectPrompt,
+    prompt: job.prompt,
+    error: job.error,
+    profileId: job.profileId,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
 }
 
-function validateInput(input: ModelCredentialProfileInput, existing?: ModelCredentialProfile, options: { allowIncompleteOAuth?: boolean } = {}): ModelCredentialProfileInput & { models: ModelDefinitionConfig[] } {
+function inferProfileKind(input: Partial<ModelCredentialProfileInput>, existing?: ModelCredentialProfile): ModelCredentialProfileKind {
+  const kind = input.profileKind ?? existing?.profileKind ?? "custom_endpoint";
+  if (!PROFILE_KINDS.includes(kind)) throw new Error("Unsupported profile kind");
+  return kind;
+}
+
+function validateUniqueModels(models: ModelDefinitionConfig[]): void {
+  const ids = new Set<string>();
+  for (const model of models) {
+    if (ids.has(model.id)) throw new Error(`Duplicate model id: ${model.id}`);
+    ids.add(model.id);
+  }
+}
+
+function validateInput(input: ModelCredentialProfileInput, existing?: ModelCredentialProfile, options: { allowIncompleteOAuth?: boolean } = {}): ModelCredentialProfileInput & { models: ModelDefinitionConfig[]; profileKind: ModelCredentialProfileKind } {
   if (!input.name?.trim()) throw new Error("name is required");
   validateSlug(input.providerSlug || "");
-  if (!MODEL_PROTOCOLS.includes(input.protocol)) throw new Error("Unsupported protocol");
   if (!AUTH_TYPES.includes(input.authType)) throw new Error("Unsupported auth type");
+  const profileKind = inferProfileKind(input, existing);
   const requestProfile = input.requestProfile || "standard";
   if (!REQUEST_PROFILES.includes(requestProfile)) throw new Error("Unsupported request profile");
+
+  if (profileKind === "builtin_provider") {
+    const builtin = getBuiltinProvider(input.providerSlug);
+    if (!builtin) throw new Error(`Unsupported built-in provider: ${input.providerSlug}`);
+    if (input.authType !== "api_key" && input.authType !== "oauth") throw new Error("Built-in providers support api_key or oauth auth only");
+    if (!builtin.authModes.includes(input.authType as "api_key" | "oauth")) throw new Error(`Provider ${input.providerSlug} does not support ${input.authType}`);
+    if (input.authType === "api_key" && !input.apiKey && !existing?.apiKey) throw new Error("apiKey is required");
+    if (input.authType === "oauth") {
+      validateOAuthProvider(input.oauthProviderId || input.providerSlug);
+      const credentials = input.oauthCredentials ?? existing?.oauthCredentials;
+      if (!options.allowIncompleteOAuth && !hasCompleteOAuthCredentials(credentials)) throw new Error("OAuth credential is incomplete; complete login before saving");
+    }
+    const catalogModels = modelsForBuiltinProvider(input.providerSlug, input.baseUrl);
+    if (catalogModels.length === 0) throw new Error(`No built-in models found for provider: ${input.providerSlug}`);
+    const modelCustomizations = input.modelCustomizations !== undefined
+      ? sanitizeModelCustomizations(input.modelCustomizations, catalogModels)
+      : input.models
+        ? deriveBuiltinModelCustomizations(input.models, catalogModels)
+        : sanitizeModelCustomizations(existing?.modelCustomizations, catalogModels);
+    const models = applyBuiltinModelCustomizations(catalogModels, modelCustomizations);
+    if (models.length === 0) throw new Error("at least one model must remain visible");
+    validateUniqueModels(models);
+    return {
+      ...input,
+      profileKind,
+      name: input.name.trim(),
+      providerSlug: input.providerSlug.trim(),
+      protocol: protocolForBuiltinProvider(input.providerSlug),
+      baseUrl: baseUrlForBuiltinProvider(input.providerSlug, input.baseUrl),
+      requestProfile,
+      models,
+      modelCustomizations,
+    };
+  }
+
+  if (!MODEL_PROTOCOLS.includes(input.protocol)) throw new Error("Unsupported protocol");
   if ((requestProfile === "anthropic_claude_code_oauth" || requestProfile === "anthropic_proxy_claude_code") && input.protocol !== "anthropic-messages") {
     throw new Error("Anthropic Claude Code compatibility requires anthropic-messages protocol");
   }
@@ -281,18 +406,16 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
     const credentials = input.oauthCredentials ?? existing?.oauthCredentials;
     if (!options.allowIncompleteOAuth && !hasCompleteOAuthCredentials(credentials)) throw new Error("OAuth credential is incomplete; complete login before saving");
   }
-  const models = (input.models || []).map(validateModel);
+  const models = (input.models || [])
+    .map(validateModel)
+    .map((m) => applyPiCatalogFallback(m, input.providerSlug.trim(), loadPiCatalogModelsSync()));
   if (models.length === 0) throw new Error("at least one model is required");
-  const ids = new Set<string>();
-  for (const model of models) {
-    if (ids.has(model.id)) throw new Error(`Duplicate model id: ${model.id}`);
-    ids.add(model.id);
-  }
-  return { ...input, name: input.name.trim(), providerSlug: input.providerSlug.trim(), requestProfile, models };
+  validateUniqueModels(models);
+  return { ...input, profileKind, name: input.name.trim(), providerSlug: input.providerSlug.trim(), requestProfile, models };
 }
 
 export function loadModelCredentialProfiles(): ModelCredentialProfile[] {
-  return readStore().profiles;
+  return refreshBuiltinProviderProfilesFromStore({ persist: true });
 }
 
 export function listPublicModelCredentialProfiles(): PublicModelCredentialProfile[] {
@@ -301,6 +424,11 @@ export function listPublicModelCredentialProfiles(): PublicModelCredentialProfil
 
 export function getModelCredentialProfile(id: string): ModelCredentialProfile | null {
   return loadModelCredentialProfiles().find((p) => p.id === id) ?? null;
+}
+
+function resolveApiKeyForSave(valid: ModelCredentialProfileInput, existing?: ModelCredentialProfile): string | undefined {
+  const next = valid.apiKey?.trim();
+  return next ? next : existing?.apiKey;
 }
 
 export function saveModelCredentialProfile(input: ModelCredentialProfileInput & { id?: string }): PublicModelCredentialProfile {
@@ -312,12 +440,13 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
   const ts = now();
   const profile: ModelCredentialProfile = {
     id: input.id || randomUUID().slice(0, 8),
+    profileKind: valid.profileKind,
     name: valid.name,
     providerSlug: valid.providerSlug,
     protocol: valid.protocol,
     baseUrl: valid.baseUrl,
     authType: valid.authType,
-    apiKey: valid.authType === "api_key" ? (valid.apiKey ?? existing?.apiKey) : undefined,
+    apiKey: valid.authType === "api_key" ? resolveApiKeyForSave(valid, existing) : undefined,
     oauthProviderId: valid.authType === "oauth" ? valid.oauthProviderId : undefined,
     oauthCredentials: valid.authType === "oauth" ? (valid.oauthCredentials ?? existing?.oauthCredentials) : undefined,
     requestProfile: valid.requestProfile,
@@ -326,12 +455,38 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
     enabled: valid.enabled ?? existing?.enabled ?? true,
     isDefault: valid.isDefault ?? existing?.isDefault ?? false,
     models: valid.models,
+    modelCustomizations: valid.modelCustomizations,
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };
   const next = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
   writeStore(next);
   return sanitizeProfile(profile);
+}
+
+export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): PublicModelCredentialProfile {
+  const providerSlug = input.providerSlug?.trim();
+  validateSlug(providerSlug || "");
+  if (!input.apiKey?.trim()) throw new Error("apiKey is required");
+  const provider = getBuiltinProvider(providerSlug);
+  if (!provider) throw new Error(`Unsupported built-in provider: ${providerSlug}`);
+  if (!provider.authModes.includes("api_key")) throw new Error(`Provider ${providerSlug} does not support API key auth`);
+
+  const existing = loadModelCredentialProfiles().find((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider" && p.authType === "api_key");
+  return saveModelCredentialProfile({
+    ...(existing ? { id: existing.id } : {}),
+    profileKind: "builtin_provider",
+    name: input.name?.trim() || existing?.name || provider.displayName,
+    providerSlug,
+    protocol: protocolForBuiltinProvider(providerSlug),
+    baseUrl: baseUrlForBuiltinProvider(providerSlug, input.baseUrlOverride),
+    authType: "api_key",
+    apiKey: input.apiKey,
+    requestProfile: providerSlug === "anthropic" && input.requestProfile === "anthropic_proxy_claude_code" ? "anthropic_proxy_claude_code" : "standard",
+    enabled: true,
+    isDefault: input.isDefault ?? existing?.isDefault ?? true,
+    models: modelsForBuiltinProvider(providerSlug, input.baseUrlOverride),
+  });
 }
 
 export function deleteModelCredentialProfile(id: string): boolean {
@@ -371,6 +526,53 @@ function getOAuthLoginAdapter(): OAuthLoginAdapter {
   return oauthLoginAdapter;
 }
 
+
+function mapOAuthError(err: unknown): string {
+  const message = String((err as any)?.message || err || "OAuth login failed");
+  if (message.includes("Failed to extract accountId from token") || message.toLowerCase().includes("invalid_grant") || message.toLowerCase().includes("refresh")) {
+    return "OAuth credential is invalid or expired. 请在 Settings 重新连接。";
+  }
+  return message;
+}
+
+function parseDeviceCodeFromAuth(info: { url: string; instructions?: string }): OAuthDeviceCodeInfo | undefined {
+  const instructions = info.instructions || "";
+  const codeMatch = instructions.match(/(?:enter code|code)[:：]?\s*([A-Z0-9-]{4,})/i);
+  if (!codeMatch) return undefined;
+  return { userCode: codeMatch[1], verificationUri: info.url };
+}
+
+function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { providerId: string; profileInput: ModelCredentialProfileInput & { id?: string }; profileId?: string } {
+  const providerId = validateOAuthProvider(input.providerId);
+  const provider = getBuiltinProvider(providerId);
+  if (!provider) throw new Error(`Unsupported built-in provider: ${providerId}`);
+  if (!provider.authModes.includes("oauth")) throw new Error(`Provider ${providerId} does not support OAuth`);
+
+  const existingById = input.profileId ? getModelCredentialProfile(input.profileId) : null;
+  if (input.profileId && !existingById) throw new Error("profile not found");
+  if (existingById && existingById.providerSlug !== providerId) throw new Error("profile provider does not match OAuth provider");
+  const existing = existingById ?? loadModelCredentialProfiles().find((p) => p.providerSlug === providerId && (p.profileKind ?? "custom_endpoint") === "builtin_provider") ?? null;
+
+  return {
+    providerId,
+    profileId: existing?.id,
+    profileInput: {
+      id: existing?.id,
+      profileKind: "builtin_provider",
+      name: input.name?.trim() || existing?.name || provider.displayName,
+      providerSlug: providerId,
+      protocol: protocolForBuiltinProvider(providerId),
+      baseUrl: baseUrlForBuiltinProvider(providerId),
+      authType: "oauth",
+      oauthProviderId: providerId,
+      requestProfile: providerId === "anthropic" && input.requestProfile === "anthropic_proxy_claude_code" ? "anthropic_proxy_claude_code" : "standard",
+      enabled: existing?.enabled ?? true,
+      isDefault: existing?.isDefault ?? true,
+      models: modelsForBuiltinProvider(providerId),
+    },
+  };
+}
+
 export function setOAuthLoginAdapterForTests(adapter: OAuthLoginAdapter | null): void {
   oauthLoginAdapter = adapter;
 }
@@ -380,11 +582,20 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     signal: job.abortController.signal,
     onAuth: (info) => {
       job.authUrl = info.url;
+      const deviceCode = parseDeviceCodeFromAuth(info);
+      if (deviceCode) {
+        job.status = "awaiting_device";
+        job.deviceCode = deviceCode;
+        job.userCode = deviceCode.userCode;
+      } else {
+        job.status = "awaiting_input";
+      }
       job.prompt = info.instructions || "Complete login in the opened provider page, then paste the returned code if requested.";
       job.updatedAt = now();
       job.resolveReady();
     },
     onPrompt: async (prompt) => {
+      job.status = "awaiting_input";
       job.prompt = prompt.message;
       job.updatedAt = now();
       job.resolveReady();
@@ -392,16 +603,28 @@ function startOAuthLogin(job: OAuthLoginJob): void {
       return waitForOAuthInput(job);
     },
     onManualCodeInput: async () => {
+      job.status = "awaiting_input";
       job.prompt = "Paste the authorization code or full redirect URL.";
       job.updatedAt = now();
       job.resolveReady();
       return waitForOAuthInput(job);
     },
+    onDeviceCode: (deviceCode) => {
+      job.status = "awaiting_device";
+      job.deviceCode = deviceCode;
+      job.userCode = deviceCode.userCode;
+      job.authUrl = deviceCode.verificationUri;
+      job.prompt = `Open ${deviceCode.verificationUri} and enter code ${deviceCode.userCode}.`;
+      job.updatedAt = now();
+      job.resolveReady();
+    },
     onSelect: async (prompt) => {
+      job.status = "awaiting_input";
+      job.selectPrompt = prompt;
       job.prompt = `${prompt.message} (${prompt.options.map((o) => o.label).join(", ")})`;
       job.updatedAt = now();
       job.resolveReady();
-      return prompt.options[0]?.id;
+      return waitForOAuthInput(job);
     },
     onProgress: (message) => {
       job.prompt = message;
@@ -428,14 +651,52 @@ function startOAuthLogin(job: OAuthLoginJob): void {
   }).catch((err: any) => {
     if (job.status === "cancelled") return;
     job.status = "failed";
-    job.error = err.message || String(err);
+    job.error = mapOAuthError(err);
     job.prompt = "OAuth login failed. Retry from Start login.";
     job.updatedAt = now();
     job.resolveReady();
   });
 }
 
-export async function startOAuthLoginJob(input: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string }): Promise<OAuthLoginJobPublic> {
+function createOAuthLoginJob(providerId: string, profileInput: ModelCredentialProfileInput & { id?: string }, profileId?: string): OAuthLoginJob {
+  const nowTs = now();
+  const ready = createDeferred();
+  const job: OAuthLoginJob = {
+    id: randomUUID().slice(0, 8),
+    status: "starting",
+    providerId,
+    prompt: "Starting provider OAuth login...",
+    profileId,
+    createdAt: nowTs,
+    updatedAt: nowTs,
+    profileInput,
+    abortController: new AbortController(),
+    ready: ready.promise,
+    resolveReady: ready.resolve,
+    loginPromise: Promise.resolve(),
+  };
+  oauthJobs.set(job.id, job);
+  startOAuthLogin(job);
+  return job;
+}
+
+export async function startNativeOAuthConnection(input: StartOAuthConnectionRequest): Promise<OAuthLoginJobPublic> {
+  const raw = input as StartOAuthConnectionRequest & Record<string, unknown>;
+  for (const forbidden of ["profile", "baseUrl", "protocol", "models", "authType"] as const) {
+    if (raw[forbidden] !== undefined) throw new Error(`OAuth connection accepts only providerId, profileId, name, and requestProfile; unexpected ${forbidden}`);
+  }
+  const { providerId, profileInput, profileId } = buildNativeOAuthProfileInput(input);
+  validateInput(profileInput, profileId ? getModelCredentialProfile(profileId) || undefined : undefined, { allowIncompleteOAuth: true });
+  const job = createOAuthLoginJob(providerId, profileInput, profileId);
+  await Promise.race([job.ready, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
+  return sanitizeOAuthJob(job);
+}
+
+export async function startOAuthLoginJob(input: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string; name?: string }): Promise<OAuthLoginJobPublic> {
+  if (!input.profile) {
+    return startNativeOAuthConnection({ providerId: input.providerId || "", profileId: input.profileId, name: input.name });
+  }
+
   const existing = input.profileId ? getModelCredentialProfile(input.profileId) : null;
   const profileInput = {
     ...(existing || {}),
@@ -448,25 +709,7 @@ export async function startOAuthLoginJob(input: { profileId?: string; profile?: 
   } as ModelCredentialProfileInput & { id?: string };
   const providerId = validateOAuthProvider(profileInput.oauthProviderId);
   validateInput(profileInput, existing || undefined, { allowIncompleteOAuth: true });
-  const nowTs = now();
-  const id = randomUUID().slice(0, 8);
-  const ready = createDeferred();
-  const job: OAuthLoginJob = {
-    id,
-    status: "awaiting_input",
-    providerId,
-    prompt: "Starting provider OAuth login...",
-    profileId: input.profileId,
-    createdAt: nowTs,
-    updatedAt: nowTs,
-    profileInput,
-    abortController: new AbortController(),
-    ready: ready.promise,
-    resolveReady: ready.resolve,
-    loginPromise: Promise.resolve(),
-  };
-  oauthJobs.set(id, job);
-  startOAuthLogin(job);
+  const job = createOAuthLoginJob(providerId, profileInput, input.profileId);
   await Promise.race([job.ready, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
   return sanitizeOAuthJob(job);
 }
@@ -545,6 +788,22 @@ function explicitBoolean(...values: unknown[]): boolean | undefined {
   return undefined;
 }
 
+function clonePlainObject<T extends Record<string, unknown>>(value: unknown): T | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  try { return JSON.parse(JSON.stringify(value)) as T; } catch { return undefined; }
+}
+
+function modelSdkMetadata(raw: any): Pick<ModelDefinitionConfig, "thinkingLevelMap" | "compat"> {
+  return {
+    ...(clonePlainObject(raw?.thinkingLevelMap) ? { thinkingLevelMap: clonePlainObject(raw.thinkingLevelMap) } : {}),
+    ...(clonePlainObject(raw?.compat) ? { compat: clonePlainObject(raw.compat) } : {}),
+  };
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
 function coerceDiscoveredModel(raw: any): ModelDefinitionConfig | null {
   const id = typeof raw?.id === "string" ? raw.id.trim() : "";
   if (!id) return null;
@@ -559,6 +818,7 @@ function coerceDiscoveredModel(raw: any): ModelDefinitionConfig | null {
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
     ...(Array.isArray(raw?.input) && raw.input.length ? { input: raw.input } : { input: ["text"] }),
+    ...modelSdkMetadata(raw),
     metadataSource: hasEndpointMetadata ? "endpoint" : "unknown",
   };
 }
@@ -588,6 +848,8 @@ function hasSameMetadata(a: ModelDiscoveredMetadata, b: ModelDiscoveredMetadata)
     && a.maxTokens === b.maxTokens
     && a.reasoning === b.reasoning
     && JSON.stringify(normalizeInputs(a.input)) === JSON.stringify(normalizeInputs(b.input))
+    && sameJson(a.thinkingLevelMap, b.thinkingLevelMap)
+    && sameJson(a.compat, b.compat)
   );
 }
 
@@ -599,6 +861,8 @@ function applyConsistentMetadataFallback(matches: ModelDiscoveredMetadata[]): Mo
     && first.maxTokens === undefined
     && first.reasoning === undefined
     && !first.input
+    && !first.thinkingLevelMap
+    && !first.compat
   ) {
     return null;
   }
@@ -620,28 +884,190 @@ async function loadPiCatalogModels(): Promise<any[]> {
   }
 }
 
-function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: string, catalog: any[]): ModelDefinitionConfig {
-  if (model.contextWindow !== undefined && model.maxTokens !== undefined && model.reasoning !== undefined) return model;
+function loadPiCatalogModelsSync(): any[] {
+  if (piCatalogModelsForTests) return piCatalogModelsForTests;
+  try {
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
+    return typeof registry.getAll === "function" ? registry.getAll() : [];
+  } catch {
+    return [];
+  }
+}
 
-  const exact = catalog.find((m) => m.provider === providerSlug && m.id === model.id);
-  const fallback = ((): { contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: Array<"text" | "image"> } | null => {
-    if (exact) {
+function displayNameForProvider(providerSlug: string): string {
+  try {
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
+    return registry.getProviderDisplayName(providerSlug) || providerSlug;
+  } catch {
+    return providerSlug;
+  }
+}
+
+function oauthProviderIds(): Set<string> {
+  try {
+    return new Set(AuthStorage.inMemory({}).getOAuthProviders().map((p: any) => p.id).filter(Boolean));
+  } catch {
+    return new Set(OAUTH_PROVIDERS as readonly string[]);
+  }
+}
+
+function modelsForBuiltinProvider(providerSlug: string, baseUrlOverride?: string): ModelDefinitionConfig[] {
+  return loadPiCatalogModelsSync()
+    .filter((m) => m.provider === providerSlug)
+    .map((m) => ({
+      id: String(m.id),
+      name: typeof m.name === "string" ? m.name : undefined,
+      contextWindow: positiveNumber(m.contextWindow) ?? 128000,
+      maxTokens: positiveNumber(m.maxTokens, m.max_output_tokens),
+      reasoning: explicitBoolean(m.reasoning),
+      input: Array.isArray(m.input) && m.input.length ? m.input : ["text"],
+      ...modelSdkMetadata(m),
+      metadataSource: "pi_catalog" as const,
+    }))
+    .filter((m) => !!m.id);
+}
+
+function firstBuiltinModel(providerSlug: string): any | undefined {
+  return loadPiCatalogModelsSync().find((m) => m.provider === providerSlug);
+}
+
+function protocolForBuiltinProvider(providerSlug: string): ModelProtocol {
+  const api = firstBuiltinModel(providerSlug)?.api;
+  return MODEL_PROTOCOLS.includes(api) ? api : "openai-responses";
+}
+
+function baseUrlForBuiltinProvider(providerSlug: string, override?: string): string {
+  return override || firstBuiltinModel(providerSlug)?.baseUrl || "https://api.example.invalid";
+}
+
+export function listBuiltinModelProviders(): PublicModelProvider[] {
+  const oauthIds = oauthProviderIds();
+  const byProvider = new Map<string, any[]>();
+  for (const model of loadPiCatalogModelsSync()) {
+    if (!model?.provider) continue;
+    if (!BUILTIN_API_KEY_PROVIDERS.has(model.provider) && !oauthIds.has(model.provider)) continue;
+    const list = byProvider.get(model.provider) || [];
+    list.push(model);
+    byProvider.set(model.provider, list);
+  }
+
+  return Array.from(byProvider.entries())
+    .map(([providerSlug, models]) => {
+      const authModes: Array<"api_key" | "oauth"> = [];
+      if (BUILTIN_API_KEY_PROVIDERS.has(providerSlug)) authModes.push("api_key");
+      if (oauthIds.has(providerSlug)) authModes.push("oauth");
+      const protocol = MODEL_PROTOCOLS.includes(models[0]?.api) ? models[0].api as ModelProtocol : undefined;
       return {
-        contextWindow: positiveNumber(exact.contextWindow),
-        maxTokens: positiveNumber(exact.maxTokens, exact.max_output_tokens),
-        reasoning: explicitBoolean(exact.reasoning, exact.supports_reasoning),
-        input: Array.isArray(exact.input) ? exact.input : undefined,
+        providerSlug,
+        displayName: displayNameForProvider(providerSlug),
+        authModes,
+        defaultAuthMode: (authModes.includes("api_key") ? "api_key" : "oauth") as "api_key" | "oauth",
+        modelCount: models.length,
+        sampleModels: models.slice(0, 5).map((m) => String(m.id)),
+        protocol,
+        logoKey: providerSlug,
       };
-    }
+    })
+    .filter((p) => p.authModes.length > 0 && p.modelCount > 0)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export function getBuiltinProvider(providerSlug: string): PublicModelProvider | null {
+  return listBuiltinModelProviders().find((p) => p.providerSlug === providerSlug) ?? null;
+}
+
+function normalizeUrlForCompare(value?: string): string {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
+function isLegacyOfficialBuiltinProviderProfile(profile: ModelCredentialProfile): boolean {
+  if (profile.profileKind) return false;
+  if (profile.authType !== "api_key" && profile.authType !== "oauth") return false;
+  if ((profile.requestProfile || "standard") !== "standard") return false;
+  if (profile.authHeader || profile.headers) return false;
+  if (!getBuiltinProvider(profile.providerSlug)) return false;
+  if (profile.protocol !== protocolForBuiltinProvider(profile.providerSlug)) return false;
+  const officialBaseUrl = baseUrlForBuiltinProvider(profile.providerSlug);
+  return !profile.baseUrl || normalizeUrlForCompare(profile.baseUrl) === normalizeUrlForCompare(officialBaseUrl);
+}
+
+function isBuiltinProviderProfile(profile: ModelCredentialProfile): boolean {
+  return profile.profileKind === "builtin_provider" || isLegacyOfficialBuiltinProviderProfile(profile);
+}
+
+function shouldUseSdkBuiltinCatalog(profile: ModelCredentialProfile): boolean {
+  if (!isBuiltinProviderProfile(profile)) return false;
+  if (hasModelCustomizations(profile)) return false;
+  if ((profile.requestProfile || "standard") !== "standard") return false;
+  if (profile.authHeader || profile.headers) return false;
+  return normalizeUrlForCompare(profile.baseUrl) === normalizeUrlForCompare(baseUrlForBuiltinProvider(profile.providerSlug));
+}
+
+function refreshBuiltinProviderProfile(profile: ModelCredentialProfile): ModelCredentialProfile {
+  if (!isBuiltinProviderProfile(profile)) return profile;
+  const catalogModels = modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl);
+  if (catalogModels.length === 0) return profile;
+  const modelCustomizations = sanitizeModelCustomizations(profile.modelCustomizations, catalogModels);
+  const models = applyBuiltinModelCustomizations(catalogModels, modelCustomizations);
+  if (models.length === 0) return profile;
+  const next: ModelCredentialProfile = {
+    ...profile,
+    profileKind: "builtin_provider",
+    protocol: protocolForBuiltinProvider(profile.providerSlug),
+    baseUrl: baseUrlForBuiltinProvider(profile.providerSlug, profile.baseUrl),
+    requestProfile: profile.requestProfile || "standard",
+    models,
+    modelCustomizations,
+  };
+  const changed = profile.profileKind !== next.profileKind
+    || profile.protocol !== next.protocol
+    || profile.baseUrl !== next.baseUrl
+    || JSON.stringify(profile.models) !== JSON.stringify(next.models)
+    || JSON.stringify(profile.modelCustomizations) !== JSON.stringify(next.modelCustomizations);
+  return changed ? { ...next, updatedAt: now() } : profile;
+}
+
+function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }): ModelCredentialProfile[] {
+  const store = readStore();
+  let changed = false;
+  const profiles = store.profiles.map((profile) => {
+    const next = refreshBuiltinProviderProfile(profile);
+    if (next !== profile) changed = true;
+    return next;
+  });
+  if (changed && options.persist) writeStore(profiles);
+  return profiles;
+}
+
+export function refreshModelCredentialProfileModels(id: string): PublicModelCredentialProfile {
+  const profiles = refreshBuiltinProviderProfilesFromStore({ persist: false });
+  const profile = profiles.find((p) => p.id === id);
+  if (!profile) throw new Error("Model credential profile not found");
+  if (!isBuiltinProviderProfile(profile)) throw new Error("Only built-in provider profiles can refresh models from catalog");
+  const refreshed = refreshBuiltinProviderProfile(profile);
+  const next = profiles.map((p) => p.id === id ? refreshed : p);
+  writeStore(next);
+  return sanitizeProfile(refreshed);
+}
+
+function catalogMetadata(m: any): ModelDiscoveredMetadata {
+  return {
+    contextWindow: positiveNumber(m.contextWindow),
+    maxTokens: positiveNumber(m.maxTokens, m.max_output_tokens),
+    reasoning: explicitBoolean(m.reasoning, m.supports_reasoning),
+    input: Array.isArray(m.input) ? m.input : undefined,
+    ...modelSdkMetadata(m),
+  };
+}
+
+function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: string, catalog: any[]): ModelDefinitionConfig {
+  const exact = catalog.find((m) => m.provider === providerSlug && m.id === model.id);
+  const fallback = ((): ModelDiscoveredMetadata | null => {
+    if (exact) return catalogMetadata(exact);
 
     const matches = catalog
       .filter((m) => m.id === model.id)
-      .map((m) => ({
-        contextWindow: positiveNumber(m.contextWindow),
-        maxTokens: positiveNumber(m.maxTokens, m.max_output_tokens),
-        reasoning: explicitBoolean(m.reasoning, m.supports_reasoning),
-        input: Array.isArray(m.input) ? m.input : undefined,
-      }));
+      .map(catalogMetadata);
 
     return applyConsistentMetadataFallback(matches);
   })();
@@ -653,14 +1079,18 @@ function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: stri
     contextWindow: model.contextWindow ?? fallback.contextWindow,
     maxTokens: model.maxTokens ?? fallback.maxTokens,
     reasoning: model.reasoning ?? explicitBoolean(fallback.reasoning),
-    ...(fallback.input ? { input: fallback.input } : {}),
+    ...(fallback.input && !model.input ? { input: fallback.input } : {}),
+    ...(fallback.thinkingLevelMap && !model.thinkingLevelMap ? { thinkingLevelMap: fallback.thinkingLevelMap } : {}),
+    ...(fallback.compat && !model.compat ? { compat: fallback.compat } : {}),
   };
 
   const added =
     patched.contextWindow !== model.contextWindow
     || patched.maxTokens !== model.maxTokens
     || patched.reasoning !== model.reasoning
-    || (patched.input && JSON.stringify(patched.input) !== JSON.stringify(model.input));
+    || !sameJson(patched.input, model.input)
+    || !sameJson(patched.thinkingLevelMap, model.thinkingLevelMap)
+    || !sameJson(patched.compat, model.compat);
 
   return added
     ? { ...patched, metadataSource: model.metadataSource === "endpoint" ? "endpoint" : "pi_catalog" }
@@ -776,7 +1206,9 @@ export function writePiConfigForProfiles(profiles: ModelCredentialProfile[], tar
   const authData: Record<string, unknown> = {};
   const extensionPaths: string[] = [];
   for (const profile of enabledProfiles) {
-    providers[profile.providerSlug] = piProviderConfig(profile);
+    if (!shouldUseSdkBuiltinCatalog(profile)) {
+      providers[profile.providerSlug] = piProviderConfig(profile);
+    }
     const auth = authEntry(profile);
     if (auth) authData[profile.providerSlug] = auth;
     if (requiresInternalExtension(profile)) {
@@ -803,14 +1235,20 @@ export function createBossmodeModelRegistry(): { authStorage: AuthStorage; model
 export function listAvailableModels(): AvailableModelOption[] {
   const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
   if (profiles.length === 0) return [];
+  const customizedProfiles = profiles.filter((p) => !shouldUseSdkBuiltinCatalog(p));
+  const customizedProviderSlugs = new Set(customizedProfiles.map((p) => p.providerSlug));
+  const customizedOptions = customizedProfiles.flatMap((profile) => profile.models.map((model) => modelOptionFromProfile(profile, model)));
+  const registryProfiles = profiles.filter((p) => !customizedProviderSlugs.has(p.providerSlug));
+  if (registryProfiles.length === 0) return customizedOptions;
   const { modelRegistry } = createBossmodeModelRegistry();
-  const profileByProvider = new Map(profiles.map((p) => [p.providerSlug, p]));
-  return modelRegistry.getAvailable()
+  const profileByProvider = new Map(registryProfiles.map((p) => [p.providerSlug, p]));
+  const registryOptions = modelRegistry.getAvailable()
     .map((model: any) => {
       const profile = profileByProvider.get(model.provider);
       return profile ? modelOptionFromProfile(profile, model) : null;
     })
     .filter(Boolean) as AvailableModelOption[];
+  return [...registryOptions, ...customizedOptions];
 }
 
 function piProviderConfig(profile: ModelCredentialProfile): Record<string, unknown> {
@@ -828,6 +1266,8 @@ function piProviderConfig(profile: ModelCredentialProfile): Record<string, unkno
       ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
       ...(m.reasoning !== undefined ? { reasoning: m.reasoning } : {}),
       input: m.input ?? ["text"],
+      ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
+      ...(m.compat ? { compat: m.compat } : {}),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     })),
   };
@@ -848,19 +1288,19 @@ function requiresInternalExtension(profile: ModelCredentialProfile): boolean {
 }
 
 function apiForProfile(profile: ModelCredentialProfile): string {
-  if (profile.requestProfile === "anthropic_claude_code_oauth") return `${profile.providerSlug}-anthropic-claude-code-oauth`;
-  if (profile.requestProfile === "anthropic_proxy_claude_code") return "anthropic-proxy-claude-code";
+  if (profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code") return "anthropic-proxy-claude-code";
   return profile.protocol;
 }
 
 function extensionSource(profile: ModelCredentialProfile): string {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
-  if (profile.requestProfile === "anthropic_proxy_claude_code") return anthropicProxyClaudeCodeExtensionSource(profile, normalizedBaseUrl);
-  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";\n\nexport default function (pi) {\n  pi.registerProvider(${JSON.stringify(profile.providerSlug)}, {\n    baseUrl: ${JSON.stringify(normalizedBaseUrl)},\n    api: ${JSON.stringify(apiForProfile(profile))},\n    apiKey: ${JSON.stringify(API_KEY_PLACEHOLDER)},\n    models: ${JSON.stringify(profile.models)},\n    streamSimple(model, context, options) {\n      const proxyKey = options?.apiKey || "";\n      return streamSimpleAnthropic(\n        { ...model, api: "anthropic-messages", provider: ${JSON.stringify(profile.providerSlug)}, baseUrl: ${JSON.stringify(normalizedBaseUrl)} },\n        context,\n        {\n          ...options,\n          apiKey: "sk-ant-oat-" + proxyKey,\n          headers: { ...(options?.headers || {}), Authorization: "Bearer " + proxyKey },\n        },\n      );\n    },\n  });\n}\n`;
+  if (profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code") return anthropicProxyClaudeCodeExtensionSource(profile, normalizedBaseUrl);
+  throw new Error(`Unsupported internal extension request profile: ${profile.requestProfile}`);
 }
 
-function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, _normalizedBaseUrl: string): string {
+function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, normalizedBaseUrl: string): string {
   return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";
+import { anthropicOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -868,6 +1308,8 @@ import { dirname, join } from "node:path";
 
 const PROVIDER = ${JSON.stringify(profile.providerSlug)};
 const PROVIDER_API = "anthropic-proxy-claude-code";
+const USE_ANTHROPIC_OAUTH_ALIAS = ${JSON.stringify(profile.authType === "oauth" && profile.oauthProviderId === "anthropic")};
+const { id: _anthropicOAuthId, ...ANTHROPIC_OAUTH_ALIAS } = anthropicOAuthProvider;
 const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.122 (external, sdk-cli)";
 const CLAUDE_CODE_BETA = [
   "claude-code-20250219",
@@ -1027,6 +1469,7 @@ function streamClaudeCodeAnthropicProxy(model, context, options) {
 export default function (pi) {
   pi.registerProvider(PROVIDER, {
     api: PROVIDER_API,
+    ...(USE_ANTHROPIC_OAUTH_ALIAS ? { oauth: ANTHROPIC_OAUTH_ALIAS } : {}),
     streamSimple: streamClaudeCodeAnthropicProxy,
   });
 }
@@ -1074,7 +1517,11 @@ export function exportPiConfigForMember(args: {
     }
   }
 
-  writePrivateJson(join(agentDir, "models.json"), { providers: { [runtimeProfile.providerSlug]: piProviderConfig(runtimeProfile) } });
+  writePrivateJson(join(agentDir, "models.json"), {
+    providers: shouldUseSdkBuiltinCatalog(runtimeProfile)
+      ? {}
+      : { [runtimeProfile.providerSlug]: piProviderConfig(runtimeProfile) },
+  });
   const auth = authEntry(runtimeProfile);
   writePrivateJson(authPath, auth ? { [runtimeProfile.providerSlug]: auth } : {});
 
