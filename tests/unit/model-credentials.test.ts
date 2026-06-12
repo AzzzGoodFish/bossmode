@@ -125,6 +125,26 @@ describe("model credential profiles", () => {
     expect(modelsJson.providers.openrouter.models[0].contextWindow).toBe(128000);
   });
 
+  it("preserves user-edited contextWindow and maxTokens through save and export", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "openrouter", id: "anthropic/claude-sonnet", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text"] },
+    ]);
+
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      models: [{ id: "anthropic/claude-sonnet", contextWindow: 500000, maxTokens: 64000, metadataSource: "endpoint" }],
+    });
+
+    const listed = mod.listPublicModelCredentialProfiles().find((p) => p.id === saved.id)!;
+    expect(listed.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000, metadataSource: "endpoint" });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
+    mod.setPiCatalogModelsForTests(null);
+  });
+
   it("exports agent-scoped pi models/auth without leaking api key into models.json", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
@@ -138,6 +158,24 @@ describe("model credential profiles", () => {
     expect(modelsJson).not.toContain("sk-secret");
     expect(authJson).toContain("sk-secret");
     expect(statSync(join(exported!.agentDir, "auth.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("preserves an existing API key when editing a profile with blank apiKey", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile(baseProfile);
+
+    const updated = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      id: saved.id,
+      apiKey: "",
+      models: [{ id: "anthropic/claude-sonnet", contextWindow: 500000, maxTokens: 64000, input: ["text"] }],
+    });
+    expect(updated.hasSecret).toBe(true);
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
+    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
+    expect(authJson).toContain("sk-secret");
+    expect(JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8")).providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
   });
 
   it("rejects credential/model provider mismatch", async () => {
@@ -164,7 +202,37 @@ describe("model credential profiles", () => {
     expect(exported?.extensionPaths).toHaveLength(1);
     const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
     expect(ext).toContain("streamSimpleAnthropic");
+    expect(ext).toContain("anthropic-proxy-claude-code");
+    expect(ext).toContain("patchClaudeCodePayload");
     expect(ext).not.toContain("sk-secret");
+  });
+
+  it("registers an Anthropic OAuth alias for enhanced Claude Code fingerprint adapter profiles", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      providerSlug: "anthropic-cc",
+      protocol: "anthropic-messages",
+      requestProfile: "anthropic_proxy_claude_code",
+      baseUrl: "https://api.anthropic.com",
+      authType: "oauth",
+      oauthProviderId: "anthropic",
+      oauthCredentials: { access: "oauth-access", refresh: "oauth-refresh", expires: 999999 },
+      models: [{ id: "claude-fable-5", contextWindow: 1000000 }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-cc/claude-fable-5", credentialId: saved.id });
+    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
+
+    expect(authJson["anthropic-cc"]).toMatchObject({ type: "oauth", access: "oauth-access" });
+    expect(modelsJson.providers["anthropic-cc"].api).toBe("anthropic-proxy-claude-code");
+    expect(ext).toContain("anthropicOAuthProvider");
+    expect(ext).toContain("USE_ANTHROPIC_OAUTH_ALIAS = true");
+    expect(ext).toContain("oauth: ANTHROPIC_OAUTH_ALIAS");
+    expect(ext).not.toContain("oauth-access");
+    expect(ext).not.toContain("oauth-refresh");
   });
 
   it("generates an internal anthropic proxy Claude Code adapter with payload/header rewrites", async () => {
@@ -208,6 +276,49 @@ describe("model credential profiles", () => {
     expect(ext).not.toContain("sk-secret");
   });
 
+  it("preserves SDK adaptive-thinking metadata for anthropic-proxy Claude Fable 5 export", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      {
+        provider: "anthropic",
+        id: "claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        contextWindow: 1000000,
+        maxTokens: 128000,
+        reasoning: true,
+        input: ["text", "image"],
+        compat: { forceAdaptiveThinking: true },
+        thinkingLevelMap: { xhigh: "xhigh" },
+      },
+    ]);
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      providerSlug: "anthropic-proxy",
+      protocol: "anthropic-messages",
+      requestProfile: "anthropic_proxy_claude_code",
+      baseUrl: "https://console.cloudrouter.online",
+      models: [{ id: "claude-fable-5" }],
+    });
+
+    expect(saved.models[0]).toEqual(expect.objectContaining({
+      id: "claude-fable-5",
+      contextWindow: 1000000,
+      maxTokens: 128000,
+      reasoning: true,
+      compat: { forceAdaptiveThinking: true },
+      thinkingLevelMap: { xhigh: "xhigh" },
+    }));
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-proxy/claude-fable-5", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    const exportedModel = modelsJson.providers["anthropic-proxy"].models[0];
+    expect(exportedModel.compat.forceAdaptiveThinking).toBe(true);
+    expect(exportedModel.thinkingLevelMap.xhigh).toBe("xhigh");
+    mod.setPiCatalogModelsForTests(null);
+  });
+
   it("keeps newer file OAuth credentials during synced auth overlay and mirrors them to the profile", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
@@ -234,6 +345,162 @@ describe("model credential profiles", () => {
 
     expect(authStorage.get("openai-codex")).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
     expect(mod.getModelCredentialProfile(saved.id)!.oauthCredentials).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
+  });
+
+  it("lists built-in provider catalog and connects API key without baseUrl/protocol/models input", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "openai", id: "gpt-4.1", name: "GPT 4.1", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, maxTokens: 32768, reasoning: true, input: ["text", "image"] },
+      { provider: "openai", id: "gpt-4.1-mini", name: "GPT 4.1 Mini", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, input: ["text"] },
+    ]);
+
+    const catalog = mod.listBuiltinModelProviders();
+    expect(catalog).toEqual(expect.arrayContaining([expect.objectContaining({
+      providerSlug: "openai",
+      authModes: expect.arrayContaining(["api_key"]),
+      modelCount: 2,
+      sampleModels: expect.arrayContaining(["gpt-4.1"]),
+    })]));
+
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-openai", isDefault: true });
+    expect(profile.profileKind).toBe("builtin_provider");
+    expect(profile.providerSlug).toBe("openai");
+    expect(profile.protocol).toBe("openai-responses");
+    expect(profile.baseUrl).toBe("https://api.openai.com/v1");
+    expect(profile.models.map((m) => m.id)).toEqual(["gpt-4.1", "gpt-4.1-mini"]);
+    expect(profile.hasSecret).toBe(true);
+    expect(JSON.stringify(profile)).not.toContain("sk-openai");
+  });
+
+
+  it("refreshes built-in provider model snapshots from the current SDK catalog", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-old", name: "Claude Old", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000, input: ["text"] },
+    ]);
+    const saved = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+    expect(saved.models.map((m) => m.id)).toEqual(["claude-old"]);
+
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-old", name: "Claude Old", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000, input: ["text"] },
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
+    ]);
+
+    const listed = mod.listPublicModelCredentialProfiles().find((p) => p.id === saved.id)!;
+    expect(listed.models.map((m) => m.id)).toContain("claude-fable-5");
+    expect(mod.listAvailableModels().map((m) => m.ref)).toContain("anthropic/claude-fable-5");
+    const refreshed = mod.refreshModelCredentialProfileModels(saved.id);
+    expect(refreshed.models.find((m) => m.id === "claude-fable-5")).toMatchObject({ contextWindow: 1000000, maxTokens: 128000, reasoning: true });
+    mod.setPiCatalogModelsForTests(null);
+  });
+
+  it("includes Claude Fable 5 in the upgraded Anthropic SDK catalog", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+    expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
+  });
+
+  it("migrates legacy official Anthropic profiles to built-in provider and refreshes catalog models", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-old", name: "Claude Old", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000, input: ["text"] },
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
+    ]);
+    writeFileSync(join(dir, "model-credentials.json"), JSON.stringify({ profiles: [{
+      id: "legacy-anthropic",
+      name: "Anthropic (Claude Pro/Max)",
+      providerSlug: "anthropic",
+      protocol: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+      authType: "api_key",
+      apiKey: "sk-ant",
+      requestProfile: "standard",
+      enabled: true,
+      isDefault: true,
+      models: [{ id: "claude-old", contextWindow: 1000, input: ["text"] }],
+      createdAt: 1,
+      updatedAt: 1,
+    }] }, null, 2));
+
+    const listed = mod.listPublicModelCredentialProfiles()[0];
+    expect(listed.profileKind).toBe("builtin_provider");
+    expect(listed.models.map((m) => m.id)).toContain("claude-fable-5");
+    expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toContain("builtin_provider");
+    mod.setPiCatalogModelsForTests(null);
+  });
+
+  it("does not export simplified model overrides for SDK built-in provider profiles", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+    expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-fable-5", credentialId: profile.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers).toEqual({});
+  });
+
+  it("persists built-in provider disabled models and contextWindow overrides", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-a", name: "Claude A", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, input: ["text"] },
+      { provider: "anthropic", id: "claude-b", name: "Claude B", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, maxTokens: 64000, input: ["text"] },
+    ]);
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+
+    const edited = mod.saveModelCredentialProfile({
+      ...profile,
+      apiKey: "",
+      models: [{ id: "claude-a", contextWindow: 500000, maxTokens: 64000, input: ["text"] }],
+    });
+
+    expect(edited.models.map((m) => m.id)).toEqual(["claude-a"]);
+    expect(edited.modelCustomizations).toEqual({ disabled: ["claude-b"], contextWindowOverride: { "claude-a": 500000 } });
+    expect(mod.listConfiguredModels().map((m) => m.ref)).toEqual(["anthropic/claude-a"]);
+    expect(mod.listAvailableModels().map((m) => m.ref)).toEqual(["anthropic/claude-a"]);
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-a", credentialId: profile.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers.anthropic.models.map((m: any) => m.id)).toEqual(["claude-a"]);
+    expect(modelsJson.providers.anthropic.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 128000 });
+
+    const reloaded = mod.listPublicModelCredentialProfiles().find((p) => p.id === profile.id)!;
+    expect(reloaded.models.map((m) => m.id)).toEqual(["claude-a"]);
+    expect(reloaded.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 128000 });
+    mod.setPiCatalogModelsForTests(null);
+  });
+
+  it("restores built-in provider defaults when customizations are cleared", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-a", name: "Claude A", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, input: ["text"] },
+      { provider: "anthropic", id: "claude-b", name: "Claude B", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, maxTokens: 64000, input: ["text"] },
+    ]);
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+    mod.saveModelCredentialProfile({ ...profile, apiKey: "", models: [{ id: "claude-a", contextWindow: 500000, input: ["text"] }] });
+
+    const restored = mod.saveModelCredentialProfile({ ...profile, apiKey: "", models: profile.models });
+    expect(restored.modelCustomizations).toBeUndefined();
+    expect(restored.models.map((m) => m.id)).toEqual(["claude-a", "claude-b"]);
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-a", credentialId: profile.id });
+    expect(JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8")).providers).toEqual({});
+    mod.setPiCatalogModelsForTests(null);
+  });
+
+  it("supports enhanced Claude Code fingerprint for built-in Anthropic API-key-like tokens", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-oat-test-token", requestProfile: "anthropic_proxy_claude_code" });
+    expect(profile.requestProfile).toBe("anthropic_proxy_claude_code");
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-fable-5", credentialId: profile.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
+    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
+
+    expect(modelsJson.providers.anthropic.api).toBe("anthropic-proxy-claude-code");
+    expect(authJson.anthropic).toMatchObject({ type: "api_key", key: "sk-ant-oat-test-token" });
+    expect(ext).toContain("patchClaudeCodePayload");
+    expect(ext).toContain("USE_ANTHROPIC_OAUTH_ALIAS = false");
+    expect(ext).not.toContain("sk-ant-oat-test-token");
   });
 
   it("persists OAuth refreshes from runtime auth storage back to the Bossmode profile", async () => {
