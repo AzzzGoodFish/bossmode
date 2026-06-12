@@ -5,7 +5,7 @@ import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
-import { Search, Plus, ScrollText, Maximize2, Minimize2, X } from "lucide-react";
+import { Search, Plus, ScrollText } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
@@ -20,7 +20,7 @@ import { ChatArea } from "../components/ChatArea";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
-import { AgentTab, type CommittedEvent } from "../components/AgentTab";
+import { WorkstationDetail } from "../components/WorkstationDetail";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { useDialog } from "../components/dialogs";
 
@@ -68,11 +68,9 @@ export function Main({
     }
   }, [externalShowCreateRoom, onCreateRoomShown]);
 
-  // 视图：Chat | Tasks；镜头：lensAgent（分屏）+ lensExpanded（全幅工位视图）
+  // 视图：Chat | Tasks；工位详情：lensAgent（全幅工位视图）
   const [view, setView] = useState<RoomView>("chat");
   const [lensAgent, setLensAgent] = useState<string | null>(null);
-  const [lensExpanded, setLensExpanded] = useState(false);
-  const [agentEventsCache, setAgentEventsCache] = useState<Record<string, CommittedEvent[]>>({});
 
   const {
     room,
@@ -97,8 +95,6 @@ export function Main({
 
   // 房间切换时重置视图
   useEffect(() => {
-    setLensExpanded(false);
-    setAgentEventsCache({});
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
     sessionStorage.removeItem("bossmode_main_restore_tab");
     setView(restoreTab === "tasks" ? "tasks" : "chat");
@@ -116,14 +112,12 @@ export function Main({
 
   const openLens = useCallback((agentName: string) => {
     setLensAgent(agentName);
-    if (isMobile) setLensExpanded(true);
     setMobileMembersOpen(false);
     if (selectedRoomId) onClearUnreadTab(selectedRoomId, agentName);
-  }, [isMobile, selectedRoomId, onClearUnreadTab]);
+  }, [selectedRoomId, onClearUnreadTab]);
 
   const closeLens = useCallback(() => {
     setLensAgent(null);
-    setLensExpanded(false);
     if (selectedRoomId) onClearUnreadTab(selectedRoomId, "room");
   }, [selectedRoomId, onClearUnreadTab]);
 
@@ -156,12 +150,6 @@ export function Main({
     },
     [onRoomCreated, toast],
   );
-
-  const handleAgentEventsChange = useCallback((events: CommittedEvent[]) => {
-    if (lensAgent) {
-      setAgentEventsCache((prev) => ({ ...prev, [lensAgent]: events }));
-    }
-  }, [lensAgent]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [summarizeDialog, setSummarizeDialog] = useState<{ status: SummarizeStatus; totalMessages: number } | null>(null);
@@ -259,41 +247,17 @@ export function Main({
     }`;
   const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
-  const lensFull = lensAgent && (lensExpanded || isMobile);
-  const lensSplit = lensAgent && !lensFull;
+  const lensFull = !!lensAgent;
 
   const lensPanel = lensAgent && (
-    <div className={`flex flex-col min-h-0 min-w-0 bg-surface-1 ${lensFull ? "flex-1" : "w-[440px] shrink-0 border-l border-line"}`}>
-      {/* lens 头部：工位标识 + 展开/收起 + 关闭 */}
-      <div className="h-9 shrink-0 border-b border-line-soft flex items-center gap-2 px-3 bg-surface-0">
-        <span className="text-[10px] font-semibold tracking-[0.06em] text-accent-ink">WORKSTATION</span>
-        <span className="text-xs font-semibold text-ink-1">{lensAgent}</span>
-        <span className="flex-1" />
-        {!isMobile && (
-          <button
-            onClick={() => setLensExpanded((v) => !v)}
-            className={toolBtn}
-            title={lensExpanded ? "收起为分屏镜头" : "打开完整工位视图"}
-          >
-            {lensExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          </button>
-        )}
-        <button onClick={closeLens} className={toolBtn} title="关闭镜头">
-          <X size={14} />
-        </button>
-      </div>
-      <div className="flex-1 min-h-0 flex flex-col">
-        <AgentTab
-          key={`${selectedRoomId}:${lensAgent}`}
-          roomId={selectedRoomId!}
-          agentName={lensAgent}
-          onClose={closeLens}
-          onSteer={(content) => handleSteer(lensAgent, content)}
-          cachedEvents={agentEventsCache[lensAgent]}
-          onEventsChange={handleAgentEventsChange}
-        />
-      </div>
-    </div>
+    <WorkstationDetail
+      key={`${selectedRoomId}:${lensAgent}`}
+      roomId={selectedRoomId!}
+      agentName={lensAgent}
+      contextUsage={contextUsage[lensAgent]}
+      onClose={closeLens}
+      onSteer={(content) => handleSteer(lensAgent, content)}
+    />
   );
 
   return (
@@ -350,7 +314,7 @@ export function Main({
         </div>
       </div>
 
-      {/* 内容区：chat/tasks + lens 分屏 + 工位墙 */}
+      {/* 内容区：chat/tasks + 全幅工位详情 + 工位墙 */}
       <div className="flex-1 flex min-h-0 bg-surface-1">
         {!lensFull && (
           <div className="flex-1 flex flex-col min-w-0">
@@ -369,20 +333,22 @@ export function Main({
           </div>
         )}
 
-        {/* lens（分屏或全幅） */}
+        {/* 全幅工位详情 */}
         {lensPanel}
 
         {/* 工位墙（桌面） */}
-        <div className={`hidden ${lensSplit ? "xl:block" : "md:block"} w-[280px] border-l border-line shrink-0`}>
-          <StationPanel
-            members={room.members}
-            agentStatus={agentStatus}
-            contextUsage={contextUsage}
-            roomId={room.id}
-            onOpenLens={openLens}
-            unreadAgents={unreadTabs}
-          />
-        </div>
+        {!lensFull && (
+          <div className="hidden md:block w-[280px] border-l border-line shrink-0">
+            <StationPanel
+              members={room.members}
+              agentStatus={agentStatus}
+              contextUsage={contextUsage}
+              roomId={room.id}
+              onOpenLens={openLens}
+              unreadAgents={unreadTabs}
+            />
+          </div>
+        )}
 
         {/* 工位墙（移动端抽屉） */}
         {isMobile && (

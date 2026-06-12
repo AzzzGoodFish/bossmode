@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Square, ChevronDown } from "lucide-react";
+import { Square, ChevronDown, ExternalLink } from "lucide-react";
 import {
-  abortAgent, getMembers, getConfiguredModels, updateMember,
+  abortAgent, getMembers, getConfiguredModels, updateMember, getAgentEventsPaginated, getToken,
   type MemberInfo, type AvailableModelOption, type ContextUsageData,
 } from "../api/client";
+import { formatEventTime, isStationActionEvent, latestActionSummary, summarizeAgentEvent, toolTarget, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { useDialog } from "./dialogs";
@@ -42,6 +43,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [openChip, setOpenChip] = useState<string | null>(null);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
 
   useEffect(() => {
     getMembers()
@@ -79,6 +82,40 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     [toast],
   );
 
+
+  const loadRecentEvents = useCallback(async (name: string) => {
+    try {
+      const result = await getAgentEventsPaginated(roomId, name, 8);
+      setRecentEvents((prev) => ({ ...prev, [name]: result.events as AgentEvent[] }));
+    } catch (err) {
+      console.error("Failed to load recent agent events:", err);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    for (const name of members) void loadRecentEvents(name);
+  }, [roomId, members.join("\u0000"), loadRecentEvents]);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token || !roomId || members.length === 0) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    ws.onopen = () => {
+      for (const name of members) ws.send(JSON.stringify({ type: "subscribe:agent", roomId, agent: name }));
+    };
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type !== "agent:event" || data.roomId !== roomId || !members.includes(data.agent)) return;
+        const event = data.event as AgentEvent;
+        setRecentEvents((prev) => ({ ...prev, [data.agent]: [...(prev[data.agent] || []), event].slice(-8) }));
+      } catch {}
+    };
+    return () => ws.close();
+  }, [roomId, members.join("\u0000")]);
+
   const workingCount = members.filter((m) => agentStatus[m] === "working").length;
 
   return (
@@ -105,17 +142,16 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           return (
             <div key={name} className="border-b border-line-soft px-3.5 py-3">
               <div className="flex items-center gap-2.5">
-                <button onClick={() => onOpenLens?.(name)} className="cursor-pointer" title={`打开 ${name} 的工位`}>
+                <div>
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
-                </button>
+                </div>
                 <div className="flex-1 min-w-0">
-                  <button
-                    onClick={() => onOpenLens?.(name)}
-                    className="text-[12.5px] font-semibold text-ink-1 truncate cursor-pointer hover:text-accent-ink transition-colors flex items-center gap-1.5"
+                  <div
+                    className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5"
                   >
                     {name}
                     {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                  </button>
+                  </div>
                   {/* 模型热切换 chip */}
                   <div className="relative">
                     <button
@@ -154,12 +190,32 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                 )}
               </div>
 
+              <ActionLine
+                name={name}
+                status={status}
+                events={recentEvents[name] || []}
+                expanded={expandedAgent === name}
+                onToggle={() => setExpandedAgent(expandedAgent === name ? null : name)}
+              />
+              {expandedAgent === name && (
+                <div className="mt-2.5 border-l-2 border-accent bg-surface-1 rounded-r-lg p-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[9px] font-semibold tracking-[0.08em] text-ink-4">RECENT ACTIVITY</span>
+                    <button onClick={() => onOpenLens?.(name)} className="inline-flex items-center gap-1 text-[10px] text-accent-ink hover:opacity-80 cursor-pointer">
+                      完整工位 <ExternalLink size={10} />
+                    </button>
+                  </div>
+                  {(recentEvents[name] || []).filter(isStationActionEvent).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} />)}
+                  {(recentEvents[name] || []).length === 0 && <div className="text-[11px] text-ink-4 py-1">No recent activity</div>}
+                </div>
+              )}
+
               {/* context 油量表 */}
               <div className="flex items-center gap-2 mt-2.5">
                 <div className="flex-1 h-[3px] rounded-full bg-surface-3 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-700 ease-out ${
-                      pct >= 85 ? "bg-think" : pct >= 95 ? "bg-blocked" : "bg-ink-3"
+                      pct >= 95 ? "bg-blocked" : pct >= 85 ? "bg-think" : "bg-ink-3"
                     }`}
                     style={{ width: `${Math.max(pct, hasUsage ? 2 : 0)}%` }}
                     role="progressbar"
@@ -175,6 +231,47 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+
+function actionTone(kind: string): string {
+  if (kind === "tool") return "text-accent-ink";
+  if (kind === "thinking") return "text-think";
+  if (kind === "reply") return "text-ink-2";
+  return "text-ink-4";
+}
+
+function ActionLine({ name, status, events, expanded, onToggle }: { name: string; status: string; events: AgentEvent[]; expanded: boolean; onToggle: () => void }) {
+  const summary = latestActionSummary(events);
+  const label = status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
+  const time = summary.ts ? formatEventTime(summary.ts) : "";
+  const detail = status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full mt-2.5 flex items-center gap-2 rounded-md border border-line-soft bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer"
+      title={`${name}: ${label} ${detail}`}
+    >
+      <span className={`text-[9px] font-bold tracking-[0.12em] shrink-0 ${actionTone(summary.kind)}`}>{label}</span>
+      <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{detail}</span>
+      <ChevronDown size={11} className={`text-ink-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+    </button>
+  );
+}
+
+function MiniEvent({ event }: { event: AgentEvent }) {
+  const summary = summarizeAgentEvent(event);
+  const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
+  const target = event.type === "tool_start" ? toolTarget(event.args) : summary.detail;
+  return (
+    <div className="rounded-md bg-inset border border-line-soft px-2 py-1.5">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`text-[9px] font-bold tracking-[0.1em] shrink-0 ${actionTone(summary.kind)}`}>{summary.label}</span>
+        <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{target || summary.detail}</span>
+        {time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
       </div>
     </div>
   );
