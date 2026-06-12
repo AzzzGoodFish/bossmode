@@ -19,6 +19,19 @@ function hashPassword(password: string): string {
 
 const testPasswordHash = hashPassword(TEST_PASSWORD);
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Per-process unique dir — a fixed "/tmp/bossmode-test" collides across users
+// on shared machines (EACCES on files owned by another user) and across runs.
+const TEST_BOSSMODE_DIR = mkdtempSync(join(tmpdir(), "bossmode-test-"));
+
+/** The BOSSMODE_DIR used by the mocked config — tests that build fixture paths must use this. */
+export function getTestBossmodeDir(): string {
+  return TEST_BOSSMODE_DIR;
+}
+
 export function setupConfigMock(): void {
   vi.mock("../../src/shared/config.js", () => ({
     readConfig: () => ({
@@ -39,7 +52,7 @@ export function setupConfigMock(): void {
     writePidFile: () => {},
     removePidFile: () => {},
     configExists: () => true,
-    getBossmodeDir: () => "/tmp/bossmode-test",
+    getBossmodeDir: () => TEST_BOSSMODE_DIR,
   }));
 }
 

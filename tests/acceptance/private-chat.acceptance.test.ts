@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
@@ -243,7 +243,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   describe("Reset Session", () => {
     it("clears session metadata, resets cursor to null, and writes a system event", async () => {
       const room = await createRoom("reset-session-test", ["pm"]);
-      const roomDir = join("/tmp/bossmode-test", "rooms", room.id);
+      const roomDir = join(getTestBossmodeDir(), "rooms", room.id);
       mkdirSync(roomDir, { recursive: true });
       writeFileSync(join(roomDir, "sessions.json"), JSON.stringify({
         pm: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
