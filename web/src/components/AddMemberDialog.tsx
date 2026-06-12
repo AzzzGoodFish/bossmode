@@ -29,14 +29,14 @@ export function AddMemberDialog({ currentMembers, onAdd, onClose }: AddMemberDia
     <Sheet open onClose={onClose} size="sm" closeOnOverlayClick={false}>
       <div className="p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-white">Add Member</h2>
+          <h2 className="text-sm font-semibold text-ink-1">Add Member</h2>
           <button onClick={onClose} className="text-ink-3 hover:text-ink-1 text-lg transition-colors cursor-pointer">×</button>
         </div>
 
         <input
           type="text" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Search members..."
-          className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-white mb-3
+          className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 mb-3
                      focus:outline-none focus:border-line-strong transition-colors placeholder:text-ink-4"
           autoFocus
         />

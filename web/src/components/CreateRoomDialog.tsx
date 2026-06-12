@@ -104,12 +104,12 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   return (
     <Sheet open onClose={onClose} size="lg" closeOnOverlayClick={false}>
       <form onSubmit={handleSubmit} className="bg-surface-1 rounded-lg p-6 w-full space-y-4">
-        <h2 className="text-lg font-semibold text-white">Create Room</h2>
+        <h2 className="text-lg font-semibold text-ink-1">Create Room</h2>
 
         <div>
           <label className="block text-sm text-ink-4 mb-1">Room Name</label>
           <input autoComplete="off" type="text" value={name} onChange={(e) => setName(e.target.value)}
-            className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-line-strong transition-colors"
+            className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
             placeholder="e.g., openteam dev" autoFocus required />
         </div>
 
@@ -117,7 +117,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           <label className="block text-sm text-ink-4 mb-1">Working Directory</label>
           <div className="flex items-center gap-2">
             <input autoComplete="off" type="text" value={cwd} onChange={(e) => setCwd(e.target.value)}
-              className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-line-strong transition-colors font-mono"
+              className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors font-mono"
               placeholder="/path/to/your/project" required />
             <button
               type="button"
@@ -248,11 +248,11 @@ function InlineCreateMember({
   return (
     <Sheet open onClose={onClose} size="sm" closeOnOverlayClick={false}>
       <div className="bg-surface-1 rounded-lg p-5 w-full space-y-3">
-        <h3 className="text-sm font-semibold text-white">Create Member for "{agentName}"</h3>
+        <h3 className="text-sm font-semibold text-ink-1">Create Member for "{agentName}"</h3>
         <div>
           <label className="block text-xs text-ink-4 mb-1">Name</label>
           <input autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} autoFocus
-            className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-line-strong transition-colors" />
+            className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors" />
         </div>
         <div>
           <label className="block text-xs text-ink-4 mb-1">Model</label>

@@ -22,7 +22,7 @@ function highlight(text: string, query: string): React.ReactNode {
     <>
       {parts.map((p, i) =>
         re.test(p) ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-700/60 rounded-sm">{p}</mark>
+          <mark key={i} className="bg-highlight text-ink-1 rounded-sm">{p}</mark>
         ) : p
       )}
     </>

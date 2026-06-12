@@ -35,7 +35,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
     <div className="flex-1 flex flex-col p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-lg font-bold text-white">Skills</h1>
+          <h1 className="text-lg font-bold text-ink-1">Skills</h1>
           <p className="text-sm text-ink-3 mt-0.5">{skills.length} skills configured</p>
         </div>
         <button
@@ -53,7 +53,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search skills..."
-          className="w-full bg-surface-1 border border-line-soft rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-line-strong transition-colors placeholder:text-ink-4"
+          className="w-full bg-surface-1 border border-line-soft rounded-lg pl-9 pr-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors placeholder:text-ink-4"
         />
       </div>
 
@@ -66,7 +66,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
           >
             <div className="flex items-center gap-2 mb-2">
               <Puzzle size={14} className="text-ink-3" />
-              <span className="font-semibold text-white text-sm">{skill.name}</span>
+              <span className="font-semibold text-ink-1 text-sm">{skill.name}</span>
             </div>
             <p className="text-xs text-ink-4 mb-2 line-clamp-2">{skill.description || "No description"}</p>
             <div className="flex flex-wrap gap-1">
@@ -106,13 +106,13 @@ tags: []
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-surface-1 border border-line-soft rounded-lg p-5 w-full max-w-3xl">
-        <h2 className="text-sm font-semibold text-white mb-4">Create Skill</h2>
+        <h2 className="text-sm font-semibold text-ink-1 mb-4">Create Skill</h2>
         <div className="mb-3">
           <label className="block text-xs text-ink-4 mb-1">Name (directory name)</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-surface-2 border border-line rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-line-strong transition-colors"
+            className="w-full bg-surface-2 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
             placeholder="my-skill"
             autoFocus
           />
@@ -123,11 +123,11 @@ tags: []
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={20}
-            className="w-full bg-surface-2 border border-line rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-line-strong transition-colors resize-none"
+            className="w-full bg-surface-2 border border-line rounded px-3 py-2 text-sm text-ink-1 font-mono focus:outline-none focus:border-line-strong transition-colors resize-none"
           />
         </div>
         <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-ink-4 hover:text-white cursor-pointer">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-ink-4 hover:text-ink-1 cursor-pointer">Cancel</button>
           <button
             onClick={() => name && content && onCreate(name, content)}
             disabled={!name || !content}

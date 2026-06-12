@@ -444,7 +444,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium text-ink-1 group-hover:text-black dark:group-hover:text-white transition-colors">
+                      <span className="text-sm font-medium text-ink-1 group-hover:text-ink-1 transition-colors">
                         {room.name}
                       </span>
                       {unreadRoomIds?.has(room.id) && (
@@ -453,7 +453,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
                     </div>
                     <div className="flex items-center gap-3 text-xs text-ink-3">
                       <span className="font-mono truncate">{room.cwd.split("/").slice(-2).join("/")}</span>
-                      <span className="text-ink-2 dark:text-ink-2">·</span>
+                      <span className="text-ink-2">·</span>
                       <span>{room.members.length} member{room.members.length !== 1 ? "s" : ""}</span>
                     </div>
                   </div>
@@ -473,7 +473,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
             onClick={onCreateRoom}
             className="w-full text-left group rounded-lg border border-dashed border-line hover:border-line-strong hover:bg-surface-1/30 transition-all px-4 py-3.5 cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-ink-4 group-hover:text-ink-3 dark:group-hover:text-ink-2 transition-colors">
+            <div className="flex items-center gap-2 text-ink-4 group-hover:text-ink-3 transition-colors">
               <Plus size={14} />
               <span className="text-sm">New Room</span>
             </div>

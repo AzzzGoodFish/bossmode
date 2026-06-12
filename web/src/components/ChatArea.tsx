@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, BookOpen, FileText, ShieldCheck } from "lucide-react";
+import { Loader2, BookOpen, FileText, ShieldCheck, Plus, Pencil, ArrowRight, Trash2 } from "lucide-react";
 import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, GateEventMeta } from "../api/client";
 import { decideGate } from "../api/client";
 import { Markdown } from "./Markdown";
@@ -257,12 +257,12 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
 }
 
 function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMeta; content: string; mentions?: string[]; onJump?: () => void }) {
-  const icon = meta.action === "created" ? "➕" : meta.action === "deleted" ? "🗑️" : meta.action === "status_changed" ? "➡️" : "✏️";
+  const Icon = meta.action === "created" ? Plus : meta.action === "deleted" ? Trash2 : meta.action === "status_changed" ? ArrowRight : Pencil;
   const activatedAgent = mentions?.length ? mentions[0] : null;
   return (
     <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
       <div className="flex items-center gap-2 text-xs text-ink-3">
-        <span>{icon}</span>
+        <Icon size={13} className="text-ink-4 shrink-0" />
         <span className="flex-1">
           {onJump && meta.action !== "deleted" ? (
             <button onClick={onJump} className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline">
@@ -357,7 +357,7 @@ function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge }: { meta:
   };
 
   return (
-    <div className="border border-accent/30 rounded-lg mt-3 bg-accent-dim/30 overflow-hidden">
+    <div className={`${settled ? "border border-line bg-surface-0/40" : "border border-accent/30 bg-accent-dim/30"} rounded-lg mt-3 overflow-hidden`}>
       <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-line-soft">
         <ShieldCheck size={14} className="text-accent-ink shrink-0" />
         <span className="text-[10px] font-semibold tracking-[0.06em] text-accent-ink">STAGE GATE</span>
@@ -400,14 +400,14 @@ function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge }: { meta:
             <button
               onClick={() => decide("reject")}
               disabled={busy}
-              className="px-3 py-1 text-[11px] font-medium border border-line rounded-md text-ink-2 hover:text-blocked hover:border-blocked/40 cursor-pointer disabled:opacity-40 transition-colors"
+              className="px-3 py-1.5 min-h-[32px] text-[11px] font-medium border border-line rounded-md text-ink-2 hover:text-blocked hover:border-blocked/40 cursor-pointer disabled:opacity-40 transition-colors"
             >
               打回
             </button>
             <button
               onClick={() => decide("approve")}
               disabled={busy}
-              className="px-3 py-1 text-[11px] font-semibold bg-accent text-accent-contrast rounded-md cursor-pointer hover:opacity-90 disabled:opacity-40 transition-opacity"
+              className="px-3 py-1.5 min-h-[32px] text-[11px] font-semibold bg-accent text-accent-contrast rounded-md cursor-pointer hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               {busy ? "…" : "批准"}
             </button>

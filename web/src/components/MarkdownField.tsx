@@ -92,7 +92,7 @@ export function MarkdownField({
     return (
       <div className={`markdown-field markdown-field--editing ${className}`}>
         {!autoEdit && (
-          <div className="sticky top-0 z-20 mb-3 pb-3 border-b border-line-soft bg-white/95 bg-surface-0/95 backdrop-blur flex items-center gap-2">
+          <div className="sticky top-0 z-20 mb-3 pb-3 border-b border-line-soft bg-surface-0/95 backdrop-blur flex items-center gap-2">
             <button
               onClick={handleSave}
               className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -147,7 +147,7 @@ export function MarkdownField({
           type="button"
           onClick={enterEdit}
           aria-label="Edit"
-          className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-white/90 dark:bg-surface-1/90 backdrop-blur-sm border border-line text-ink-2 hover:text-ink-1 hover:bg-white dark:hover:bg-surface-2 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
+          className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-surface-1/90 backdrop-blur-sm border border-line text-ink-2 hover:text-ink-1 hover:bg-surface-2 shadow-sm opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer md:flex"
         >
           <Pencil size={12} /> Edit
         </button>

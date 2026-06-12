@@ -1194,7 +1194,7 @@ function DocRow({ node, onClick }: { node: KnowledgeTreeNode; onClick: () => voi
   return (
     <button
       onClick={onClick}
-      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-line-soft dark:hover:border-line-soft hover:bg-surface-2/50 transition-colors cursor-pointer group"
+      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-line-soft hover:bg-surface-2/50 transition-colors cursor-pointer group"
     >
       <FileIcon size={14} className="text-ink-4 shrink-0" />
       <span className="text-sm text-ink-2 group-hover:text-ink-1 truncate">

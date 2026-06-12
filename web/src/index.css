@@ -28,8 +28,12 @@
 
   --accent: #0fa897;
   --accent-dim: rgba(15, 168, 151, 0.12);
-  --accent-ink: #0b8d7f;
+  --accent-ink: #0a7d71;
   --accent-contrast: #ffffff;
+  --highlight: rgba(232, 176, 63, 0.28);
+  --avatar-pm: #7c5cff;
+  --avatar-designer: #c24d8d;
+  --avatar-user: #1687a7;
 
   --on-air: #1d9e58;
   --on-air-dim: rgba(29, 158, 88, 0.13);
@@ -62,6 +66,10 @@
   --accent-dim: rgba(55, 214, 196, 0.14);
   --accent-ink: #5ee6d5;
   --accent-contrast: #06231f;
+  --highlight: rgba(232, 176, 63, 0.34);
+  --avatar-pm: #9d8cff;
+  --avatar-designer: #e37bb8;
+  --avatar-user: #45c0df;
 
   --on-air: #3fd07a;
   --on-air-dim: rgba(63, 208, 122, 0.15);
@@ -94,6 +102,10 @@
   --color-accent-dim: var(--accent-dim);
   --color-accent-ink: var(--accent-ink);
   --color-accent-contrast: var(--accent-contrast);
+  --color-highlight: var(--highlight);
+  --color-avatar-pm: var(--avatar-pm);
+  --color-avatar-designer: var(--avatar-designer);
+  --color-avatar-user: var(--avatar-user);
 
   --color-onair: var(--on-air);
   --color-onair-dim: var(--on-air-dim);

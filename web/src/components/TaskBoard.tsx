@@ -85,7 +85,7 @@ function BoardColumn({
       onDrop={handleDrop}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line-soft/50 dark:border-line-soft/50">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line-soft/50">
         <div className="flex items-center gap-2">
           <span className={`text-xs font-semibold uppercase tracking-wider ${color}`}>{label}</span>
           <span className="text-[10px] text-ink-4 tabular-nums">{tasks.length}</span>

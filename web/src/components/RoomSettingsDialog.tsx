@@ -160,14 +160,14 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved }: RoomSetting
               <Shield size={13} className="text-think" />
               Rule Documents ({selectedRuleDocs.size} selected)
             </label>
-            <p className="text-xs text-ink-3 dark:text-ink-3 mb-2">
+            <p className="text-xs text-ink-3 mb-2">
               Selected docs are injected into every agent's system prompt.
             </p>
             <div className="border border-line-soft rounded p-2 max-h-56 overflow-y-auto">
               {tree?.children && tree.children.length > 0 ? (
                 <RulesTree nodes={tree.children} selected={selectedRuleDocs} onToggle={toggleRuleDoc} />
               ) : (
-                <p className="text-xs text-ink-3 dark:text-ink-3 py-4 text-center">No knowledge documents found</p>
+                <p className="text-xs text-ink-3 py-4 text-center">No knowledge documents found</p>
               )}
             </div>
           </div>
