@@ -30,8 +30,9 @@ npm install -g bossmode
 ```
 
 **Requirements**:
-- Node.js ≥ 18
-- [pi-coding-agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) installed as `pi`
+- Node.js ≥ 20.6
+
+Bossmode bundles the pi Agent SDK runtime via npm dependencies; a separate global `pi` CLI install is not required for normal use.
 
 ---
 
@@ -96,9 +97,9 @@ Open your browser at `http://localhost:8080` and sign in. On first run, `bossmod
 - Configure auto-summarization threshold in Settings
 
 ### ⚙️ Settings
-- **Session Resume**: toggle whether agents resume prior pi-cli sessions
+- **Model Credentials**: connect official providers, enable/disable Connect Provider catalog models, override Connect Provider context windows, add custom endpoints, edit custom model context/output limits, and choose Claude Code fingerprint compatibility for Anthropic-style credentials
+- **Session Resume**: toggle whether agents resume prior pi SDK sessions
 - **Auto-Summary**: enable automatic summarization with configurable threshold and keep count
-- Runtime status: see detected pi-cli availability and capabilities
 
 ---
 
@@ -120,7 +121,7 @@ Agents have access to these tools via MCP:
 
 ## Architecture Overview
 
-Bossmode is a single Node.js daemon: HTTP static serving + REST API + WebSocket real-time push + agent process pool. No external database — everything is stored on the file system.
+Bossmode is a single Node.js daemon: HTTP static serving + REST API + WebSocket real-time push + in-process pi Agent SDK runtime. No external database — everything is stored on the file system.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -142,9 +143,9 @@ Bossmode is a single Node.js daemon: HTTP static serving + REST API + WebSocket 
 │   │  knowledge/                        │     │              │
 │   └────────────────────────────────────┘     │              │
 └──────────────────────────────────────────────┼──────────────┘
-                                               │ spawn
+                                               │ in-process
                               ┌─────────────────┐
-                              │    pi-cli       │
+                              │ pi Agent SDK    │
                               │   (runtime)     │
                               └─────────────────┘
 ```
@@ -163,15 +164,13 @@ Dependency direction is strictly one-way: `API → Communication → Engine → 
 
 ### Supported Runtimes
 
-Bossmode does not bundle an LLM engine — it spawns pi-coding-agent (`pi`) as its CLI runtime.
+Bossmode uses the in-process `@earendil-works/pi-coding-agent` SDK runtime, installed as an npm dependency of Bossmode.
 
-| Runtime | Command | Install | Notes |
-|---------|---------|---------|-------|
-| **pi-cli** | `pi` | `npm install -g @mariozechner/pi-coding-agent` | Open-source multi-provider agent runtime |
+| Runtime | Install | Notes |
+|---------|---------|-------|
+| **pi SDK** | Bundled dependency | Multi-provider agent runtime with streaming, tool events, thinking levels, session resume, context usage tracking, and dynamic model/thinking configuration |
 
-pi-cli provides streaming, tool events, thinking levels, session resume, context usage tracking, and dynamic model/thinking configuration.
-
-Agent tools are injected via a Bossmode-generated pi extension.
+Bossmode provides its own tools directly to the SDK runtime.
 
 ### Data Storage
 
@@ -218,7 +217,7 @@ Optional environment variables:
 
 Host and port can also be set via `--host` / `--port` flags on `bossmode on`.
 
-Runtime detection happens automatically. `bossmode status` shows pi-cli availability and detected version.
+Model credentials are managed in Settings. Official providers use the bundled pi SDK catalog; custom endpoints can edit per-model context window and max output token limits, while blank API key fields preserve existing saved secrets on edit. Custom Anthropic-compatible endpoints can enable Claude Code fingerprint compatibility when a credential or proxy requires Claude Code-style request headers/payload shaping. Bossmode preserves SDK model metadata such as context windows, output limits, reasoning capability, and provider compatibility flags for models like Claude Fable 5. When a member switches across credentials or providers, Bossmode recreates the SDK handle with session resume so fresh auth and generated provider extensions are loaded without losing conversation context.
 
 ---
 
