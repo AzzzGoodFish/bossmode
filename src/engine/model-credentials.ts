@@ -45,7 +45,9 @@ const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "anthropic_claude_c
 const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom_endpoint", "trusted_adapter"];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together"]);
+const MIGRATION_CUSTOM_ENDPOINT_VISION_V1 = "custom-endpoint-vision-v1";
 
+type ModelCredentialStore = { profiles: ModelCredentialProfile[]; migrations: string[] };
 type OAuthJobStatus = OAuthLoginJobStatus;
 
 type OAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown };
@@ -103,16 +105,20 @@ function writePrivateJson(path: string, data: unknown): void {
   try { chmodSync(path, 0o600); } catch {}
 }
 
-function readStore(): { profiles: ModelCredentialProfile[] } {
+function readStore(): ModelCredentialStore {
   const path = storePath();
-  if (!existsSync(path)) return { profiles: [] };
-  const parsed = JSON.parse(readFileSync(path, "utf-8")) as { profiles?: ModelCredentialProfile[] };
-  return { profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [] };
+  if (!existsSync(path)) return { profiles: [], migrations: [] };
+  const parsed = JSON.parse(readFileSync(path, "utf-8")) as { profiles?: ModelCredentialProfile[]; migrations?: string[] };
+  return {
+    profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
+    migrations: Array.isArray(parsed.migrations) ? parsed.migrations.filter((m): m is string => typeof m === "string") : [],
+  };
 }
 
-function writeStore(profiles: ModelCredentialProfile[]): void {
+function writeStore(profiles: ModelCredentialProfile[], migrations?: string[]): void {
   ensureBossmodeDir();
-  writePrivateJson(storePath(), { profiles });
+  const existingMigrations = migrations ?? readStore().migrations;
+  writePrivateJson(storePath(), { profiles, ...(existingMigrations.length ? { migrations: existingMigrations } : {}) });
 }
 
 function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredentialProfile {
@@ -147,12 +153,13 @@ function validateModel(model: ModelDefinitionConfig): ModelDefinitionConfig {
   if (!model.id?.trim()) throw new Error("model id is required");
   if (model.contextWindow !== undefined && (!Number.isInteger(model.contextWindow) || model.contextWindow <= 0)) throw new Error("contextWindow must be a positive integer");
   if (model.maxTokens !== undefined && (!Number.isInteger(model.maxTokens) || model.maxTokens <= 0)) throw new Error("maxTokens must be a positive integer");
-  const input = model.input?.length ? model.input : ["text" as const];
+  const input = model.input?.length ? model.input : undefined;
+  const { input: _input, ...rest } = model;
   return {
-    ...model,
+    ...rest,
     id: model.id.trim(),
     name: model.name?.trim() || undefined,
-    input,
+    ...(input ? { input } : {}),
     ...modelSdkMetadata(model),
     metadataSource: model.metadataSource || (model.contextWindow || model.maxTokens || model.reasoning !== undefined ? "endpoint" : "unknown"),
   };
@@ -817,7 +824,7 @@ function coerceDiscoveredModel(raw: any): ModelDefinitionConfig | null {
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
-    ...(Array.isArray(raw?.input) && raw.input.length ? { input: raw.input } : { input: ["text"] }),
+    ...(Array.isArray(raw?.input) && raw.input.length ? { input: raw.input } : {}),
     ...modelSdkMetadata(raw),
     metadataSource: hasEndpointMetadata ? "endpoint" : "unknown",
   };
@@ -1027,15 +1034,41 @@ function refreshBuiltinProviderProfile(profile: ModelCredentialProfile): ModelCr
   return changed ? { ...next, updatedAt: now() } : profile;
 }
 
+function isDefaultTextOnlyInput(input: ModelDefinitionConfig["input"]): boolean {
+  return Array.isArray(input) && input.length === 1 && input[0] === "text";
+}
+
+function migrateCustomEndpointVisionInput(profile: ModelCredentialProfile, catalog: any[]): ModelCredentialProfile {
+  if ((profile.profileKind ?? "custom_endpoint") !== "custom_endpoint") return profile;
+  let changed = false;
+  const models = profile.models.map((model) => {
+    if (!isDefaultTextOnlyInput(model.input)) return model;
+    const fallbackInput = piCatalogFallbackMetadata(model.id, profile.providerSlug, catalog)?.input;
+    if (!fallbackInput?.includes("image")) return model;
+    changed = true;
+    return {
+      ...model,
+      input: fallbackInput,
+      metadataSource: model.metadataSource === "endpoint" ? "endpoint" as const : "pi_catalog" as const,
+    };
+  });
+  return changed ? { ...profile, models, updatedAt: now() } : profile;
+}
+
 function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }): ModelCredentialProfile[] {
   const store = readStore();
+  const catalog = loadPiCatalogModelsSync();
   let changed = false;
+  const runVisionMigration = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_VISION_V1);
   const profiles = store.profiles.map((profile) => {
-    const next = refreshBuiltinProviderProfile(profile);
+    const refreshed = refreshBuiltinProviderProfile(profile);
+    const next = runVisionMigration ? migrateCustomEndpointVisionInput(refreshed, catalog) : refreshed;
     if (next !== profile) changed = true;
     return next;
   });
-  if (changed && options.persist) writeStore(profiles);
+  const migrations = runVisionMigration ? [...store.migrations, MIGRATION_CUSTOM_ENDPOINT_VISION_V1] : store.migrations;
+  if (runVisionMigration) changed = true;
+  if (changed && options.persist) writeStore(profiles, migrations);
   return profiles;
 }
 
@@ -1060,17 +1093,19 @@ function catalogMetadata(m: any): ModelDiscoveredMetadata {
   };
 }
 
+function piCatalogFallbackMetadata(modelId: string, providerSlug: string, catalog: any[]): ModelDiscoveredMetadata | null {
+  const exact = catalog.find((m) => m.provider === providerSlug && m.id === modelId);
+  if (exact) return catalogMetadata(exact);
+
+  const matches = catalog
+    .filter((m) => m.id === modelId)
+    .map(catalogMetadata);
+
+  return applyConsistentMetadataFallback(matches);
+}
+
 function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: string, catalog: any[]): ModelDefinitionConfig {
-  const exact = catalog.find((m) => m.provider === providerSlug && m.id === model.id);
-  const fallback = ((): ModelDiscoveredMetadata | null => {
-    if (exact) return catalogMetadata(exact);
-
-    const matches = catalog
-      .filter((m) => m.id === model.id)
-      .map(catalogMetadata);
-
-    return applyConsistentMetadataFallback(matches);
-  })();
+  const fallback = piCatalogFallbackMetadata(model.id, providerSlug, catalog);
 
   if (!fallback) return model;
 

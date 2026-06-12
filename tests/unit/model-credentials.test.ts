@@ -107,10 +107,115 @@ describe("model credential profiles", () => {
         contextWindow: 1000000,
         maxTokens: 128000,
         reasoning: true,
+        input: ["text", "image"],
       }),
     ]);
 
     fetchMock.mockRestore();
+  });
+
+  it("lets pi catalog fill image input when custom endpoint models omit input", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic-proxy", id: "claude-fable-5", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      providerSlug: "anthropic-proxy",
+      protocol: "anthropic-messages",
+      models: [{ id: "claude-fable-5" }],
+    });
+
+    expect(saved.models[0].input).toEqual(["text", "image"]);
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-proxy/claude-fable-5", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers["anthropic-proxy"].models[0].input).toEqual(["text", "image"]);
+  });
+
+  it("migrates stored custom endpoint text-only catalog models to image input", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic-proxy", id: "claude-fable-5", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "model-credentials.json"), JSON.stringify({
+      profiles: [{
+        id: "p1",
+        profileKind: "custom_endpoint",
+        name: "Proxy",
+        providerSlug: "anthropic-proxy",
+        protocol: "anthropic-messages",
+        baseUrl: "https://proxy.example/v1",
+        authType: "api_key",
+        apiKey: "sk-secret",
+        requestProfile: "standard",
+        enabled: true,
+        isDefault: true,
+        models: [{ id: "claude-fable-5", input: ["text"], metadataSource: "unknown" }],
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }, null, 2));
+
+    expect(mod.loadModelCredentialProfiles()[0].models[0].input).toEqual(["text", "image"]);
+    const persisted = JSON.parse(readFileSync(join(dir, "model-credentials.json"), "utf-8"));
+    expect(persisted.profiles[0].models[0].input).toEqual(["text", "image"]);
+    expect(persisted.migrations).toContain("custom-endpoint-vision-v1");
+
+    const afterFirstLoad = readFileSync(join(dir, "model-credentials.json"), "utf-8");
+    expect(mod.loadModelCredentialProfiles()[0].models[0].input).toEqual(["text", "image"]);
+    expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toBe(afterFirstLoad);
+  });
+
+  it("preserves migration markers when saving and deleting profiles", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic-proxy", id: "claude-fable-5", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "model-credentials.json"), JSON.stringify({
+      profiles: [{
+        id: "p1",
+        profileKind: "custom_endpoint",
+        name: "Proxy",
+        providerSlug: "anthropic-proxy",
+        protocol: "anthropic-messages",
+        baseUrl: "https://proxy.example/v1",
+        authType: "api_key",
+        apiKey: "sk-secret",
+        requestProfile: "standard",
+        enabled: true,
+        isDefault: true,
+        models: [{ id: "claude-fable-5", input: ["text"], metadataSource: "unknown" }],
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }, null, 2));
+
+    mod.loadModelCredentialProfiles();
+    const afterMigration = JSON.parse(readFileSync(join(dir, "model-credentials.json"), "utf-8"));
+    expect(afterMigration.migrations).toContain("custom-endpoint-vision-v1");
+
+    const saved = mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "other-proxy", models: [{ id: "unknown-model" }] });
+    let persisted = JSON.parse(readFileSync(join(dir, "model-credentials.json"), "utf-8"));
+    expect(persisted.migrations).toContain("custom-endpoint-vision-v1");
+
+    expect(mod.deleteModelCredentialProfile(saved.id)).toBe(true);
+    persisted = JSON.parse(readFileSync(join(dir, "model-credentials.json"), "utf-8"));
+    expect(persisted.migrations).toContain("custom-endpoint-vision-v1");
+  });
+
+  it("keeps non-catalog custom endpoint models text-only at runtime export", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([]);
+
+    const saved = mod.saveModelCredentialProfile({ ...baseProfile, models: [{ id: "unknown-model" }] });
+
+    expect(saved.models[0].input).toBeUndefined();
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/unknown-model", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers.openrouter.models[0].input).toEqual(["text"]);
   });
 
   it("allows unknown public context metadata but applies internal pi export fallback", async () => {
@@ -253,7 +358,7 @@ describe("model credential profiles", () => {
     const models = JSON.parse(modelsJson);
     const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
     expect(modelsJson).toContain("anthropic-proxy-claude-code");
-    expect(models.providers["anthropic-proxy"].models[0].input).toEqual(["text"]);
+    expect(models.providers["anthropic-proxy"].models[0].input).toEqual(["text", "image"]);
     expect(models.providers["anthropic-proxy"].models[0].cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     expect(ext).toContain("claude-cli/2.1.122 (external, sdk-cli)");
     expect(ext).toContain("context-1m-2025-08-07");

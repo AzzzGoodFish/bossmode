@@ -448,7 +448,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                 </div>
                 {expanded && (
                   <>
-                    {profile.baseUrl && <div className="text-[11px] text-ink-3 dark:text-ink-3 font-mono truncate mt-3 mb-3">{profile.baseUrl}</div>}
+                    {profile.baseUrl && <div className="text-[11px] text-ink-3 font-mono truncate mt-3 mb-3">{profile.baseUrl}</div>}
                     <div className="rounded-md bg-inset/60 border border-line-soft p-3 mt-3">
                       <div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-ink-2">Models</span><span className="text-[11px] text-ink-4">{profile.hasSecret ? "Secret configured" : profile.authType}</span></div>
                       <div className="space-y-1">
@@ -729,7 +729,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     requestProfile: profile?.requestProfile || "standard",
     enabled: profile?.enabled ?? true,
     isDefault: profile?.isDefault ?? false,
-    models: profile?.profileKind === "builtin_provider" && profile.catalogModels?.length ? profile.catalogModels : (profile?.models?.length ? profile.models : [{ id: "", input: ["text"], metadataSource: "unknown" }]),
+    models: profile?.profileKind === "builtin_provider" && profile.catalogModels?.length ? profile.catalogModels : (profile?.models?.length ? profile.models : [{ id: "", metadataSource: "unknown" }]),
     modelCustomizations: profile?.modelCustomizations,
   }));
   const [saving, setSaving] = useState(false);
@@ -850,19 +850,19 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                   return <div key={m.id} className="border border-line-soft rounded-lg p-3 space-y-2">
                     <div className={hidden ? "opacity-50" : ""}>
                       <code className="block text-xs text-ink-1 break-all whitespace-normal">{m.id}</code>
-                      <div className="text-[11px] text-ink-3 dark:text-ink-3 mt-0.5">Provider catalog · Default: {formatK(m.contextWindow)} ctx</div>
+                      <div className="text-[11px] text-ink-3 mt-0.5">Provider catalog · Default: {formatK(m.contextWindow)} ctx</div>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-ink-2">
                       <input type="checkbox" checked={!hidden} onChange={(e) => setModelVisible(m.id, e.target.checked)} />
                       Enabled
                     </label>
-                    <Field label="Context window"><div className="space-y-1"><input type="number" min={1} step={1} className={inputCls} value={override.contextWindow ?? ""} onChange={(e) => setModelOverride(m.id, "contextWindow", parseIntegerInput(e.target.value))} placeholder={m.contextWindow ? String(m.contextWindow) : "Default"} /><div className="text-[11px] text-ink-3 dark:text-ink-3">Leave empty for default.</div></div></Field>
+                    <Field label="Context window"><div className="space-y-1"><input type="number" min={1} step={1} className={inputCls} value={override.contextWindow ?? ""} onChange={(e) => setModelOverride(m.id, "contextWindow", parseIntegerInput(e.target.value))} placeholder={m.contextWindow ? String(m.contextWindow) : "Default"} /><div className="text-[11px] text-ink-3">Leave empty for default.</div></div></Field>
                   </div>;
                 })}
               </>
             ) : (
               <>
-                <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-ink-1">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", input: ["text"], metadataSource: "unknown" }] })} className="text-xs text-accent-ink">Add model manually</button></div></div>
+                <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-ink-1">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", metadataSource: "unknown" }] })} className="text-xs text-accent-ink">Add model manually</button></div></div>
                 {fetchError && <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-2">{fetchError} Manual add remains available.</div>}
                 {form.models.map((m, i) => <div key={i} className="border border-line-soft rounded-lg p-3 space-y-2">
                   <input className={inputCls} value={m.id} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, id: e.target.value }; setForm({ ...form, models }); }} placeholder="model id" />
@@ -871,7 +871,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                     <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 1000000" /></Field>
                     <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 128000" /></Field>
                   </div>
-                  <div className="text-[11px] text-ink-3 dark:text-ink-3">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max` : ""} · ${m.metadataSource === "pi_catalog" ? "from pi catalog" : "custom"}` : "metadata unknown"}</div>
+                  <div className="text-[11px] text-ink-3">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max` : ""} · ${m.metadataSource === "pi_catalog" ? "from pi catalog" : "custom"}` : "metadata unknown"}</div>
                   <button type="button" className="text-xs text-blocked" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
                 </div>)}
               </>

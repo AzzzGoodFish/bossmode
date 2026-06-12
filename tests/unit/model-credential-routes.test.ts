@@ -259,6 +259,8 @@ describe("model credential profile API routes", () => {
   });
 
   it("discovers OpenAI-compatible models without leaking secrets", async () => {
+    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests(null);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
@@ -287,9 +289,10 @@ describe("model credential profile API routes", () => {
     expect(res.body).not.toContain("sk-secret-discovery");
     const body = JSON.parse(res.body);
     expect(body.models).toEqual([
-      expect.objectContaining({ id: "gpt-4.1", input: ["text"], metadataSource: "unknown" }),
+      expect.objectContaining({ id: "gpt-4.1", metadataSource: "unknown" }),
       expect.objectContaining({ id: "gpt-4.1-mini", name: "GPT 4.1 Mini" }),
     ]);
+    expect(body.models[0].input).toBeUndefined();
     expect(body.models[0].contextWindow).toBeUndefined();
     expect(body.partial).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/v1/models", expect.objectContaining({
