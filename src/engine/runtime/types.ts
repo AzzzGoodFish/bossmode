@@ -90,7 +90,8 @@ export interface AgentHandle {
   readonly runtimeParams?: AgentRuntimeParams;
 
   // Optional — check runtime.capabilities before calling
-  setModel?(model: string): void;
+  setModel?(model: string): void | Promise<void>;
+  refreshModelRegistry?(): void | Promise<void>;
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
 }

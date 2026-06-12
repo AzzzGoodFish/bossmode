@@ -12,7 +12,7 @@ import {
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
-import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
+import { getMemberInstances, destroyInstance, switchMemberModelInActiveRooms } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getModelCredentialProfile, normalizeModelRef } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
@@ -265,6 +265,17 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
     contextLimit: body.contextLimit ?? existing.contextLimit,
     credentialId,
   });
+
+  const modelChanged = model !== existing.model || credentialId !== existing.credentialId;
+  if (modelChanged && model) {
+    try {
+      await switchMemberModelInActiveRooms(existing.name, model, credentialId);
+    } catch (err: any) {
+      sendJson(res, 400, { error: err.message || String(err) });
+      return;
+    }
+  }
+
   sendJson(res, 200, member);
 });
 

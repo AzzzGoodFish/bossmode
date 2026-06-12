@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
-import { getMemberByName } from "../workforce/member-store.js";
+import { getMemberByName, saveMember } from "../workforce/member-store.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
@@ -32,6 +32,7 @@ import { USER_DISPLAY_NAME } from "../shared/user-identity.js";
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
+import { exportPiConfigForMember, listAvailableModels, normalizeModelRef } from "./model-credentials.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -58,6 +59,11 @@ function formatRuntimeErrorMessage(error: unknown): string {
   return message;
 }
 
+interface PendingModelSwitch {
+  model: string;
+  credentialId?: string;
+}
+
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
@@ -65,8 +71,12 @@ interface AgentInstance {
   status: AgentStatus;
   dispatchState: DispatchState;
   queuedInputs: string[];
+  pendingModelSwitch?: PendingModelSwitch;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
+  appliedModel: string;
+  appliedProvider: string;
+  appliedCredentialId?: string;
 }
 
 const instances = new Map<string, AgentInstance>();
@@ -111,6 +121,78 @@ function flushQueuedInputs(instance: AgentInstance, trigger: string): void {
 function queueInput(instance: AgentInstance, input: string, trigger: string): void {
   instance.queuedInputs.push(input);
   logger.info("agent", "queueInput", { member: instance.agentName, count: instance.queuedInputs.length, trigger });
+}
+
+function normalizeSwitchModelRef(model: string): string {
+  const ref = normalizeModelRef(model.trim());
+  const idx = ref.indexOf("/");
+  return idx > 0 ? ref : `anthropic/${ref}`;
+}
+
+function providerFromModelRef(model: string): string {
+  const ref = normalizeSwitchModelRef(model);
+  const idx = ref.indexOf("/");
+  return idx > 0 ? ref.slice(0, idx) : "anthropic";
+}
+
+function shouldRecreateForModelSwitch(instance: AgentInstance, model: string, credentialId?: string): boolean {
+  return instance.appliedProvider !== providerFromModelRef(model) || instance.appliedCredentialId !== credentialId;
+}
+
+async function recreateInstanceForModelSwitch(instance: AgentInstance, model: string, credentialId: string | undefined, trigger: string): Promise<void> {
+  const key = instanceKey(instance.roomId, instance.agentName);
+  const queuedInputs = instance.queuedInputs.splice(0);
+  try { await instance.handle.waitForIdle?.(); } catch {}
+  try { instance.unsubscribe(); } catch {}
+  try { instance.handle.destroy(); } catch {}
+  if (instances.get(key) === instance) instances.delete(key);
+  contextUsageCache.delete(key);
+
+  const next = await getOrCreate(instance.roomId, instance.agentName);
+  if (!next) throw new Error(`Failed to recreate member "${instance.agentName}" for model switch`);
+  next.queuedInputs.push(...queuedInputs);
+  next.appliedModel = model;
+  next.appliedProvider = providerFromModelRef(model);
+  next.appliedCredentialId = credentialId;
+  logger.info("agent", "modelSwitchRecreated", { member: instance.agentName, roomId: instance.roomId, model, trigger });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: next.status });
+}
+
+async function applyModelSwitchToInstance(instance: AgentInstance, pending: PendingModelSwitch, trigger: string): Promise<void> {
+  const model = normalizeSwitchModelRef(pending.model);
+  const credentialId = pending.credentialId;
+  const exported = exportPiConfigForMember({
+    roomId: instance.roomId,
+    memberName: instance.agentName,
+    modelRef: model,
+    credentialId,
+  });
+  if (!exported) throw new Error(`No model credentials configured for ${model}`);
+
+  if (shouldRecreateForModelSwitch(instance, model, credentialId)) {
+    await recreateInstanceForModelSwitch(instance, model, credentialId, trigger);
+    return;
+  }
+
+  if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
+  await instance.handle.refreshModelRegistry?.();
+  await instance.handle.setModel(model);
+  if (instance.handle.runtimeParams) instance.handle.runtimeParams.model = model;
+  instance.appliedModel = model;
+  instance.appliedProvider = providerFromModelRef(model);
+  instance.appliedCredentialId = credentialId;
+  logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: instance.status });
+}
+
+function applyPendingModelSwitch(instance: AgentInstance, trigger: string): void {
+  const pending = instance.pendingModelSwitch;
+  if (!pending) return;
+  instance.pendingModelSwitch = undefined;
+  applyModelSwitchToInstance(instance, pending, trigger).catch((err) => {
+    logger.error("agent", "modelSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
+    postMessage(instance.roomId, "system", `Failed to switch model for "${instance.agentName}": ${err.message || String(err)}`);
+  });
 }
 
 // -- Format messages --
@@ -300,6 +382,9 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         queuedInputs: [],
         unsubscribe: () => {},
         eventBuffer: [],
+        appliedModel: normalizeSwitchModelRef(member.model || "claude-sonnet-4-6"),
+        appliedProvider: providerFromModelRef(member.model || "claude-sonnet-4-6"),
+        appliedCredentialId: member.credentialId,
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
@@ -309,6 +394,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
           flushQueuedInputs(instance, event.type);
         } else if (event.type === "agent_end") {
           updateDispatchState(instance, "idle", event.type);
+          applyPendingModelSwitch(instance, event.type);
         } else if (event.type === "runtime_exit" && event.unexpected) {
           updateDispatchState(instance, "idle", event.type);
           instance.queuedInputs = [];
@@ -421,6 +507,46 @@ export async function activateAll(roomId: string): Promise<void> {
     return activateAgent(roomId, agentName);
   });
   await Promise.allSettled(activations);
+}
+
+// -- Model switching --
+
+export async function switchMemberModel(roomId: string, memberName: string, model: string, credentialId?: string | null): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
+  const member = getMemberByName(memberName);
+  if (!member) throw new Error(`Member not found: ${memberName}`);
+  const normalizedModel = normalizeSwitchModelRef(model);
+  const available = listAvailableModels().some((m) => m.ref === normalizedModel);
+  if (!available) throw new Error(`Model is not available or credential is missing: ${normalizedModel}`);
+
+  saveMember({
+    ...member,
+    model: normalizedModel,
+    credentialId: credentialId || undefined,
+  });
+
+  const key = instanceKey(roomId, memberName);
+  const instance = instances.get(key);
+  if (!instance) return { applied: false, pending: false, active: false, model: normalizedModel };
+
+  const pending = { model: normalizedModel, credentialId: credentialId || undefined };
+  if (instance.status === "working" || instance.dispatchState !== "idle") {
+    instance.pendingModelSwitch = pending;
+    logger.info("agent", "modelSwitchQueued", { member: memberName, roomId, model: normalizedModel, status: instance.status, dispatchState: instance.dispatchState });
+    return { applied: false, pending: true, active: true, model: normalizedModel };
+  }
+
+  await applyModelSwitchToInstance(instance, pending, "switchMemberModel");
+  return { applied: true, pending: false, active: true, model: normalizedModel };
+}
+
+export async function switchMemberModelInActiveRooms(memberName: string, model: string, credentialId?: string | null): Promise<Array<{ roomId: string; applied: boolean; pending: boolean; active: boolean; model: string }>> {
+  const rooms = Array.from(instances.values())
+    .filter((instance) => instance.agentName === memberName)
+    .map((instance) => instance.roomId);
+  if (rooms.length === 0) return [];
+  const results = [];
+  for (const roomId of rooms) results.push({ roomId, ...(await switchMemberModel(roomId, memberName, model, credentialId)) });
+  return results;
 }
 
 // -- Status --
