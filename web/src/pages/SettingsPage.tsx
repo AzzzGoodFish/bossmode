@@ -483,7 +483,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
   const [authMode, setAuthMode] = useState<"api_key" | "oauth">("api_key");
   const [apiKey, setApiKey] = useState("");
   const [name, setName] = useState("");
-  const [enableClaudeCodeFingerprint, setEnableClaudeCodeFingerprint] = useState(false);
   const [busy, setBusy] = useState(false);
   const [oauthJob, setOauthJob] = useState<OAuthLoginJob | null>(null);
   const [oauthInput, setOauthInput] = useState("");
@@ -500,7 +499,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
     setAuthMode(selected.defaultAuthMode);
     setName(selected.displayName);
     setApiKey("");
-    setEnableClaudeCodeFingerprint(false);
     setOauthJob(null);
     setOauthInput("");
   }, [selected?.providerSlug]);
@@ -533,7 +531,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
         providerSlug: selected.providerSlug,
         apiKey: apiKey.trim(),
         name: name.trim() || selected.displayName,
-        requestProfile: selected.providerSlug === "anthropic" && enableClaudeCodeFingerprint ? "anthropic_proxy_claude_code" : "standard",
       });
       toast("Provider connected", "success");
       onSaved();
@@ -548,7 +545,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
       setOauthJob(await startOAuthConnection({
         providerId: selected.providerSlug,
         name: name.trim() || selected.displayName,
-        requestProfile: selected.providerSlug === "anthropic" && enableClaudeCodeFingerprint ? "anthropic_proxy_claude_code" : "standard",
       }));
     } catch (err: any) { toast(err.message, "error"); }
     finally { setBusy(false); }
@@ -628,16 +624,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
                     <Field label="Authentication"><select className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={authMode} onChange={(e) => setAuthMode(e.target.value as "api_key" | "oauth")}>{selected.authModes.map((mode) => <option key={mode} value={mode}>{mode === "api_key" ? "API Key" : "OAuth login"}</option>)}</select></Field>
                   )}
 
-                  {selected.providerSlug === "anthropic" && <div className="rounded border border-line-soft p-3 space-y-2">
-                    <label className="flex items-center justify-between gap-3 text-xs text-ink-2">
-                      <span>
-                        <span className="block font-medium text-ink-1">Enable Claude Code fingerprint</span>
-                        <span className="block mt-1 text-ink-3">Turn on when this credential requires Claude Code-compatible request headers and payload shaping. Leave off for regular Anthropic API keys.</span>
-                      </span>
-                      <input type="checkbox" checked={enableClaudeCodeFingerprint} onChange={(e) => setEnableClaudeCodeFingerprint(e.target.checked)} />
-                    </label>
-                  </div>}
-
                   {authMode === "api_key" ? (
                     <div className="space-y-3">
                       <Field label="API key"><input type="password" className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste provider API key" /></Field>
@@ -673,10 +659,6 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
 
 function Badge({ tone, children }: { tone: "success" | "neutral"; children: React.ReactNode }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded ${tone === "success" ? "bg-onair-dim text-onair" : "bg-surface-2 text-ink-3"}`}>{children}</span>;
-}
-
-function usesClaudeCodeFingerprint(profile: Pick<ModelCredentialProfileInput, "requestProfile">): boolean {
-  return profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code";
 }
 
 function parseIntegerInput(value: string): number | undefined {
@@ -804,7 +786,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const save = async () => {
     setSaving(true);
     try {
-      const payload = { ...form, requestProfile: form.protocol === "anthropic-messages" && usesClaudeCodeFingerprint(form) ? "anthropic_proxy_claude_code" as const : "standard" as const };
+      const payload = { ...form, requestProfile: "standard" as const };
       if (profile) await updateModelCredentialProfile(profile.id, payload);
       else await createModelCredentialProfile(payload);
       onSaved();
@@ -819,7 +801,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
           <div className="space-y-3">
             <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="OpenRouter main" /></Field>
             <Field label="Provider slug"><input className={inputCls} value={form.providerSlug} onChange={(e) => setForm({ ...form, providerSlug: e.target.value })} placeholder="openrouter" /></Field>
-            <Field label="Protocol"><select className={inputCls} value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value as ModelProtocol, requestProfile: e.target.value === "anthropic-messages" ? form.requestProfile : "standard" })}>{PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+            <Field label="Protocol"><select className={inputCls} value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value as ModelProtocol })}>{PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
             <Field label="Base URL"><input className={inputCls} value={form.baseUrl || ""} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" /></Field>
             <Field label="Auth type"><select className={inputCls} value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value as ModelAuthType })}>{AUTH_TYPES.map((a) => <option key={a} value={a}>{a}</option>)}</select></Field>
             {form.authType === "api_key" && <Field label="API key"><input type="password" className={inputCls} value={form.apiKey || ""} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={profile?.hasSecret ? "Leave blank to keep existing key" : "sk-..."} /></Field>}
@@ -830,15 +812,6 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
               <p className="text-xs text-ink-3">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
             <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-3">Secrets are stored locally in plaintext with 0600 file permissions. Use a scoped key when possible.</div>
-            {form.protocol === "anthropic-messages" && <div className="rounded border border-line-soft p-3 space-y-2">
-              <label className="flex items-center justify-between gap-3 text-xs text-ink-2">
-                <span>
-                  <span className="block font-medium text-ink-1">Enable Claude Code fingerprint</span>
-                  <span className="block mt-1 text-ink-3">Turn on for Claude Code/OAuth-style keys or proxies that require Claude Code-compatible headers and payload shaping. Leave off for standard Anthropic API keys.</span>
-                </span>
-                <input type="checkbox" checked={usesClaudeCodeFingerprint(form)} onChange={(e) => setForm({ ...form, requestProfile: e.target.checked ? "anthropic_proxy_claude_code" : "standard" })} />
-              </label>
-            </div>}
           </div>
           <div className="space-y-3">
             {builtinProvider ? (

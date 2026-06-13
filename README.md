@@ -97,7 +97,7 @@ Open your browser at `http://localhost:8080` and sign in. On first run, `bossmod
 - Configure auto-summarization threshold in Settings
 
 ### ⚙️ Settings
-- **Model Credentials**: connect official providers, enable/disable Connect Provider catalog models, override Connect Provider context windows, add custom endpoints, edit custom model context/output limits, and choose Claude Code fingerprint compatibility for Anthropic-style credentials
+- **Model Credentials**: connect official providers, enable/disable Connect Provider catalog models, override Connect Provider context windows, add custom endpoints, and edit custom model context/output limits
 - **Session Resume**: toggle whether agents resume prior pi SDK sessions
 - **Auto-Summary**: enable automatic summarization with configurable threshold and keep count
 
@@ -217,7 +217,7 @@ Optional environment variables:
 
 Host and port can also be set via `--host` / `--port` flags on `bossmode on`.
 
-Model credentials are managed in Settings. Official providers use the bundled pi SDK catalog; custom endpoints can edit per-model context window and max output token limits, while blank API key fields preserve existing saved secrets on edit. Custom Anthropic-compatible endpoints can enable Claude Code fingerprint compatibility when a credential or proxy requires Claude Code-style request headers/payload shaping. Bossmode preserves SDK model metadata such as context windows, output limits, reasoning capability, and provider compatibility flags for models like Claude Fable 5. When a member switches across credentials or providers, Bossmode recreates the SDK handle with session resume so fresh auth and generated provider extensions are loaded without losing conversation context.
+Model credentials are managed in Settings. Official providers use the bundled pi SDK catalog; custom endpoints can edit per-model context window and max output token limits, while blank API key fields preserve existing saved secrets on edit. Bossmode preserves SDK model metadata such as context windows, output limits, reasoning capability, and provider compatibility flags for models like Claude Fable 5. When a member switches across credentials or providers, Bossmode recreates the SDK handle with session resume so fresh auth is loaded without losing conversation context.
 
 ---
 

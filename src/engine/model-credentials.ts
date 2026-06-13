@@ -41,7 +41,7 @@ export const MODEL_PROTOCOLS: ModelProtocol[] = [
 ];
 
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
-const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "anthropic_claude_code_oauth", "anthropic_proxy_claude_code", "openai_codex_subscription"];
+const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "openai_codex_subscription"];
 const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom_endpoint", "trusted_adapter"];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together"]);
@@ -109,10 +109,20 @@ function readStore(): ModelCredentialStore {
   const path = storePath();
   if (!existsSync(path)) return { profiles: [], migrations: [] };
   const parsed = JSON.parse(readFileSync(path, "utf-8")) as { profiles?: ModelCredentialProfile[]; migrations?: string[] };
+  const rawProfiles = Array.isArray(parsed.profiles) ? parsed.profiles : [];
   return {
-    profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
+    profiles: rawProfiles.map(normalizeStoredRequestProfile),
     migrations: Array.isArray(parsed.migrations) ? parsed.migrations.filter((m): m is string => typeof m === "string") : [],
   };
+}
+
+// Legacy "Claude Code fingerprint" request profiles were removed; fold them back to standard.
+function normalizeStoredRequestProfile(profile: ModelCredentialProfile): ModelCredentialProfile {
+  const legacy = profile.requestProfile as string;
+  if (legacy === "anthropic_claude_code_oauth" || legacy === "anthropic_proxy_claude_code") {
+    return { ...profile, requestProfile: "standard" };
+  }
+  return profile;
 }
 
 function writeStore(profiles: ModelCredentialProfile[], migrations?: string[]): void {
@@ -403,9 +413,6 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
   }
 
   if (!MODEL_PROTOCOLS.includes(input.protocol)) throw new Error("Unsupported protocol");
-  if ((requestProfile === "anthropic_claude_code_oauth" || requestProfile === "anthropic_proxy_claude_code") && input.protocol !== "anthropic-messages") {
-    throw new Error("Anthropic Claude Code compatibility requires anthropic-messages protocol");
-  }
   validateBaseUrl(input.baseUrl, input.authType);
   if (input.authType === "api_key" && !input.apiKey && !existing?.apiKey) throw new Error("apiKey is required");
   if (input.authType === "oauth") {
@@ -489,7 +496,7 @@ export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): Publi
     baseUrl: baseUrlForBuiltinProvider(providerSlug, input.baseUrlOverride),
     authType: "api_key",
     apiKey: input.apiKey,
-    requestProfile: providerSlug === "anthropic" && input.requestProfile === "anthropic_proxy_claude_code" ? "anthropic_proxy_claude_code" : "standard",
+    requestProfile: "standard",
     enabled: true,
     isDefault: input.isDefault ?? existing?.isDefault ?? true,
     models: modelsForBuiltinProvider(providerSlug, input.baseUrlOverride),
@@ -572,7 +579,7 @@ function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { pro
       baseUrl: baseUrlForBuiltinProvider(providerId),
       authType: "oauth",
       oauthProviderId: providerId,
-      requestProfile: providerId === "anthropic" && input.requestProfile === "anthropic_proxy_claude_code" ? "anthropic_proxy_claude_code" : "standard",
+      requestProfile: "standard",
       enabled: existing?.enabled ?? true,
       isDefault: existing?.isDefault ?? true,
       models: modelsForBuiltinProvider(providerId),
@@ -1246,13 +1253,6 @@ export function writePiConfigForProfiles(profiles: ModelCredentialProfile[], tar
     }
     const auth = authEntry(profile);
     if (auth) authData[profile.providerSlug] = auth;
-    if (requiresInternalExtension(profile)) {
-      const extDir = join(targetDir, "extensions");
-      mkdirSync(extDir, { recursive: true });
-      const extPath = join(extDir, `${profile.providerSlug}.ts`);
-      writeFileSync(extPath, extensionSource(profile), "utf-8");
-      extensionPaths.push(extPath);
-    }
   }
   writePrivateJson(join(targetDir, "models.json"), { providers });
   writePrivateJson(join(targetDir, "auth.json"), authData);
@@ -1318,197 +1318,8 @@ function authEntry(profile: ModelCredentialProfile): unknown | undefined {
   return undefined;
 }
 
-function requiresInternalExtension(profile: ModelCredentialProfile): boolean {
-  return profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code";
-}
-
 function apiForProfile(profile: ModelCredentialProfile): string {
-  if (profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code") return "anthropic-proxy-claude-code";
   return profile.protocol;
-}
-
-function extensionSource(profile: ModelCredentialProfile): string {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(profile, profile.baseUrl || "");
-  if (profile.requestProfile === "anthropic_claude_code_oauth" || profile.requestProfile === "anthropic_proxy_claude_code") return anthropicProxyClaudeCodeExtensionSource(profile, normalizedBaseUrl);
-  throw new Error(`Unsupported internal extension request profile: ${profile.requestProfile}`);
-}
-
-function anthropicProxyClaudeCodeExtensionSource(profile: ModelCredentialProfile, normalizedBaseUrl: string): string {
-  return `import { streamSimpleAnthropic } from "@earendil-works/pi-ai";
-import { anthropicOAuthProvider } from "@earendil-works/pi-ai/oauth";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { randomBytes, randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-
-const PROVIDER = ${JSON.stringify(profile.providerSlug)};
-const PROVIDER_API = "anthropic-proxy-claude-code";
-const USE_ANTHROPIC_OAUTH_ALIAS = ${JSON.stringify(profile.authType === "oauth" && profile.oauthProviderId === "anthropic")};
-const { id: _anthropicOAuthId, ...ANTHROPIC_OAUTH_ALIAS } = anthropicOAuthProvider;
-const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.122 (external, sdk-cli)";
-const CLAUDE_CODE_BETA = [
-  "claude-code-20250219",
-  "context-1m-2025-08-07",
-  "interleaved-thinking-2025-05-14",
-  "context-management-2025-06-27",
-  "prompt-caching-scope-2026-01-05",
-  "advisor-tool-2026-03-01",
-  "advanced-tool-use-2025-11-20",
-  "effort-2025-11-24",
-].join(",");
-const CLAUDE_CODE_BILLING_HEADER =
-  "x-anthropic-billing-header: cc_version=2.1.122.d65; cc_entrypoint=sdk-cli; cch=6b420;";
-const DEVICE_ID_PATH = join(homedir(), ".pi", "agent", "anthropic-proxy-device-id");
-
-let fallbackSessionId;
-let cachedDeviceId;
-
-function toClaudeCodeOAuthKey(apiKey) {
-  return apiKey.startsWith("sk-ant-oat-") ? apiKey : "sk-ant-oat-" + apiKey;
-}
-
-function getSessionId(options) {
-  fallbackSessionId ||= randomUUID();
-  return options?.sessionId || fallbackSessionId;
-}
-
-function findClaudeDeviceId() {
-  const roots = [join(homedir(), ".claude", "telemetry"), join(homedir(), ".claude", "statsig")];
-  for (const root of roots) {
-    if (!existsSync(root)) continue;
-    for (const file of readdirSync(root).slice(-200)) {
-      const path = join(root, file);
-      try {
-        if (!statSync(path).isFile()) continue;
-        const text = readFileSync(path, "utf8");
-        const match = text.match(/"(?:device_id|userID)"\\s*:\\s*"([a-f0-9]{64})"/i);
-        if (match) return match[1].toLowerCase();
-      } catch {
-        // Ignore unreadable telemetry files.
-      }
-    }
-  }
-  return undefined;
-}
-
-function getDeviceId() {
-  if (cachedDeviceId) return cachedDeviceId;
-  try {
-    const claudeDeviceId = findClaudeDeviceId();
-    if (claudeDeviceId) {
-      cachedDeviceId = claudeDeviceId;
-      mkdirSync(dirname(DEVICE_ID_PATH), { recursive: true });
-      writeFileSync(DEVICE_ID_PATH, cachedDeviceId + "\\n", { mode: 0o600 });
-      return cachedDeviceId;
-    }
-    if (existsSync(DEVICE_ID_PATH)) {
-      const value = readFileSync(DEVICE_ID_PATH, "utf8").trim();
-      if (/^[a-f0-9]{64}$/i.test(value)) {
-        cachedDeviceId = value.toLowerCase();
-        return cachedDeviceId;
-      }
-    }
-    cachedDeviceId = randomBytes(32).toString("hex");
-    mkdirSync(dirname(DEVICE_ID_PATH), { recursive: true });
-    writeFileSync(DEVICE_ID_PATH, cachedDeviceId + "\\n", { mode: 0o600 });
-    return cachedDeviceId;
-  } catch {
-    cachedDeviceId ||= randomBytes(32).toString("hex");
-    return cachedDeviceId;
-  }
-}
-
-function patchClaudeCodePayload(payload, sessionId) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
-
-  const body = payload;
-  body.metadata = {
-    ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
-    user_id: JSON.stringify({
-      device_id: getDeviceId(),
-      account_uuid: "",
-      session_id: sessionId,
-    }),
-  };
-
-  const billingBlock = { type: "text", text: CLAUDE_CODE_BILLING_HEADER };
-  const existingSystem = Array.isArray(body.system)
-    ? body.system
-    : typeof body.system === "string"
-      ? [{ type: "text", text: body.system }]
-      : [];
-  const systemText = existingSystem
-    .filter(
-      (block) =>
-        block?.type === "text" &&
-        typeof block.text === "string" &&
-        !block.text.startsWith("x-anthropic-billing-header:"),
-    )
-    .map((block) => block.text.trim())
-    .filter(Boolean)
-    .join("\\n\\n");
-
-  body.system = [billingBlock];
-  if (systemText && Array.isArray(body.messages) && body.messages.length > 0) {
-    const firstUser = body.messages.find((message) => message?.role === "user") ?? body.messages[0];
-    const reminderText = "<pi-system-prompt>\\n" + systemText + "\\n</pi-system-prompt>";
-    if (Array.isArray(firstUser.content)) {
-      const alreadyInserted = firstUser.content.some(
-        (block) => block?.type === "text" && typeof block.text === "string" && block.text.startsWith("<pi-system-prompt>"),
-      );
-      if (!alreadyInserted) firstUser.content.unshift({ type: "text", text: reminderText });
-    } else if (typeof firstUser.content === "string" && !firstUser.content.startsWith("<pi-system-prompt>")) {
-      firstUser.content = reminderText + "\\n\\n" + firstUser.content;
-    }
-  }
-
-  return body;
-}
-
-function streamClaudeCodeAnthropicProxy(model, context, options) {
-  const apiKey = options?.apiKey;
-  if (!apiKey) {
-    throw new Error("No API key for provider: " + model.provider);
-  }
-
-  const sessionId = getSessionId(options);
-  const { Authorization: _authorization, authorization: _authorizationLower, ...headers } = options?.headers ?? {};
-  const originalOnPayload = options?.onPayload;
-
-  return streamSimpleAnthropic(
-    {
-      ...model,
-      api: "anthropic-messages",
-      provider: PROVIDER,
-    },
-    context,
-    {
-      ...options,
-      apiKey: toClaudeCodeOAuthKey(apiKey),
-      headers: {
-        ...headers,
-        Authorization: "Bearer " + apiKey,
-        "User-Agent": CLAUDE_CODE_USER_AGENT,
-        "X-Claude-Code-Session-Id": sessionId,
-        "anthropic-beta": CLAUDE_CODE_BETA,
-      },
-      onPayload: async (payload, patchedModel) => {
-        const patched = patchClaudeCodePayload(payload, sessionId);
-        const nextPayload = await originalOnPayload?.(patched, patchedModel);
-        return patchClaudeCodePayload(nextPayload ?? patched, sessionId);
-      },
-    },
-  );
-}
-
-export default function (pi) {
-  pi.registerProvider(PROVIDER, {
-    api: PROVIDER_API,
-    ...(USE_ANTHROPIC_OAUTH_ALIAS ? { oauth: ANTHROPIC_OAUTH_ALIAS } : {}),
-    streamSimple: streamClaudeCodeAnthropicProxy,
-  });
-}
-`;
 }
 
 export interface PiCredentialExport {
@@ -1560,14 +1371,5 @@ export function exportPiConfigForMember(args: {
   const auth = authEntry(runtimeProfile);
   writePrivateJson(authPath, auth ? { [runtimeProfile.providerSlug]: auth } : {});
 
-  const extensionPaths: string[] = [];
-  if (requiresInternalExtension(runtimeProfile)) {
-    const extDir = join(agentDir, "extensions");
-    mkdirSync(extDir, { recursive: true });
-    const extPath = join(extDir, `${runtimeProfile.providerSlug}.ts`);
-    writeFileSync(extPath, extensionSource(runtimeProfile), "utf-8");
-    extensionPaths.push(extPath);
-  }
-
-  return { agentDir, extensionPaths, profile: sanitizeProfile(runtimeProfile) };
+  return { agentDir, extensionPaths: [], profile: sanitizeProfile(runtimeProfile) };
 }

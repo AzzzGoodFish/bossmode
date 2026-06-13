@@ -11,7 +11,7 @@ async function login(port: number): Promise<string> {
 
 describe("model credential profile API routes", () => {
 
-  it("runs native Anthropic OAuth connection with explicit enhanced Claude Code fingerprint", async () => {
+  it("runs native Anthropic OAuth connection and normalizes legacy request profile to standard", async () => {
     const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"], compat: { forceAdaptiveThinking: true }, thinkingLevelMap: { xhigh: "xhigh" } },
@@ -29,7 +29,7 @@ describe("model credential profile API routes", () => {
 
     const start = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/oauth/start", {
       token,
-      body: { providerId: "anthropic", name: "Anthropic Enhanced", requestProfile: "anthropic_proxy_claude_code" },
+      body: { providerId: "anthropic", name: "Anthropic Enhanced" },
     });
     expect(start.status).toBe(200);
     const job = JSON.parse(start.body);
@@ -45,7 +45,7 @@ describe("model credential profile API routes", () => {
       providerSlug: "anthropic",
       authType: "oauth",
       oauthProviderId: "anthropic",
-      requestProfile: "anthropic_proxy_claude_code",
+      requestProfile: "standard",
       hasSecret: true,
     }));
     expect(saved.modelRefs).toEqual(["anthropic/claude-fable-5"]);

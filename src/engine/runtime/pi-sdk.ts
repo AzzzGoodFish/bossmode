@@ -139,6 +139,12 @@ class PiSdkAgentHandle implements AgentHandle {
 
   refreshModelRegistry(): void {
     this.modelRegistry.refresh();
+    // Reload auth.json so edited credentials (e.g. a rotated API key on the same
+    // profile) take effect on the fast model-switch path. ModelRegistry.refresh()
+    // only reloads models.json; the API key is resolved at request time from the
+    // in-memory AuthStorage, which otherwise keeps the stale key until recreate.
+    try { this.modelRegistry.authStorage?.reload?.(); }
+    catch (err) { logger.warn("runtime:pi-sdk", "authStorage reload failed", { error: String(err) }); }
   }
 
   async setModel(modelRef: string): Promise<void> {

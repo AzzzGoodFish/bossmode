@@ -291,96 +291,6 @@ describe("model credential profiles", () => {
       .toThrow("does not match model provider");
   });
 
-  it("generates an internal extension for anthropic Claude Code/OAuth compatible profiles without embedding the key", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const saved = mod.saveModelCredentialProfile({
-      ...baseProfile,
-      providerSlug: "corp-claude",
-      protocol: "anthropic-messages",
-      requestProfile: "anthropic_claude_code_oauth",
-      baseUrl: "https://proxy.example.com",
-      models: [{ id: "claude-sonnet", contextWindow: 400000 }],
-    });
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "corp-claude/claude-sonnet", credentialId: saved.id });
-
-    expect(exported?.extensionPaths).toHaveLength(1);
-    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
-    expect(ext).toContain("streamSimpleAnthropic");
-    expect(ext).toContain("anthropic-proxy-claude-code");
-    expect(ext).toContain("patchClaudeCodePayload");
-    expect(ext).not.toContain("sk-secret");
-  });
-
-  it("registers an Anthropic OAuth alias for enhanced Claude Code fingerprint adapter profiles", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const saved = mod.saveModelCredentialProfile({
-      ...baseProfile,
-      providerSlug: "anthropic-cc",
-      protocol: "anthropic-messages",
-      requestProfile: "anthropic_proxy_claude_code",
-      baseUrl: "https://api.anthropic.com",
-      authType: "oauth",
-      oauthProviderId: "anthropic",
-      oauthCredentials: { access: "oauth-access", refresh: "oauth-refresh", expires: 999999 },
-      models: [{ id: "claude-fable-5", contextWindow: 1000000 }],
-    });
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-cc/claude-fable-5", credentialId: saved.id });
-    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
-    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
-    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
-
-    expect(authJson["anthropic-cc"]).toMatchObject({ type: "oauth", access: "oauth-access" });
-    expect(modelsJson.providers["anthropic-cc"].api).toBe("anthropic-proxy-claude-code");
-    expect(ext).toContain("anthropicOAuthProvider");
-    expect(ext).toContain("USE_ANTHROPIC_OAUTH_ALIAS = true");
-    expect(ext).toContain("oauth: ANTHROPIC_OAUTH_ALIAS");
-    expect(ext).not.toContain("oauth-access");
-    expect(ext).not.toContain("oauth-refresh");
-  });
-
-  it("generates an internal anthropic proxy Claude Code adapter with payload/header rewrites", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const saved = mod.saveModelCredentialProfile({
-      ...baseProfile,
-      providerSlug: "anthropic-proxy",
-      protocol: "anthropic-messages",
-      requestProfile: "anthropic_proxy_claude_code",
-      baseUrl: "https://console.cloudrouter.online",
-      models: [{ id: "claude-sonnet-4-6", contextWindow: 200000 }],
-    });
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic-proxy/claude-sonnet-4-6", credentialId: saved.id });
-
-    expect(exported?.extensionPaths).toHaveLength(1);
-    const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
-    const models = JSON.parse(modelsJson);
-    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
-    expect(modelsJson).toContain("anthropic-proxy-claude-code");
-    expect(models.providers["anthropic-proxy"].models[0].input).toEqual(["text", "image"]);
-    expect(models.providers["anthropic-proxy"].models[0].cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-    expect(ext).toContain("claude-cli/2.1.122 (external, sdk-cli)");
-    expect(ext).toContain("context-1m-2025-08-07");
-    expect(ext).toContain("effort-2025-11-24");
-    expect(ext).toContain("x-anthropic-billing-header: cc_version=2.1.122.d65; cc_entrypoint=sdk-cli; cch=6b420;");
-    expect(ext).toContain("X-Claude-Code-Session-Id");
-    expect(ext).toContain("anthropic-beta");
-    expect(ext).toContain("onPayload: async");
-    expect(ext).toContain("patchClaudeCodePayload");
-    expect(ext).toContain("<pi-system-prompt>");
-    expect(ext).toContain("device_id: getDeviceId()");
-    expect(ext).toContain("account_uuid: \"\"");
-    expect(ext).toContain("Authorization: _authorization");
-    expect(ext).toContain("authorization: _authorizationLower");
-    expect(ext).not.toContain("claude-cli/1.0.0");
-    expect(ext).not.toContain("device_id: \"bossmode\"");
-    expect(ext).not.toContain("rewriteContext");
-    expect(ext).not.toContain("models:");
-    expect(ext).not.toContain("__bossmode_managed_key__");
-    expect(ext).not.toContain("sk-secret");
-  });
-
   it("preserves SDK adaptive-thinking metadata for anthropic-proxy Claude Fable 5 export", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     mod.setPiCatalogModelsForTests([
@@ -402,7 +312,7 @@ describe("model credential profiles", () => {
       ...baseProfile,
       providerSlug: "anthropic-proxy",
       protocol: "anthropic-messages",
-      requestProfile: "anthropic_proxy_claude_code",
+      requestProfile: "standard",
       baseUrl: "https://console.cloudrouter.online",
       models: [{ id: "claude-fable-5" }],
     });
@@ -589,23 +499,6 @@ describe("model credential profiles", () => {
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-a", credentialId: profile.id });
     expect(JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8")).providers).toEqual({});
     mod.setPiCatalogModelsForTests(null);
-  });
-
-  it("supports enhanced Claude Code fingerprint for built-in Anthropic API-key-like tokens", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-oat-test-token", requestProfile: "anthropic_proxy_claude_code" });
-    expect(profile.requestProfile).toBe("anthropic_proxy_claude_code");
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-fable-5", credentialId: profile.id });
-    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
-    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
-    const ext = readFileSync(exported!.extensionPaths[0], "utf-8");
-
-    expect(modelsJson.providers.anthropic.api).toBe("anthropic-proxy-claude-code");
-    expect(authJson.anthropic).toMatchObject({ type: "api_key", key: "sk-ant-oat-test-token" });
-    expect(ext).toContain("patchClaudeCodePayload");
-    expect(ext).toContain("USE_ANTHROPIC_OAUTH_ALIAS = false");
-    expect(ext).not.toContain("sk-ant-oat-test-token");
   });
 
   it("persists OAuth refreshes from runtime auth storage back to the Bossmode profile", async () => {

@@ -8,6 +8,7 @@ let exportedConfig: any = null;
 const authCreate = vi.fn();
 const modelRegistryCreate = vi.fn();
 const modelRegistryRefresh = vi.fn();
+const authReload = vi.fn();
 const createAgentSession = vi.fn();
 const resourceLoaderCtor = vi.fn();
 const sessionManagerCreate = vi.fn();
@@ -46,7 +47,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     ModelRegistry: {
       create: (...args: any[]) => {
         modelRegistryCreate(...args);
-        return { find: () => ({ provider: "anthropic", id: "claude-sonnet-4-6" }), refresh: modelRegistryRefresh };
+        return { find: () => ({ provider: "anthropic", id: "claude-sonnet-4-6" }), refresh: modelRegistryRefresh, authStorage: { reload: authReload } };
       },
     },
     SettingsManager: {
@@ -232,6 +233,7 @@ describe("PiSdkRuntime", () => {
     await handle.setModel?.("anthropic/claude-opus-4-6");
 
     expect(modelRegistryRefresh).toHaveBeenCalled();
+    expect(authReload).toHaveBeenCalled();
     expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));
     expect(handle.runtimeParams?.model).toBe("anthropic/claude-opus-4-6");
   });

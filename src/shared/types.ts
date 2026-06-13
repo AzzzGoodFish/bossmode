@@ -69,7 +69,7 @@ export type ModelProtocol =
 
 export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
 export type ModelCredentialProfileKind = "builtin_provider" | "custom_endpoint" | "trusted_adapter";
-export type ModelRequestProfile = "standard" | "anthropic_claude_code_oauth" | "anthropic_proxy_claude_code" | "openai_codex_subscription";
+export type ModelRequestProfile = "standard" | "openai_codex_subscription";
 
 export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
 
