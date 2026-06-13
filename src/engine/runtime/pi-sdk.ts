@@ -42,22 +42,18 @@ function getSessionContextModel(sessionManager: SessionManager): { provider: str
   }
 }
 
-function getSessionLeafAssistantError(sessionManager: SessionManager): string | null {
+function recoverableErrorLeaf(sessionManager: SessionManager): { id: string; parentId: string | null; errorMessage: string } | null {
   try {
     const leaf = (sessionManager as any).getLeafEntry?.() ?? (sessionManager as any).getBranch?.().slice(-1)[0];
-    const message = leaf?.type === "message" ? leaf.message : undefined;
+    if (!leaf || leaf.type !== "message") return null;
+    const message = leaf.message;
     if (message?.role === "assistant" && message.stopReason === "error") {
-      return typeof message.errorMessage === "string" && message.errorMessage.trim() ? message.errorMessage : "provider error";
+      const errorMessage = typeof message.errorMessage === "string" && message.errorMessage.trim() ? message.errorMessage : "provider error";
+      return { id: leaf.id, parentId: leaf.parentId ?? null, errorMessage };
     }
   } catch {
     return null;
   }
-  return null;
-}
-
-function freshSessionReason(sessionManager: SessionManager): { reason: string; previous?: string } | null {
-  const leafError = getSessionLeafAssistantError(sessionManager);
-  if (leafError) return { reason: "previous assistant turn ended with provider error", previous: leafError };
   return null;
 }
 
@@ -243,27 +239,34 @@ export class PiSdkRuntime implements AgentRuntime {
     try {
       if (opts.resumeSession?.sessionFile) {
         const resumed = SessionManager.open(opts.resumeSession.sessionFile, sessionDir, opts.cwd);
-        const freshReason = freshSessionReason(resumed);
-        if (freshReason) {
-          logger.warn("runtime:pi-sdk", "resume session skipped, starting fresh", {
-            agent: opts.member.name,
-            reason: freshReason.reason,
-            previous: freshReason.previous,
-            configured: resolvedModel,
-          });
-          sessionManager = SessionManager.create(opts.cwd, sessionDir);
-        } else {
-          const previous = sessionModelDiffers(resumed, provider, modelId);
-          if (previous) {
-            appendConfiguredModelChange = true;
-            logger.info("runtime:pi-sdk", "resuming session with configured model switch", {
+        const errorLeaf = recoverableErrorLeaf(resumed);
+        if (errorLeaf) {
+          // The last assistant turn ended with a provider error (rate limit,
+          // network blip, stale credential, etc.). Don't discard the whole
+          // conversation — just roll the leaf back past the failed turn so the
+          // prior context is preserved on restart.
+          try {
+            if (errorLeaf.parentId) (resumed as any).branch(errorLeaf.parentId);
+            else (resumed as any).resetLeaf?.();
+            logger.info("runtime:pi-sdk", "resume session recovered past failed turn", {
               agent: opts.member.name,
-              previous: `${previous.provider}/${previous.modelId}`,
+              previous: errorLeaf.errorMessage,
               configured: resolvedModel,
             });
+          } catch (branchErr) {
+            logger.warn("runtime:pi-sdk", "failed to roll back error turn, resuming as-is", { agent: opts.member.name, error: String(branchErr) });
           }
-          sessionManager = resumed;
         }
+        const previous = sessionModelDiffers(resumed, provider, modelId);
+        if (previous) {
+          appendConfiguredModelChange = true;
+          logger.info("runtime:pi-sdk", "resuming session with configured model switch", {
+            agent: opts.member.name,
+            previous: `${previous.provider}/${previous.modelId}`,
+            configured: resolvedModel,
+          });
+        }
+        sessionManager = resumed;
       } else {
         sessionManager = SessionManager.create(opts.cwd, sessionDir);
       }

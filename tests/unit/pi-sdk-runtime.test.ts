@@ -16,6 +16,8 @@ const sessionManagerOpen = vi.fn();
 const settingsManagerCreate = vi.fn();
 let openedSessionModel: { provider: string; modelId: string } | null = null;
 let openedLeafEntry: any = null;
+const sessionBranch = vi.fn();
+const sessionResetLeaf = vi.fn();
 
 vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -68,6 +70,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
           args,
           buildSessionContext: () => ({ model: openedSessionModel }),
           getLeafEntry: () => openedLeafEntry,
+          branch: sessionBranch,
+          resetLeaf: sessionResetLeaf,
         };
       },
     },
@@ -174,11 +178,13 @@ describe("PiSdkRuntime", () => {
     expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));
   });
 
-  it("starts fresh instead of resuming when saved session ended with assistant provider error", async () => {
+  it("rolls back the failed turn and resumes instead of discarding history when saved session ended with assistant provider error", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
     openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
     openedLeafEntry = {
       type: "message",
+      id: "leaf-err",
+      parentId: "turn-parent",
       message: { role: "assistant", stopReason: "error", errorMessage: "An unknown error occurred" },
     };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -188,8 +194,30 @@ describe("PiSdkRuntime", () => {
     }));
 
     expect(sessionManagerOpen).toHaveBeenCalledWith(join(dir, "old-session.jsonl"), expect.any(String), dir);
-    expect(sessionManagerCreate).toHaveBeenCalledWith(dir, expect.any(String));
-    expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("created-session");
+    expect(sessionBranch).toHaveBeenCalledWith("turn-parent");
+    expect(sessionManagerCreate).not.toHaveBeenCalled();
+    expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("opened-session");
+  });
+
+  it("resets the leaf and resumes when the first turn itself ended with a provider error", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
+    openedLeafEntry = {
+      type: "message",
+      id: "leaf-err",
+      parentId: null,
+      message: { role: "assistant", stopReason: "error", errorMessage: "boom" },
+    };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts({
+      resumeSession: { sessionId: "old-session", sessionFile: join(dir, "old-session.jsonl") },
+    }));
+
+    expect(sessionResetLeaf).toHaveBeenCalled();
+    expect(sessionBranch).not.toHaveBeenCalled();
+    expect(sessionManagerCreate).not.toHaveBeenCalled();
+    expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("opened-session");
   });
 
   it("resumes saved session when saved model matches configured model", async () => {
