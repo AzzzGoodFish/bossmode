@@ -4,6 +4,22 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.13.4] — 2026-06-13
+
+### Fixed
+- Editing a model credential and hot-switching to a model on the same provider/profile now reloads `auth.json`, so a rotated API key takes effect immediately instead of failing requests with the stale key.
+- Restarting an agent whose last assistant turn ended with a provider error now preserves the prior conversation: the failed turn is rolled back (`branch`/`resetLeaf`) and the session is resumed, instead of discarding all context and starting fresh.
+
+### Removed
+- Claude Code fingerprint request profiles (`anthropic_claude_code_oauth`, `anthropic_proxy_claude_code`) and the generated proxy extension. Legacy stored profiles are normalized to `standard` on read.
+
+### Tests
+- `npx tsc --noEmit`
+- `npm run build`
+- `npm test` (608 passed)
+
+---
+
 ## [0.12.21] — 2026-06-10
 
 ### Added
