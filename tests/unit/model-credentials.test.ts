@@ -362,6 +362,60 @@ describe("model credential profiles", () => {
     expect(mod.getModelCredentialProfile(saved.id)!.oauthCredentials).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
   });
 
+  it("connects built-in provider API key with optional API URL override", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "  http://127.0.0.1:3456  " });
+
+    expect(profile.baseUrl).toBe("http://127.0.0.1:3456");
+    expect(profile.catalogModels?.map((m) => m.id)).toContain("claude-fable-5");
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic/claude-fable-5", credentialId: profile.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers.anthropic.baseUrl).toBe("http://127.0.0.1:3456");
+    expect(modelsJson.providers.anthropic.models[0].id).toBe("claude-fable-5");
+  });
+
+  it("clears built-in provider API URL override when omitted and rejects invalid override URLs", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+
+    mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "http://127.0.0.1:3456" });
+    const reset = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-2", baseUrlOverride: "   " });
+
+    expect(reset.baseUrl).toBe("https://api.anthropic.com");
+    expect(() => mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "ftp://bad.example" })).toThrow("baseUrl must be an http:// or https:// URL");
+  });
+
+  it("clears built-in provider API URL override on profile edit when baseUrl is blank", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
+    ]);
+
+    const saved = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "http://127.0.0.1:3456" });
+    const edited = mod.saveModelCredentialProfile({
+      id: saved.id,
+      profileKind: "builtin_provider",
+      name: saved.name,
+      providerSlug: saved.providerSlug,
+      protocol: saved.protocol,
+      baseUrl: "   ",
+      authType: "api_key",
+      enabled: true,
+      isDefault: true,
+      models: saved.models,
+    });
+
+    expect(edited.baseUrl).toBe("https://api.anthropic.com");
+    const stored = mod.getModelCredentialProfile(saved.id)!;
+    expect(stored.baseUrl).toBe("https://api.anthropic.com");
+  });
+
   it("lists built-in provider catalog and connects API key without baseUrl/protocol/models input", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     mod.setPiCatalogModelsForTests([

@@ -159,6 +159,13 @@ function validateBaseUrl(baseUrl: string | undefined, authType: ModelAuthType): 
   }
 }
 
+function normalizeOptionalBaseUrl(baseUrl: string | undefined): string | undefined {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) return undefined;
+  validateBaseUrl(trimmed, "api_key");
+  return trimmed;
+}
+
 function validateModel(model: ModelDefinitionConfig): ModelDefinitionConfig {
   if (!model.id?.trim()) throw new Error("model id is required");
   if (model.contextWindow !== undefined && (!Number.isInteger(model.contextWindow) || model.contextWindow <= 0)) throw new Error("contextWindow must be a positive integer");
@@ -389,7 +396,8 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
       const credentials = input.oauthCredentials ?? existing?.oauthCredentials;
       if (!options.allowIncompleteOAuth && !hasCompleteOAuthCredentials(credentials)) throw new Error("OAuth credential is incomplete; complete login before saving");
     }
-    const catalogModels = modelsForBuiltinProvider(input.providerSlug, input.baseUrl);
+    const baseUrlOverride = input.authType === "api_key" ? normalizeOptionalBaseUrl(input.baseUrl) : undefined;
+    const catalogModels = modelsForBuiltinProvider(input.providerSlug, baseUrlOverride);
     if (catalogModels.length === 0) throw new Error(`No built-in models found for provider: ${input.providerSlug}`);
     const modelCustomizations = input.modelCustomizations !== undefined
       ? sanitizeModelCustomizations(input.modelCustomizations, catalogModels)
@@ -405,7 +413,7 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
       name: input.name.trim(),
       providerSlug: input.providerSlug.trim(),
       protocol: protocolForBuiltinProvider(input.providerSlug),
-      baseUrl: baseUrlForBuiltinProvider(input.providerSlug, input.baseUrl),
+      baseUrl: baseUrlForBuiltinProvider(input.providerSlug, baseUrlOverride),
       requestProfile,
       models,
       modelCustomizations,
@@ -486,6 +494,7 @@ export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): Publi
   if (!provider) throw new Error(`Unsupported built-in provider: ${providerSlug}`);
   if (!provider.authModes.includes("api_key")) throw new Error(`Provider ${providerSlug} does not support API key auth`);
 
+  const baseUrlOverride = normalizeOptionalBaseUrl(input.baseUrlOverride);
   const existing = loadModelCredentialProfiles().find((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider" && p.authType === "api_key");
   return saveModelCredentialProfile({
     ...(existing ? { id: existing.id } : {}),
@@ -493,13 +502,13 @@ export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): Publi
     name: input.name?.trim() || existing?.name || provider.displayName,
     providerSlug,
     protocol: protocolForBuiltinProvider(providerSlug),
-    baseUrl: baseUrlForBuiltinProvider(providerSlug, input.baseUrlOverride),
+    baseUrl: baseUrlForBuiltinProvider(providerSlug, baseUrlOverride),
     authType: "api_key",
     apiKey: input.apiKey,
     requestProfile: "standard",
     enabled: true,
     isDefault: input.isDefault ?? existing?.isDefault ?? true,
-    models: modelsForBuiltinProvider(providerSlug, input.baseUrlOverride),
+    models: modelsForBuiltinProvider(providerSlug, baseUrlOverride),
   });
 }
 

@@ -482,6 +482,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
   const [selected, setSelected] = useState<PublicModelProvider | null>(null);
   const [authMode, setAuthMode] = useState<"api_key" | "oauth">("api_key");
   const [apiKey, setApiKey] = useState("");
+  const [apiUrl, setApiUrl] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [oauthJob, setOauthJob] = useState<OAuthLoginJob | null>(null);
@@ -499,6 +500,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
     setAuthMode(selected.defaultAuthMode);
     setName(selected.displayName);
     setApiKey("");
+    setApiUrl("");
     setOauthJob(null);
     setOauthInput("");
   }, [selected?.providerSlug]);
@@ -531,6 +533,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
         providerSlug: selected.providerSlug,
         apiKey: apiKey.trim(),
         name: name.trim() || selected.displayName,
+        baseUrlOverride: apiUrl.trim() || undefined,
       });
       toast("Provider connected", "success");
       onSaved();
@@ -627,6 +630,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
                   {authMode === "api_key" ? (
                     <div className="space-y-3">
                       <Field label="API key"><input type="password" className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste provider API key" /></Field>
+                      <Field label="API URL"><div className="space-y-1"><input className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="Official default" /><div className="text-[11px] text-ink-3">Optional. Leave empty to use the provider default URL.</div></div></Field>
                       <button type="button" onClick={connectApiKey} disabled={busy || !apiKey.trim()} className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Connecting..." : "Connect"}</button>
                     </div>
                   ) : (
