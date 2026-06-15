@@ -171,6 +171,28 @@ describe("HTTP server", () => {
     expect(res.status).toBe(404);
   });
 
+  it("POST /internal/tool-callback is not an unauthenticated bypass", async () => {
+    const unauth = await request({
+      hostname: "127.0.0.1",
+      port,
+      path: "/internal/tool-callback",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "chat", args: {} }),
+    });
+    expect(unauth.status).toBe(401);
+
+    const authed = await request({
+      hostname: "127.0.0.1",
+      port,
+      path: "/internal/tool-callback",
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "chat", args: {} }),
+    });
+    expect(authed.status).toBe(404);
+  });
+
   it("OPTIONS request returns CORS headers", async () => {
     const res = await request({
       hostname: "127.0.0.1",

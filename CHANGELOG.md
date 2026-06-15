@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [Unreleased]
+
+### Removed
+- Removed the legacy pi CLI runtime shell and unauthenticated `/internal/tool-callback` HTTP transport. Pi SDK runtime tools continue to use the in-process dispatcher.
+
+### Security
+- `/internal/*` paths no longer bypass API authentication; the deleted legacy callback now returns unauthorized without a bearer token and 404 with one.
+
+### Tests
+- `npx tsc --noEmit`
+- `npm run build`
+- `npm test` (594 passed)
+
+---
+
 ## [0.13.4] — 2026-06-13
 
 ### Fixed

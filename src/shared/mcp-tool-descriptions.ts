@@ -1,4 +1,4 @@
-// Centralized agent tool descriptions used by pi-cli extension generation.
+// Centralized agent tool descriptions used by agent tool definitions.
 
 export const QUERY_ROOM_MESSAGES_DESCRIPTION = `Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.
 

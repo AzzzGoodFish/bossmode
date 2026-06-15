@@ -28,7 +28,7 @@ export function truncateToolResult(text: string): string {
   return truncated + `\n\n--- Result truncated (${text.length} chars exceeded ${MAX_RESULT_CHARS} limit). Use a more specific query to get smaller results. ---`;
 }
 
-/** Handle a tool callback from an agent runtime (pi-cli extension) */
+/** Handle a tool callback from an agent runtime */
 export async function handleToolCallback(
   tool: string,
   roomId: string,

@@ -227,32 +227,6 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
     await wsClient.close();
   });
 
-  // ── SM-4: Compact fire-and-forget ───────────────────────────────────────
-
-  it("SM-4: pi-cli compact uses sendCommand (fire-and-forget), not sendRequest (RPC timeout)", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const src = readFileSync(join(process.cwd(), "src/engine/runtime/pi-cli.ts"), "utf-8");
-
-    // Find handleCompactCommand function definition (private method body)
-    const fnDefStart = src.indexOf("private handleCompactCommand");
-    expect(fnDefStart).toBeGreaterThan(-1);
-    const fnBody = src.slice(fnDefStart, fnDefStart + 700);
-
-    // Must use sendCommand (fire-and-forget)
-    expect(fnBody).toContain("sendCommand");
-    // Must NOT use sendRequest in the function body
-    expect(fnBody).not.toContain("sendRequest");
-
-    // compact response must be handled asynchronously in handleParsedLine
-    expect(src).toContain('raw.command === "compact"');
-
-    // endWork must be called in the compact response handler
-    const compactResponseStart = src.indexOf('raw.command === "compact"');
-    const compactResponseBlock = src.slice(compactResponseStart, compactResponseStart + 500);
-    expect(compactResponseBlock).toContain("endWork");
-  });
-
   // ── SM-5: Summarizer timeout protection ─────────────────────────────────
 
   it("SM-5: Summarizer has 5-minute (300_000ms) per-batch timeout protection", async () => {

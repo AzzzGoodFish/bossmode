@@ -101,7 +101,6 @@ async function ensureRoutesRegistered(): Promise<void> {
   await import("./tasks.js");
   await import("./gates.js");
   await import("./integrations.js");
-  await import("./internal.js");
 }
 
 // -- Main request handler --
@@ -127,12 +126,12 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
     return true;
   }
 
-  // Auth check (skip login/internal endpoints)
+  // Auth check (skip login endpoint only)
   // Attachment GET routes skip auth — filenames are sha256 hashes (unguessable), roomIds are UUIDs.
   // Browser <img src> and <a download> don't send Authorization headers.
   // See TD-A18 for long-term cookie-session migration plan.
   const isAttachmentGet = req.method === "GET" && /^\/api\/rooms\/[^/]+\/attachments\//.test(url);
-  if (url !== "/api/auth/login" && !url.startsWith("/internal/") && !isAttachmentGet && !requireAuth(req.headers)) {
+  if (url !== "/api/auth/login" && !isAttachmentGet && !requireAuth(req.headers)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
   }

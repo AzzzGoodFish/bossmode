@@ -38,7 +38,6 @@ vi.mock("../../src/engine/runtime/registry.js", () => ({
     register() {}
   },
 }));
-vi.mock("../../src/engine/runtime/pi-cli.js", () => ({ PiCliRuntime: class {} }));
 vi.mock("../../src/api/index.js", () => ({ handleApiRequest: vi.fn(async () => false) }));
 
 vi.mock("node:http", () => ({

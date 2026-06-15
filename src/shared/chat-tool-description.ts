@@ -1,4 +1,4 @@
-// Canonical description for the `chat` tool used by pi-cli extension generation.
+// Canonical description for the `chat` tool used by agent tool definitions.
 // Centralizing this keeps the envelope/target/@mention contract in a single source of truth.
 
 export function buildChatToolDescription(memberList: string): string {
