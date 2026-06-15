@@ -17,7 +17,10 @@ import { readConfig, writeConfig } from "../shared/config.js";
 // ── Rooms ──
 
 addRoute("GET", "/api/rooms", async (_req, res) => {
-  const rooms = roomStore.listRooms();
+  const rooms = roomStore.listRooms().map((room) => ({
+    ...room,
+    agentStatuses: getRoomAgentStatuses(room.id),
+  }));
   sendJson(res, 200, rooms);
 });
 

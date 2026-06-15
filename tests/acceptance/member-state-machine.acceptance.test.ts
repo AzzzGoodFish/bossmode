@@ -156,11 +156,16 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
       3000,
     );
 
-    // Room detail should show working
+    // Room detail and room list should show working
     const roomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
     const roomData = JSON.parse(roomRes.body);
     expect(roomData.agentStatuses).toBeDefined();
     expect(roomData.agentStatuses.pm).toBe("working");
+
+    const roomsRes = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
+    const roomsData = JSON.parse(roomsRes.body);
+    const listedRoom = roomsData.find((r: any) => r.id === room.id);
+    expect(listedRoom?.agentStatuses?.pm).toBe("working");
 
     // Release → IDLE
     promptResolveFn!();
@@ -172,6 +177,11 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
     const roomRes2 = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
     const roomData2 = JSON.parse(roomRes2.body);
     expect(roomData2.agentStatuses.pm).toBe("idle");
+
+    const roomsRes2 = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
+    const roomsData2 = JSON.parse(roomsRes2.body);
+    const listedRoom2 = roomsData2.find((r: any) => r.id === room.id);
+    expect(listedRoom2?.agentStatuses?.pm).toBe("idle");
 
     await wsClient.close();
   });
