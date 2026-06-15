@@ -6,6 +6,13 @@ All notable changes to Bossmode are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.13.9] — 2026-06-15
+
+### Changed
+- Applied the approved comfort dark theme tokens: graphite surfaces, softer accent/status colors, more readable meta/path/placeholder text, and unchanged light theme semantics.
+
 ### Removed
 - Removed the legacy pi CLI runtime shell and unauthenticated `/internal/tool-callback` HTTP transport. Pi SDK runtime tools continue to use the in-process dispatcher.
 
@@ -16,6 +23,7 @@ All notable changes to Bossmode are documented here.
 - `npx tsc --noEmit`
 - `npm run build`
 - `npm test` (594 passed)
+- Clean global install from packed tarball.
 
 ---
 
