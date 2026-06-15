@@ -40,6 +40,23 @@ export function workspaceResourceRouteMode(name: string | null): "list" | "creat
   return "detail";
 }
 
+export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: string, status: string): Room[] {
+  let changed = false;
+  const next = rooms.map((room) => {
+    if (room.id !== roomId) return room;
+    if (room.agentStatuses?.[agent] === status) return room;
+    changed = true;
+    return {
+      ...room,
+      agentStatuses: {
+        ...(room.agentStatuses ?? {}),
+        [agent]: status,
+      },
+    };
+  });
+  return changed ? next : rooms;
+}
+
 export function Layout({ onLogout, username }: LayoutProps) {
   const [activePage, setActivePage] = useState<ActivePage>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -95,6 +112,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
     // Forward to Main's useRoom handler
     mainWsHandlerRef.current?.(event);
+
+    if (event.type === "agent:status") {
+      setRooms((prev) => patchRoomAgentStatus(prev, event.roomId, event.agent, event.status));
+    }
 
     if (event.type === "room:message") {
       // F6: Skip user's own messages
@@ -206,6 +227,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
       refreshKey={refreshKey}
       unreadRoomIds={unreadRooms}
       onRoomsLoaded={handleRoomsLoaded}
+      liveRooms={rooms}
       collapsed={isMobile ? false : sidebarCollapsed}
       onToggle={toggleSidebar}
     />

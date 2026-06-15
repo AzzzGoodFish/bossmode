@@ -47,6 +47,7 @@ interface SidebarProps {
   refreshKey?: number;
   unreadRoomIds?: Set<string>;
   onRoomsLoaded?: (rooms: Room[]) => void;
+  liveRooms?: Room[];
   collapsed: boolean;
   onToggle: () => void;
 }
@@ -61,7 +62,7 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
 
 export function Sidebar({
   activePage, username, onNavigate, onLogout, refreshKey,
-  unreadRoomIds, onRoomsLoaded, collapsed, onToggle,
+  unreadRoomIds, onRoomsLoaded, liveRooms, collapsed, onToggle,
 }: SidebarProps) {
   const isMobile = useIsMobile();
   const { toast, confirm, prompt } = useDialog();
@@ -97,6 +98,8 @@ export function Sidebar({
     onRoomsLoaded?.(rooms);
   }, [rooms, onRoomsLoaded]);
 
+  const displayRooms = liveRooms ?? rooms;
+
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
@@ -105,7 +108,7 @@ export function Sidebar({
   const activeSettingsSection = activePage?.type === "settings" ? (activePage.section ?? "models") : null;
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
-  const settingsRoom = settingsRoomId ? rooms.find((r) => r.id === settingsRoomId) || null : null;
+  const settingsRoom = settingsRoomId ? displayRooms.find((r) => r.id === settingsRoomId) || null : null;
 
   const openTasksLabel = useMemo(() => "All Tasks", []);
 
@@ -198,7 +201,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
         {domain === "rooms" && (
           <>
-            {rooms.map((r) => {
+            {displayRooms.map((r) => {
               const statuses = Object.values(r.agentStatuses ?? {});
               return (
                 <div key={r.id} className="group relative">
