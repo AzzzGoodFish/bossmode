@@ -175,6 +175,10 @@ export function Sidebar({
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
+  const roomItemCls = (active: boolean) =>
+    `w-full text-left rounded-lg pl-2.5 pr-8 py-2 mb-px transition-colors cursor-pointer ${
+      active ? "bg-surface-2" : "hover:bg-surface-1"
+    }`;
 
   const panel = (
     <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
@@ -198,8 +202,8 @@ export function Sidebar({
               const statuses = Object.values(r.agentStatuses ?? {});
               return (
                 <div key={r.id} className="group relative">
-                  <button onClick={() => onNavigate({ type: "room", id: r.id })} className={itemCls(selectedRoomId === r.id)}>
-                    <div className="flex items-center gap-1.5">
+                  <button onClick={() => onNavigate({ type: "room", id: r.id })} className={roomItemCls(selectedRoomId === r.id)}>
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span className={`text-[12.5px] font-medium truncate flex-1 ${selectedRoomId === r.id ? "text-ink-1" : "text-ink-2"}`}>
                         {r.name}
                       </span>
