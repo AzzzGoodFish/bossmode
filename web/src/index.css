@@ -46,40 +46,40 @@
   --shadow-pop: 0 8px 24px rgba(25, 35, 55, 0.16);
 }
 .dark {
-  /* 夜班（暗色）：石墨近黑，微冷偏 */
-  --surface-0: #0c0e11;
-  --surface-1: #11141a;
-  --surface-2: #171b22;
-  --surface-3: #1e232c;
-  --inset: #0a0c0f;
+  /* 夜班（暗色）：舒适石墨，抬高背景亮度并降低霓虹感 */
+  --surface-0: #111317;
+  --surface-1: #171a20;
+  --surface-2: #20242c;
+  --surface-3: #292e38;
+  --inset: #0f1115;
 
-  --ink-1: #e8ebef;
-  --ink-2: #a7afbb;
-  --ink-3: #6b7480;
-  --ink-4: #454d59;
+  --ink-1: #dfe4ec;
+  --ink-2: #b2bac7;
+  --ink-3: #828b99;
+  --ink-4: #5f6876;
 
-  --line: rgba(160, 175, 200, 0.10);
-  --line-soft: rgba(160, 175, 200, 0.06);
-  --line-strong: rgba(160, 175, 200, 0.20);
+  --line: rgba(178, 188, 204, 0.13);
+  --line-soft: rgba(178, 188, 204, 0.08);
+  --line-strong: rgba(178, 188, 204, 0.22);
 
-  --accent: #37d6c4;
-  --accent-dim: rgba(55, 214, 196, 0.14);
-  --accent-ink: #5ee6d5;
-  --accent-contrast: #06231f;
-  --highlight: rgba(232, 176, 63, 0.34);
+  --accent: #2fb8aa;
+  --accent-dim: rgba(47, 184, 170, 0.16);
+  --accent-ink: #76d8cf;
+  --accent-contrast: #071d1b;
+  --highlight: rgba(210, 163, 72, 0.30);
   --avatar-pm: #9d8cff;
   --avatar-designer: #e37bb8;
   --avatar-user: #45c0df;
 
-  --on-air: #3fd07a;
-  --on-air-dim: rgba(63, 208, 122, 0.15);
-  --thinking: #e8b03f;
-  --thinking-dim: rgba(232, 176, 63, 0.15);
-  --blocked: #e85f5f;
-  --blocked-dim: rgba(232, 95, 95, 0.14);
-  --idle-g: #4a525e;
+  --on-air: #55c783;
+  --on-air-dim: rgba(85, 199, 131, 0.15);
+  --thinking: #d2a348;
+  --thinking-dim: rgba(210, 163, 72, 0.15);
+  --blocked: #df6b6b;
+  --blocked-dim: rgba(223, 107, 107, 0.14);
+  --idle-g: #68717f;
 
-  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.34);
 }
 
 @theme inline {
