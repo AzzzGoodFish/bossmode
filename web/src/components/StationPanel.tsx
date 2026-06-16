@@ -5,7 +5,7 @@ import {
   abortAgent, getMembers, getConfiguredModels, updateMember, getAgentEventsPaginated, getToken,
   type MemberInfo, type AvailableModelOption, type ContextUsageData,
 } from "../api/client";
-import { formatEventTime, isStationActionEvent, latestActionSummary, summarizeAgentEvent, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { useDialog } from "./dialogs";
@@ -87,8 +87,9 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
 
   const loadRecentEvents = useCallback(async (name: string) => {
     try {
-      const result = await getAgentEventsPaginated(roomId, name, 8);
-      setRecentEvents((prev) => ({ ...prev, [name]: result.events as AgentEvent[] }));
+      const result = await getAgentEventsPaginated(roomId, name, 40);
+      const stationEvents = (result.events as AgentEvent[]).filter(isStationDisplayEvent).slice(-8);
+      setRecentEvents((prev) => ({ ...prev, [name]: stationEvents }));
     } catch (err) {
       console.error("Failed to load recent agent events:", err);
     }
@@ -112,6 +113,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
         const data = JSON.parse(e.data);
         if (data.type !== "agent:event" || data.roomId !== roomId || !members.includes(data.agent)) return;
         const event = data.event as AgentEvent;
+        if (!isStationDisplayEvent(event)) return;
         setRecentEvents((prev) => ({ ...prev, [data.agent]: [...(prev[data.agent] || []), event].slice(-8) }));
       } catch {}
     };
@@ -222,7 +224,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-[9px] font-semibold tracking-[0.08em] text-ink-4">RECENT ACTIVITY</span>
                   </div>
-                  {(recentEvents[name] || []).filter(isStationActionEvent).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} />)}
+                  {(recentEvents[name] || []).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} />)}
                   {(recentEvents[name] || []).length === 0 && <div className="text-[11px] text-ink-4 py-1">No recent activity</div>}
                 </div>
               )}
@@ -254,25 +256,71 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
 }
 
 
+function isStationDisplayEvent(event: AgentEvent): boolean {
+  return isStationActionEvent(event) || event.type === "tool_end";
+}
+
+function toolEndDetail(event: AgentEvent): string {
+  if (event.isError) return truncateText(event.result ?? event.text ?? "failed", 64);
+  return event.toolName ? "completed" : "done";
+}
+
+function stationSummary(event?: AgentEvent): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean } {
+  if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
+  const ts = typeof event.ts === "number" ? event.ts : undefined;
+  if (event.type === "tool_start") {
+    return { kind: "running", label: `RUNNING · ${event.toolName || "tool"}`, detail: toolTarget(event.args) || "running", ts, pulse: true };
+  }
+  if (event.type === "tool_end") {
+    return {
+      kind: event.isError ? "error" : "done",
+      label: `${event.isError ? "ERROR" : "DONE"} · ${event.toolName || "tool"}`,
+      detail: toolEndDetail(event),
+      ts,
+    };
+  }
+  const summary = summarizeAgentEvent(event);
+  return summary;
+}
+
+function latestStationSummary(events: AgentEvent[]) {
+  return stationSummary([...events].reverse().find(isStationDisplayEvent));
+}
+
 function actionTone(kind: string): string {
+  if (kind === "running") return "text-accent-ink";
+  if (kind === "done") return "text-onair";
+  if (kind === "error") return "text-blocked";
   if (kind === "tool") return "text-accent-ink";
   if (kind === "thinking") return "text-think";
   if (kind === "reply") return "text-ink-2";
   return "text-ink-4";
 }
 
+function actionShell(kind: string): string {
+  if (kind === "running") return "border-accent/30";
+  if (kind === "done") return "border-onair/25";
+  if (kind === "error") return "border-blocked/35 bg-blocked-dim/40";
+  return "border-line-soft";
+}
+
 function ActionLine({ name, status, events, expanded, onToggle }: { name: string; status: string; events: AgentEvent[]; expanded: boolean; onToggle: () => void }) {
-  const summary = latestActionSummary(events);
-  const label = status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
+  const summary = latestStationSummary(events);
+  const isWorkingWithoutEvent = status === "working" && summary.kind === "idle";
+  const label = isWorkingWithoutEvent ? "WORKING" : status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
   const time = summary.ts ? formatEventTime(summary.ts) : "";
-  const detail = status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
+  const detail = isWorkingWithoutEvent ? "Waiting for activity" : status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
+  const tone = isWorkingWithoutEvent ? "text-onair" : actionTone(summary.kind);
   return (
     <button
       onClick={onToggle}
-      className="w-full mt-2.5 flex items-center gap-2 rounded-md border border-line-soft bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer"
+      className={`w-full mt-2.5 flex items-center gap-2 rounded-md border bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer ${actionShell(summary.kind)}`}
       title={`${name}: ${label} ${detail}`}
     >
-      <span className={`text-[9px] font-bold tracking-[0.12em] shrink-0 ${actionTone(summary.kind)}`}>{label}</span>
+      <span className={`text-[9px] font-bold tracking-[0.12em] shrink-0 ${tone}`}>
+        {summary.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5 align-middle animate-pulse" />}
+        {label}
+      </span>
       <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{detail}</span>
       <ChevronDown size={11} className={`text-ink-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
     </button>
@@ -280,14 +328,16 @@ function ActionLine({ name, status, events, expanded, onToggle }: { name: string
 }
 
 function MiniEvent({ event }: { event: AgentEvent }) {
-  const summary = summarizeAgentEvent(event);
+  const summary = stationSummary(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  const target = event.type === "tool_start" ? toolTarget(event.args) : summary.detail;
   return (
-    <div className="rounded-md bg-inset border border-line-soft px-2 py-1.5">
+    <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(summary.kind)}`}>
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`text-[9px] font-bold tracking-[0.1em] shrink-0 ${actionTone(summary.kind)}`}>{summary.label}</span>
-        <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{target || summary.detail}</span>
+        <span className={`text-[9px] font-bold tracking-[0.1em] shrink-0 ${actionTone(summary.kind)}`}>
+          {summary.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5 align-middle animate-pulse" />}
+          {summary.label}
+        </span>
+        <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{summary.detail}</span>
         {time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
       </div>
     </div>

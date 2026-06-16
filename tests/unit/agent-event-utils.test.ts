@@ -21,24 +21,40 @@ function groupTurns(events: any[]): any[][] {
 }
 
 describe("agent event UI helpers", () => {
-  it("summarizes latest durable tool events for workstation action lines", () => {
+  it("summarizes tool_start as running lifecycle action", () => {
     const summary = latestActionSummary([
       { type: "message_update", text: "partial", ts: 1 },
       { type: "tool_start", toolName: "Edit", args: { file_path: "web/src/pages/Main.tsx" }, ts: 2 },
     ]);
 
-    expect(summary).toMatchObject({ kind: "tool", label: "TOOL·Edit", detail: "web/src/pages/Main.tsx" });
+    expect(summary).toMatchObject({ kind: "tool-running", label: "RUNNING · Edit", detail: "web/src/pages/Main.tsx" });
   });
 
-  it("skips non-error tool_end noise for station action summaries", () => {
-    const summary = latestActionSummary([
+  it("summarizes successful and failed tool_end lifecycle actions", () => {
+    const done = latestActionSummary([
       { type: "tool_start", toolName: "Bash", args: { command: "npm test" }, ts: 1 },
-      { type: "tool_end", toolName: "Bash", ts: 2 },
+      { type: "tool_end", toolName: "Bash", result: "ok", ts: 2 },
+    ]);
+    const failed = latestActionSummary([
+      { type: "tool_start", toolName: "Bash", args: { command: "npm test" }, ts: 1 },
+      { type: "tool_end", toolName: "Bash", isError: true, result: "Command failed", ts: 2 },
     ]);
 
-    expect(summary).toMatchObject({ kind: "tool", label: "TOOL·Bash", detail: "npm test" });
-    expect(isStationActionEvent({ type: "tool_end", toolName: "Bash" })).toBe(false);
+    expect(done).toMatchObject({ kind: "tool-done", label: "DONE · Bash", detail: "ok" });
+    expect(failed).toMatchObject({ kind: "tool-error", label: "ERROR · Bash", detail: "Command failed" });
+    expect(isStationActionEvent({ type: "tool_end", toolName: "Bash" })).toBe(true);
     expect(isStationActionEvent({ type: "tool_end", toolName: "Bash", isError: true })).toBe(true);
+  });
+
+  it("keeps latest displayable tool lifecycle when streaming noise follows", () => {
+    const summary = latestActionSummary([
+      { type: "tool_start", toolName: "Bash", args: { command: "npm test" }, ts: 1 },
+      { type: "tool_update", text: "...", ts: 2 },
+      { type: "message_start", ts: 3 },
+      { type: "message_update", text: "draft", ts: 4 },
+    ]);
+
+    expect(summary).toMatchObject({ kind: "tool-running", label: "RUNNING · Bash", detail: "npm test" });
   });
 
   it("prefers final reply text over thinking when message_end contains both", () => {

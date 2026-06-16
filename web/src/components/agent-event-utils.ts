@@ -12,7 +12,7 @@ export interface AgentEvent {
   [key: string]: unknown;
 }
 
-export type ActionKind = "tool" | "thinking" | "reply" | "system" | "idle";
+export type ActionKind = "tool-running" | "tool-done" | "tool-error" | "thinking" | "reply" | "system" | "idle";
 
 export interface ActionSummary {
   kind: ActionKind;
@@ -26,7 +26,7 @@ export function isDurableAgentEvent(event: AgentEvent): boolean {
 }
 
 export function isStationActionEvent(event: AgentEvent): boolean {
-  return isDurableAgentEvent(event) && (event.type !== "tool_end" || event.isError === true);
+  return isDurableAgentEvent(event);
 }
 
 export function formatEventTime(ts?: number): string {
@@ -53,10 +53,15 @@ export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
-    return { kind: "tool", label: `TOOL·${event.toolName || "tool"}`, detail: toolTarget(event.args) || "running", ts };
+    const tool = String(event.toolName || "tool");
+    return { kind: "tool-running", label: `RUNNING · ${tool}`, detail: toolTarget(event.args) || "running", ts };
   }
   if (event.type === "tool_end") {
-    return { kind: "tool", label: event.isError ? "TOOL·error" : "TOOL·done", detail: event.toolName ? String(event.toolName) : "completed", ts };
+    const tool = String(event.toolName || "tool");
+    if (event.isError) {
+      return { kind: "tool-error", label: `ERROR · ${tool}`, detail: truncateText(event.result ?? event.text ?? "failed", 78), ts };
+    }
+    return { kind: "tool-done", label: `DONE · ${tool}`, detail: toolTarget(event.args) || truncateText(event.result ?? event.text ?? "completed", 78), ts };
   }
   if ((event.type === "message_end" || event.type === "message_update") && event.text) {
     return { kind: "reply", label: event.type === "message_update" ? "DRAFT" : "REPLY", detail: truncateText(event.text, 78), ts };
