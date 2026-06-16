@@ -19,6 +19,7 @@ function seedTemplateProject(root: string, version = "9.9.9"): void {
   writeFileSync(join(root, "package.json"), JSON.stringify({ version }, null, 2));
 
   writeFileSync(join(root, "templates", "agents", "pm.md"), "---\nname: pm\ndescription: PM\n---\n\n# prompt\n", "utf-8");
+  writeFileSync(join(root, "templates", "agents", "general.md"), "---\nname: general\ndescription: General\n---\n\n# old general prompt\n", "utf-8");
   writeFileSync(join(root, "templates", "skills", "skill-a", "SKILL.md"), "---\nname: skill-a\ndescription: A\n---\n\nskill\n", "utf-8");
   writeFileSync(join(root, "templates", "teams", "universal-principles.md"), "# UAP\n\nbody\n", "utf-8");
 }
@@ -147,6 +148,37 @@ describe("team-updates service", () => {
     writeFileSync(pmPath, `${current}\n# user edit\n`, "utf-8");
     const result = m.checkForUpdates();
     expect(result.candidates.find((c) => c.relativePath === "agents/pm.md")?.status).toBe("modified");
+  });
+
+  it("updates builtin general prompt through team update without overwriting modified local general", async () => {
+    const m = await mod();
+    m.seedBuiltinTeam();
+
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.4" }));
+    writeFileSync(
+      join(projectDir, "templates", "agents", "general.md"),
+      "---\nname: general\ndescription: General\n---\n\nYou are a practical coding assistant with tool access.\n",
+      "utf-8",
+    );
+
+    const check = m.checkForUpdates();
+    expect(check.candidates.find((c) => c.relativePath === "agents/general.md")?.status).toBe("updated");
+
+    const applied = m.applyUpdates(["agents/general.md"]);
+    expect(applied.applied).toContain("agents/general.md");
+    expect(readFileSync(join(bossmodeDir, "agents", "general.md"), "utf-8")).toContain("You are a practical coding assistant with tool access.");
+
+    const localGeneral = join(bossmodeDir, "agents", "general.md");
+    writeFileSync(localGeneral, `${readFileSync(localGeneral, "utf-8")}\n# user edit\n`, "utf-8");
+    writeFileSync(join(projectDir, "package.json"), JSON.stringify({ version: "1.2.5" }));
+    writeFileSync(
+      join(projectDir, "templates", "agents", "general.md"),
+      "---\nname: general\ndescription: General\n---\n\nYou are a practical coding assistant with tool access.\n\nUpdated again.\n",
+      "utf-8",
+    );
+
+    const modifiedCheck = m.checkForUpdates();
+    expect(modifiedCheck.candidates.find((c) => c.relativePath === "agents/general.md")?.status).toBe("modified");
   });
 
   it("checkForUpdates skips update when template content unchanged despite version bump", async () => {

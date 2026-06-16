@@ -6,6 +6,14 @@ All notable changes to Bossmode are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Built-in `general` agent now uses a Bossmode-maintained practical coding assistant prompt instead of an empty body that falls through to the pi SDK default prompt. Existing installs can apply it via Built-in team update.
+
+### Tests
+- `npm test -- tests/general-agent.test.ts tests/unit/team-updates.test.ts`
+- `npm run build`
+- `npm test` (595 passed)
+
 ---
 
 ## [0.13.10] — 2026-06-15

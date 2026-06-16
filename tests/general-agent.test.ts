@@ -19,7 +19,7 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     updatedAt: Date.now(),
   });
 
-  it("returns empty agentPrompt when agent systemPrompt is empty", () => {
+  it("keeps empty agentPrompt empty when agent systemPrompt is empty", () => {
     const agent = makeAgent("", "general");
     const result = buildAgentPrompt(agent, [], ["general", "pm"], "bossmode dev");
     expect(result.agentPrompt).toBe("");
@@ -55,12 +55,21 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     expect(result.envPrompt).toContain("Documents are stored at");
   });
 
-  it("empty systemPrompt + knowledge keeps agentPrompt empty for builtin/default prompt preservation", () => {
-    const agent = makeAgent("", "general");
+  it("general safe prompt plus knowledge keeps Bossmode append prompt", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const content = readFileSync(join(import.meta.dirname, "../templates/agents/general.md"), "utf-8");
+    const body = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/)?.[1] ?? "";
+    const agent = makeAgent(body, "general");
     const entries = [makeEntry("Design Doc", "The system uses React")];
     const result = buildAgentPrompt(agent, entries, ["general"], "bossmode dev");
-    expect(result.agentPrompt).toBe("");
+
+    expect(result.agentPrompt).toContain("You are a practical coding assistant with tool access.");
+    expect(result.agentPrompt).toContain("avoid unnecessary product framing or harness-specific meta commentary");
     expect(result.envPrompt).toContain("Design Doc");
+    expect(result.envPrompt).toContain('group chat room "bossmode dev"');
+    expect(result.fullPrompt).toContain(result.agentPrompt);
+    expect(result.fullPrompt).toContain(result.envPrompt);
   });
 
   it("envPrompt uses envelope guidance and no tool/rules sections", () => {
@@ -80,7 +89,7 @@ describe("General Agent: prompt-assembler split (G3)", () => {
 });
 
 describe("General Agent: builtin tag template (G1)", () => {
-  it("general.md template has builtin tag and empty body", async () => {
+  it("general.md template has builtin tag and safe prompt body", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const content = readFileSync(join(import.meta.dirname, "../templates/agents/general.md"), "utf-8");
@@ -90,10 +99,12 @@ describe("General Agent: builtin tag template (G1)", () => {
     expect(content).toContain("builtin");
     expect(content).toContain("name: general");
 
-    // Body after frontmatter should be empty
     const match = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
     expect(match).not.toBeNull();
     const body = match![1].trim();
-    expect(body).toBe("");
+    expect(body).toContain("You are a practical coding assistant with tool access.");
+    expect(body).toContain("Available capabilities are defined by the tool schemas in this session.");
+    expect(body).toContain("Prefer checking files, running commands, or inspecting outputs over guessing.");
+    expect(body).toContain("Do not describe yourself as a special harness, product, or first-party CLI unless the user explicitly asks.");
   });
 });
