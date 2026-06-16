@@ -8,6 +8,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.13.10] — 2026-06-15
+
+### Fixed
+- Station agent avatar mouse clicks no longer leave a misleading accent focus ring; keyboard `focus-visible` accessibility ring remains intact.
+
+### Tests
+- `npm run build`
+- `npm test` (594 passed)
+- Clean global install from packed tarball.
+
+---
+
 ## [0.13.9] — 2026-06-15
 
 ### Changed
