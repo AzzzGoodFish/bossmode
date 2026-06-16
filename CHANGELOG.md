@@ -6,6 +6,10 @@ All notable changes to Bossmode are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.13.12] — 2026-06-16
+
 ### Changed
 - Station agent action line now displays tool lifecycle states (`RUNNING`, `DONE`, `ERROR`) and keeps the last displayable station event through streaming noise.
 
@@ -15,6 +19,8 @@ All notable changes to Bossmode are documented here.
 ### Tests
 - `npm test -- tests/unit/agent-event-utils.test.ts`
 - `npm run build`
+- `npx vitest run --maxWorkers=1 --minWorkers=1` (596 passed)
+- Clean global install from packed tarball.
 
 ---
 
