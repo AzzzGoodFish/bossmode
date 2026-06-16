@@ -144,7 +144,12 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           return (
             <div key={name} className="border-b border-line-soft px-3.5 py-3">
               <div className="flex items-center gap-2.5">
-                <button onClick={() => onOpenLens?.(name)} className="cursor-pointer rounded-full focus:outline-none focus:ring-2 focus:ring-accent" title={`打开 ${name} 工位`}>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onOpenLens?.(name)}
+                  className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  title={`打开 ${name} 工位`}
+                >
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
                 </button>
                 <div className="flex-1 min-w-0">
