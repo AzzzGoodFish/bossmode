@@ -25,16 +25,13 @@ export function formatTokens(n: number): string {
   return Math.round(n / 1000) + "k";
 }
 
-function statusTag(status: string): { label: string; cls: string } {
+function statusLabel(status: string): string {
   switch (status) {
-    case "working":
-      return { label: "WORKING", cls: "text-onair bg-onair-dim" };
-    case "thinking":
-      return { label: "THINKING", cls: "text-think bg-think-dim" };
-    case "idle":
-      return { label: "IDLE", cls: "text-ink-3 bg-surface-2" };
-    default:
-      return { label: "OFF", cls: "text-ink-4 bg-surface-2" };
+    case "working": return "WORKING";
+    case "thinking": return "THINKING";
+    case "idle": return "IDLE";
+    case "off": return "OFF";
+    default: return "OFFLINE";
   }
 }
 
@@ -140,7 +137,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           const usage = contextUsage[name];
           const hasUsage = usage?.supported && usage.percentage !== undefined;
           const pct = hasUsage ? Math.round(usage.percentage!) : 0;
-          const tag = statusTag(status);
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
           const modelLabel = info?.model || "agent default";
@@ -152,7 +148,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onOpenLens?.(name)}
                   className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`打开 ${name} 工位`}
+                  title={`打开 ${name} 工位 · ${statusLabel(status)}`}
                 >
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
                 </button>
@@ -182,11 +178,11 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                         }
                       }}
                       title={`${modelLabel} · This room only`}
-                      className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex items-center gap-1 cursor-pointer transition-colors min-w-0"
+                      className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left"
                     >
-                      <span className="truncate">{modelLabel}</span>
-                      <ChevronDown size={9} className="shrink-0 opacity-70" />
+                      {modelLabel}
                     </button>
+                    {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
                     {info && (
                       <button
                         onClick={(e) => {
@@ -201,10 +197,10 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                             setThinkingAnchor(e.currentTarget.getBoundingClientRect());
                           }
                         }}
-                        title={`thinking · ${info.thinkingLevel || "off"} · This room only`}
-                        className="font-mono text-[9.5px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 py-px border border-line-soft/70 cursor-pointer transition-colors shrink-0"
+                        title={`think · ${info.thinkingLevel || "off"} · This room only`}
+                        className={`font-mono text-[10px] hover:text-accent-ink hover:bg-accent-dim rounded px-1 py-px cursor-pointer transition-colors shrink-0 ${info.thinkingLevel ? "text-ink-3" : "text-ink-4"}`}
                       >
-                        think {info.thinkingLevel || "off"}
+                        think <span className={info.thinkingLevel ? "text-think" : "text-ink-4"}>{info.thinkingLevel || "default"}</span>
                       </button>
                     )}
                     {openChip === name && info && (
@@ -239,9 +235,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                     )}
                   </div>
                 </div>
-                <span className={`text-[9.5px] font-semibold tracking-[0.05em] px-2 py-0.5 rounded-full shrink-0 ${tag.cls}`}>
-                  {tag.label}
-                </span>
                 {isBusy && (
                   <button
                     onClick={() => abortAgent(roomId, name).catch(console.error)}

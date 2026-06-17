@@ -10,6 +10,7 @@ All notable changes to Bossmode are documented here.
 - Station tool lifecycle action line now uses the tool name as the primary label; running/completed/error states are expressed by dot, border, color, and compact error tag instead of `RUNNING`/`DONE` main labels.
 - Station, WorkstationDetail, and AgentDetail room rows now use room-scoped effective member config for model and thinking settings.
 - Station and AgentDetail now expose model and thinking effort as separate compact room-scoped chips/dropdowns, including `default` to clear the room thinking override.
+- Station cards now use avatar rings instead of status text tags and show `model · think <level>` inline so model names keep readable width.
 
 ### Fixed
 - Changing an agent/member model in one room no longer mutates the global member config or hot-switches the same member in other rooms.
@@ -21,6 +22,7 @@ All notable changes to Bossmode are documented here.
 ### Tests
 - `npm test -- tests/unit/agent-event-utils.test.ts`
 - `npm test -- tests/unit/room-member-overrides.test.ts tests/unit/agent-manager-model-switch.test.ts tests/unit/member-runtime-normalization.test.ts`
+- `npm test -- tests/unit/agent-event-utils.test.ts tests/unit/room-member-overrides.test.ts`
 - `npm run build`
 
 ---

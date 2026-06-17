@@ -4,15 +4,16 @@
  * 状态环颜色 = 状态（working 绿呼吸 / thinking 琥珀呼吸 / blocked 红 / idle 灰 / boss 署名色）。
  */
 
-export type BadgeStatus = "working" | "thinking" | "idle" | "blocked" | "offline" | "boss";
+export type BadgeStatus = "working" | "thinking" | "idle" | "blocked" | "off" | "offline" | "boss";
 
 const RING_CLASS: Record<BadgeStatus, string> = {
   working: "ring-onair",
   thinking: "ring-think",
   blocked: "ring-blocked",
   boss: "ring-boss",
-  idle: "",
-  offline: "",
+  idle: "ring-idle",
+  off: "ring-off",
+  offline: "ring-offline",
 };
 
 const SIZE = {
@@ -27,6 +28,7 @@ export function statusFromAgent(status?: string): BadgeStatus {
     case "working": return "working";
     case "thinking": return "thinking";
     case "idle": return "idle";
+    case "off": return "off";
     default: return "offline";
   }
 }
@@ -46,14 +48,17 @@ export function StaffBadge({
 }) {
   const s = SIZE[size];
   const ring = RING_CLASS[status];
+  const tone = status === "boss"
+    ? "bg-accent-dim text-accent-ink"
+    : status === "offline"
+      ? "bg-surface-2 text-ink-4 opacity-70"
+      : status === "off"
+        ? "bg-surface-2 text-ink-4 opacity-80"
+        : "bg-surface-3 text-ink-2";
   return (
     <div className={`badge-ring ${ring} ${s.box} shrink-0 ${className}`} title={name}>
       <div
-        className={`${s.box} rounded-full flex items-center justify-center font-semibold select-none ${
-          status === "boss"
-            ? "bg-accent-dim text-accent-ink"
-            : "bg-surface-3 text-ink-2"
-        } ${s.text}`}
+        className={`${s.box} rounded-full flex items-center justify-center font-semibold select-none ${tone} ${s.text}`}
       >
         {avatar ? <span>{avatar}</span> : name.charAt(0).toUpperCase()}
       </div>

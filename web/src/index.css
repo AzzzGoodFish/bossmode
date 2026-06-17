@@ -137,6 +137,9 @@
   opacity: 1;
   animation: badge-breath 1.6s ease-in-out infinite;
 }
+.badge-ring.ring-idle::after { border-color: var(--idle-g); opacity: 0.82; }
+.badge-ring.ring-off::after { border-color: var(--idle-g); opacity: 0.28; }
+.badge-ring.ring-offline::after { border-color: var(--idle-g); border-style: dashed; opacity: 0.22; }
 .badge-ring.ring-blocked::after { border-color: var(--blocked); opacity: 1; }
 .badge-ring.ring-boss::after { border-color: var(--accent); opacity: 0.7; }
 @keyframes badge-breath {
