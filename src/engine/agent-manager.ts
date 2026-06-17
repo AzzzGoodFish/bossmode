@@ -6,7 +6,8 @@
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
-import { getMemberByName, saveMember } from "../workforce/member-store.js";
+import { getMemberByName } from "../workforce/member-store.js";
+import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
@@ -64,6 +65,10 @@ interface PendingModelSwitch {
   credentialId?: string;
 }
 
+interface PendingThinkingSwitch {
+  thinkingLevel: string;
+}
+
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
@@ -72,6 +77,7 @@ interface AgentInstance {
   dispatchState: DispatchState;
   queuedInputs: string[];
   pendingModelSwitch?: PendingModelSwitch;
+  pendingThinkingSwitch?: PendingThinkingSwitch;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -195,6 +201,24 @@ function applyPendingModelSwitch(instance: AgentInstance, trigger: string): void
   });
 }
 
+async function applyThinkingSwitchToInstance(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
+  if (!instance.handle.setThinkingLevel) throw new Error("Runtime does not support dynamic thinking level switching");
+  await instance.handle.setThinkingLevel(pending.thinkingLevel);
+  if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
+  logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, roomId: instance.roomId, thinkingLevel: pending.thinkingLevel, trigger });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: instance.status });
+}
+
+function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): void {
+  const pending = instance.pendingThinkingSwitch;
+  if (!pending) return;
+  instance.pendingThinkingSwitch = undefined;
+  applyThinkingSwitchToInstance(instance, pending, trigger).catch((err) => {
+    logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
+    postMessage(instance.roomId, "system", `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
+  });
+}
+
 // -- Format messages --
 
 function formatMessagesForAgent(messages: RoomMessage[], receiver: string, roomName: string): string {
@@ -261,29 +285,12 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       return null;
     }
 
-    // Find member config — try by name, fall back to auto-create from same-name agent
-    let member = getMemberByName(memberName);
+    const member = resolveRoomMember(roomId, memberName);
     if (!member) {
-      const agentDef = loadAgentDefinition(memberName);
-      if (!agentDef) {
-        logger.error("agent", "no member or agent definition found", { name: memberName });
-        return null;
-      }
-      member = {
-        id: memberName,
-        name: memberName,
-        type: "agent",
-        agent: memberName,
-        model: agentDef.model || "claude-sonnet-4-6",
-        runtime: "pi-cli",
-        thinkingLevel: "off",
-        avatar: agentDef.avatar,
-      };
-      logger.info("agent", "loadMember", { member: memberName, source: "auto-default", agent: memberName, runtime: "pi-cli", model: member.model });
-    } else {
-      member = { ...member, model: member.model || loadAgentDefinition(member.agent)?.model || "claude-sonnet-4-6" };
-      logger.info("agent", "loadMember", { member: memberName, source: "members.json", agent: member.agent, runtime: member.runtime, model: member.model });
+      logger.error("agent", "no member or agent definition found", { name: memberName });
+      return null;
     }
+    logger.info("agent", "loadMember", { member: memberName, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
 
     const agentDef = loadAgentDefinition(member.agent);
     if (!agentDef) {
@@ -395,6 +402,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         } else if (event.type === "agent_end") {
           updateDispatchState(instance, "idle", event.type);
           applyPendingModelSwitch(instance, event.type);
+          applyPendingThinkingSwitch(instance, event.type);
         } else if (event.type === "runtime_exit" && event.unexpected) {
           updateDispatchState(instance, "idle", event.type);
           instance.queuedInputs = [];
@@ -460,7 +468,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
   if (allNewMessages.length === 0) return;
 
   // Context limit
-  const member = getMemberByName(memberName);
+  const member = resolveRoomMember(roomId, memberName);
   const contextLimit = (member as any)?.contextLimit || 50;
   const newMessages = allNewMessages.length > contextLimit
     ? allNewMessages.slice(-contextLimit)
@@ -511,18 +519,11 @@ export async function activateAll(roomId: string): Promise<void> {
 
 // -- Model switching --
 
-export async function switchMemberModel(roomId: string, memberName: string, model: string, credentialId?: string | null): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
-  const member = getMemberByName(memberName);
-  if (!member) throw new Error(`Member not found: ${memberName}`);
+export async function switchMemberModel(roomId: string, memberName: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
   const normalizedModel = normalizeSwitchModelRef(model);
   const available = listAvailableModels().some((m) => m.ref === normalizedModel);
   if (!available) throw new Error(`Model is not available or credential is missing: ${normalizedModel}`);
-
-  saveMember({
-    ...member,
-    model: normalizedModel,
-    credentialId: credentialId || undefined,
-  });
+  if (persistRoomOverride) roomStore.updateRoomMemberOverride(roomId, memberName, { model: normalizedModel, credentialId: credentialId || null });
 
   const key = instanceKey(roomId, memberName);
   const instance = instances.get(key);
@@ -539,13 +540,29 @@ export async function switchMemberModel(roomId: string, memberName: string, mode
   return { applied: true, pending: false, active: true, model: normalizedModel };
 }
 
+export async function switchMemberThinkingLevel(roomId: string, memberName: string, thinkingLevel: string): Promise<{ applied: boolean; pending: boolean; active: boolean; thinkingLevel: string }> {
+  const key = instanceKey(roomId, memberName);
+  const instance = instances.get(key);
+  if (!instance) return { applied: false, pending: false, active: false, thinkingLevel };
+
+  const pending = { thinkingLevel };
+  if (instance.status === "working" || instance.dispatchState !== "idle") {
+    instance.pendingThinkingSwitch = pending;
+    logger.info("agent", "thinkingSwitchQueued", { member: memberName, roomId, thinkingLevel, status: instance.status, dispatchState: instance.dispatchState });
+    return { applied: false, pending: true, active: true, thinkingLevel };
+  }
+
+  await applyThinkingSwitchToInstance(instance, pending, "switchMemberThinkingLevel");
+  return { applied: true, pending: false, active: true, thinkingLevel };
+}
+
 export async function switchMemberModelInActiveRooms(memberName: string, model: string, credentialId?: string | null): Promise<Array<{ roomId: string; applied: boolean; pending: boolean; active: boolean; model: string }>> {
   const rooms = Array.from(instances.values())
-    .filter((instance) => instance.agentName === memberName)
+    .filter((instance) => instance.agentName === memberName && !roomStore.hasRoomMemberModelOverride(instance.roomId, memberName))
     .map((instance) => instance.roomId);
   if (rooms.length === 0) return [];
   const results = [];
-  for (const roomId of rooms) results.push({ roomId, ...(await switchMemberModel(roomId, memberName, model, credentialId)) });
+  for (const roomId of rooms) results.push({ roomId, ...(await switchMemberModel(roomId, memberName, model, credentialId, false)) });
   return results;
 }
 

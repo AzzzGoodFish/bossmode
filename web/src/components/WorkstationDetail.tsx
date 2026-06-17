@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search, RotateCcw, RefreshCw, X, Send } from "lucide-react";
-import { abortAgent, getAgentEventsPaginated, getMembers, getMemberTokenUsage, getToken, resetAgentSession, restartMember, type ContextUsageData, type MemberInfo } from "../api/client";
+import { abortAgent, getAgentEventsPaginated, getRoomMembers, getMemberTokenUsage, getToken, resetAgentSession, restartMember, type ContextUsageData, type MemberInfo } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 import { diffStatForTool, eventSearchText, formatEventTime, isReplyEvent, isToolEvent, summarizeAgentEvent, toolTarget, type AgentEvent } from "./agent-event-utils";
@@ -58,14 +58,14 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
   useEffect(() => { void loadInitial(); }, [loadInitial]);
 
   useEffect(() => {
-    getMembers().then((all) => {
+    getRoomMembers(roomId).then((all) => {
       const map: Record<string, MemberInfo> = {};
       for (const m of all) map[m.name] = m;
       setMembers(map);
       const current = all.find((m) => m.name === agentName);
       if (current) getMemberTokenUsage(current.id).then((v) => setTokenTotal(v.totalTokens)).catch(() => {});
     }).catch(console.error);
-  }, [agentName]);
+  }, [roomId, agentName]);
 
   useEffect(() => {
     const token = getToken();
@@ -155,7 +155,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
 
       <div className="flex-1 min-h-0 flex">
         <main className="flex-1 min-w-0 flex flex-col">
-          <div className="w-full max-w-[860px] mx-auto px-4 py-3 border-b border-line-soft flex items-center gap-3 shrink-0">
+          <div className="w-full px-4 py-3 border-b border-line-soft flex items-center gap-3 shrink-0">
             <div className="flex bg-inset border border-line-soft rounded-lg p-0.5">
               <FilterButton label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
               <FilterButton label="Tools" count={counts.tools} active={filter === "tools"} onClick={() => setFilter("tools")} />
@@ -166,14 +166,14 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search loaded activity: command, tool, file path…" className="bg-transparent outline-none text-xs text-ink-1 placeholder:text-ink-4 flex-1" />
             </div>
           </div>
-          <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 w-full max-w-[860px] mx-auto">
+          <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 w-full">
             {hasMore && <button onClick={loadOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80">Load earlier activity</button>}
             {loading && <div className="text-center text-sm text-ink-4 py-8">Loading workstation history…</div>}
             {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
             {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
             <div ref={bottomRef} />
           </div>
-          <div className="border-t border-line bg-surface-0 p-3 flex gap-2 shrink-0 w-full max-w-[860px] mx-auto">
+          <div className="border-t border-line bg-surface-0 p-3 flex gap-2 shrink-0 w-full">
             <input value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendSteer(); }} placeholder={`Private steer @${agentName}…`} className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong" />
             <button onClick={sendSteer} className="inline-flex items-center gap-1 px-3 py-2 bg-accent text-accent-contrast text-sm font-medium rounded cursor-pointer"><Send size={14} />Send</button>
           </div>

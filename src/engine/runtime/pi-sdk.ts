@@ -155,7 +155,10 @@ class PiSdkAgentHandle implements AgentHandle {
   }
 
   setThinkingLevel(level: string): void {
-    try { this.session.setThinkingLevel(level as any); }
+    try {
+      this.session.setThinkingLevel(level as any);
+      this.runtimeParams.thinkingLevel = (this.session as any).thinkingLevel || level;
+    }
     catch (err) { logger.warn("runtime:pi-sdk", "setThinkingLevel failed", { level, error: String(err) }); }
   }
 

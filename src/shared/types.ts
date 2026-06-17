@@ -294,6 +294,12 @@ export interface RoomLinearIntegration {
   syncCount?: number;
 }
 
+export interface RoomMemberOverride {
+  model?: string;
+  credentialId?: string;
+  thinkingLevel?: string;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -305,6 +311,8 @@ export interface Room {
    * agents' system prompts as rules.
    */
   ruleDocs?: string[];
+  /** Room-scoped member/workstation overrides keyed by member name. */
+  memberOverrides?: Record<string, RoomMemberOverride>;
   integrations?: {
     linear?: RoomLinearIntegration;
   };

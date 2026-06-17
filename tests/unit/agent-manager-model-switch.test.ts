@@ -55,6 +55,9 @@ vi.mock("../../src/workforce/agent-store.js", () => ({
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   getRoom: vi.fn(() => ({ id: "room", name: "Room", cwd: "/tmp", members: ["pm"], ruleDocs: [] })),
+  getRoomMemberOverride: vi.fn(() => undefined),
+  updateRoomMemberOverride: vi.fn((_roomId: string, _memberName: string, patch: any) => { member = { ...member, ...patch }; return { id: "room", name: "Room", cwd: "/tmp", members: ["pm"] }; }),
+  hasRoomMemberModelOverride: vi.fn(() => false),
   getCursors: vi.fn(() => ({})),
   setCursor: vi.fn(),
 }));

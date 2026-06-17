@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
-import type { Room, CursorMap, RoomLinearIntegration } from "../shared/types.js";
+import type { Room, CursorMap, RoomLinearIntegration, RoomMemberOverride } from "../shared/types.js";
 
 const ROOMS_DIR = join(getBossmodeDir(), "rooms");
 
@@ -114,6 +114,56 @@ export function updateRoomLinearIntegration(roomId: string, config: RoomLinearIn
   }
   writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
   return room;
+}
+
+export function getRoomMemberOverride(roomId: string, memberName: string): RoomMemberOverride | undefined {
+  return getRoom(roomId)?.memberOverrides?.[memberName];
+}
+
+function cleanOverride(override: RoomMemberOverride): RoomMemberOverride {
+  const next: RoomMemberOverride = {};
+  if (override.model) next.model = override.model;
+  if (override.credentialId) next.credentialId = override.credentialId;
+  if (override.thinkingLevel) next.thinkingLevel = override.thinkingLevel;
+  return next;
+}
+
+export function updateRoomMemberOverride(roomId: string, memberName: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null }): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  const current = room.memberOverrides?.[memberName] || {};
+  const next: RoomMemberOverride = { ...current };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "model")) {
+    if (patch.model) next.model = patch.model;
+    else {
+      delete next.model;
+      delete next.credentialId;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "credentialId")) {
+    if (patch.credentialId) next.credentialId = patch.credentialId;
+    else delete next.credentialId;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) {
+    if (patch.thinkingLevel) next.thinkingLevel = patch.thinkingLevel;
+    else delete next.thinkingLevel;
+  }
+
+  const cleaned = cleanOverride(next);
+  if (Object.keys(cleaned).length > 0) {
+    room.memberOverrides = { ...(room.memberOverrides || {}), [memberName]: cleaned };
+  } else if (room.memberOverrides?.[memberName]) {
+    delete room.memberOverrides[memberName];
+    if (Object.keys(room.memberOverrides).length === 0) delete room.memberOverrides;
+  }
+  writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
+  return room;
+}
+
+export function hasRoomMemberModelOverride(roomId: string, memberName: string): boolean {
+  const override = getRoomMemberOverride(roomId, memberName);
+  return typeof override?.model === "string" && override.model.length > 0;
 }
 
 export function clearLinearIntegrationsForAllRooms(): number {

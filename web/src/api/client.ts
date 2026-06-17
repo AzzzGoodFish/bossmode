@@ -167,6 +167,15 @@ export async function updateMember(id: string, data: Partial<MemberInfo>): Promi
   return apiFetch(`/api/members/${id}`, { method: "PUT", body: JSON.stringify(data) });
 }
 
+export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
+  return apiFetch(`/api/rooms/${roomId}/members`);
+}
+
+export async function updateRoomMember(roomId: string, memberName: string, data: Partial<Pick<MemberInfo, "model" | "credentialId" | "thinkingLevel">>): Promise<MemberInfo> {
+  const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
+  return result.member;
+}
+
 export async function deleteMemberApi(id: string): Promise<void> {
   await apiFetch(`/api/members/${id}`, { method: "DELETE" });
 }

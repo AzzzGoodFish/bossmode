@@ -3,7 +3,7 @@ import { ArrowLeft, Save, X, ChevronDown } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
 import {
   getAgent, updateAgent, deleteAgent, createAgent,
-  getMembers, getRooms, getConfiguredModels, updateMember,
+  getMembers, getRooms, getConfiguredModels, getRoomMembers, updateRoomMember,
   getAgentContextUsage, getMemberTokenUsage,
   type MemberInfo, type Room, type AvailableModelOption, type ContextUsageData,
 } from "../api/client";
@@ -74,13 +74,17 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     try {
       const [allMembers, allRooms] = await Promise.all([getMembers(), getRooms()]);
       const mine = allMembers.filter((m) => m.agent === name);
+      const mineNames = new Set(mine.map((m) => m.name));
       const rows: DutyRow[] = [];
-      for (const m of mine) {
-        for (const r of allRooms) {
-          if (!r.members.includes(m.name)) continue;
+      await Promise.all(allRooms.map(async (r) => {
+        const names = r.members.filter((memberName) => mineNames.has(memberName));
+        if (names.length === 0) return;
+        const effectiveMembers = await getRoomMembers(r.id).catch(() => mine.filter((m) => names.includes(m.name)));
+        for (const m of effectiveMembers) {
+          if (!mineNames.has(m.name)) continue;
           rows.push({ member: m, room: r, status: r.agentStatuses?.[m.name] || "inactive" });
         }
-      }
+      }));
       setDuty(rows);
       // context usage（逐行拉取，失败忽略）
       rows.forEach((row, i) => {
@@ -111,11 +115,22 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     return () => document.removeEventListener("click", close);
   }, [openChip]);
 
-  const handleSwitchModel = async (member: MemberInfo, model: string, credentialId: string) => {
+  const handleSwitchModel = async (roomId: string, member: MemberInfo, model: string, credentialId: string) => {
     setOpenChip(null);
     try {
-      await updateMember(member.id, { model, credentialId });
-      toast(`${member.name} → ${model}（下一回合生效）`, "success");
+      await updateRoomMember(roomId, member.name, { model, credentialId });
+      toast(`${member.name} → ${model}（仅当前房间，下一回合生效）`, "success");
+      loadDuty();
+    } catch (err: any) {
+      toast(`切换失败: ${err.message}`, "error");
+    }
+  };
+
+  const handleSwitchThinking = async (roomId: string, member: MemberInfo, thinkingLevel: string) => {
+    setOpenChip(null);
+    try {
+      await updateRoomMember(roomId, member.name, { thinkingLevel });
+      toast(`${member.name} thinking → ${thinkingLevel}（仅当前房间）`, "success");
       loadDuty();
     } catch (err: any) {
       toast(`切换失败: ${err.message}`, "error");
@@ -290,7 +305,9 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
                           <ModelPop
                             models={models}
                             current={{ model: row.member.model ?? null, credentialId: row.member.credentialId ?? null }}
-                            onSelect={(model, credentialId) => handleSwitchModel(row.member, model, credentialId)}
+                            currentThinking={row.member.thinkingLevel || "off"}
+                            onThinkingSelect={(thinkingLevel) => handleSwitchThinking(row.room.id, row.member, thinkingLevel)}
+                            onSelect={(model, credentialId) => handleSwitchModel(row.room.id, row.member, model, credentialId)}
                           />
                         )}
                       </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
-  abortAgent, getMembers, getConfiguredModels, updateMember, getAgentEventsPaginated, getToken,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken,
   type MemberInfo, type AvailableModelOption, type ContextUsageData,
 } from "../api/client";
 import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
@@ -49,14 +49,14 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
 
   useEffect(() => {
-    getMembers()
+    getRoomMembers(roomId)
       .then((all) => {
         const map: Record<string, MemberInfo> = {};
         for (const m of all) map[m.name] = m;
         setMemberInfos(map);
       })
       .catch(console.error);
-  }, [members]);
+  }, [members, roomId]);
 
   useEffect(() => {
     getConfiguredModels().then(setModels).catch(console.error);
@@ -74,14 +74,14 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     async (member: MemberInfo, model: string, credentialId: string) => {
       setOpenChip(null);
       try {
-        const updated = await updateMember(member.id, { model, credentialId });
+        const updated = await updateRoomMember(roomId, member.name, { model, credentialId });
         setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
         toast(`${member.name} → ${model}（下一回合生效）`, "success");
       } catch (err: any) {
         toast(`切换失败: ${err.message}`, "error");
       }
     },
-    [toast],
+    [roomId, toast],
   );
 
 
@@ -188,7 +188,18 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                         anchorRect={chipAnchor}
                         models={models}
                         current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
+                        currentThinking={info.thinkingLevel || "off"}
                         onClose={() => { setOpenChip(null); setChipAnchor(null); }}
+                        onThinkingSelect={(thinkingLevel) => {
+                          setOpenChip(null);
+                          setChipAnchor(null);
+                          updateRoomMember(roomId, info.name, { thinkingLevel })
+                            .then((updated) => {
+                              setMemberInfos((prev) => ({ ...prev, [info.name]: updated }));
+                              toast(`${info.name} thinking → ${thinkingLevel}`, "success");
+                            })
+                            .catch((err: any) => toast(`切换失败: ${err.message}`, "error"));
+                        }}
                         onSelect={(model, credentialId) => {
                           setOpenChip(null);
                           setChipAnchor(null);
@@ -359,14 +370,18 @@ function MiniEvent({ event }: { event: AgentEvent }) {
 export function ModelPop({
   models,
   current,
+  currentThinking,
   anchorRect = null,
   onSelect,
+  onThinkingSelect,
   onClose,
 }: {
   models: AvailableModelOption[];
   current: { model: string | null; credentialId: string | null };
+  currentThinking?: string;
   anchorRect?: DOMRect | null;
   onSelect: (model: string, credentialId: string) => void;
+  onThinkingSelect?: (thinkingLevel: string) => void;
   onClose?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -421,8 +436,24 @@ export function ModelPop({
         </div>
       ))}
       {models.length === 0 && <p className="text-[11px] text-ink-4 px-2 py-2">无可用模型 — 先在 System → Models 配置凭证。</p>}
+      {onThinkingSelect && (
+        <div className="border-t border-line-soft mt-1 pt-1.5">
+          <div className="px-2 pb-0.5 text-[9px] font-semibold tracking-[0.05em] text-ink-4">THINKING</div>
+          <div className="grid grid-cols-3 gap-1 px-1">
+            {["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => (
+              <button
+                key={level}
+                onClick={() => onThinkingSelect(level)}
+                className={`text-[10px] font-mono px-1.5 py-1 rounded cursor-pointer transition-colors ${currentThinking === level ? "text-accent-ink bg-accent-dim" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">
-        热切换：不中断当前回合，下一 turn 生效；可跨凭证/provider。
+        热切换：不中断当前回合，下一 turn 生效；配置仅作用于当前房间工位。
       </p>
     </>
   );

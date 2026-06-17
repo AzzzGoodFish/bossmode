@@ -9,10 +9,12 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentions } from "../communication/router.js";
-import { getRoomAgentStatuses, getAgentContextUsage } from "../engine/agent-manager.js";
+import { getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
+import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
+import { getModelCredentialProfile, listAvailableModels, normalizeModelRef } from "../engine/model-credentials.js";
 
 // ── Rooms ──
 
@@ -159,6 +161,110 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
 });
 
 // ── Room Members ──
+
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function providerFromModelRef(model: string): string {
+  const ref = normalizeModelRef(model);
+  const idx = ref.indexOf("/");
+  return idx > 0 ? ref.slice(0, idx) : "anthropic";
+}
+
+function normalizeRoomModelInput(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? normalizeModelRef(trimmed) : null;
+}
+
+function validateCredentialMatchesModel(credentialId: unknown, model: string | null | undefined): string | null | undefined {
+  if (credentialId === null || credentialId === "") return null;
+  if (credentialId === undefined) return undefined;
+  if (typeof credentialId !== "string") throw new Error("credentialId must be a string");
+  if (!model) throw new Error("credentialId requires an explicit model override");
+  const credential = getModelCredentialProfile(credentialId);
+  if (!credential) throw new Error("Model credential profile not found");
+  const provider = providerFromModelRef(model);
+  if (credential.providerSlug !== provider) {
+    throw new Error(`Credential provider ${credential.providerSlug} does not match model provider ${provider}`);
+  }
+  return credentialId;
+}
+
+addRoute("GET", "/api/rooms/:id/members", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  sendJson(res, 200, resolveRoomMembers(params.id, room.members));
+});
+
+addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  if (!room.members.includes(params.memberName)) {
+    sendJson(res, 404, { error: "Member is not in this room" });
+    return;
+  }
+
+  const body = (await parseBody(req)) as { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null };
+  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null } = {};
+  const hasModel = Object.prototype.hasOwnProperty.call(body, "model");
+  const hasCredential = Object.prototype.hasOwnProperty.call(body, "credentialId");
+  const hasThinking = Object.prototype.hasOwnProperty.call(body, "thinkingLevel");
+
+  let model: string | null | undefined;
+  if (hasModel) {
+    model = normalizeRoomModelInput(body.model);
+    if (model) {
+      const available = listAvailableModels().some((m) => m.ref === model);
+      if (!available) {
+        sendJson(res, 400, { error: `Model is not available or credential is missing: ${model}` });
+        return;
+      }
+    }
+    patch.model = model ?? null;
+  }
+
+  try {
+    const credentialTargetModel = model === undefined ? resolveRoomMember(params.id, params.memberName)?.model : model;
+    const credentialId = hasCredential ? validateCredentialMatchesModel(body.credentialId, credentialTargetModel) : undefined;
+    if (hasCredential) patch.credentialId = credentialId ?? null;
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+    return;
+  }
+
+  if (hasThinking) {
+    if (body.thinkingLevel === null || body.thinkingLevel === "") patch.thinkingLevel = null;
+    else if (typeof body.thinkingLevel === "string" && THINKING_LEVELS.has(body.thinkingLevel)) patch.thinkingLevel = body.thinkingLevel;
+    else {
+      sendJson(res, 400, { error: "thinkingLevel must be one of off|minimal|low|medium|high|xhigh" });
+      return;
+    }
+  }
+
+  if (!hasModel && !hasCredential && !hasThinking) {
+    sendJson(res, 400, { error: "Nothing to update" });
+    return;
+  }
+
+  roomStore.updateRoomMemberOverride(params.id, params.memberName, patch);
+  const effective = resolveRoomMember(params.id, params.memberName);
+  const result: Record<string, unknown> = { member: effective };
+  try {
+    if (hasModel && effective?.model) result.modelSwitch = await switchMemberModel(params.id, params.memberName, effective.model, effective.credentialId);
+    if (hasThinking && effective?.thinkingLevel) result.thinkingSwitch = await switchMemberThinkingLevel(params.id, params.memberName, effective.thinkingLevel);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+    return;
+  }
+  sendJson(res, 200, result);
+});
 
 addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
