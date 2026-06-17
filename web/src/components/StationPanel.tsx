@@ -231,7 +231,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                           updateRoomMember(roomId, info.name, { thinkingLevel })
                             .then((updated) => {
                               setMemberInfos((prev) => ({ ...prev, [info.name]: updated }));
-                              toast(`${info.name} thinking → ${thinkingLevel}`, "success");
+                              toast(`${info.name} thinking → ${thinkingLevel ?? "default"}`, "success");
                             })
                             .catch((err: any) => toast(`切换失败: ${err.message}`, "error"));
                         }}
@@ -501,13 +501,21 @@ export function ThinkingPop({
 }: {
   currentThinking: string;
   anchorRect?: DOMRect | null;
-  onSelect: (thinkingLevel: string) => void;
+  onSelect: (thinkingLevel: string | null) => void;
   onClose?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const width = 200;
   const gap = 6;
-  const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+  const levels: Array<{ label: string; value: string | null }> = [
+    { label: "default", value: null },
+    { label: "off", value: "off" },
+    { label: "minimal", value: "minimal" },
+    { label: "low", value: "low" },
+    { label: "medium", value: "medium" },
+    { label: "high", value: "high" },
+    { label: "xhigh", value: "xhigh" },
+  ];
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -534,11 +542,11 @@ export function ThinkingPop({
       <div className="grid grid-cols-2 gap-1 px-1">
         {levels.map((level) => (
           <button
-            key={level}
-            onClick={() => onSelect(level)}
-            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${currentThinking === level ? "text-accent-ink bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
+            key={level.label}
+            onClick={() => onSelect(level.value)}
+            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${level.value !== null && currentThinking === level.value ? "text-accent-ink bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
           >
-            {level}
+            {level.label}
           </button>
         ))}
       </div>

@@ -130,12 +130,12 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     }
   };
 
-  const handleSwitchThinking = async (roomId: string, member: MemberInfo, thinkingLevel: string) => {
+  const handleSwitchThinking = async (roomId: string, member: MemberInfo, thinkingLevel: string | null) => {
     setOpenThinkingChip(null);
     setThinkingAnchor(null);
     try {
       await updateRoomMember(roomId, member.name, { thinkingLevel });
-      toast(`${member.name} thinking → ${thinkingLevel}（仅当前房间）`, "success");
+      toast(`${member.name} thinking → ${thinkingLevel ?? "default"}（仅当前房间）`, "success");
       loadDuty();
     } catch (err: any) {
       toast(`切换失败: ${err.message}`, "error");

@@ -171,7 +171,11 @@ export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
   return apiFetch(`/api/rooms/${roomId}/members`);
 }
 
-export async function updateRoomMember(roomId: string, memberName: string, data: Partial<Pick<MemberInfo, "model" | "credentialId" | "thinkingLevel">>): Promise<MemberInfo> {
+export async function updateRoomMember(
+  roomId: string,
+  memberName: string,
+  data: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null },
+): Promise<MemberInfo> {
   const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
   return result.member;
 }
