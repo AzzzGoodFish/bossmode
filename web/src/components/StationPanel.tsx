@@ -45,6 +45,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [openChip, setOpenChip] = useState<string | null>(null);
   const [chipAnchor, setChipAnchor] = useState<DOMRect | null>(null);
+  const [openThinkingChip, setOpenThinkingChip] = useState<string | null>(null);
+  const [thinkingAnchor, setThinkingAnchor] = useState<DOMRect | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
 
@@ -65,7 +67,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   // 点击外部关闭模型弹层
   useEffect(() => {
     if (!openChip) return;
-    const close = () => setOpenChip(null);
+    const close = () => { setOpenChip(null); setChipAnchor(null); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [openChip]);
@@ -131,7 +133,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0" onScroll={() => { setOpenChip(null); setChipAnchor(null); }}>
+      <div className="flex-1 overflow-y-auto min-h-0" onScroll={() => { setOpenChip(null); setChipAnchor(null); setOpenThinkingChip(null); setThinkingAnchor(null); }}>
         {members.map((name) => {
           const status = agentStatus[name] || "inactive";
           const info = memberInfos[name];
@@ -163,12 +165,14 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                     <span className="truncate">{name}</span>
                     {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                   </button>
-                  {/* 模型热切换 chip */}
-                  <div className="relative">
+                  {/* 当前 room 的模型 + thinking 配置 chips */}
+                  <div className="relative flex items-center gap-1 min-w-0 max-w-full">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!info) return;
+                        setOpenThinkingChip(null);
+                        setThinkingAnchor(null);
                         if (openChip === name) {
                           setOpenChip(null);
                           setChipAnchor(null);
@@ -177,33 +181,59 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                           setChipAnchor(e.currentTarget.getBoundingClientRect());
                         }
                       }}
-                      title={modelLabel}
-                      className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex items-center gap-1 cursor-pointer transition-colors max-w-full"
+                      title={`${modelLabel} · This room only`}
+                      className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex items-center gap-1 cursor-pointer transition-colors min-w-0"
                     >
                       <span className="truncate">{modelLabel}</span>
                       <ChevronDown size={9} className="shrink-0 opacity-70" />
                     </button>
+                    {info && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenChip(null);
+                          setChipAnchor(null);
+                          if (openThinkingChip === name) {
+                            setOpenThinkingChip(null);
+                            setThinkingAnchor(null);
+                          } else {
+                            setOpenThinkingChip(name);
+                            setThinkingAnchor(e.currentTarget.getBoundingClientRect());
+                          }
+                        }}
+                        title={`thinking · ${info.thinkingLevel || "off"} · This room only`}
+                        className="font-mono text-[9.5px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 py-px border border-line-soft/70 cursor-pointer transition-colors shrink-0"
+                      >
+                        think {info.thinkingLevel || "off"}
+                      </button>
+                    )}
                     {openChip === name && info && (
                       <ModelPop
                         anchorRect={chipAnchor}
                         models={models}
                         current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
-                        currentThinking={info.thinkingLevel || "off"}
                         onClose={() => { setOpenChip(null); setChipAnchor(null); }}
-                        onThinkingSelect={(thinkingLevel) => {
+                        onSelect={(model, credentialId) => {
                           setOpenChip(null);
                           setChipAnchor(null);
+                          handleSwitchModel(info, model, credentialId);
+                        }}
+                      />
+                    )}
+                    {openThinkingChip === name && info && (
+                      <ThinkingPop
+                        anchorRect={thinkingAnchor}
+                        currentThinking={info.thinkingLevel || "off"}
+                        onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
+                        onSelect={(thinkingLevel) => {
+                          setOpenThinkingChip(null);
+                          setThinkingAnchor(null);
                           updateRoomMember(roomId, info.name, { thinkingLevel })
                             .then((updated) => {
                               setMemberInfos((prev) => ({ ...prev, [info.name]: updated }));
                               toast(`${info.name} thinking → ${thinkingLevel}`, "success");
                             })
                             .catch((err: any) => toast(`切换失败: ${err.message}`, "error"));
-                        }}
-                        onSelect={(model, credentialId) => {
-                          setOpenChip(null);
-                          setChipAnchor(null);
-                          handleSwitchModel(info, model, credentialId);
                         }}
                       />
                     )}
@@ -370,18 +400,14 @@ function MiniEvent({ event }: { event: AgentEvent }) {
 export function ModelPop({
   models,
   current,
-  currentThinking,
   anchorRect = null,
   onSelect,
-  onThinkingSelect,
   onClose,
 }: {
   models: AvailableModelOption[];
   current: { model: string | null; credentialId: string | null };
-  currentThinking?: string;
   anchorRect?: DOMRect | null;
   onSelect: (model: string, credentialId: string) => void;
-  onThinkingSelect?: (thinkingLevel: string) => void;
   onClose?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -436,24 +462,8 @@ export function ModelPop({
         </div>
       ))}
       {models.length === 0 && <p className="text-[11px] text-ink-4 px-2 py-2">无可用模型 — 先在 System → Models 配置凭证。</p>}
-      {onThinkingSelect && (
-        <div className="border-t border-line-soft mt-1 pt-1.5">
-          <div className="px-2 pb-0.5 text-[9px] font-semibold tracking-[0.05em] text-ink-4">THINKING</div>
-          <div className="grid grid-cols-3 gap-1 px-1">
-            {["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => (
-              <button
-                key={level}
-                onClick={() => onThinkingSelect(level)}
-                className={`text-[10px] font-mono px-1.5 py-1 rounded cursor-pointer transition-colors ${currentThinking === level ? "text-accent-ink bg-accent-dim" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}
-              >
-                {level}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">
-        热切换：不中断当前回合，下一 turn 生效；配置仅作用于当前房间工位。
+        模型配置仅作用于当前房间工位；不中断当前回合，下一 turn 生效。
       </p>
     </>
   );
@@ -477,6 +487,75 @@ export function ModelPop({
       className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto w-[260px]"
       style={{ left, ...vertical, boxShadow: "var(--shadow-pop)" }}
     >
+      {content}
+    </div>,
+    document.body,
+  );
+}
+
+export function ThinkingPop({
+  currentThinking,
+  anchorRect = null,
+  onSelect,
+  onClose,
+}: {
+  currentThinking: string;
+  anchorRect?: DOMRect | null;
+  onSelect: (thinkingLevel: string) => void;
+  onClose?: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const width = 200;
+  const gap = 6;
+  const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose?.();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    const onResize = () => onClose?.();
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [onClose]);
+
+  const content = (
+    <>
+      <div className="px-2 pt-1.5 pb-1 text-[9px] font-semibold tracking-[0.05em] text-ink-4">THINKING EFFORT</div>
+      <div className="grid grid-cols-2 gap-1 px-1">
+        {levels.map((level) => (
+          <button
+            key={level}
+            onClick={() => onSelect(level)}
+            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${currentThinking === level ? "text-accent-ink bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
+          >
+            {level}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">仅当前房间工位生效。</p>
+    </>
+  );
+
+  if (!anchorRect) {
+    return <div ref={ref} onClick={(e) => e.stopPropagation()} className="absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5 w-[200px]" style={{ boxShadow: "var(--shadow-pop)" }}>{content}</div>;
+  }
+
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.right - width));
+  const opensUp = window.innerHeight - anchorRect.bottom < 210 && anchorRect.top > 210;
+  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
+
+  return createPortal(
+    <div ref={ref} onClick={(e) => e.stopPropagation()} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5 w-[200px]" style={{ left, ...vertical, boxShadow: "var(--shadow-pop)" }}>
       {content}
     </div>,
     document.body,

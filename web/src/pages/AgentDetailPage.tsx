@@ -9,7 +9,7 @@ import {
 } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
-import { ModelPop } from "../components/StationPanel";
+import { ModelPop, ThinkingPop } from "../components/StationPanel";
 import { formatTokens } from "../components/StationPanel";
 import { useDialog } from "../components/dialogs";
 
@@ -50,6 +50,9 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   const [tokens30d, setTokens30d] = useState<number | null>(null);
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [openChip, setOpenChip] = useState<string | null>(null);
+  const [chipAnchor, setChipAnchor] = useState<DOMRect | null>(null);
+  const [openThinkingChip, setOpenThinkingChip] = useState<string | null>(null);
+  const [thinkingAnchor, setThinkingAnchor] = useState<DOMRect | null>(null);
 
   const loadAgent = () => {
     setLoading(true);
@@ -110,13 +113,14 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   // 点击外部关闭模型弹层
   useEffect(() => {
     if (!openChip) return;
-    const close = () => setOpenChip(null);
+    const close = () => { setOpenChip(null); setChipAnchor(null); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [openChip]);
 
   const handleSwitchModel = async (roomId: string, member: MemberInfo, model: string, credentialId: string) => {
     setOpenChip(null);
+    setChipAnchor(null);
     try {
       await updateRoomMember(roomId, member.name, { model, credentialId });
       toast(`${member.name} → ${model}（仅当前房间，下一回合生效）`, "success");
@@ -127,7 +131,8 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   };
 
   const handleSwitchThinking = async (roomId: string, member: MemberInfo, thinkingLevel: string) => {
-    setOpenChip(null);
+    setOpenThinkingChip(null);
+    setThinkingAnchor(null);
     try {
       await updateRoomMember(roomId, member.name, { thinkingLevel });
       toast(`${member.name} thinking → ${thinkingLevel}（仅当前房间）`, "success");
@@ -292,22 +297,59 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
                         <div className="text-[12.5px] font-medium text-ink-2 truncate">{row.room.name}</div>
                         <div className="font-mono text-[10px] text-ink-4 truncate">~{row.room.cwd.replace(/^\/home\/[^/]+/, "")}</div>
                       </div>
-                      <div className="relative min-w-0">
+                      <div className="relative min-w-0 flex items-center gap-1">
                         <button
-                          onClick={(e) => { e.stopPropagation(); setOpenChip(openChip === chipKey ? null : chipKey); }}
-                          title={row.member.model || "agent default"}
-                          className="font-mono text-[10.5px] text-ink-3 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 -mx-1.5 py-0.5 flex items-center gap-1 cursor-pointer transition-colors max-w-full"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenThinkingChip(null);
+                            setThinkingAnchor(null);
+                            if (openChip === chipKey) {
+                              setOpenChip(null);
+                              setChipAnchor(null);
+                            } else {
+                              setOpenChip(chipKey);
+                              setChipAnchor(e.currentTarget.getBoundingClientRect());
+                            }
+                          }}
+                          title={`${row.member.model || "agent default"} · This room only`}
+                          className="font-mono text-[10.5px] text-ink-3 hover:text-accent-ink hover:bg-accent-dim rounded px-1.5 -mx-1.5 py-0.5 flex items-center gap-1 cursor-pointer transition-colors min-w-0"
                         >
                           <span className="truncate">{row.member.model || "agent default"}</span>
                           <ChevronDown size={9} className="shrink-0 opacity-70" />
                         </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChip(null);
+                            setChipAnchor(null);
+                            if (openThinkingChip === chipKey) {
+                              setOpenThinkingChip(null);
+                              setThinkingAnchor(null);
+                            } else {
+                              setOpenThinkingChip(chipKey);
+                              setThinkingAnchor(e.currentTarget.getBoundingClientRect());
+                            }
+                          }}
+                          title={`thinking · ${row.member.thinkingLevel || "off"} · This room only`}
+                          className="font-mono text-[9.5px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded border border-line-soft/70 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0"
+                        >
+                          think {row.member.thinkingLevel || "off"}
+                        </button>
                         {openChip === chipKey && (
                           <ModelPop
+                            anchorRect={chipAnchor}
                             models={models}
                             current={{ model: row.member.model ?? null, credentialId: row.member.credentialId ?? null }}
-                            currentThinking={row.member.thinkingLevel || "off"}
-                            onThinkingSelect={(thinkingLevel) => handleSwitchThinking(row.room.id, row.member, thinkingLevel)}
+                            onClose={() => { setOpenChip(null); setChipAnchor(null); }}
                             onSelect={(model, credentialId) => handleSwitchModel(row.room.id, row.member, model, credentialId)}
+                          />
+                        )}
+                        {openThinkingChip === chipKey && (
+                          <ThinkingPop
+                            anchorRect={thinkingAnchor}
+                            currentThinking={row.member.thinkingLevel || "off"}
+                            onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
+                            onSelect={(thinkingLevel) => handleSwitchThinking(row.room.id, row.member, thinkingLevel)}
                           />
                         )}
                       </div>
