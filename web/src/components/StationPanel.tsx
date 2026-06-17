@@ -265,18 +265,19 @@ function toolEndDetail(event: AgentEvent): string {
   return event.toolName ? "completed" : "done";
 }
 
-function stationSummary(event?: AgentEvent): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean } {
+function stationSummary(event?: AgentEvent): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean; tag?: string } {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
-    return { kind: "running", label: `RUNNING · ${event.toolName || "tool"}`, detail: toolTarget(event.args) || "running", ts, pulse: true };
+    return { kind: "running", label: String(event.toolName || "tool"), detail: toolTarget(event.args) || "running", ts, pulse: true };
   }
   if (event.type === "tool_end") {
     return {
       kind: event.isError ? "error" : "done",
-      label: `${event.isError ? "ERROR" : "DONE"} · ${event.toolName || "tool"}`,
+      label: String(event.toolName || "tool"),
       detail: toolEndDetail(event),
       ts,
+      tag: event.isError ? "ERROR" : undefined,
     };
   }
   const summary = summarizeAgentEvent(event);
@@ -291,6 +292,7 @@ function actionTone(kind: string): string {
   if (kind === "running") return "text-accent-ink";
   if (kind === "done") return "text-onair";
   if (kind === "error") return "text-blocked";
+  if (kind === "working") return "text-onair";
   if (kind === "tool") return "text-accent-ink";
   if (kind === "thinking") return "text-think";
   if (kind === "reply") return "text-ink-2";
@@ -298,10 +300,21 @@ function actionTone(kind: string): string {
 }
 
 function actionShell(kind: string): string {
-  if (kind === "running") return "border-accent/30";
-  if (kind === "done") return "border-onair/25";
+  if (kind === "running") return "border-accent/30 ring-1 ring-accent/10";
+  if (kind === "done") return "border-onair/20";
   if (kind === "error") return "border-blocked/35 bg-blocked-dim/40";
+  if (kind === "working") return "border-onair/15";
   return "border-line-soft";
+}
+
+function actionDot(kind: string): string {
+  if (kind === "running") return "bg-accent shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_16%,transparent)] animate-pulse";
+  if (kind === "done") return "bg-onair opacity-80";
+  if (kind === "error") return "bg-blocked";
+  if (kind === "working") return "bg-onair opacity-80";
+  if (kind === "thinking") return "bg-think";
+  if (kind === "reply") return "bg-ink-3";
+  return "bg-ink-4";
 }
 
 function ActionLine({ name, status, events, expanded, onToggle }: { name: string; status: string; events: AgentEvent[]; expanded: boolean; onToggle: () => void }) {
@@ -310,18 +323,18 @@ function ActionLine({ name, status, events, expanded, onToggle }: { name: string
   const label = isWorkingWithoutEvent ? "WORKING" : status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
   const time = summary.ts ? formatEventTime(summary.ts) : "";
   const detail = isWorkingWithoutEvent ? "Waiting for activity" : status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
-  const tone = isWorkingWithoutEvent ? "text-onair" : actionTone(summary.kind);
+  const visualKind = isWorkingWithoutEvent ? "working" : summary.kind;
+  const tone = actionTone(visualKind);
   return (
     <button
       onClick={onToggle}
-      className={`w-full mt-2.5 flex items-center gap-2 rounded-md border bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer ${actionShell(summary.kind)}`}
+      className={`w-full mt-2.5 flex items-center gap-2 rounded-md border bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer ${actionShell(visualKind)}`}
       title={`${name}: ${label} ${detail}`}
     >
-      <span className={`text-[9px] font-bold tracking-[0.12em] shrink-0 ${tone}`}>
-        {summary.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5 align-middle animate-pulse" />}
-        {label}
-      </span>
+      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(visualKind)}`} />
+      <span className={`text-[9px] font-bold tracking-[0.12em] uppercase shrink-0 ${tone}`}>{label}</span>
       <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{detail}</span>
+      {summary.tag && <span className="text-[8.5px] font-bold tracking-[0.08em] text-blocked border border-blocked/25 rounded-full px-1.5 py-px shrink-0">{summary.tag}</span>}
       <ChevronDown size={11} className={`text-ink-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
     </button>
   );
@@ -333,12 +346,11 @@ function MiniEvent({ event }: { event: AgentEvent }) {
   return (
     <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(summary.kind)}`}>
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`text-[9px] font-bold tracking-[0.1em] shrink-0 ${actionTone(summary.kind)}`}>
-          {summary.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent mr-1.5 align-middle animate-pulse" />}
-          {summary.label}
-        </span>
+        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(summary.kind)}`} />
+        <span className={`text-[9px] font-bold tracking-[0.1em] uppercase shrink-0 ${actionTone(summary.kind)}`}>{summary.label}</span>
         <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{summary.detail}</span>
-        {time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
+        {summary.tag && <span className="text-[8.5px] font-bold tracking-[0.08em] text-blocked border border-blocked/25 rounded-full px-1.5 py-px shrink-0">{summary.tag}</span>}
+        {!summary.tag && time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
       </div>
     </div>
   );

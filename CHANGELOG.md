@@ -6,6 +6,13 @@ All notable changes to Bossmode are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Station tool lifecycle action line now uses the tool name as the primary label; running/completed/error states are expressed by dot, border, color, and compact error tag instead of `RUNNING`/`DONE` main labels.
+
+### Tests
+- `npm test -- tests/unit/agent-event-utils.test.ts`
+- `npm run build`
+
 ---
 
 ## [0.13.12] — 2026-06-16
