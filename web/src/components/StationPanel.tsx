@@ -376,7 +376,7 @@ function actionDot(kind: string): string {
   if (kind === "running") return "bg-accent shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_16%,transparent)] animate-pulse";
   if (kind === "done") return "bg-onair opacity-80";
   if (kind === "error") return "bg-blocked";
-  if (kind === "working") return "bg-onair opacity-80";
+  if (kind === "working") return "bg-onair shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_16%,transparent)] animate-pulse";
   if (kind === "thinking") return "bg-think";
   if (kind === "reply") return "bg-ink-3";
   return "bg-ink-4";
