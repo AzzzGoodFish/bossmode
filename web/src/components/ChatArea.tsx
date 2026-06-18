@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, BookOpen, FileText, ShieldCheck, Plus, Pencil, ArrowRight, Trash2 } from "lucide-react";
+import { Loader2, BookOpen, FileText, ShieldCheck, Plus, Pencil, ArrowRight, Trash2, Eye } from "lucide-react";
 import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, GateEventMeta } from "../api/client";
 import { decideGate } from "../api/client";
 import { Markdown } from "./Markdown";
@@ -7,6 +7,7 @@ import { useDialog } from "./dialogs";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
+import type { GateArtifactPreviewState } from "./ArtifactPreviewPanel";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
@@ -20,6 +21,8 @@ interface ChatAreaProps {
   members?: string[];
   onNavigateToTask?: (taskId: string) => void;
   onNavigateToKnowledge?: (path: string) => void;
+  onPreviewArtifact?: (preview: GateArtifactPreviewState) => void;
+  activeArtifactPreview?: { gateId: string; selectedIndex: number } | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
   onReturnToLatest?: () => void;
   inHistoryView?: boolean;
@@ -27,7 +30,7 @@ interface ChatAreaProps {
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, activeArtifactPreview, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -220,7 +223,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                   ) : msg.type === "knowledge_event" && msg.knowledge_event_meta ? (
                     <KnowledgeEventCard meta={msg.knowledge_event_meta} onJump={onNavigateToKnowledge ? () => onNavigateToKnowledge(msg.knowledge_event_meta!.path) : undefined} />
                   ) : msg.type === "gate_event" && msg.gate_event_meta ? (
-                    <GateEventCard meta={msg.gate_event_meta} roomId={roomId} decided={msg.gate_event_meta.action === "requested" ? decidedGateIds.has(msg.gate_event_meta.gateId) : true} onNavigateToKnowledge={onNavigateToKnowledge} />
+                    <GateEventCard meta={msg.gate_event_meta} roomId={roomId} decided={msg.gate_event_meta.action === "requested" ? decidedGateIds.has(msg.gate_event_meta.gateId) : true} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={onPreviewArtifact} activeArtifactPreview={activeArtifactPreview} />
                   ) : msg.type === "summary" ? (
                     <SummaryCard message={msg} roomId={roomId || ""} />
                   ) : (
@@ -312,7 +315,7 @@ function KnowledgeEventCard({ meta, onJump }: { meta: KnowledgeEventMeta; onJump
 }
 
 /** 🛡 阶段交付验收卡 — 批准即移交，打回即反馈 */
-function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge }: { meta: GateEventMeta; roomId?: string; decided: boolean; onNavigateToKnowledge?: (path: string) => void }) {
+function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge, onPreviewArtifact, activeArtifactPreview }: { meta: GateEventMeta; roomId?: string; decided: boolean; onNavigateToKnowledge?: (path: string) => void; onPreviewArtifact?: (preview: GateArtifactPreviewState) => void; activeArtifactPreview?: { gateId: string; selectedIndex: number } | null }) {
   const { toast, prompt } = useDialog();
   const [busy, setBusy] = useState(false);
   const [localDecision, setLocalDecision] = useState<"approved" | "rejected" | null>(null);
@@ -370,18 +373,36 @@ function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge }: { meta:
         </div>
       )}
       {(meta.artifacts?.length ?? 0) > 0 && (
-        <div className="px-3.5 pb-2 flex flex-col gap-1">
+        <div className="px-3.5 pb-2 flex flex-col gap-1.5">
           {meta.artifacts!.map((a, i) => {
-            const isDoc = /\.md$/i.test(a) && !a.startsWith("http") && !a.startsWith("/");
+            const kind = /\.html?$/i.test(a) ? "html" : /\.md$/i.test(a) ? "md" : "file";
+            const active = activeArtifactPreview?.gateId === meta.gateId && activeArtifactPreview.selectedIndex === i;
             return (
-              <button
+              <div
                 key={i}
-                onClick={isDoc && onNavigateToKnowledge ? () => onNavigateToKnowledge(a) : undefined}
-                className={`flex items-center gap-1.5 text-[11px] text-left ${isDoc && onNavigateToKnowledge ? "text-accent-ink hover:underline cursor-pointer" : "text-ink-3 cursor-default"}`}
+                className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-[11px] ${active ? "border-accent/40 bg-accent-dim/50" : "border-line-soft bg-surface-0/30"}`}
               >
-                <FileText size={11} className="shrink-0" />
-                <span className="font-mono truncate">{a}</span>
-              </button>
+                <FileText size={11} className="shrink-0 text-ink-4" />
+                <span className="uppercase font-bold text-[8px] text-ink-4 shrink-0">{kind}</span>
+                <span className="font-mono truncate text-ink-3 flex-1 min-w-0" title={a}>{a}</span>
+                {onPreviewArtifact && (
+                  <button
+                    onClick={() => onPreviewArtifact({ gateId: meta.gateId, gateTitle: meta.gateTitle, artifacts: meta.artifacts || [], selectedIndex: i })}
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-accent-ink hover:bg-accent-dim cursor-pointer shrink-0"
+                  >
+                    <Eye size={11} />
+                    Preview
+                  </button>
+                )}
+                {!onPreviewArtifact && /\.md$/i.test(a) && onNavigateToKnowledge && (
+                  <button
+                    onClick={() => onNavigateToKnowledge(a)}
+                    className="rounded px-2 py-1 text-[10px] font-medium text-accent-ink hover:bg-accent-dim cursor-pointer shrink-0"
+                  >
+                    Open
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>

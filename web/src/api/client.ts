@@ -483,6 +483,18 @@ export async function getKnowledgeEntry(path: string): Promise<KnowledgeEntry> {
   return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`);
 }
 
+export interface ArtifactPreviewData {
+  type: "md" | "html";
+  originalPath: string;
+  path: string;
+  title: string;
+  content: string;
+}
+
+export async function getArtifactPreview(roomId: string, path: string): Promise<ArtifactPreviewData> {
+  return apiFetch(`/api/rooms/${roomId}/artifact-preview?path=${encodeURIComponent(path)}`);
+}
+
 export async function addKnowledgeEntry(
   title: string, content: string, path?: string,
 ): Promise<KnowledgeEntry> {

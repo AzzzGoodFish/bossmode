@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { Room, SummarizeStatus } from "../api/client";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
@@ -17,6 +17,7 @@ import {
 import { useRoom } from "../hooks/useRoom";
 import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
+import { ArtifactPreviewPanel, type GateArtifactPreviewState } from "../components/ArtifactPreviewPanel";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
@@ -44,6 +45,10 @@ interface MainProps {
 
 type RoomView = "chat" | "tasks";
 
+const PREVIEW_WIDTH_STORAGE_KEY = "bossmode.stageGatePreviewWidth";
+const PREVIEW_MIN_WIDTH = 320;
+const PREVIEW_MAX_WIDTH = 760;
+
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, username,
   externalShowCreateRoom, onCreateRoomShown,
@@ -57,6 +62,13 @@ export function Main({
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
+  const [artifactPreview, setArtifactPreview] = useState<GateArtifactPreviewState | null>(null);
+  const [previewWidth, setPreviewWidth] = useState<number>(() => {
+    const raw = localStorage.getItem(PREVIEW_WIDTH_STORAGE_KEY);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, n)) : 420;
+  });
+  const isPreviewDragging = useRef(false);
   const isMobile = useIsMobile();
 
   useEdgeSwipe({ side: "right", onTrigger: useCallback(() => setMobileMembersOpen(true), []) });
@@ -104,6 +116,7 @@ export function Main({
     sessionStorage.removeItem("bossmode_main_open_lens");
     setLensAgent(openLensAgent || null);
     setOpenLensTabs(openLensAgent ? [openLensAgent] : []);
+    setArtifactPreview(null);
   }, [selectedRoomId]);
 
   // 通知 Layout 当前关注的 tab key（unread 逻辑）
@@ -134,8 +147,38 @@ export function Main({
   const switchView = useCallback((v: RoomView) => {
     setView(v);
     setLensAgent(null);
+    if (v !== "chat") setArtifactPreview(null);
     if (selectedRoomId) onClearUnreadTab(selectedRoomId, v === "chat" ? "room" : "tasks");
   }, [selectedRoomId, onClearUnreadTab]);
+
+  const handlePreviewResizeStart = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    isPreviewDragging.current = true;
+    const startX = e.clientX;
+    const startWidth = previewWidth;
+    const onMove = (move: MouseEvent) => {
+      if (!isPreviewDragging.current) return;
+      const delta = startX - move.clientX;
+      const viewportMax = Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_MAX_WIDTH, window.innerWidth - 440));
+      const next = Math.min(viewportMax, Math.max(PREVIEW_MIN_WIDTH, startWidth + delta));
+      setPreviewWidth(next);
+    };
+    const onUp = () => {
+      isPreviewDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [previewWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(PREVIEW_WIDTH_STORAGE_KEY, String(previewWidth));
+  }, [previewWidth]);
 
   const handleSteer = useCallback(
     async (agentName: string, content: string) => {
@@ -354,7 +397,7 @@ export function Main({
           )}
           {lensFull ? lensPanel : view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview ? { gateId: artifactPreview.gateId, selectedIndex: artifactPreview.selectedIndex } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : selectedRoomId ? (
@@ -366,8 +409,31 @@ export function Main({
           ) : null}
         </div>
 
+        {artifactPreview && view === "chat" && selectedRoomId && !isMobile && !lensFull && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={handlePreviewResizeStart}
+              className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center border-l border-line-soft bg-surface-1 hover:bg-accent-dim group"
+              title="Drag to resize preview"
+            >
+              <div className="h-10 w-0.5 rounded-full bg-line-strong group-hover:bg-accent" />
+            </div>
+            <div className="hidden md:block shrink-0 min-h-0" style={{ width: previewWidth }}>
+              <ArtifactPreviewPanel
+                roomId={selectedRoomId}
+                state={artifactPreview}
+                onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
+                onClose={() => setArtifactPreview(null)}
+                variant="panel"
+              />
+            </div>
+          </>
+        )}
+
         {/* 工位墙（桌面） */}
-        <div className="hidden md:block w-[280px] border-l border-line shrink-0">
+        <div className={`${artifactPreview && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[280px] border-l border-line shrink-0`}>
           <StationPanel
             members={room.members}
             agentStatus={agentStatus}
@@ -392,6 +458,20 @@ export function Main({
           </MobileDrawer>
         )}
       </div>
+
+      {artifactPreview && selectedRoomId && isMobile && (
+        <Sheet open={!!artifactPreview} onClose={() => setArtifactPreview(null)} closeOnOverlayClick size="2xl">
+          <div className="h-[86vh] min-h-0">
+            <ArtifactPreviewPanel
+              roomId={selectedRoomId}
+              state={artifactPreview}
+              onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
+              onClose={() => setArtifactPreview(null)}
+              variant="sheet"
+            />
+          </div>
+        </Sheet>
+      )}
 
       {showCreateRoom && (
         <CreateRoomDialog onClose={() => setShowCreateRoom(false)} onSubmit={handleCreateRoom} />
