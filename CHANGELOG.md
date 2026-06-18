@@ -14,6 +14,8 @@ All notable changes to Bossmode are documented here.
 - Think level text now uses a compact color scale across Station, AgentDetail, WorkstationDetail, and ThinkingPop (`default/off` gray through `xhigh` gradient).
 - Station tool-end rows now retain the original tool target/command for done/error states instead of replacing content with status text or object output.
 - Station stop/abort button is now absolutely positioned so it no longer compresses the inline `model · think` row.
+- Model credential Settings now refresh active agent runtime credential snapshots after profile changes: idle agents refresh immediately, working agents refresh after `agent_end`, and unavailable profiles fail closed.
+- Connect Provider now supports multiple credential profiles for the same provider instead of overwriting the existing connection; model pickers distinguish profiles by name/provider/API URL.
 
 ### Fixed
 - Changing an agent/member model in one room no longer mutates the global member config or hot-switches the same member in other rooms.
