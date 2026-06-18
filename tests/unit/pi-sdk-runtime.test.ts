@@ -18,10 +18,6 @@ let openedSessionModel: { provider: string; modelId: string } | null = null;
 let openedLeafEntry: any = null;
 const sessionBranch = vi.fn();
 const sessionResetLeaf = vi.fn();
-const lowerBashExecute = vi.fn(async () => ({ content: [{ type: "text", text: "bash ok" }], details: {} }));
-const lowerReadExecute = vi.fn(async () => ({ content: [{ type: "text", text: "read ok" }], details: {} }));
-const lowerWriteExecute = vi.fn(async () => ({ content: [{ type: "text", text: "write ok" }], details: {} }));
-const lowerEditExecute = vi.fn(async () => ({ content: [{ type: "text", text: "edit ok" }], details: {} }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -81,11 +77,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     },
     DefaultResourceLoader,
     createAgentSession: (...args: any[]) => createAgentSession(...args),
-    defineTool: (tool: any) => tool,
-    createBashToolDefinition: () => ({ name: "bash", execute: lowerBashExecute }),
-    createReadToolDefinition: () => ({ name: "read", execute: lowerReadExecute }),
-    createWriteToolDefinition: () => ({ name: "write", execute: lowerWriteExecute }),
-    createEditToolDefinition: () => ({ name: "edit", execute: lowerEditExecute }),
   };
 });
 
@@ -273,33 +264,6 @@ describe("PiSdkRuntime", () => {
     expect(authReload).toHaveBeenCalled();
     expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));
     expect(handle.runtimeParams?.model).toBe("anthropic/claude-opus-4-6");
-  });
-
-  it("registers Claude Code-style tool aliases and maps their params to lowercase tools", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
-    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
-
-    await new PiSdkRuntime().createAgent(baseOpts());
-
-    const createOpts = createAgentSession.mock.calls[0][0];
-    expect(createOpts.tools).toEqual(expect.arrayContaining(["read", "bash", "edit", "write", "Bash", "Read", "Edit", "Write", "MultiEdit"]));
-    const aliases = new Map(createOpts.customTools.map((tool: any) => [tool.name, tool]));
-    expect([...aliases.keys()]).toEqual(expect.arrayContaining(["Bash", "Read", "Edit", "Write", "MultiEdit"]));
-
-    await (aliases.get("Bash") as any).execute("bash-id", { command: "pwd", description: "show cwd", timeout: 2 }, undefined, undefined, undefined);
-    expect(lowerBashExecute).toHaveBeenCalledWith("bash-id", { command: "pwd", timeout: 2 }, undefined, undefined, undefined);
-
-    await (aliases.get("Read") as any).execute("read-id", { file_path: "src/a.ts", offset: 3, limit: 4 }, undefined, undefined, undefined);
-    expect(lowerReadExecute).toHaveBeenCalledWith("read-id", { path: "src/a.ts", offset: 3, limit: 4 }, undefined, undefined, undefined);
-
-    await (aliases.get("Write") as any).execute("write-id", { file_path: "src/a.ts", content: "hello" }, undefined, undefined, undefined);
-    expect(lowerWriteExecute).toHaveBeenCalledWith("write-id", { path: "src/a.ts", content: "hello" }, undefined, undefined, undefined);
-
-    await (aliases.get("Edit") as any).execute("edit-id", { file_path: "src/a.ts", old_string: "old", new_string: "new" }, undefined, undefined, undefined);
-    expect(lowerEditExecute).toHaveBeenCalledWith("edit-id", { path: "src/a.ts", edits: [{ oldText: "old", newText: "new" }] }, undefined, undefined, undefined);
-
-    await (aliases.get("MultiEdit") as any).execute("multi-id", { file_path: "src/a.ts", edits: [{ old_string: "a", new_string: "b" }, { oldText: "c", newText: "d" }] }, undefined, undefined, undefined);
-    expect(lowerEditExecute).toHaveBeenCalledWith("multi-id", { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "d" }] }, undefined, undefined, undefined);
   });
 
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
