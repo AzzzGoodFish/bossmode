@@ -60,6 +60,31 @@ function formatRuntimeErrorMessage(error: unknown): string {
   return message;
 }
 
+function quoteMember(memberName: string): string {
+  return `"${memberName}"`;
+}
+
+function isSelfRuntimeFailureMessage(message: RoomMessage, memberName: string): boolean {
+  if (message.sender !== "system") return false;
+  const content = message.content || "";
+  const quoted = quoteMember(memberName);
+  return (
+    content.startsWith(`Member ${quoted} request failed.`) ||
+    content.startsWith(`Member ${quoted} error:`) ||
+    content.startsWith(`Member ${quoted} runtime ended unexpectedly`) ||
+    content.startsWith(`Member ${quoted} model credential is no longer available.`) ||
+    content.startsWith(`Failed to create member ${quoted}:`) ||
+    content.startsWith(`Failed to activate member ${quoted}:`) ||
+    content.startsWith(`Failed to switch model for ${quoted}:`) ||
+    content.startsWith(`Failed to switch thinking level for ${quoted}:`) ||
+    content.startsWith(`Failed to refresh model credential for ${quoted}:`)
+  );
+}
+
+function filterAgentVisibleMessages(messages: RoomMessage[], memberName: string): RoomMessage[] {
+  return messages.filter((message) => !isSelfRuntimeFailureMessage(message, memberName));
+}
+
 interface PendingModelSwitch {
   model: string;
   credentialId?: string;
@@ -510,6 +535,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
             ? ` Error: ${formattedError}`
             : " An unrecoverable provider error occurred.";
           postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
+          removeUnhealthyInstance(roomId, memberName, instance, "provider_error");
         }
 
         // Unexpected runtime exit: notify room and drop dead instance so next mention respawns.
@@ -565,11 +591,13 @@ export async function activateAgent(roomId: string, memberName: string): Promise
   // Context limit
   const member = resolveRoomMember(roomId, memberName);
   const contextLimit = (member as any)?.contextLimit || 50;
-  const newMessages = allNewMessages.length > contextLimit
-    ? allNewMessages.slice(-contextLimit)
-    : allNewMessages;
+  const visibleMessages = filterAgentVisibleMessages(allNewMessages, memberName);
+  if (visibleMessages.length === 0) return;
+  const newMessages = visibleMessages.length > contextLimit
+    ? visibleMessages.slice(-contextLimit)
+    : visibleMessages;
 
-  logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, cursorFrom: lastCursor });
+  logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor });
 
   const formattedMessages = formatMessagesForAgent(newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
@@ -593,8 +621,12 @@ export async function activateAgent(roomId: string, memberName: string): Promise
   } catch (err: any) {
     logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
     postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
-    updateDispatchState(instance, "idle", "activate_prompt_error");
-    instance.queuedInputs = [];
+    if (instances.get(instanceKey(roomId, memberName)) === instance) {
+      removeUnhealthyInstance(roomId, memberName, instance, "activate_prompt_error");
+    } else {
+      updateDispatchState(instance, "idle", "activate_prompt_error");
+      instance.queuedInputs = [];
+    }
   }
 }
 
@@ -816,6 +848,22 @@ export function getMemberInstances(memberName: string): Array<{
   return result;
 }
 
+function removeUnhealthyInstance(roomId: string, memberName: string, instance: AgentInstance, reason: string): void {
+  const key = instanceKey(roomId, memberName);
+  instance.queuedInputs = [];
+  instance.pendingModelSwitch = undefined;
+  instance.pendingThinkingSwitch = undefined;
+  instance.pendingCredentialRefresh = undefined;
+  updateDispatchState(instance, "idle", reason);
+  if (instances.get(key) === instance) instances.delete(key);
+  contextUsageCache.delete(key);
+  clearActivationSource(roomId, memberName);
+  try { instance.unsubscribe(); } catch {}
+  try { instance.handle.destroy(); } catch {}
+  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: "inactive" });
+  logger.warn("agent", "instance removed after provider error", { member: memberName, roomId, reason });
+}
+
 export function resetAgentSession(roomId: string, agentName: string): { ok: true; message: string } {
   const sessions = sessionStore.getSessions(roomId);
   const member = getMemberByName(agentName);
@@ -826,9 +874,9 @@ export function resetAgentSession(roomId: string, agentName: string): { ok: true
   destroyInstance(roomId, agentName);
   clearActivationSource(roomId, agentName);
   sessionStore.clearSession(roomId, agentName, runtime);
-  roomStore.setCursor(roomId, agentName, null);
+  roomStore.setCursor(roomId, agentName, getLatestMessageId(roomId));
 
-  const message = "Session reset. Next activation will start fresh.";
+  const message = "Session reset. Next activation will start fresh from new messages.";
   emitAgentLocalEvent(roomId, agentName, { type: "system", text: message });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "inactive" });
   return { ok: true, message };

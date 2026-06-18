@@ -10,6 +10,7 @@ const handles: TestHandle[] = [];
 
 class TestHandle implements AgentHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
+  promptCalls: string[] = [];
   setModelCalls: string[] = [];
   refreshCalls = 0;
   destroyed = false;
@@ -22,7 +23,8 @@ class TestHandle implements AgentHandle {
     this.runtimeParams = { model };
   }
 
-  async prompt(): Promise<void> {
+  async prompt(message = ""): Promise<void> {
+    this.promptCalls.push(message);
     this.emit({ type: "agent_start" });
     this.emit({ type: "agent_end" });
   }
@@ -70,6 +72,7 @@ vi.mock("../../src/workspace/room-store.js", () => ({
 vi.mock("../../src/workspace/session-store.js", () => ({
   getSessions: vi.fn(() => ({ pm: { runtime: "test", sessionId: "s1", sessionFile: "/tmp/session.jsonl" } })),
   saveSession: vi.fn(),
+  clearSession: vi.fn(),
 }));
 
 vi.mock("../../src/knowledge/store.js", () => ({
@@ -280,5 +283,52 @@ describe("agent-manager model hot switch", () => {
     expect(first.destroyed).toBe(true);
     expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
     expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+  });
+
+  it("filters same-member runtime failure system messages from activation prompts", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    messages = [
+      { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: Date.now() },
+      { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: Date.now() },
+      { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: Date.now() },
+      { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: keep visible to pm', mentions: [], ts: Date.now() },
+      { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: Date.now() },
+    ];
+
+    await manager.activateAgent("room", "pm");
+
+    expect(handles[0].promptCalls[0]).toContain("@pm continue");
+    expect(handles[0].promptCalls[0]).toContain("keep visible to pm");
+    expect(handles[0].promptCalls[0]).not.toContain("context_length_exceeded");
+    expect(handles[0].promptCalls[0]).not.toContain("model credential is no longer available");
+    expect(handles[0].promptCalls[0]).not.toContain("setModel failed");
+  });
+
+  it("destroys active instances after provider message_end errors so next activation recreates", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const ws = await import("../../src/communication/ws.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+
+    first.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "502 upstream_error" });
+
+    expect(first.destroyed).toBe(true);
+    expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+
+    await manager.activateAgent("room", "pm");
+    expect(handles).toHaveLength(2);
+  });
+
+  it("resetAgentSession starts from latest message instead of replaying old context", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const sessionStore = await import("../../src/workspace/session-store.js");
+
+    const result = manager.resetAgentSession("room", "pm");
+
+    expect(result.message).toContain("fresh from new messages");
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room", "pm", "test");
+    expect(roomStore.setCursor).toHaveBeenCalledWith("room", "pm", "m1");
   });
 });
