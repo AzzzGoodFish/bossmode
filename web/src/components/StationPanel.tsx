@@ -156,7 +156,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           const modelLabel = info?.model || "agent default";
 
           return (
-            <div key={name} className="border-b border-line-soft px-3.5 py-3">
+            <div key={name} className="relative border-b border-line-soft px-3.5 py-3">
               <div className="flex items-center gap-2.5">
                 <button
                   onMouseDown={(e) => e.preventDefault()}
@@ -249,16 +249,16 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                     )}
                   </div>
                 </div>
-                {isBusy && (
-                  <button
-                    onClick={() => abortAgent(roomId, name).catch(console.error)}
-                    className="w-5 h-5 flex items-center justify-center rounded text-ink-4 hover:text-blocked transition-colors cursor-pointer shrink-0"
-                    title={`Abort ${name}`}
-                  >
-                    <Square size={9} fill="currentColor" />
-                  </button>
-                )}
               </div>
+              {isBusy && (
+                <button
+                  onClick={() => abortAgent(roomId, name).catch(console.error)}
+                  className="absolute right-3.5 top-3.5 w-5 h-5 flex items-center justify-center rounded text-ink-4 hover:text-blocked hover:bg-surface-2 transition-colors cursor-pointer"
+                  title={`Abort ${name}`}
+                >
+                  <Square size={9} fill="currentColor" />
+                </button>
+              )}
 
               <ActionLine
                 name={name}
