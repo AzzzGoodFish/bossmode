@@ -291,6 +291,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     </div>
     {showConnectProvider && (
       <ConnectProviderSheet
+        profiles={profiles}
         onClose={() => setShowConnectProvider(false)}
         onSaved={async () => { setShowConnectProvider(false); await refreshProfiles(); }}
       />
@@ -475,7 +476,18 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
   );
 }
 
-function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function nextProviderProfileName(profiles: PublicModelCredentialProfile[], providerSlug: string, displayName: string): string {
+  const existing = profiles.filter((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
+  if (existing.length === 0) return displayName;
+  const used = new Set(existing.map((p) => p.name));
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${displayName} ${i}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${displayName} ${existing.length + 1}`;
+}
+
+function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: PublicModelCredentialProfile[]; onClose: () => void; onSaved: () => void }) {
   const { toast } = useDialog();
   const [providers, setProviders] = useState<PublicModelProvider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -498,7 +510,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
   useEffect(() => {
     if (!selected) return;
     setAuthMode(selected.defaultAuthMode);
-    setName(selected.displayName);
+    setName(nextProviderProfileName(profiles, selected.providerSlug, selected.displayName));
     setApiKey("");
     setApiUrl("");
     setOauthJob(null);
@@ -532,7 +544,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
       await connectModelProviderApiKey({
         providerSlug: selected.providerSlug,
         apiKey: apiKey.trim(),
-        name: name.trim() || selected.displayName,
+        name: name.trim() || nextProviderProfileName(profiles, selected.providerSlug, selected.displayName),
         baseUrlOverride: apiUrl.trim() || undefined,
       });
       toast("Provider connected", "success");
@@ -547,7 +559,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
     try {
       setOauthJob(await startOAuthConnection({
         providerId: selected.providerSlug,
-        name: name.trim() || selected.displayName,
+        name: name.trim() || nextProviderProfileName(profiles, selected.providerSlug, selected.displayName),
       }));
     } catch (err: any) { toast(err.message, "error"); }
     finally { setBusy(false); }
@@ -580,7 +592,7 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
       <div className="p-5 space-y-5">
         <div>
           <h3 className="text-base font-semibold text-ink-1">Connect Provider</h3>
-          <p className="text-xs text-ink-3 mt-1">Choose an official provider. No base URL, protocol, or manual model setup required.</p>
+          <p className="text-xs text-ink-3 mt-1">Choose an official provider. New connections create a separate credential profile; edit an existing profile to overwrite it.</p>
         </div>
 
         {loading ? <div className="text-sm text-ink-3">Loading providers...</div> : (
@@ -621,6 +633,11 @@ function ConnectProviderSheet({ onClose, onSaved }: { onClose: () => void; onSav
                     <div className="text-xs text-ink-3 mt-1">{selected.modelCount} models available from provider catalog.</div>
                   </div>
 
+                  {profiles.some((p) => p.providerSlug === selected.providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider") && (
+                    <div className="rounded border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
+                      This will create a new {selected.displayName} credential. To overwrite an existing one, use Edit on that profile.
+                    </div>
+                  )}
                   <Field label="Credential name"><input className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={name} onChange={(e) => setName(e.target.value)} /></Field>
 
                   {selected.authModes.length > 1 && (

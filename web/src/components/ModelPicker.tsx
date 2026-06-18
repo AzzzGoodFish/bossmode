@@ -16,6 +16,11 @@ function optionValue(model: PickerModel): string {
   return `${model.profileId}::${model.ref}`;
 }
 
+export function modelProfileLabel(model: Pick<PickerModel, "profileName" | "providerSlug" | "profileBaseUrl">): string {
+  const endpoint = model.profileBaseUrl || "official default";
+  return `${model.profileName || model.providerSlug} · ${model.providerSlug} · ${endpoint}`;
+}
+
 function isAvailableModel(model: PickerModel): model is AvailableModelOption {
   return "images" in model;
 }
@@ -38,7 +43,7 @@ export function ModelPicker({ value, models, onChange, disabled }: {
     : undefined;
   const selectedValue = value.model ? (matched ? optionValue(matched) : `legacy::${value.model}`) : "";
   const grouped = models.reduce<Record<string, PickerModel[]>>((acc, model) => {
-    const key = model.profileName || model.providerSlug;
+    const key = modelProfileLabel(model);
     (acc[key] ||= []).push(model);
     return acc;
   }, {});

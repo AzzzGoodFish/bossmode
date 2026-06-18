@@ -73,6 +73,8 @@ export interface AgentRuntimeParams {
   systemPrompt?: string;
   skills?: string[];
   extensions?: string[];
+  credentialId?: string;
+  credentialName?: string;
 }
 
 export interface AgentHandle {

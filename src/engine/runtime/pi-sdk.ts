@@ -322,6 +322,8 @@ export class PiSdkRuntime implements AgentRuntime {
       systemPrompt: [rolePrompt, ...appendSystemPrompt].filter(Boolean).join("\n\n"),
       skills: opts.skillNames ?? skillPaths,
       extensions: ["bossmode-sdk-tools", ...extensionPaths],
+      credentialId: piConfig.profile?.id,
+      credentialName: piConfig.profile?.name,
     };
     const handle = new PiSdkAgentHandle(session, modelRegistry, runtimeParams);
     this.handles.add(handle);

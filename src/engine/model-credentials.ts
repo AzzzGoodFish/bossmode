@@ -457,7 +457,8 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
   const profiles = loadModelCredentialProfiles();
   const existing = input.id ? profiles.find((p) => p.id === input.id) : undefined;
   const valid = validateInput(input, existing);
-  const duplicate = profiles.find((p) => p.providerSlug === valid.providerSlug && p.id !== input.id);
+  const allowsDuplicateProvider = valid.profileKind === "builtin_provider";
+  const duplicate = profiles.find((p) => p.providerSlug === valid.providerSlug && p.id !== input.id && (!allowsDuplicateProvider || (p.profileKind ?? "custom_endpoint") !== "builtin_provider"));
   if (duplicate) throw new Error(`Provider slug already exists: ${valid.providerSlug}`);
   const ts = now();
   const profile: ModelCredentialProfile = {
@@ -481,9 +482,23 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
     createdAt: existing?.createdAt ?? ts,
     updatedAt: ts,
   };
-  const next = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
+  const replaced = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
+  const next = profile.isDefault
+    ? replaced.map((p) => p.id !== profile.id && p.providerSlug === profile.providerSlug ? { ...p, isDefault: false } : p)
+    : replaced;
   writeStore(next);
   return sanitizeProfile(profile);
+}
+
+function nextBuiltinProfileName(providerSlug: string, displayName: string): string {
+  const existing = loadModelCredentialProfiles().filter((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
+  if (existing.length === 0) return displayName;
+  const used = new Set(existing.map((p) => p.name));
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${displayName} ${i}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${displayName} ${existing.length + 1}`;
 }
 
 export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): PublicModelCredentialProfile {
@@ -495,11 +510,10 @@ export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): Publi
   if (!provider.authModes.includes("api_key")) throw new Error(`Provider ${providerSlug} does not support API key auth`);
 
   const baseUrlOverride = normalizeOptionalBaseUrl(input.baseUrlOverride);
-  const existing = loadModelCredentialProfiles().find((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider" && p.authType === "api_key");
+  const hasExistingSameProviderProfile = loadModelCredentialProfiles().some((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
   return saveModelCredentialProfile({
-    ...(existing ? { id: existing.id } : {}),
     profileKind: "builtin_provider",
-    name: input.name?.trim() || existing?.name || provider.displayName,
+    name: input.name?.trim() || nextBuiltinProfileName(providerSlug, provider.displayName),
     providerSlug,
     protocol: protocolForBuiltinProvider(providerSlug),
     baseUrl: baseUrlForBuiltinProvider(providerSlug, baseUrlOverride),
@@ -507,7 +521,7 @@ export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): Publi
     apiKey: input.apiKey,
     requestProfile: "standard",
     enabled: true,
-    isDefault: input.isDefault ?? existing?.isDefault ?? true,
+    isDefault: input.isDefault ?? !hasExistingSameProviderProfile,
     models: modelsForBuiltinProvider(providerSlug, baseUrlOverride),
   });
 }
@@ -574,7 +588,8 @@ function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { pro
   const existingById = input.profileId ? getModelCredentialProfile(input.profileId) : null;
   if (input.profileId && !existingById) throw new Error("profile not found");
   if (existingById && existingById.providerSlug !== providerId) throw new Error("profile provider does not match OAuth provider");
-  const existing = existingById ?? loadModelCredentialProfiles().find((p) => p.providerSlug === providerId && (p.profileKind ?? "custom_endpoint") === "builtin_provider") ?? null;
+  const hasExistingSameProviderProfile = loadModelCredentialProfiles().some((p) => p.providerSlug === providerId && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
+  const existing = existingById ?? null;
 
   return {
     providerId,
@@ -582,7 +597,7 @@ function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { pro
     profileInput: {
       id: existing?.id,
       profileKind: "builtin_provider",
-      name: input.name?.trim() || existing?.name || provider.displayName,
+      name: input.name?.trim() || existing?.name || nextBuiltinProfileName(providerId, provider.displayName),
       providerSlug: providerId,
       protocol: protocolForBuiltinProvider(providerId),
       baseUrl: baseUrlForBuiltinProvider(providerId),
@@ -590,7 +605,7 @@ function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { pro
       oauthProviderId: providerId,
       requestProfile: "standard",
       enabled: existing?.enabled ?? true,
-      isDefault: existing?.isDefault ?? true,
+      isDefault: existing?.isDefault ?? !hasExistingSameProviderProfile,
       models: modelsForBuiltinProvider(providerId),
     },
   };
@@ -1218,6 +1233,7 @@ export function listConfiguredModels(): ModelOption[] {
       displayName: m.name,
       profileId: p.id,
       profileName: p.name,
+      profileBaseUrl: p.baseUrl,
       protocol: p.protocol,
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
@@ -1239,6 +1255,7 @@ function modelOptionFromProfile(profile: ModelCredentialProfile, model: any): Av
     displayName: model.name,
     profileId: profile.id,
     profileName: profile.name,
+    profileBaseUrl: profile.baseUrl,
     protocol: profile.protocol,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
@@ -1277,22 +1294,10 @@ export function createBossmodeModelRegistry(): { authStorage: AuthStorage; model
 }
 
 export function listAvailableModels(): AvailableModelOption[] {
-  const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
-  if (profiles.length === 0) return [];
-  const customizedProfiles = profiles.filter((p) => !shouldUseSdkBuiltinCatalog(p));
-  const customizedProviderSlugs = new Set(customizedProfiles.map((p) => p.providerSlug));
-  const customizedOptions = customizedProfiles.flatMap((profile) => profile.models.map((model) => modelOptionFromProfile(profile, model)));
-  const registryProfiles = profiles.filter((p) => !customizedProviderSlugs.has(p.providerSlug));
-  if (registryProfiles.length === 0) return customizedOptions;
-  const { modelRegistry } = createBossmodeModelRegistry();
-  const profileByProvider = new Map(registryProfiles.map((p) => [p.providerSlug, p]));
-  const registryOptions = modelRegistry.getAvailable()
-    .map((model: any) => {
-      const profile = profileByProvider.get(model.provider);
-      return profile ? modelOptionFromProfile(profile, model) : null;
-    })
-    .filter(Boolean) as AvailableModelOption[];
-  return [...registryOptions, ...customizedOptions];
+  return loadModelCredentialProfiles()
+    .filter((p) => p.enabled)
+    .filter((p) => p.authType !== "oauth" || hasCompleteOAuthCredentials(p.oauthCredentials))
+    .flatMap((profile) => profile.models.map((model) => modelOptionFromProfile(profile, model)));
 }
 
 function piProviderConfig(profile: ModelCredentialProfile): Record<string, unknown> {
@@ -1337,15 +1342,11 @@ export interface PiCredentialExport {
   profile?: PublicModelCredentialProfile;
 }
 
-export function exportPiConfigForMember(args: {
-  roomId: string;
-  memberName: string;
-  modelRef: string;
-  credentialId?: string;
-}): PiCredentialExport | null {
+export function resolveCredentialProfileForModel(args: { modelRef: string; credentialId?: string }): ModelCredentialProfile | null {
   const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
   if (profiles.length === 0) return null;
   const provider = parseProviderFromModelRef(args.modelRef);
+  const modelId = args.modelRef.includes("/") ? args.modelRef.split("/").slice(1).join("/") : args.modelRef;
   const profile = args.credentialId
     ? profiles.find((p) => p.id === args.credentialId)
     : profiles.find((p) => p.providerSlug === provider && p.isDefault) ?? profiles.find((p) => p.providerSlug === provider);
@@ -1353,6 +1354,20 @@ export function exportPiConfigForMember(args: {
   if (profile.providerSlug !== provider) {
     throw new Error(`Credential provider ${profile.providerSlug} does not match model provider ${provider}`);
   }
+  if (!profile.models.some((m) => m.id === modelId)) {
+    throw new Error(`Credential profile ${profile.name} does not include model ${args.modelRef}`);
+  }
+  return profile;
+}
+
+export function exportPiConfigForMember(args: {
+  roomId: string;
+  memberName: string;
+  modelRef: string;
+  credentialId?: string;
+}): PiCredentialExport | null {
+  const profile = resolveCredentialProfileForModel({ modelRef: args.modelRef, credentialId: args.credentialId });
+  if (!profile) return null;
 
   const safeRoom = args.roomId.replace(/[^a-zA-Z0-9._-]/g, "_");
   const safeMember = args.memberName.replace(/[^a-zA-Z0-9._-]/g, "_");

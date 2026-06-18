@@ -378,16 +378,24 @@ describe("model credential profiles", () => {
     expect(modelsJson.providers.anthropic.models[0].id).toBe("claude-fable-5");
   });
 
-  it("clears built-in provider API URL override when omitted and rejects invalid override URLs", async () => {
+  it("creates a second built-in provider profile instead of overwriting the first", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     mod.setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
     ]);
 
-    mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "http://127.0.0.1:3456" });
-    const reset = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-2", baseUrlOverride: "   " });
+    const first = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-a", name: "Anthropic A", baseUrlOverride: "http://127.0.0.1:3456" });
+    const second = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-b", baseUrlOverride: "   " });
 
-    expect(reset.baseUrl).toBe("https://api.anthropic.com");
+    expect(second.id).not.toBe(first.id);
+    expect(second.name).toBe("Anthropic (Claude Pro/Max) 2");
+    expect(first.isDefault).toBe(true);
+    expect(second.isDefault).toBe(false);
+    expect(mod.getModelCredentialProfile(first.id)!.baseUrl).toBe("http://127.0.0.1:3456");
+    expect(mod.getModelCredentialProfile(second.id)!.baseUrl).toBe("https://api.anthropic.com");
+    const options = mod.listAvailableModels().filter((m) => m.ref === "anthropic/claude-fable-5");
+    expect(options.map((m) => m.profileId).sort()).toEqual([first.id, second.id].sort());
+    expect(options.map((m) => m.profileBaseUrl).sort()).toEqual(["http://127.0.0.1:3456", "https://api.anthropic.com"].sort());
     expect(() => mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "ftp://bad.example" })).toThrow("baseUrl must be an http:// or https:// URL");
   });
 

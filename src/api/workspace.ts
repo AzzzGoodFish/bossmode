@@ -14,7 +14,7 @@ import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getModelCredentialProfile, listAvailableModels, normalizeModelRef } from "../engine/model-credentials.js";
+import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 
 // ── Rooms ──
 
@@ -164,12 +164,6 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
-function providerFromModelRef(model: string): string {
-  const ref = normalizeModelRef(model);
-  const idx = ref.indexOf("/");
-  return idx > 0 ? ref.slice(0, idx) : "anthropic";
-}
-
 function normalizeRoomModelInput(value: unknown): string | null | undefined {
   if (value === null) return null;
   if (typeof value !== "string") return undefined;
@@ -184,10 +178,8 @@ function validateCredentialMatchesModel(credentialId: unknown, model: string | n
   if (!model) throw new Error("credentialId requires an explicit model override");
   const credential = getModelCredentialProfile(credentialId);
   if (!credential) throw new Error("Model credential profile not found");
-  const provider = providerFromModelRef(model);
-  if (credential.providerSlug !== provider) {
-    throw new Error(`Credential provider ${credential.providerSlug} does not match model provider ${provider}`);
-  }
+  if (!credential.enabled) throw new Error("Model credential profile is disabled");
+  resolveCredentialProfileForModel({ modelRef: model, credentialId });
   return credentialId;
 }
 

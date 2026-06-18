@@ -331,6 +331,7 @@ export interface ModelOption {
   displayName?: string;
   profileId: string;
   profileName: string;
+  profileBaseUrl?: string;
   protocol: ModelProtocol;
   contextWindow?: number;
   maxTokens?: number;

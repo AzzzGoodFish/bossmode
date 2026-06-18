@@ -8,6 +8,7 @@ import {
 import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
+import { modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
 
 interface StationPanelProps {
@@ -439,7 +440,7 @@ export function ModelPop({
   const gap = 6;
   const maxHeight = 288;
   const grouped = models.reduce<Record<string, AvailableModelOption[]>>((acc, m) => {
-    const key = m.profileName || m.providerSlug;
+    const key = modelProfileLabel(m);
     (acc[key] ||= []).push(m);
     return acc;
   }, {});

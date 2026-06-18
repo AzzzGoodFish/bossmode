@@ -14,18 +14,12 @@ import {
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
 import { getMemberInstances, destroyInstance, switchMemberModelInActiveRooms } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
-import { getModelCredentialProfile, normalizeModelRef } from "../engine/model-credentials.js";
+import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import { setCursor } from "../workspace/room-store.js";
 import { getMemberTokenUsage } from "../workspace/token-usage-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
-
-function providerFromModelRef(model: string): string {
-  const ref = normalizeModelRef(model);
-  const idx = ref.indexOf("/");
-  return idx > 0 ? ref.slice(0, idx) : "anthropic";
-}
 
 function validateCredentialMatchesModel(credentialId: unknown, model: string | undefined): string | undefined {
   if (credentialId === undefined || credentialId === null || credentialId === "") return undefined;
@@ -33,10 +27,8 @@ function validateCredentialMatchesModel(credentialId: unknown, model: string | u
   if (!model) throw new Error("credentialId requires an explicit model override");
   const credential = getModelCredentialProfile(credentialId);
   if (!credential) throw new Error("Model credential profile not found");
-  const provider = providerFromModelRef(model);
-  if (credential.providerSlug !== provider) {
-    throw new Error(`Credential provider ${credential.providerSlug} does not match model provider ${provider}`);
-  }
+  if (!credential.enabled) throw new Error("Model credential profile is disabled");
+  resolveCredentialProfileForModel({ modelRef: model, credentialId });
   return credentialId;
 }
 

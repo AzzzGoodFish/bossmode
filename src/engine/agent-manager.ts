@@ -181,19 +181,24 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
     credentialId,
   });
   if (!exported) throw new Error(`No model credentials configured for ${model}`);
+  const resolvedCredentialId = exported.profile?.id || credentialId;
 
-  if (shouldRecreateForModelSwitch(instance, model, credentialId)) {
-    await recreateInstanceForModelSwitch(instance, model, credentialId, trigger);
+  if (shouldRecreateForModelSwitch(instance, model, resolvedCredentialId)) {
+    await recreateInstanceForModelSwitch(instance, model, resolvedCredentialId, trigger);
     return;
   }
 
   if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
   await instance.handle.refreshModelRegistry?.();
   await instance.handle.setModel(model);
-  if (instance.handle.runtimeParams) instance.handle.runtimeParams.model = model;
+  if (instance.handle.runtimeParams) {
+    instance.handle.runtimeParams.model = model;
+    instance.handle.runtimeParams.credentialId = resolvedCredentialId;
+    instance.handle.runtimeParams.credentialName = exported.profile?.name;
+  }
   instance.appliedModel = model;
   instance.appliedProvider = providerFromModelRef(model);
-  instance.appliedCredentialId = credentialId;
+  instance.appliedCredentialId = resolvedCredentialId;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
   broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: instance.status });
 }
@@ -263,7 +268,12 @@ async function applyCredentialRefreshToInstance(instance: AgentInstance, pending
 
     await instance.handle.refreshModelRegistry();
     await instance.handle.setModel(instance.appliedModel);
-    if (instance.handle.runtimeParams) instance.handle.runtimeParams.model = instance.appliedModel;
+    if (instance.handle.runtimeParams) {
+      instance.handle.runtimeParams.model = instance.appliedModel;
+      instance.handle.runtimeParams.credentialId = exported.profile?.id || instance.appliedCredentialId;
+      instance.handle.runtimeParams.credentialName = exported.profile?.name;
+    }
+    instance.appliedCredentialId = exported.profile?.id || instance.appliedCredentialId;
     logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: instance.roomId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
   } catch (err) {
     dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:${err instanceof Error ? err.message : String(err)}`);
@@ -475,7 +485,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         eventBuffer: [],
         appliedModel: normalizeSwitchModelRef(member.model || "claude-sonnet-4-6"),
         appliedProvider: providerFromModelRef(member.model || "claude-sonnet-4-6"),
-        appliedCredentialId: member.credentialId,
+        appliedCredentialId: member.credentialId || handle.runtimeParams?.credentialId,
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
