@@ -5,6 +5,7 @@ let member: any;
 let messages: any[];
 let availableModels: Array<{ ref: string }>;
 let exportedCalls: any[];
+let exportReturnsNull: boolean;
 const handles: TestHandle[] = [];
 
 class TestHandle implements AgentHandle {
@@ -12,6 +13,8 @@ class TestHandle implements AgentHandle {
   setModelCalls: string[] = [];
   refreshCalls = 0;
   destroyed = false;
+  failRefresh = false;
+  failSetModel = false;
   runtimeName = "test";
   runtimeParams: any;
 
@@ -36,10 +39,12 @@ class TestHandle implements AgentHandle {
     for (const fn of this.listeners) fn(event);
   }
   async setModel(model: string): Promise<void> {
+    if (this.failSetModel) throw new Error("setModel failed");
     this.setModelCalls.push(model);
     this.runtimeParams.model = model;
   }
   async refreshModelRegistry(): Promise<void> {
+    if (this.failRefresh) throw new Error("refresh failed");
     this.refreshCalls += 1;
   }
 }
@@ -97,7 +102,7 @@ vi.mock("../../src/engine/event-handler.js", () => ({
 vi.mock("../../src/engine/model-credentials.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => availableModels),
-  exportPiConfigForMember: vi.fn((args: any) => { exportedCalls.push(args); return { agentDir: "/tmp/agent", extensionPaths: [] }; }),
+  exportPiConfigForMember: vi.fn((args: any) => { exportedCalls.push(args); return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [] }; }),
 }));
 
 vi.mock("../../src/shared/config.js", () => ({
@@ -126,6 +131,7 @@ describe("agent-manager model hot switch", () => {
     messages = [{ id: "m1", type: "chat", sender: "user", content: "@pm hi", mentions: ["pm"], createdAt: Date.now() }];
     availableModels = [{ ref: "anthropic/claude-b" }, { ref: "anthropic-proxy/claude-fable-5" }];
     exportedCalls = [];
+    exportReturnsNull = false;
     handles.splice(0);
     vi.clearAllMocks();
     const manager = await import("../../src/engine/agent-manager.js");
@@ -204,5 +210,75 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(2);
     expect(first.destroyed).toBe(true);
     expect(handles[1].runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
+  });
+
+  it("refreshes an idle active agent when its credential profile changes", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+
+    const result = await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
+
+    expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: true, pending: false }]);
+    expect(handles).toHaveLength(1);
+    expect(handles[0].refreshCalls).toBe(1);
+    expect(handles[0].setModelCalls).toEqual(["anthropic/claude-a"]);
+    expect(exportedCalls.at(-1)).toMatchObject({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-a", credentialId: "cred-a" });
+  });
+
+  it("queues credential refresh while working and applies it after agent_end", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.emit({ type: "agent_start" });
+
+    const result = await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
+
+    expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: false, pending: true }]);
+    expect(first.refreshCalls).toBe(0);
+    first.emit({ type: "agent_end" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.refreshCalls).toBe(1);
+    expect(first.setModelCalls).toEqual(["anthropic/claude-a"]);
+  });
+
+  it("does not refresh agents using another credential profile", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+
+    const result = await manager.invalidateModelCredentialProfile("cred-b", "anthropic");
+
+    expect(result).toEqual([]);
+    expect(handles[0].refreshCalls).toBe(0);
+    expect(handles[0].setModelCalls).toEqual([]);
+  });
+
+  it("drops an idle active agent when its deleted credential can no longer export", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const ws = await import("../../src/communication/ws.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    exportReturnsNull = true;
+
+    const result = await manager.invalidateModelCredentialProfile("cred-a", "anthropic", "profileDeleted");
+
+    expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: true, pending: false }]);
+    expect(first.destroyed).toBe(true);
+    expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+  });
+
+  it("drops an idle active agent when refresh/rebind fails", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const ws = await import("../../src/communication/ws.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.failSetModel = true;
+
+    await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
+
+    expect(first.destroyed).toBe(true);
+    expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
   });
 });

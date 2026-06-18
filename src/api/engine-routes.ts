@@ -1,12 +1,13 @@
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./index.js";
-import { getRegistry } from "../engine/agent-manager.js";
+import { getRegistry, invalidateModelCredentialProfile } from "../engine/agent-manager.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 import {
   cancelOAuthLoginJob,
   connectBuiltinProviderApiKey,
   deleteModelCredentialProfile,
   discoverModelCredentialModels,
+  getModelCredentialProfile,
   getOAuthLoginJob,
   listAvailableModels,
   listBuiltinModelProviders,
@@ -38,7 +39,9 @@ addRoute("GET", "/api/model-provider-catalog", async (_req, res) => {
 async function connectApiKeyRoute(req: any, res: any): Promise<void> {
   try {
     const body = (await parseBody(req)) as any;
-    sendJson(res, 200, connectBuiltinProviderApiKey(body));
+    const profile = connectBuiltinProviderApiKey(body);
+    await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
+    sendJson(res, 200, profile);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
   }
@@ -59,7 +62,9 @@ addRoute("GET", "/api/model-providers", async (_req, res) => {
 async function createModelCredentialProfileRoute(req: any, res: any): Promise<void> {
   try {
     const body = (await parseBody(req)) as any;
-    sendJson(res, 200, saveModelCredentialProfile(body));
+    const profile = saveModelCredentialProfile(body);
+    await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
+    sendJson(res, 200, profile);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
   }
@@ -139,7 +144,9 @@ addRoute("POST", "/api/model-providers/oauth-login/:id/cancel", cancelOAuthLogin
 async function updateModelCredentialProfileRoute(req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
     const body = (await parseBody(req)) as any;
-    sendJson(res, 200, saveModelCredentialProfile({ ...body, id: params.id }));
+    const profile = saveModelCredentialProfile({ ...body, id: params.id });
+    await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
+    sendJson(res, 200, profile);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
   }
@@ -150,7 +157,9 @@ addRoute("PUT", "/api/model-providers/:id", updateModelCredentialProfileRoute);
 
 async function refreshModelCredentialProfileModelsRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
-    sendJson(res, 200, refreshModelCredentialProfileModels(params.id));
+    const profile = refreshModelCredentialProfileModels(params.id);
+    await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
+    sendJson(res, 200, profile);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
   }
@@ -160,10 +169,12 @@ addRoute("POST", "/api/model-credential-profiles/:id/refresh-models", refreshMod
 addRoute("POST", "/api/model-providers/:id/refresh-models", refreshModelCredentialProfileModelsRoute);
 
 async function deleteModelCredentialProfileRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
+  const existing = getModelCredentialProfile(params.id);
   if (!deleteModelCredentialProfile(params.id)) {
     sendJson(res, 404, { error: "Model credential profile not found" });
     return;
   }
+  if (existing) await invalidateModelCredentialProfile(existing.id, existing.providerSlug, "profileDeleted");
   sendJson(res, 200, { ok: true });
 }
 

@@ -69,6 +69,12 @@ interface PendingThinkingSwitch {
   thinkingLevel: string;
 }
 
+interface PendingCredentialRefresh {
+  profileId: string;
+  providerSlug: string;
+  changeType: "profileUpdated" | "profileDeleted";
+}
+
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
@@ -78,6 +84,7 @@ interface AgentInstance {
   queuedInputs: string[];
   pendingModelSwitch?: PendingModelSwitch;
   pendingThinkingSwitch?: PendingThinkingSwitch;
+  pendingCredentialRefresh?: PendingCredentialRefresh;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -217,6 +224,83 @@ function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): v
     logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
     postMessage(instance.roomId, "system", `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
   });
+}
+
+function instanceUsesCredentialProfile(instance: AgentInstance, profileId: string, providerSlug: string): boolean {
+  return instance.appliedCredentialId === profileId || (!instance.appliedCredentialId && instance.appliedProvider === providerSlug);
+}
+
+function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason: string): void {
+  const key = instanceKey(instance.roomId, instance.agentName);
+  if (instances.get(key) === instance) instances.delete(key);
+  contextUsageCache.delete(key);
+  try { instance.unsubscribe(); } catch {}
+  try { instance.handle.destroy(); } catch {}
+  instance.status = "inactive";
+  updateDispatchState(instance, "idle", "credential_unavailable");
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: "inactive" });
+  logger.warn("agent", "credentialRefreshUnavailable", { member: instance.agentName, roomId: instance.roomId, reason });
+  postMessage(instance.roomId, "system", `Member "${instance.agentName}" model credential is no longer available. Update Settings → Model Credentials or choose another model before the next turn.`);
+}
+
+async function applyCredentialRefreshToInstance(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
+  try {
+    const exported = exportPiConfigForMember({
+      roomId: instance.roomId,
+      memberName: instance.agentName,
+      modelRef: instance.appliedModel,
+      credentialId: instance.appliedCredentialId,
+    });
+    if (!exported) {
+      dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:export-null`);
+      return;
+    }
+
+    if (!instance.handle.refreshModelRegistry || !instance.handle.setModel) {
+      dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:runtime-refresh-unsupported`);
+      return;
+    }
+
+    await instance.handle.refreshModelRegistry();
+    await instance.handle.setModel(instance.appliedModel);
+    if (instance.handle.runtimeParams) instance.handle.runtimeParams.model = instance.appliedModel;
+    logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: instance.roomId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
+  } catch (err) {
+    dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function applyPendingCredentialRefresh(instance: AgentInstance, trigger: string): void {
+  const pending = instance.pendingCredentialRefresh;
+  if (!pending) return;
+  instance.pendingCredentialRefresh = undefined;
+  applyCredentialRefreshToInstance(instance, pending, trigger).catch((err) => {
+    logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
+    postMessage(instance.roomId, "system", `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
+  });
+}
+
+export async function invalidateModelCredentialProfile(profileId: string, providerSlug: string, changeType: PendingCredentialRefresh["changeType"] = "profileUpdated"): Promise<Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }>> {
+  const pending = { profileId, providerSlug, changeType };
+  const results: Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }> = [];
+  for (const instance of Array.from(instances.values())) {
+    if (!instanceUsesCredentialProfile(instance, profileId, providerSlug)) continue;
+    if (instance.status === "working" || instance.dispatchState !== "idle") {
+      instance.pendingCredentialRefresh = pending;
+      logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: instance.roomId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
+      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: false, pending: true });
+      continue;
+    }
+    try {
+      await applyCredentialRefreshToInstance(instance, pending, "credentialProfileInvalidated");
+      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: true, pending: false });
+    } catch (err: any) {
+      logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
+      postMessage(instance.roomId, "system", `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
+      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: false, pending: false });
+    }
+  }
+  return results;
 }
 
 // -- Format messages --
@@ -401,6 +485,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
           flushQueuedInputs(instance, event.type);
         } else if (event.type === "agent_end") {
           updateDispatchState(instance, "idle", event.type);
+          applyPendingCredentialRefresh(instance, event.type);
           applyPendingModelSwitch(instance, event.type);
           applyPendingThinkingSwitch(instance, event.type);
         } else if (event.type === "runtime_exit" && event.unexpected) {
