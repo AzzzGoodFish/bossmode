@@ -4,6 +4,7 @@ import { abortAgent, getAgentEventsPaginated, getRoomMembers, getMemberTokenUsag
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 import { diffStatForTool, eventSearchText, formatEventTime, isReplyEvent, isToolEvent, summarizeAgentEvent, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { thinkLevelTextClass } from "./StationPanel";
 
 const PAGE_SIZE = 120;
 type FilterMode = "all" | "tools" | "replies";
@@ -181,7 +182,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
 
         <aside className="hidden lg:block w-[260px] border-l border-line bg-surface-0 p-4 space-y-4 overflow-y-auto">
           <SideMetric title="CONTEXT" value={contextUsage?.supported && contextUsage.percentage !== undefined ? `${Math.round(contextUsage.percentage)}%` : "—"} detail={contextUsage?.totalTokens ? `${formatTokens(contextUsage.totalTokens)} tokens` : "unavailable"} />
-          <SideMetric title="SESSION" value={member?.runtime || "pi-sdk"} detail={`thinking · ${member?.thinkingLevel || "default"}`} />
+          <SideMetric title="SESSION" value={member?.runtime || "pi-sdk"} detail={<span>think · <span className={`font-semibold ${thinkLevelTextClass(member?.thinkingLevel || "default")}`}>{member?.thinkingLevel || "default"}</span></span>} />
           <SideMetric title="TOKENS · TOTAL" value={tokenTotal !== null ? formatTokens(tokenTotal) : "—"} detail="cumulative member usage" />
         </aside>
       </div>
@@ -238,7 +239,7 @@ function highlight(text: string, query: string): ReactNode {
   return <>{text.slice(0, idx)}<mark className="bg-highlight text-ink-1 rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>;
 }
 
-function SideMetric({ title, value, detail }: { title: string; value: string; detail: string }) {
+function SideMetric({ title, value, detail }: { title: string; value: string; detail: ReactNode }) {
   return <div className="rounded-lg border border-line-soft bg-surface-1 p-3"><div className="text-[10px] font-semibold tracking-[0.08em] text-ink-4">{title}</div><div className="mt-2 text-lg font-semibold text-ink-1">{value}</div><div className="mt-1 text-[11px] text-ink-3">{detail}</div></div>;
 }
 

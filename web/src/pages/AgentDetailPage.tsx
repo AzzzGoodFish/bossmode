@@ -9,7 +9,7 @@ import {
 } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
-import { ModelPop, ThinkingPop } from "../components/StationPanel";
+import { ModelPop, ThinkingPop, thinkLevelTextClass } from "../components/StationPanel";
 import { formatTokens } from "../components/StationPanel";
 import { useDialog } from "../components/dialogs";
 
@@ -330,10 +330,10 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
                               setThinkingAnchor(e.currentTarget.getBoundingClientRect());
                             }
                           }}
-                          title={`thinking · ${row.member.thinkingLevel || "off"} · This room only`}
+                          title={`think · ${row.member.thinkingLevel || "off"} · This room only`}
                           className="font-mono text-[9.5px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded border border-line-soft/70 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0"
                         >
-                          think {row.member.thinkingLevel || "off"}
+                          think <span className={`font-semibold ${thinkLevelTextClass(row.member.thinkingLevel || "off")}`}>{row.member.thinkingLevel || "off"}</span>
                         </button>
                         {openChip === chipKey && (
                           <ModelPop

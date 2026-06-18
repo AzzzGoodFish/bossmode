@@ -35,6 +35,20 @@ function statusLabel(status: string): string {
   }
 }
 
+export function thinkLevelTextClass(level?: string | null): string {
+  switch (level || "default") {
+    case "minimal": return "think-level-minimal";
+    case "low": return "think-level-low";
+    case "medium": return "think-level-medium";
+    case "high": return "think-level-high";
+    case "xhigh": return "think-level-xhigh";
+    case "off":
+    case "default":
+    default:
+      return "think-level-default";
+  }
+}
+
 /** 工位墙 — 每个 agent 一张工位卡：工牌 + 状态 + 模型热切换 + context 油量 + 快捷操作 */
 export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, unreadAgents }: StationPanelProps) {
   const { toast } = useDialog();
@@ -200,7 +214,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                         title={`think · ${info.thinkingLevel || "off"} · This room only`}
                         className={`font-mono text-[10px] hover:text-accent-ink hover:bg-accent-dim rounded px-1 py-px cursor-pointer transition-colors shrink-0 ${info.thinkingLevel ? "text-ink-3" : "text-ink-4"}`}
                       >
-                        think <span className={info.thinkingLevel ? "text-think" : "text-ink-4"}>{info.thinkingLevel || "default"}</span>
+                        think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span>
                       </button>
                     )}
                     {openChip === name && info && (
@@ -537,9 +551,9 @@ export function ThinkingPop({
           <button
             key={level.label}
             onClick={() => onSelect(level.value)}
-            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${level.value !== null && currentThinking === level.value ? "text-accent-ink bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
+            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${level.value !== null && currentThinking === level.value ? "bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
           >
-            {level.label}
+            <span className={`font-semibold ${thinkLevelTextClass(level.label)}`}>{level.label}</span>
           </button>
         ))}
       </div>
