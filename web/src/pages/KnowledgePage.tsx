@@ -17,6 +17,7 @@ import {
 import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MoveToDialog } from "../components/MoveToDialog";
+import { normalizeKnowledgeMarkdownRef } from "../utils/knowledge-path";
 
 const inputCls = "w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors";
 
@@ -50,6 +51,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const { toast, confirm, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPathOriginal, setSelectedPathOriginal] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const lastClickedRef = useRef<string | null>(null);
 
@@ -102,17 +104,21 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
 
   useEffect(() => {
     if (!initialPath || initialPath === "__new__") return;
-    const topLevel = initialPath.split("/")[0];
+    const normalized = normalizeKnowledgeMarkdownRef(initialPath);
+    const normalizedPath = normalized.path;
+    const topLevel = normalizedPath.split("/")[0];
     setExpanded((prev) => {
       const next = new Set(prev);
       next.add(topLevel);
       return next;
     });
-    if (initialPath.endsWith(".md")) {
-      setSelectedPath(initialPath);
+    if (normalizedPath.endsWith(".md")) {
+      setSelectedPath(normalizedPath);
+      setSelectedPathOriginal(normalized.changed ? normalized.originalPath : null);
       setSelectedPaths(new Set());
     } else {
       setSelectedPath(null);
+      setSelectedPathOriginal(null);
     }
   }, [initialPath]);
 
@@ -145,17 +151,22 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       setIsDocLoading(false);
     }).catch((err) => {
       if (seq !== loadDocSeqRef.current) return;
-      toast(String(err?.message || err), "error");
+      const base = String(err?.message || err);
+      const message = selectedPathOriginal
+        ? `${base}: ${selectedPathOriginal} (tried ${selectedPath})`
+        : base;
+      toast(message, "error");
       setCurrentDoc(null);
       setIsDocLoading(false);
     });
-  }, [selectedPath, toast]);
+  }, [selectedPath, selectedPathOriginal, toast]);
 
   const folderNode = useMemo(() => {
     if (!tree || !initialPath || initialPath === "__new__") return null;
-    if (initialPath.endsWith(".md")) return null;
+    const normalizedPath = normalizeKnowledgeMarkdownRef(initialPath).path;
+    if (normalizedPath.endsWith(".md")) return null;
     if (selectedPath) return null;
-    return findNodeByPath(tree, initialPath);
+    return findNodeByPath(tree, normalizedPath);
   }, [tree, initialPath, selectedPath]);
 
   // mobileView must be declared AFTER folderNode (dependency order — avoids TDZ)
@@ -165,8 +176,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   }, [isMobile, currentDoc, folderNode]);
 
   useEffect(() => {
-    if (!initialPath || initialPath === "__new__" || initialPath.endsWith(".md")) return;
-    const topLevel = initialPath.split("/")[0];
+    if (!initialPath || initialPath === "__new__") return;
+    const normalizedPath = normalizeKnowledgeMarkdownRef(initialPath).path;
+    if (normalizedPath.endsWith(".md")) return;
+    const topLevel = normalizedPath.split("/")[0];
     const el = document.querySelector(`[data-folder-path="${topLevel}"]`) as HTMLElement | null;
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -220,6 +233,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       await addKnowledgeEntry(title, "", path);
       refreshTree();
       if (parentPath) setExpanded((prev) => new Set(prev).add(parentPath));
+      setSelectedPathOriginal(null);
       setSelectedPath(path);
       setSelectedPaths(new Set());
     } catch (err: any) { toast(err.message, "error"); }
@@ -255,12 +269,14 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const selectDocument = useCallback(async (path: string) => {
     if (!(await confirmDiscardMarkdown())) return;
     setSelectedPaths(new Set());
+    setSelectedPathOriginal(null);
     setSelectedPath(path);
   }, [confirmDiscardMarkdown]);
 
   const clearDocumentSelection = useCallback(async () => {
     if (!(await confirmDiscardMarkdown())) return;
     setSelectedPath(null);
+    setSelectedPathOriginal(null);
     setCurrentDoc(null);
   }, [confirmDiscardMarkdown]);
 
@@ -271,6 +287,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       await apiDeleteEntry(currentDoc.id);
       refreshTree();
       setSelectedPath(null);
+      setSelectedPathOriginal(null);
     } catch (err: any) { toast(err.message, "error"); }
   };
 
@@ -279,7 +296,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     try {
       await apiDeleteEntry(path);
       refreshTree();
-      if (selectedPath === path || selectedPath?.startsWith(`${path}/`)) setSelectedPath(null);
+      if (selectedPath === path || selectedPath?.startsWith(`${path}/`)) {
+        setSelectedPath(null);
+        setSelectedPathOriginal(null);
+      }
       setSelectedPaths((prev) => {
         const next = new Set(prev);
         next.delete(path);
@@ -299,8 +319,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     const moved = await moveKnowledgeEntry(fromPath, to);
 
     if (selectedPath === fromPath) {
+      setSelectedPathOriginal(null);
       setSelectedPath(moved.to);
     } else if (selectedPath?.startsWith(`${fromPath}/`)) {
+      setSelectedPathOriginal(null);
       setSelectedPath(moved.to + selectedPath.slice(fromPath.length));
     }
   }, [selectedPath]);
@@ -349,7 +371,11 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
         toast(`Deleted ${result.deleted}. Failed ${result.failed.length}.`, "info");
       }
       setSelectedPaths(new Set());
-      setSelectedPath((prev) => (prev && paths.some((p) => prev === p || prev.startsWith(`${p}/`)) ? null : prev));
+      const removesSelectedPath = selectedPath ? paths.some((p) => selectedPath === p || selectedPath.startsWith(`${p}/`)) : false;
+      if (removesSelectedPath) {
+        setSelectedPath(null);
+        setSelectedPathOriginal(null);
+      }
       refreshTree();
     } catch (err: any) {
       toast(String(err?.message || err), "error");
@@ -386,8 +412,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       const moved = await moveKnowledgeEntry(oldPath, nextPath);
       setRenamingPath(null);
       if (selectedPath === oldPath) {
+        setSelectedPathOriginal(null);
         setSelectedPath(moved.to);
       } else if (selectedPath?.startsWith(`${oldPath}/`)) {
+        setSelectedPathOriginal(null);
         setSelectedPath(moved.to + selectedPath.slice(oldPath.length));
       }
       refreshTree();
