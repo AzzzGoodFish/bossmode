@@ -272,7 +272,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-[9px] font-semibold tracking-[0.08em] text-ink-4">RECENT ACTIVITY</span>
                   </div>
-                  {(recentEvents[name] || []).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} />)}
+                  {(recentEvents[name] || []).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} events={recentEvents[name] || []} />)}
                   {(recentEvents[name] || []).length === 0 && <div className="text-[11px] text-ink-4 py-1">No recent activity</div>}
                 </div>
               )}
@@ -308,12 +308,29 @@ function isStationDisplayEvent(event: AgentEvent): boolean {
   return isStationActionEvent(event) || event.type === "tool_end";
 }
 
-function toolEndDetail(event: AgentEvent): string {
-  if (event.isError) return truncateText(event.result ?? event.text ?? "failed", 64);
-  return event.toolName ? "completed" : "done";
+function safeEventDetail(value: unknown): string {
+  if (typeof value === "string") return truncateText(value, 64);
+  if (!value || typeof value !== "object") return truncateText(value ?? "", 64);
+  const obj = value as Record<string, unknown>;
+  return truncateText(obj.error ?? obj.message ?? obj.summary ?? obj.text ?? "", 64);
 }
 
-function stationSummary(event?: AgentEvent): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean; tag?: string } {
+function findMatchingToolStart(events: AgentEvent[], endEvent: AgentEvent): AgentEvent | undefined {
+  const reversed = [...events].reverse();
+  return reversed.find((event) => {
+    if (event.type !== "tool_start") return false;
+    if (endEvent.toolCallId && event.toolCallId === endEvent.toolCallId) return true;
+    if (endEvent.toolName && event.toolName === endEvent.toolName) return true;
+    return false;
+  });
+}
+
+function toolEndDetail(event: AgentEvent, events: AgentEvent[] = []): string {
+  const matchingStart = findMatchingToolStart(events, event);
+  return toolTarget(matchingStart?.args) || toolTarget(event.args) || (event.isError ? safeEventDetail(event.result ?? event.text) : safeEventDetail(event.result ?? event.text)) || String(event.toolName || "tool");
+}
+
+function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean; tag?: string } {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
@@ -323,7 +340,7 @@ function stationSummary(event?: AgentEvent): { kind: string; label: string; deta
     return {
       kind: event.isError ? "error" : "done",
       label: String(event.toolName || "tool"),
-      detail: toolEndDetail(event),
+      detail: toolEndDetail(event, events),
       ts,
       tag: event.isError ? "ERROR" : undefined,
     };
@@ -333,7 +350,7 @@ function stationSummary(event?: AgentEvent): { kind: string; label: string; deta
 }
 
 function latestStationSummary(events: AgentEvent[]) {
-  return stationSummary([...events].reverse().find(isStationDisplayEvent));
+  return stationSummary([...events].reverse().find(isStationDisplayEvent), events);
 }
 
 function actionTone(kind: string): string {
@@ -388,8 +405,8 @@ function ActionLine({ name, status, events, expanded, onToggle }: { name: string
   );
 }
 
-function MiniEvent({ event }: { event: AgentEvent }) {
-  const summary = stationSummary(event);
+function MiniEvent({ event, events = [] }: { event: AgentEvent; events?: AgentEvent[] }) {
+  const summary = stationSummary(event, events);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
   return (
     <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(summary.kind)}`}>

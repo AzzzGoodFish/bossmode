@@ -12,6 +12,7 @@ All notable changes to Bossmode are documented here.
 - Station and AgentDetail now expose model and thinking effort as separate compact room-scoped chips/dropdowns, including `default` to clear the room thinking override.
 - Station cards now use avatar rings instead of status text tags and show `model · think <level>` inline so model names keep readable width.
 - Think level text now uses a compact color scale across Station, AgentDetail, WorkstationDetail, and ThinkingPop (`default/off` gray through `xhigh` gradient).
+- Station tool-end rows now retain the original tool target/command for done/error states instead of replacing content with status text or object output.
 
 ### Fixed
 - Changing an agent/member model in one room no longer mutates the global member config or hot-switches the same member in other rooms.
