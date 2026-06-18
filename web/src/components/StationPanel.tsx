@@ -385,10 +385,11 @@ function actionDot(kind: string): string {
 function ActionLine({ name, status, events, expanded, onToggle }: { name: string; status: string; events: AgentEvent[]; expanded: boolean; onToggle: () => void }) {
   const summary = latestStationSummary(events);
   const isWorkingWithoutEvent = status === "working" && summary.kind === "idle";
+  const isWorkingTurnStart = status === "working" && summary.kind === "system" && summary.label === "TURN" && summary.detail === "Agent started";
   const label = isWorkingWithoutEvent ? "WORKING" : status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
   const time = summary.ts ? formatEventTime(summary.ts) : "";
   const detail = isWorkingWithoutEvent ? "Waiting for activity" : status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
-  const visualKind = isWorkingWithoutEvent ? "working" : summary.kind;
+  const visualKind = isWorkingWithoutEvent || isWorkingTurnStart ? "working" : summary.kind;
   const tone = actionTone(visualKind);
   return (
     <button
