@@ -105,9 +105,11 @@ describe("gate API behaviors (createGateAndAnnounce + decision messaging)", () =
   it("announces a gate_event message into the room stream", async () => {
     const { createGateAndAnnounce } = await import("../../src/api/gates.js");
     const messageStore = await import("../../src/workspace/message-store.js");
+    const knowledgeStore = await import("../../src/knowledge/store.js");
     ensureRoom("g7");
+    knowledgeStore.addEntry("Architecture", "# Architecture", "test", "bossmode/architecture/x.md");
     const gate = createGateAndAnnounce("g7", {
-      title: "架构设计", summary: "见文档", artifacts: ["bossmode/architecture/x.md"],
+      title: "架构设计", summary: "见文档", artifacts: ["docs/bossmode/architecture/x.md"],
       requestedBy: "architect", handoffTo: "developer",
     });
     const messages = messageStore.getMessages("g7");
@@ -117,5 +119,20 @@ describe("gate API behaviors (createGateAndAnnounce + decision messaging)", () =
     expect(gateMsg!.gate_event_meta?.gateId).toBe(gate.id);
     expect(gateMsg!.gate_event_meta?.summary).toBe("见文档");
     expect(gateMsg!.gate_event_meta?.handoffTo).toBe("developer");
+  });
+
+  it("rejects missing local artifacts before creating a gate", async () => {
+    const { createGateAndAnnounce } = await import("../../src/api/gates.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    ensureRoom("g8");
+
+    expect(() =>
+      createGateAndAnnounce("g8", {
+        title: "缺失文档", summary: "见文档", artifacts: ["docs/bossmode/missing.md"], requestedBy: "pm",
+      }),
+    ).toThrow(/Artifact not found: docs\/bossmode\/missing\.md/);
+
+    const messages = messageStore.getMessages("g8");
+    expect(messages.some((m) => m.type === "gate_event")).toBe(false);
   });
 });

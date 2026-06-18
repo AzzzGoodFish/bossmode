@@ -55,7 +55,7 @@ describe("artifact preview API", () => {
     }));
   });
 
-  it("returns original and tried paths for missing artifacts", async () => {
+  it("returns a non-technical missing artifact message", async () => {
     const ts = await createTestServer();
     servers.push(ts);
     const token = await login(ts.port);
@@ -66,8 +66,7 @@ describe("artifact preview API", () => {
     const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/missing.md")}`, { token });
     expect(res.status).toBe(404);
     const body = JSON.parse(res.body);
-    expect(body.error).toContain("docs/missing.md");
-    expect(body.error).toContain("missing.md");
-    expect(body.error).toContain("tried");
+    expect(body.error).toBe("Artifact not found: docs/missing.md");
+    expect(body.error).not.toContain("tried");
   });
 });

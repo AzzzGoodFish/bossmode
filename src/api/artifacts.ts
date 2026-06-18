@@ -39,14 +39,11 @@ addRoute("GET", "/api/rooms/:id/artifact-preview", async (req, res, params) => {
   const normalized = normalizeArtifactRef(originalPath);
   const ext = extname(normalized.path).toLowerCase();
   if (ext !== ".md" && ext !== ".html") {
-    sendJson(res, 400, { error: `Unsupported artifact type: ${originalPath} (tried ${normalized.path})` });
+    sendJson(res, 400, { error: `Unsupported artifact type: ${originalPath}` });
     return;
   }
 
-  const triedPaths: string[] = [];
-
   if (ext === ".md") {
-    triedPaths.push(normalized.path);
     const entry = knowledgeStore.getEntry(normalized.path);
     if (entry) {
       sendJson(res, 200, {
@@ -76,11 +73,10 @@ addRoute("GET", "/api/rooms/:id/artifact-preview", async (req, res, params) => {
   }
 
   for (const candidate of [...new Set(candidates)]) {
-    triedPaths.push(candidate);
     if (!existsSync(candidate)) continue;
     const check = checkPath(candidate, { allowedPrefixes, maxSizeBytes: MAX_ARTIFACT_BYTES });
     if (!check.ok) {
-      sendJson(res, 400, { error: `${check.error}: ${originalPath} (tried ${triedPaths.join(", ")})` });
+      sendJson(res, 400, { error: `${check.error}: ${originalPath}` });
       return;
     }
     const content = readFileSync(check.absolutePath, "utf8");
@@ -94,5 +90,5 @@ addRoute("GET", "/api/rooms/:id/artifact-preview", async (req, res, params) => {
     return;
   }
 
-  sendJson(res, 404, { error: `Artifact not found: ${originalPath} (tried ${triedPaths.join(", ")})` });
+  sendJson(res, 404, { error: `Artifact not found: ${originalPath}` });
 });

@@ -4,12 +4,76 @@
 // doc, architecture design, ...) and requests user approval before the
 // pipeline continues. Approval posts a user message that @mentions the
 // handoff target, so activation reuses the existing router path untouched.
+import { existsSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as gateStore from "../workspace/gate-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import * as knowledgeStore from "../knowledge/store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
-import type { Gate, GateEventMeta } from "../shared/types.js";
+import { checkPath } from "../shared/path-security.js";
+import type { Gate, GateEventMeta, Room } from "../shared/types.js";
+
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+function normalizeArtifactRef(input: string): { originalPath: string; path: string } {
+  const originalPath = input.trim();
+  return { originalPath, path: originalPath.replace(/^docs\//, "") };
+}
+
+function safeRealpath(path: string): string | null {
+  try { return realpathSync(path); } catch { return null; }
+}
+
+function isValidUrlArtifact(artifact: string): boolean {
+  if (!URL_SCHEME_RE.test(artifact)) return false;
+  try {
+    // URL artifacts are references only; do not fetch during gate submission.
+    new URL(artifact);
+    return true;
+  } catch {
+    throw new Error(`Invalid artifact URL: ${artifact}`);
+  }
+}
+
+function validateLocalArtifact(room: Room, artifact: string): void {
+  const normalized = normalizeArtifactRef(artifact);
+  const allowedPrefixes = [
+    safeRealpath(knowledgeStore._internal.docsRoot()),
+    safeRealpath(resolve(room.cwd)),
+  ].filter((p): p is string => !!p);
+
+  if (normalized.path.toLowerCase().endsWith(".md") && knowledgeStore.getEntry(normalized.path)) return;
+
+  const candidates: string[] = [knowledgeStore._internal.absDocPath(normalized.path)];
+  if (!normalized.originalPath.startsWith("/")) {
+    candidates.push(resolve(room.cwd, normalized.originalPath));
+    if (normalized.path !== normalized.originalPath) candidates.push(resolve(room.cwd, normalized.path));
+  } else {
+    candidates.push(normalized.originalPath);
+  }
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (!existsSync(candidate)) continue;
+    const check = checkPath(candidate, { allowedPrefixes });
+    if (!check.ok) {
+      throw new Error(`Artifact path is not accessible: ${normalized.originalPath}. ${check.error}`);
+    }
+    return;
+  }
+
+  throw new Error(`Artifact not found: ${normalized.originalPath}. Fix the artifact path and submit the approval again.`);
+}
+
+function validateGateArtifacts(room: Room, artifacts?: string[]): void {
+  for (const raw of artifacts || []) {
+    const artifact = String(raw).trim();
+    if (!artifact) continue;
+    if (isValidUrlArtifact(artifact)) continue;
+    validateLocalArtifact(room, artifact);
+  }
+}
 
 /** Emit a structured gate_event system message into the room stream. */
 export function emitGateEvent(
@@ -58,6 +122,7 @@ export function createGateAndAnnounce(
       `handoff_to "${data.handoffTo}" is not a member of this room. Members: ${room.members.join(", ")}`,
     );
   }
+  validateGateArtifacts(room, data.artifacts);
   const gate = gateStore.createGate(roomId, data);
   emitGateEvent(roomId, "requested", gate);
   return gate;
