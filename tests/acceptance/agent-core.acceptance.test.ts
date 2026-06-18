@@ -224,7 +224,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   // ── T6.1: Agent error → error summary in room (F19) ──
 
   describe("T6.1: Agent error handling (F19)", () => {
-    it("agent error posts error summary to room and drops unhealthy runtime", async () => {
+    it("agent error posts error summary to room and status returns to idle", async () => {
       // Make prompt throw an error
       setMockPromptFn(vi.fn().mockRejectedValue(new Error("API rate limit exceeded")));
 
@@ -244,7 +244,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       // 1. room:message (user's @pm message)
       // 2. agent:status → working
       // 3. room:message (error summary from system)
-      // 4. agent:status → inactive (unhealthy runtime dropped; next activation recreates)
+      // 4. agent:status → idle (back to idle after error)
 
       const errorMessages = wsClient.events.filter(
         (e) => e.type === "room:message" && (e as any).message?.sender === "system",
@@ -255,16 +255,16 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       const errorContent = (errorMessages[0] as any).message.content;
       expect(errorContent).toContain("error");
 
-      // Agent should be inactive so the next activation rebuilds the runtime/session path.
-      const inactiveEvents = wsClient.events.filter(
-        (e) => e.type === "agent:status" && (e as any).agent === "pm" && (e as any).status === "inactive",
+      // Agent should be back to idle
+      const idleEvents = wsClient.events.filter(
+        (e) => e.type === "agent:status" && (e as any).agent === "pm" && (e as any).status === "idle",
       );
-      expect(inactiveEvents.length).toBeGreaterThanOrEqual(1);
+      expect(idleEvents.length).toBeGreaterThanOrEqual(1);
 
-      // Verify via API that pm is inactive.
+      // Verify via API that pm is idle
       const roomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
       const roomData = JSON.parse(roomRes.body);
-      expect(roomData.agentStatuses.pm).toBe("inactive");
+      expect(roomData.agentStatuses.pm).toBe("idle");
 
       await wsClient.close();
     });

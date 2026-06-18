@@ -241,7 +241,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   // ── Reset Session ──
 
   describe("Reset Session", () => {
-    it("clears session metadata, resets cursor to latest message, and writes a system event", async () => {
+    it("clears session metadata, resets cursor to null, and writes a system event", async () => {
       const room = await createRoom("reset-session-test", ["pm"]);
       const roomDir = join(getTestBossmodeDir(), "rooms", room.id);
       mkdirSync(roomDir, { recursive: true });
@@ -249,25 +249,22 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
         pm: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
       }, null, 2));
       writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ pm: "msg-123" }, null, 2));
-      await sendMessage(room.id, "context before reset");
-
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });
       expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh from new messages." });
+      expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
 
       const sessions = JSON.parse(readFileSync(join(roomDir, "sessions.json"), "utf-8"));
       expect(sessions.pm).toEqual({ runtime: "mock" });
 
-      const messages = JSON.parse(readFileSync(join(roomDir, "messages.jsonl"), "utf-8").trim().split("\n").at(-1)!);
       const cursors = JSON.parse(readFileSync(join(roomDir, "cursors.json"), "utf-8"));
-      expect(cursors.pm).toBe(messages.id);
+      expect(cursors.pm).toBeNull();
 
       const eventsRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/agents/pm/events`, { token });
       expect(eventsRes.status).toBe(200);
       const events = JSON.parse(eventsRes.body);
       expect(events).toContainEqual(expect.objectContaining({
         type: "system",
-        text: "Session reset. Next activation will start fresh from new messages.",
+        text: "Session reset. Next activation will start fresh.",
       }));
     });
 

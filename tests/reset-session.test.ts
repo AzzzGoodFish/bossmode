@@ -152,19 +152,19 @@ describe("resetAgentSession", () => {
     expect(createOpts.resumeSession).toBeUndefined();
   });
 
-  it("destroys instance, clears session, resets cursor to latest, and emits system event", async () => {
+  it("destroys instance, clears session, resets cursor to null, and emits system event", async () => {
     await activateAgent("room1", "pm");
 
     const result = resetAgentSession("room1", "pm");
 
-    expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh from new messages." });
+    expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
     expect(mockHandle.destroy).toHaveBeenCalledTimes(1);
     expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "pm", "pi-cli");
-    expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "pm", "msg-1");
+    expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "pm", null);
     expect(appendEventToDisk).toHaveBeenCalledWith(
       "room1",
       "pm",
-      expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh from new messages." }),
+      expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh." }),
     );
     expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(
       "room1",

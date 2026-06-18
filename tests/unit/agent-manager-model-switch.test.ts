@@ -304,31 +304,21 @@ describe("agent-manager model hot switch", () => {
     expect(handles[0].promptCalls[0]).not.toContain("setModel failed");
   });
 
-  it("destroys active instances after provider message_end errors so next activation recreates", async () => {
+  it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
+    const messageBus = await import("../../src/communication/message-bus.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
     first.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "502 upstream_error" });
 
-    expect(first.destroyed).toBe(true);
-    expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
-    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+    expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" request failed. Error: 502 upstream_error');
+    expect(first.destroyed).toBe(false);
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    expect(ws.broadcastToRoom).not.toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
 
     await manager.activateAgent("room", "pm");
-    expect(handles).toHaveLength(2);
-  });
-
-  it("resetAgentSession starts from latest message instead of replaying old context", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const sessionStore = await import("../../src/workspace/session-store.js");
-
-    const result = manager.resetAgentSession("room", "pm");
-
-    expect(result.message).toContain("fresh from new messages");
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room", "pm", "test");
-    expect(roomStore.setCursor).toHaveBeenCalledWith("room", "pm", "m1");
+    expect(handles).toHaveLength(1);
   });
 });
