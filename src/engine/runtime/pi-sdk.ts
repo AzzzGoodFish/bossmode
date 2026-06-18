@@ -14,6 +14,7 @@ import {
 import { logger } from "../../foundation/logger.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
+import { CLAUDE_CODE_TOOL_ALIAS_NAMES, createClaudeCodeToolAliases } from "./pi-sdk-tool-aliases.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams } from "./types.js";
 
@@ -295,7 +296,9 @@ export class PiSdkRuntime implements AgentRuntime {
     });
     await resourceLoader.reload();
 
-    const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
+    const bossmodeTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
+    const aliasTools = createClaudeCodeToolAliases(opts.cwd);
+    const customTools = [...aliasTools, ...bossmodeTools];
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -307,7 +310,7 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager,
       settingsManager,
       customTools,
-      tools: ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)],
+      tools: ["read", "bash", "edit", "write", ...CLAUDE_CODE_TOOL_ALIAS_NAMES, ...bossmodeTools.map((t) => t.name)],
     });
 
     if (appendConfiguredModelChange) {
