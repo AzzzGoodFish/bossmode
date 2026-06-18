@@ -31,6 +31,10 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
+  createSyncedAuthStorage: (...args: any[]) => {
+    authCreate(...args);
+    return { kind: "synced-auth", args };
+  },
 }));
 
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
@@ -275,8 +279,8 @@ describe("PiSdkRuntime", () => {
     expect(handle.runtimeParams?.model).toBe("anthropic/claude-opus-4-6");
   });
 
-  it("registers Claude Code-style tool aliases and maps their params to lowercase tools", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+  it("registers Claude Code-style tool aliases for API-key profiles and maps their params to lowercase tools", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "cred-a", authType: "api_key" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
@@ -300,6 +304,17 @@ describe("PiSdkRuntime", () => {
 
     await (aliases.get("MultiEdit") as any).execute("multi-id", { file_path: "src/a.ts", edits: [{ old_string: "a", new_string: "b" }, { oldText: "c", newText: "d" }] }, undefined, undefined, undefined);
     expect(lowerEditExecute).toHaveBeenCalledWith("multi-id", { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "d" }] }, undefined, undefined, undefined);
+  });
+
+  it("does not register Claude Code-style tool aliases for OAuth profiles", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "cred-oauth", authType: "oauth" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts());
+
+    const createOpts = createAgentSession.mock.calls[0][0];
+    expect(createOpts.tools).toEqual(["read", "bash", "edit", "write"]);
+    expect(createOpts.customTools.map((tool: any) => tool.name)).not.toEqual(expect.arrayContaining(["Bash", "Read", "Edit", "Write", "MultiEdit"]));
   });
 
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
