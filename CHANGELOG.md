@@ -16,6 +16,7 @@ All notable changes to Bossmode are documented here.
 - Station stop/abort button is now absolutely positioned so it no longer compresses the inline `model · think` row.
 - Model credential Settings now refresh active agent runtime credential snapshots after profile changes: idle agents refresh immediately, working agents refresh after `agent_end`, and unavailable profiles fail closed.
 - Connect Provider now supports multiple credential profiles for the same provider instead of overwriting the existing connection; model pickers distinguish profiles by name/provider/API URL.
+- Station error tool events now use only the status dot, border, and background for error state; the redundant uppercase `ERROR` pill was removed from event rows.
 
 ### Fixed
 - Changing an agent/member model in one room no longer mutates the global member config or hot-switches the same member in other rooms.

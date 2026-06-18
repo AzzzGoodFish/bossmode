@@ -331,7 +331,7 @@ function toolEndDetail(event: AgentEvent, events: AgentEvent[] = []): string {
   return toolTarget(matchingStart?.args) || toolTarget(event.args) || (event.isError ? safeEventDetail(event.result ?? event.text) : safeEventDetail(event.result ?? event.text)) || String(event.toolName || "tool");
 }
 
-function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean; tag?: string } {
+function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean } {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
@@ -343,7 +343,6 @@ function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: 
       label: String(event.toolName || "tool"),
       detail: toolEndDetail(event, events),
       ts,
-      tag: event.isError ? "ERROR" : undefined,
     };
   }
   const summary = summarizeAgentEvent(event);
@@ -400,7 +399,6 @@ function ActionLine({ name, status, events, expanded, onToggle }: { name: string
       <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(visualKind)}`} />
       <span className={`text-[9px] font-bold tracking-[0.12em] uppercase shrink-0 ${tone}`}>{label}</span>
       <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{detail}</span>
-      {summary.tag && <span className="text-[8.5px] font-bold tracking-[0.08em] text-blocked border border-blocked/25 rounded-full px-1.5 py-px shrink-0">{summary.tag}</span>}
       <ChevronDown size={11} className={`text-ink-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
     </button>
   );
@@ -415,8 +413,7 @@ function MiniEvent({ event, events = [] }: { event: AgentEvent; events?: AgentEv
         <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(summary.kind)}`} />
         <span className={`text-[9px] font-bold tracking-[0.1em] uppercase shrink-0 ${actionTone(summary.kind)}`}>{summary.label}</span>
         <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{summary.detail}</span>
-        {summary.tag && <span className="text-[8.5px] font-bold tracking-[0.08em] text-blocked border border-blocked/25 rounded-full px-1.5 py-px shrink-0">{summary.tag}</span>}
-        {!summary.tag && time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
+        {time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
       </div>
     </div>
   );
