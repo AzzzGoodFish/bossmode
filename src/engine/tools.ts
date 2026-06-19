@@ -66,10 +66,7 @@ export async function handleToolCallback(
         }
         if (errors.length > 0) {
           const errorMsg = errors.join("; ");
-          if (attachments.length === 0) {
-            return { ok: false, error: `Attachment failed: ${errorMsg}` };
-          }
-          message += `${message ? "\n" : ""}(Attachment errors: ${errorMsg})`;
+          return { ok: false, error: `Attachment failed: ${errorMsg}` };
         }
       }
 

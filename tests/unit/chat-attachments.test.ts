@@ -78,6 +78,35 @@ describe("chat attachment artifacts", () => {
     expect(unsafe.status).not.toBe(200);
   });
 
+  it("agent chat fails atomically when any attachment path is missing", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
+    const missingPath = join(cwd, "missing.md");
+    const room = roomStore.createRoom("Agent Missing Attach", cwd, ["developer"]);
+
+    const result = await handleToolCallback("chat", room.id, "developer", {
+      message: "should not send",
+      attachments: [missingPath],
+    }) as any;
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(missingPath);
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
+
+    const chatTool = createBossmodeSdkTools({ roomId: room.id, agentName: "developer", roomMembers: ["developer"] })[0];
+    await expect(chatTool.execute("call-1", {
+      message: "should not report sent",
+      target: "room",
+      attachments: [missingPath],
+    })).rejects.toThrow(missingPath);
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
+  });
+
   it("agent chat attachments use structured metadata and do not leak source/store absolute paths in message JSON", async () => {
     const ts = await createTestServer();
     servers.push(ts);

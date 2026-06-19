@@ -188,7 +188,7 @@ function MessageWithAttachments({
       )}
 
       {renderAttachments.length > 0 && (
-        <div className={`${hasBody ? "mt-1.5" : ""} flex flex-col gap-1.5 max-w-lg`}>
+        <div className={`${hasBody ? "mt-1.5" : ""} flex flex-col gap-1.5 max-w-2xl`}>
           {renderAttachments.map((a, i) => (
             <AttachmentRow
               key={`${a.id}:${i}`}
@@ -256,7 +256,7 @@ function AttachmentRow({
         {name}
       </button>
       <span className="text-[9px] uppercase font-bold text-ink-4 shrink-0">{previewType === "markdown" ? "md" : previewType}</span>
-      <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover/att:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-0.5 opacity-100 transition-opacity shrink-0">
         {(isImage || canDocumentPreview) && url && (
           <button
             type="button"

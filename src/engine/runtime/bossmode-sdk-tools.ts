@@ -42,6 +42,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       }),
       execute: async (_id, params) => {
         const data = await call("chat", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Chat failed");
         const targetText = (params as any).target === "user" ? "Private reply sent." : "Message sent to room.";
         return textResult(targetText + (data?.warning ? " Warning: " + data.warning : ""));
       },
