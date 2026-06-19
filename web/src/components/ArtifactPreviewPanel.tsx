@@ -1,19 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Code2, FileCode, FileText, Loader2, Maximize2, X } from "lucide-react";
-import type { ArtifactPreviewData } from "../api/client";
-import { getArtifactPreview } from "../api/client";
+import type { ArtifactPreviewData, RoomMessageAttachment } from "../api/client";
+import { getArtifactPreview, getAttachmentPreview } from "../api/client";
 import { Markdown } from "./Markdown";
 
 export interface GateArtifactPreviewState {
+  kind?: "gate";
   gateId: string;
   gateTitle: string;
   artifacts: string[];
   selectedIndex: number;
 }
 
+export interface ChatAttachmentPreviewState {
+  kind: "attachment";
+  messageId: string;
+  title: string;
+  attachments: RoomMessageAttachment[];
+  selectedIndex: number;
+}
+
+type PreviewState = GateArtifactPreviewState | ChatAttachmentPreviewState;
+
 interface ArtifactPreviewPanelProps {
   roomId: string;
-  state: GateArtifactPreviewState;
+  state: PreviewState;
   onSelect: (index: number) => void;
   onClose: () => void;
   variant: "panel" | "sheet";
@@ -35,7 +46,11 @@ function artifactName(path: string): string {
 }
 
 export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant }: ArtifactPreviewPanelProps) {
-  const selectedPath = state.artifacts[state.selectedIndex] || state.artifacts[0] || "";
+  const isAttachment = state.kind === "attachment";
+  const items = isAttachment ? state.attachments : state.artifacts;
+  const selectedAttachment = isAttachment ? state.attachments[state.selectedIndex] || state.attachments[0] : null;
+  const selectedPath = isAttachment ? (selectedAttachment?.storedFilename || "") : (state.artifacts[state.selectedIndex] || state.artifacts[0] || "");
+  const selectedLabel = isAttachment ? (selectedAttachment?.originalFilename || selectedPath) : selectedPath;
   const [load, setLoad] = useState<LoadState>({ status: "idle" });
   const [htmlMode, setHtmlMode] = useState<"preview" | "source">("preview");
   const [focusOpen, setFocusOpen] = useState(false);
@@ -51,13 +66,13 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
     }
     let cancelled = false;
     setLoad({ status: "loading" });
-    getArtifactPreview(roomId, selectedPath)
+    (isAttachment ? getAttachmentPreview(roomId, selectedPath) : getArtifactPreview(roomId, selectedPath))
       .then((data) => { if (!cancelled) setLoad({ status: "ready", data }); })
       .catch((err: any) => { if (!cancelled) setLoad({ status: "error", error: String(err?.message || err) }); });
     return () => { cancelled = true; };
-  }, [roomId, selectedPath]);
+  }, [roomId, selectedPath, isAttachment]);
 
-  const title = load.status === "ready" ? load.data.title : artifactName(selectedPath);
+  const title = isAttachment ? selectedLabel : (load.status === "ready" ? load.data.title : artifactName(selectedPath));
   const canSource = load.status === "ready" && load.data.type === "html";
 
   const body = useMemo(() => (
@@ -71,7 +86,7 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
           <FileText size={14} className="text-accent-ink shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-ink-1 truncate">{title}</div>
-            <div className="font-mono text-[10px] text-ink-4 truncate" title={selectedPath}>{selectedPath}</div>
+            <div className="font-mono text-[10px] text-ink-4 truncate" title={selectedLabel}>{selectedLabel}</div>
           </div>
           {canSource && (
             <div className="flex items-center gap-0.5 rounded-md border border-line bg-inset p-0.5 shrink-0">
@@ -108,20 +123,22 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
         </div>
       </div>
 
-      {state.artifacts.length > 1 && (
+      {items.length > 1 && (
         <div className="shrink-0 border-b border-line-soft px-2 py-2 flex gap-1 overflow-x-auto">
-          {state.artifacts.map((path, index) => {
-            const kind = artifactKind(path);
+          {items.map((item, index) => {
+            const path = typeof item === "string" ? item : item.storedFilename;
+            const label = typeof item === "string" ? artifactName(item) : item.originalFilename;
+            const kind = typeof item === "string" ? artifactKind(path) : item.previewType;
             const active = index === state.selectedIndex;
             return (
               <button
                 key={`${path}:${index}`}
                 onClick={() => onSelect(index)}
                 className={`min-w-0 shrink-0 max-w-[220px] flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-[10px] cursor-pointer ${active ? "border-accent/40 bg-accent-dim text-ink-1" : "border-line bg-surface-0/40 text-ink-3 hover:text-ink-2 hover:border-line-strong"}`}
-                title={path}
+                title={label}
               >
-                <span className="uppercase font-bold text-[8px] text-ink-4">{kind}</span>
-                <span className="font-mono truncate">{artifactName(path)}</span>
+                <span className="uppercase font-bold text-[8px] text-ink-4">{kind === "markdown" ? "md" : kind}</span>
+                <span className="font-mono truncate">{label}</span>
               </button>
             );
           })}
@@ -135,7 +152,7 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
       {focusOpen && (
         <ArtifactPreviewLightbox
           title={title}
-          path={selectedPath}
+          path={selectedLabel}
           load={load}
           htmlMode={htmlMode}
           onClose={() => setFocusOpen(false)}

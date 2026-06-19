@@ -11,6 +11,7 @@ import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
+import * as attachmentStore from "../workspace/attachment-store.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
@@ -340,7 +341,22 @@ export async function invalidateModelCredentialProfile(profileId: string, provid
 
 // -- Format messages --
 
-function formatMessagesForAgent(messages: RoomMessage[], receiver: string, roomName: string): string {
+function renderMessageForAgent(roomId: string, msg: RoomMessage): RoomMessage {
+  if (!msg.attachments?.length) return msg;
+  const lines: string[] = [];
+  for (const attachment of msg.attachments) {
+    try {
+      const absPath = attachmentStore.getAttachmentPath(roomId, attachment.storedFilename);
+      lines.push(`Attachment: [original filename: ${attachment.originalFilename}](${absPath})`);
+    } catch {
+      lines.push(`Attachment: [original filename: ${attachment.originalFilename}](unavailable)`);
+    }
+  }
+  const content = msg.content?.trim() ? `${msg.content}\n${lines.join("\n")}` : lines.join("\n");
+  return { ...msg, content };
+}
+
+function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receiver: string, roomName: string): string {
   if (messages.length === 0) return "";
 
   let triggerIdx = -1;
@@ -362,7 +378,8 @@ function formatMessagesForAgent(messages: RoomMessage[], receiver: string, roomN
     }
   }
 
-  const wrapped = messages.map((m, idx) => {
+  const wrapped = messages.map((raw, idx) => {
+    const m = renderMessageForAgent(roomId, raw);
     if (m.type === "summary") return m.content;
     const senderRole = resolveSenderRole(m.sender);
     if (idx === triggerIdx) {
@@ -598,7 +615,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor });
 
-  const formattedMessages = formatMessagesForAgent(newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
+  const formattedMessages = formatMessagesForAgent(roomId, newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
   setActivationSource(roomId, memberName, "room_mention");
 

@@ -15,6 +15,8 @@ import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/sum
 import { readConfig, writeConfig } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
+import * as attachmentStore from "../workspace/attachment-store.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 
 // ── Rooms ──
 
@@ -139,17 +141,37 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { content?: string };
-  if (!body.content) {
-    sendJson(res, 400, { error: "content is required" });
+  const body = (await parseBody(req)) as { content?: string; attachments?: Array<{ storedFilename?: string; filename?: string; originalFilename?: string; size?: number }> };
+  const content = typeof body.content === "string" ? body.content : "";
+  const attachments: RoomMessageAttachment[] = [];
+  if (Array.isArray(body.attachments)) {
+    for (const raw of body.attachments) {
+      const storedFilename = displayFilename(raw?.storedFilename || raw?.filename || "");
+      if (!storedFilename || !attachmentStore.attachmentExists(params.id, storedFilename)) {
+        sendJson(res, 400, { error: `Attachment not found: ${storedFilename || "(missing filename)"}` });
+        return;
+      }
+      const originalFilename = displayFilename(raw?.originalFilename || storedFilename);
+      attachments.push({
+        id: storedFilename,
+        storedFilename,
+        originalFilename,
+        size: typeof raw?.size === "number" ? raw.size : undefined,
+        previewType: inferAttachmentPreviewType(storedFilename || originalFilename),
+      });
+    }
+  }
+  if (!content.trim() && attachments.length === 0) {
+    sendJson(res, 400, { error: "content or attachments is required" });
     return;
   }
 
   // Parse @ mentions from content
-  const mentions = parseMentions(body.content, room.members);
+  const mentions = parseMentions(content, room.members);
 
   // Post via message-bus (writes + broadcasts + notifies router listeners)
-  postMessage(params.id, "user", body.content, mentions);
+  if (attachments.length > 0) postMessage(params.id, "user", content, mentions, { attachments });
+  else postMessage(params.id, "user", content, mentions);
 
   // Return the latest message
   const messages = messageStore.getMessages(params.id, { limit: 1 });

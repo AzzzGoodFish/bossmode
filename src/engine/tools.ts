@@ -21,6 +21,7 @@ const MAX_RESULT_CHARS = 25_000;
 
 /** Truncate a serialized tool result if it exceeds the limit. */
 import { processAgentAttachments } from "./agent-attachments.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 
 export function truncateToolResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
@@ -43,27 +44,32 @@ export async function handleToolCallback(
       let message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
 
-      // Process agent attachments (file paths → validate + copy → append Attachment lines)
+      const attachments: RoomMessageAttachment[] = [];
+      // Process agent attachments (file paths → validate + copy → structured message metadata).
+      // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
         const outcomes = await processAgentAttachments(roomId, params.attachments.map(String));
-        const lines: string[] = [];
         const errors: string[] = [];
         for (const o of outcomes) {
           if (o.ok) {
-            lines.push(`Attachment: [original filename: ${o.originalFilename}](${o.absolutePath})`);
+            const originalFilename = displayFilename(o.originalFilename);
+            attachments.push({
+              id: o.storedFilename,
+              storedFilename: o.storedFilename,
+              originalFilename,
+              size: o.size,
+              previewType: inferAttachmentPreviewType(o.storedFilename || originalFilename),
+            });
           } else {
             errors.push(`${o.path}: ${o.error}`);
           }
         }
-        if (lines.length > 0) {
-          message = message ? `${message}\n${lines.join("\n")}` : lines.join("\n");
-        }
         if (errors.length > 0) {
           const errorMsg = errors.join("; ");
-          if (lines.length === 0) {
+          if (attachments.length === 0) {
             return { ok: false, error: `Attachment failed: ${errorMsg}` };
           }
-          message += `\n(Attachment errors: ${errorMsg})`;
+          message += `${message ? "\n" : ""}(Attachment errors: ${errorMsg})`;
         }
       }
 
@@ -82,7 +88,8 @@ export async function handleToolCallback(
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      postMessage(roomId, agentName, message, mentions);
+      if (attachments.length > 0) postMessage(roomId, agentName, message, mentions, { attachments });
+      else postMessage(roomId, agentName, message, mentions);
 
       return warning ? { ok: true, warning } : { ok: true };
     }

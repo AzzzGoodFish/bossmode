@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, BookOpen, FileText, ShieldCheck, Plus, Pencil, ArrowRight, Trash2, Eye } from "lucide-react";
-import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, GateEventMeta } from "../api/client";
+import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, GateEventMeta, RoomMessageAttachment } from "../api/client";
 import { decideGate } from "../api/client";
 import { Markdown } from "./Markdown";
 import { useDialog } from "./dialogs";
 import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
-import type { GateArtifactPreviewState } from "./ArtifactPreviewPanel";
+import type { GateArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
@@ -22,7 +22,9 @@ interface ChatAreaProps {
   onNavigateToTask?: (taskId: string) => void;
   onNavigateToKnowledge?: (path: string) => void;
   onPreviewArtifact?: (preview: GateArtifactPreviewState) => void;
+  onPreviewAttachment?: (preview: ChatAttachmentPreviewState) => void;
   activeArtifactPreview?: { gateId: string; selectedIndex: number } | null;
+  activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
   onReturnToLatest?: () => void;
   inHistoryView?: boolean;
@@ -30,7 +32,7 @@ interface ChatAreaProps {
 
 const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, activeArtifactPreview, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -235,6 +237,10 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
                       roomId={roomId}
+                      messageId={msg.id}
+                      attachments={msg.attachments}
+                      activeAttachmentPreview={activeAttachmentPreview}
+                      onPreviewAttachment={roomId && onPreviewAttachment ? (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => onPreviewAttachment({ kind: "attachment", messageId, title: "Attachment preview", attachments, selectedIndex }) : undefined}
                     />
                   )}
                 </div>

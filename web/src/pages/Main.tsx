@@ -17,7 +17,7 @@ import {
 import { useRoom } from "../hooks/useRoom";
 import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
-import { ArtifactPreviewPanel, type GateArtifactPreviewState } from "../components/ArtifactPreviewPanel";
+import { ArtifactPreviewPanel, type GateArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
@@ -62,7 +62,7 @@ export function Main({
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
-  const [artifactPreview, setArtifactPreview] = useState<GateArtifactPreviewState | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<GateArtifactPreviewState | ChatAttachmentPreviewState | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
     const raw = localStorage.getItem(PREVIEW_WIDTH_STORAGE_KEY);
     const n = raw ? parseInt(raw, 10) : NaN;
@@ -397,7 +397,7 @@ export function Main({
           )}
           {lensFull ? lensPanel : view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview ? { gateId: artifactPreview.gateId, selectedIndex: artifactPreview.selectedIndex } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { gateId: artifactPreview.gateId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : selectedRoomId ? (

@@ -5,7 +5,7 @@ import { useUpload } from "../hooks/useUpload";
 import { AttachmentUploader } from "./AttachmentUploader";
 
 interface MessageInputProps {
-  onSend: (content: string) => void;
+  onSend: (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => void;
   members: string[];
   disabled?: boolean;
   roomId?: string;
@@ -71,20 +71,19 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
 
     let content = trimmed;
 
+    const attachments: Array<{ storedFilename: string; originalFilename: string; size?: number }> = [];
+
     // Upload pending files
     if (upload.hasPending && roomId) {
       const results = await upload.uploadAll(roomId);
-      if (results.length > 0) {
-        const lines = results.map((r) =>
-          `Attachment: [original filename: ${r.originalFilename}](${r.path})`,
-        );
-        content = content ? `${content}\n${lines.join("\n")}` : lines.join("\n");
+      for (const r of results) {
+        attachments.push({ storedFilename: r.filename, originalFilename: r.originalFilename, size: r.size });
       }
       // Only clear successful uploads — keep errored/cancelled items so user can retry.
       upload.clearSuccessful();
     }
 
-    if (content) onSend(content);
+    if (content || attachments.length > 0) onSend(content, attachments.length > 0 ? attachments : undefined);
     clearDraft();
     setShowMentions(false);
   };

@@ -4,9 +4,11 @@
 export interface UploadResult {
   filename: string;
   originalFilename: string;
+  /** Stored filename, kept as `path` for legacy caller compatibility. Never an absolute path. */
   path: string;
   size: number;
   url: string;
+  previewType?: "image" | "markdown" | "html" | "download";
 }
 
 export interface UploadOptions {

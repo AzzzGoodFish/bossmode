@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { FileText, Image as ImageIcon, Eye, Download, X } from "lucide-react";
+import { FileText, FileCode, Image as ImageIcon, Eye, Download, X } from "lucide-react";
 import { Markdown } from "./Markdown";
+import type { RoomMessageAttachment } from "../api/client";
 
 interface MessageBubbleProps {
   sender: string;
@@ -10,6 +11,10 @@ interface MessageBubbleProps {
   grouped?: boolean;
   isMarkdown?: boolean;
   roomId?: string;
+  messageId?: string;
+  attachments?: RoomMessageAttachment[];
+  onPreviewAttachment?: (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => void;
+  activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
 }
 
 /** Regex to match attachment lines: Attachment: [original filename: xxx](path) */
@@ -18,10 +23,20 @@ const ATTACHMENT_RE = /^Attachment: \[original filename: ([^\]]+)\]\(([^)]+)\)$/
 const ATTACHMENT_RE_M = /^Attachment: \[original filename: ([^\]]+)\]\(([^)]+)\)$/m;
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
+const MARKDOWN_EXTS = new Set([".md", ".markdown"]);
+const HTML_EXTS = new Set([".html", ".htm"]);
 
-function isImagePath(path: string): boolean {
-  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
-  return IMAGE_EXTS.has(ext);
+function extOf(path: string): string {
+  const idx = path.lastIndexOf(".");
+  return idx >= 0 ? path.slice(idx).toLowerCase() : "";
+}
+
+function inferPreviewType(path: string): RoomMessageAttachment["previewType"] {
+  const ext = extOf(path);
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (MARKDOWN_EXTS.has(ext)) return "markdown";
+  if (HTML_EXTS.has(ext)) return "html";
+  return "download";
 }
 
 /** Build API URL for an attachment given roomId. Falls back to legacy roomId-from-path. */
@@ -61,7 +76,7 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 }
 
 export function MessageBubble({
-  sender, content, time, fullTime, grouped = false, isMarkdown = false, roomId,
+  sender, content, time, fullTime, grouped = false, isMarkdown = false, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
 }: MessageBubbleProps) {
   const isUser = sender === "user";
   const isSystem = sender === "system";
@@ -81,7 +96,7 @@ export function MessageBubble({
   const bubbleBg = isUser ? "bg-accent-dim border-accent/15" : "bg-surface-2/60 border-line-soft";
   const displayName = isUser ? "you" : sender;
 
-  const hasAttachments = ATTACHMENT_RE_M.test(content);
+  const hasAttachments = ATTACHMENT_RE_M.test(content) || (attachments?.length ?? 0) > 0;
 
   return (
     <div className={`group flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-surface-2/40 transition-colors`}>
@@ -106,6 +121,10 @@ export function MessageBubble({
             isMarkdown={isMarkdown}
             bubbleBg={bubbleBg}
             roomId={roomId}
+            messageId={messageId}
+            attachments={attachments}
+            onPreviewAttachment={onPreviewAttachment}
+            activeAttachmentPreview={activeAttachmentPreview}
           />
         ) : (
           <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
@@ -123,20 +142,40 @@ export function MessageBubble({
   );
 }
 
-/**
- * Render message body bubble + lightweight attachment indicators.
- * Each attachment is a compact row (icon + filename + Preview/Download).
- * Click filename or Preview opens lightbox (image) or new tab (file).
- */
+type RenderAttachment = RoomMessageAttachment & { legacyPath?: string };
+
+function legacyToAttachment(a: { originalName: string; path: string }): RenderAttachment {
+  const storedFilename = a.path.split(/[\\/]/).pop() || a.path;
+  return {
+    id: `legacy:${storedFilename}:${a.originalName}`,
+    storedFilename,
+    originalFilename: a.originalName,
+    previewType: inferPreviewType(storedFilename || a.originalName),
+    legacyPath: a.path,
+  };
+}
+
+/** Render message body bubble + lightweight attachment cards. */
 function MessageWithAttachments({
-  content, isMarkdown, bubbleBg, roomId,
-}: { content: string; isMarkdown: boolean; bubbleBg: string; roomId?: string }) {
+  content, isMarkdown, bubbleBg, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
+}: {
+  content: string;
+  isMarkdown: boolean;
+  bubbleBg: string;
+  roomId?: string;
+  messageId?: string;
+  attachments?: RoomMessageAttachment[];
+  onPreviewAttachment?: (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => void;
+  activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
+}) {
   const segments = parseContentSegments(content);
   const textSegments = segments.filter((s) => s.type === "text") as Array<{ type: "text"; text: string }>;
-  const attachmentSegments = segments.filter((s) => s.type === "attachment") as Array<{ type: "attachment"; originalName: string; path: string }>;
+  const legacySegments = segments.filter((s) => s.type === "attachment") as Array<{ type: "attachment"; originalName: string; path: string }>;
 
   const bodyText = textSegments.map((s) => s.text).join("\n\n").trim();
   const hasBody = bodyText.length > 0;
+  const renderAttachments: RenderAttachment[] = attachments?.length ? attachments : legacySegments.map(legacyToAttachment);
+  const documentPreviewAttachments = renderAttachments.filter((a) => a.previewType === "markdown" || a.previewType === "html");
 
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
 
@@ -148,15 +187,19 @@ function MessageWithAttachments({
         </div>
       )}
 
-      {attachmentSegments.length > 0 && (
-        <div className={`${hasBody ? "mt-1.5" : ""} flex flex-col gap-1 max-w-md`}>
-          {attachmentSegments.map((a, i) => (
+      {renderAttachments.length > 0 && (
+        <div className={`${hasBody ? "mt-1.5" : ""} flex flex-col gap-1.5 max-w-lg`}>
+          {renderAttachments.map((a, i) => (
             <AttachmentRow
-              key={i}
-              name={a.originalName}
-              path={a.path}
+              key={`${a.id}:${i}`}
+              attachment={a}
               roomId={roomId}
-              onPreview={(url) => setPreview({ url, name: a.originalName })}
+              active={!!messageId && activeAttachmentPreview?.messageId === messageId && activeAttachmentPreview.storedFilename === a.storedFilename}
+              onImagePreview={(url) => setPreview({ url, name: a.originalFilename })}
+              onDocumentPreview={messageId && onPreviewAttachment ? () => {
+                const selectedIndex = documentPreviewAttachments.findIndex((item) => item.storedFilename === a.storedFilename);
+                onPreviewAttachment(messageId, documentPreviewAttachments, Math.max(0, selectedIndex));
+              } : undefined}
             />
           ))}
         </div>
@@ -170,37 +213,54 @@ function MessageWithAttachments({
 }
 
 function AttachmentRow({
-  name, path, roomId, onPreview,
-}: { name: string; path: string; roomId?: string; onPreview: (url: string) => void }) {
-  const url = attachmentUrl(path, roomId);
-  const isImage = isImagePath(path);
-  const Icon = isImage ? ImageIcon : FileText;
-  const iconColor = isImage ? "text-accent-ink" : "text-ink-3";
+  attachment, roomId, active, onImagePreview, onDocumentPreview,
+}: {
+  attachment: RenderAttachment;
+  roomId?: string;
+  active?: boolean;
+  onImagePreview: (url: string) => void;
+  onDocumentPreview?: () => void;
+}) {
+  const name = attachment.originalFilename;
+  const url = attachmentUrl(attachment.legacyPath || attachment.storedFilename, roomId);
+  const previewType = attachment.previewType || inferPreviewType(attachment.storedFilename || name);
+  const isImage = previewType === "image";
+  const canDocumentPreview = previewType === "markdown" || previewType === "html";
+  const Icon = isImage ? ImageIcon : previewType === "html" ? FileCode : FileText;
+  const iconColor = isImage || canDocumentPreview ? "text-accent-ink" : "text-ink-3";
 
-  const handleNameClick = (e: React.MouseEvent) => {
+  const handleOpen = (e: React.MouseEvent) => {
     if (!url) return;
     e.preventDefault();
-    if (isImage) onPreview(url);
+    if (isImage) onImagePreview(url);
+    else if (canDocumentPreview && onDocumentPreview) onDocumentPreview();
     else window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
-    <div className="group/att flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line bg-surface-0/40 hover:border-line-strong transition-colors">
-      <Icon size={14} className={`${iconColor} shrink-0`} />
+    <div className={`group/att flex items-center gap-2 px-2.5 py-1.5 rounded-md border bg-surface-0/40 transition-colors ${active ? "border-accent/50 bg-accent-dim/40" : "border-line hover:border-line-strong"}`}>
+      {isImage && url ? (
+        <button type="button" onClick={() => onImagePreview(url)} className="w-9 h-9 rounded border border-line overflow-hidden bg-inset shrink-0" aria-label={`Preview ${name}`}>
+          <img src={url} alt="" className="w-full h-full object-cover" />
+        </button>
+      ) : (
+        <Icon size={15} className={`${iconColor} shrink-0`} />
+      )}
       <button
         type="button"
         disabled={!url}
-        onClick={handleNameClick}
+        onClick={handleOpen}
         className="text-xs text-ink-2 truncate flex-1 min-w-0 text-left hover:text-ink-1 disabled:cursor-not-allowed disabled:opacity-60"
         title={name}
       >
         {name}
       </button>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover/att:opacity-100 transition-opacity shrink-0">
-        {isImage && url && (
+      <span className="text-[9px] uppercase font-bold text-ink-4 shrink-0">{previewType === "markdown" ? "md" : previewType}</span>
+      <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover/att:opacity-100 transition-opacity shrink-0">
+        {(isImage || canDocumentPreview) && url && (
           <button
             type="button"
-            onClick={() => onPreview(url)}
+            onClick={() => isImage ? onImagePreview(url) : onDocumentPreview?.()}
             title="Preview"
             aria-label="Preview"
             className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2"

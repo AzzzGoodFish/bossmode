@@ -495,6 +495,10 @@ export async function getArtifactPreview(roomId: string, path: string): Promise<
   return apiFetch(`/api/rooms/${roomId}/artifact-preview?path=${encodeURIComponent(path)}`);
 }
 
+export async function getAttachmentPreview(roomId: string, filename: string): Promise<ArtifactPreviewData> {
+  return apiFetch(`/api/rooms/${roomId}/attachments/${encodeURIComponent(filename)}/preview`);
+}
+
 export async function addKnowledgeEntry(
   title: string, content: string, path?: string,
 ): Promise<KnowledgeEntry> {
@@ -684,6 +688,17 @@ export async function decideGate(
   });
 }
 
+export type AttachmentPreviewType = "image" | "markdown" | "html" | "download";
+
+export interface RoomMessageAttachment {
+  id: string;
+  storedFilename: string;
+  originalFilename: string;
+  size?: number;
+  mime?: string;
+  previewType: AttachmentPreviewType;
+}
+
 export interface RoomMessage {
   id: string;
   sender: string;
@@ -695,6 +710,7 @@ export interface RoomMessage {
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
   gate_event_meta?: GateEventMeta;
+  attachments?: RoomMessageAttachment[];
 }
 
 export interface MessageSearchResult {
@@ -731,10 +747,11 @@ export async function getMessages(
 export async function sendMessage(
   roomId: string,
   content: string,
+  attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
 ): Promise<RoomMessage> {
   return apiFetch(`/api/rooms/${roomId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, attachments }),
   });
 }
 
@@ -806,9 +823,11 @@ export async function getAgentContextUsage(roomId: string, agentName: string): P
 export interface UploadResult {
   filename: string;
   originalFilename: string;
+  /** Stored filename, kept as `path` for legacy caller compatibility. Never an absolute path. */
   path: string;
   size: number;
   url: string;
+  previewType?: AttachmentPreviewType;
 }
 
 export async function uploadFile(roomId: string, file: File): Promise<UploadResult> {

@@ -335,6 +335,8 @@ export interface SummaryMeta {
   participants: string[];
 }
 
+import type { RoomMessageAttachment } from "./attachments.js";
+
 export interface RoomMessage {
   id: string;
   sender: string; // member name or "user" (legacy) or "system"
@@ -346,6 +348,8 @@ export interface RoomMessage {
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
   gate_event_meta?: GateEventMeta;
+  /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
+  attachments?: RoomMessageAttachment[];
 }
 
 // -- Agent Status --
