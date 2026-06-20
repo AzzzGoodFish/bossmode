@@ -60,6 +60,30 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "team-updates", title: "Team Updates", desc: "内置团队版本" },
 ];
 
+type RoomPresence = "working" | "idle" | "offline";
+
+function roomPresence(room: Room): { state: RoomPresence; title: string } {
+  const memberStatuses = room.members.map((m) => room.agentStatuses?.[m] || "inactive");
+  const workingCount = memberStatuses.filter((s) => s === "working" || s === "thinking").length;
+  const idleCount = memberStatuses.filter((s) => s === "idle").length;
+  const memberCount = room.members.length;
+
+  if (workingCount > 0) return { state: "working", title: `${workingCount} working · ${memberCount} members` };
+  if (idleCount > 0) return { state: "idle", title: `${idleCount} idle · ${memberCount} members` };
+  return { state: "offline", title: `offline · ${memberCount} members` };
+}
+
+function roomBeaconClass(state: RoomPresence): string {
+  switch (state) {
+    case "working":
+      return "bg-onair shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_14%,transparent),0_0_12px_color-mix(in_srgb,var(--on-air)_46%,transparent)] animate-pulse";
+    case "idle":
+      return "bg-onair opacity-85 shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_10%,transparent)]";
+    default:
+      return "bg-idleg opacity-60 shadow-[0_0_0_3px_color-mix(in_srgb,var(--idle-g)_8%,transparent)]";
+  }
+}
+
 export function Sidebar({
   activePage, username, onNavigate, onLogout, refreshKey,
   unreadRoomIds, onRoomsLoaded, liveRooms, collapsed, onToggle,
@@ -179,7 +203,7 @@ export function Sidebar({
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
   const roomItemCls = (active: boolean) =>
-    `w-full text-left rounded-lg pl-2.5 pr-8 py-2 mb-px transition-colors cursor-pointer ${
+    `w-full text-left rounded-lg pl-2.5 pr-[72px] py-2 mb-px transition-colors cursor-pointer ${
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
 
@@ -202,27 +226,17 @@ export function Sidebar({
         {domain === "rooms" && (
           <>
             {displayRooms.map((r) => {
-              const statuses = Object.values(r.agentStatuses ?? {});
+              const presence = roomPresence(r);
               return (
                 <div key={r.id} className="group relative">
-                  <button onClick={() => onNavigate({ type: "room", id: r.id })} className={roomItemCls(selectedRoomId === r.id)}>
+                  <button
+                    onClick={() => onNavigate({ type: "room", id: r.id })}
+                    className={roomItemCls(selectedRoomId === r.id)}
+                    title={presence.title}
+                  >
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={`text-[12.5px] font-medium truncate flex-1 ${selectedRoomId === r.id ? "text-ink-1" : "text-ink-2"}`}>
                         {r.name}
-                      </span>
-                      <span className="flex gap-[3px] shrink-0">
-                        {r.members.slice(0, 4).map((m) => {
-                          const st = r.agentStatuses?.[m];
-                          return (
-                            <span
-                              key={m}
-                              title={`${m}${st ? ` · ${st}` : ""}`}
-                              className={`w-[5px] h-[5px] rounded-full ${
-                                st === "working" ? "bg-onair" : st === "thinking" ? "bg-think" : "bg-idleg"
-                              }`}
-                            />
-                          );
-                        })}
                       </span>
                       {unreadRoomIds?.has(r.id) && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                     </div>
@@ -230,6 +244,13 @@ export function Sidebar({
                       ~{r.cwd.replace(/^\/home\/[^/]+/, "")}
                     </div>
                   </button>
+                  <span
+                    className="absolute right-[54px] top-[17px] w-3 h-3 grid place-items-center pointer-events-none"
+                    title={presence.title}
+                    aria-label={presence.title}
+                  >
+                    <span className={`w-[7px] h-[7px] rounded-full ${roomBeaconClass(presence.state)}`} />
+                  </span>
                   <div className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <RoomMenu
                       onRename={async () => {
