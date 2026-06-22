@@ -183,4 +183,30 @@ describe("agent-manager pending creation dedup", () => {
     resolvePrompt();
     await Promise.all([first, second]);
   });
+
+  it("does not prompt again between agent_end and prompt promise settlement; queued input prompts after settle", async () => {
+    let resolveFirst!: () => void;
+    mocks.prompt
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(async () => {});
+
+    const first = activateAgent("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mocks.prompt).toHaveBeenCalledTimes(1);
+
+    mocks.subscribeCb?.({ type: "agent_start" });
+    mocks.subscribeCb?.({ type: "agent_end" });
+
+    const second = activateAgent("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mocks.prompt).toHaveBeenCalledTimes(1);
+    expect(mocks.steer).not.toHaveBeenCalled();
+
+    resolveFirst();
+    await Promise.all([first, second]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mocks.prompt).toHaveBeenCalledTimes(2);
+  });
 });

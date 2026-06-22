@@ -107,6 +107,7 @@ interface AgentInstance {
   agentName: string;
   status: AgentStatus;
   dispatchState: DispatchState;
+  promptInFlight: boolean;
   queuedInputs: string[];
   pendingModelSwitch?: PendingModelSwitch;
   pendingThinkingSwitch?: PendingThinkingSwitch;
@@ -160,6 +161,50 @@ function flushQueuedInputs(instance: AgentInstance, trigger: string): void {
 function queueInput(instance: AgentInstance, input: string, trigger: string): void {
   instance.queuedInputs.push(input);
   logger.info("agent", "queueInput", { member: instance.agentName, count: instance.queuedInputs.length, trigger });
+}
+
+function applyPendingAfterPromptSettlement(instance: AgentInstance, trigger: string): void {
+  applyPendingCredentialRefresh(instance, trigger);
+  applyPendingModelSwitch(instance, trigger);
+  applyPendingThinkingSwitch(instance, trigger);
+}
+
+function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
+  if (instance.queuedInputs.length === 0) return;
+  if (instance.status === "working" || instance.dispatchState !== "idle") return;
+  const queued = instance.queuedInputs.splice(0);
+  const message = queued.join("\n\n");
+  logger.info("agent", "drainQueuedInputsAsPrompt", { member: instance.agentName, count: queued.length, trigger });
+  void runPrompt(instance, message, "queued", (err) => {
+    logger.error("agent", "queued prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
+    postMessage(instance.roomId, "system", `Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(err)}`);
+  });
+}
+
+async function finalizePromptSettlement(instance: AgentInstance, trigger: string): Promise<void> {
+  updateDispatchState(instance, "idle", trigger);
+  applyPendingAfterPromptSettlement(instance, trigger);
+  drainQueuedInputsAsPrompt(instance, trigger);
+}
+
+async function runPrompt(
+  instance: AgentInstance,
+  message: string,
+  trigger: string,
+  onError: (err: unknown) => void,
+): Promise<void> {
+  updateDispatchState(instance, "promptSubmitted", trigger);
+  instance.promptInFlight = true;
+  try {
+    await instance.handle.prompt(message);
+    instance.promptInFlight = false;
+    await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`);
+  } catch (err: any) {
+    instance.promptInFlight = false;
+    onError(err);
+    updateDispatchState(instance, "idle", `${trigger}_prompt_error`);
+    instance.queuedInputs = [];
+  }
 }
 
 function normalizeSwitchModelRef(model: string): string {
@@ -522,6 +567,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         agentName: memberName,
         status: "idle",
         dispatchState: "idle",
+        promptInFlight: false,
         queuedInputs: [],
         unsubscribe: () => {},
         eventBuffer: [],
@@ -536,10 +582,15 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
           updateDispatchState(instance, "running", event.type);
           flushQueuedInputs(instance, event.type);
         } else if (event.type === "agent_end") {
-          updateDispatchState(instance, "idle", event.type);
-          applyPendingCredentialRefresh(instance, event.type);
-          applyPendingModelSwitch(instance, event.type);
-          applyPendingThinkingSwitch(instance, event.type);
+          // Public status may become idle here, but the SDK run can still be finalizing.
+          // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
+          if (!instance.promptInFlight) {
+            updateDispatchState(instance, "idle", event.type);
+            applyPendingAfterPromptSettlement(instance, event.type);
+            drainQueuedInputsAsPrompt(instance, event.type);
+          } else if (instance.dispatchState === "idle") {
+            applyPendingAfterPromptSettlement(instance, event.type);
+          }
         } else if (event.type === "runtime_exit" && event.unexpected) {
           updateDispatchState(instance, "idle", event.type);
           instance.queuedInputs = [];
@@ -619,27 +670,21 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   setActivationSource(roomId, memberName, "room_mention");
 
-  if (instance.dispatchState === "running" || instance.status === "working") {
+  if (instance.status === "working") {
     instance.handle.steer(formattedMessages);
     return;
   }
 
-  if (instance.dispatchState === "promptSubmitted" || instance.dispatchState === "aborting") {
+  if (instance.dispatchState !== "idle") {
     queueInput(instance, formattedMessages, "activate");
     return;
   }
 
   logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
-  updateDispatchState(instance, "promptSubmitted", "activate");
-  try {
-    await instance.handle.prompt(formattedMessages);
-    if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "activate_prompt_resolved");
-  } catch (err: any) {
+  await runPrompt(instance, formattedMessages, "activate", (err) => {
     logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
     postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
-    updateDispatchState(instance, "idle", "activate_prompt_error");
-    instance.queuedInputs = [];
-  }
+  });
 }
 
 // -- @all broadcast --
@@ -792,25 +837,19 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
 
   setActivationSource(roomId, agentName, isSlashCommand ? "system" : "private_instruction");
 
-  if (instance.dispatchState === "running" || instance.status === "working") {
+  if (instance.status === "working") {
     instance.handle.steer(userMessage);
     return;
   }
 
-  if (instance.dispatchState === "promptSubmitted" || instance.dispatchState === "aborting") {
+  if (instance.dispatchState !== "idle") {
     queueInput(instance, userMessage, "steer");
     return;
   }
 
-  updateDispatchState(instance, "promptSubmitted", "steer");
-  try {
-    await instance.handle.prompt(userMessage);
-    if ((instance.dispatchState as DispatchState) !== "running") updateDispatchState(instance, "idle", "steer_prompt_resolved");
-  } catch (err: any) {
+  await runPrompt(instance, userMessage, "steer", (err) => {
     logger.error("agent", "steer error", { agent: agentName, error: formatRuntimeErrorMessage(err) });
-    updateDispatchState(instance, "idle", "steer_prompt_error");
-    instance.queuedInputs = [];
-  }
+  });
 }
 
 // -- Abort --
