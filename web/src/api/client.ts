@@ -886,8 +886,13 @@ export interface SummarySettings {
   keepCount: number;
 }
 
+export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
+
 export interface RuntimeSettings {
   sessionResume: boolean;
+  codexTransport?: PiTransportSetting;
+  websocketConnectTimeoutMs?: number;
+  httpIdleTimeoutMs?: number;
 }
 
 export interface TeamUpdateCandidate {
@@ -925,10 +930,10 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
   return apiFetch("/api/settings/runtime");
 }
 
-export async function updateRuntimeSettings(sessionResume: boolean): Promise<RuntimeSettings> {
+export async function updateRuntimeSettings(settings: boolean | Partial<RuntimeSettings>): Promise<RuntimeSettings> {
   return apiFetch("/api/settings/runtime", {
     method: "PUT",
-    body: JSON.stringify({ sessionResume }),
+    body: JSON.stringify(typeof settings === "boolean" ? { sessionResume: settings } : settings),
   });
 }
 

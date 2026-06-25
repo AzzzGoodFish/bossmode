@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -40,11 +40,24 @@ interface SettingsPageProps {
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   models: { title: "Models", desc: "模型凭证与可用模型。per-model 定制在 catalog 刷新后保留。" },
-  runtime: { title: "Runtime", desc: "pi SDK 运行时与会话行为。" },
+  runtime: { title: "Runtime", desc: "pi SDK 运行时、会话与网络传输。" },
   summary: { title: "Summarization", desc: "智能消息摘要的自动触发与保留策略。" },
   integrations: { title: "Integrations", desc: "外部系统连接。" },
   "team-updates": { title: "Team Updates", desc: "内置 agents / skills / rules 的版本更新。" },
 };
+
+function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
+  return {
+    sessionResume: settings.sessionResume !== false,
+    codexTransport: settings.codexTransport || "auto",
+    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 60000,
+    httpIdleTimeoutMs: settings.httpIdleTimeoutMs,
+  };
+}
+
+function secondsFromMs(ms: number | undefined, fallbackSeconds: number): number {
+  return Math.round((ms ?? fallbackSeconds * 1000) / 1000);
+}
 
 export function SettingsPage({ section = "models", onOpenMobileSidebar }: SettingsPageProps = {}) {
   const { toast, confirm } = useDialog();
@@ -55,9 +68,13 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summarySaved, setSummarySaved] = useState(false);
-  const [sessionResume, setSessionResume] = useState(true);
-  const [sessionResumeSaving, setSessionResumeSaving] = useState(false);
-  const [sessionResumeSaved, setSessionResumeSaved] = useState(false);
+  const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
+    sessionResume: true,
+    codexTransport: "auto",
+    websocketConnectTimeoutMs: 60000,
+  });
+  const [runtimeSaving, setRuntimeSaving] = useState(false);
+  const [runtimeSaved, setRuntimeSaved] = useState(false);
   const [teamUpdateSettings, setTeamUpdateSettings] = useState<TeamUpdateSettings | null>(null);
   const [checkingTeamUpdates, setCheckingTeamUpdates] = useState(false);
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
@@ -68,7 +85,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
 
   useEffect(() => {
     getSummarySettings().then(setSummarySettings).catch(console.error);
-    getRuntimeSettings().then((v) => setSessionResume(v.sessionResume)).catch(console.error);
+    getRuntimeSettings().then((v) => setRuntimeSettings(normalizeRuntimeSettings(v))).catch(console.error);
     getTeamUpdateSettings().then(setTeamUpdateSettings).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
     getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
@@ -89,20 +106,41 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     }
   };
 
-  const handleSessionResumeToggle = async () => {
-    const next = !sessionResume;
-    setSessionResume(next);
-    setSessionResumeSaving(true);
+  const handleRuntimeChange = async (updates: Partial<RuntimeSettings>) => {
+    const previous = runtimeSettings;
+    const next = normalizeRuntimeSettings({ ...runtimeSettings, ...updates });
+    setRuntimeSettings(next);
+    setRuntimeSaving(true);
     try {
-      await updateRuntimeSettings(next);
-      setSessionResumeSaved(true);
-      setTimeout(() => setSessionResumeSaved(false), 2000);
+      const saved = await updateRuntimeSettings(next);
+      setRuntimeSettings(normalizeRuntimeSettings(saved));
+      setRuntimeSaved(true);
+      setTimeout(() => setRuntimeSaved(false), 2000);
     } catch (err: any) {
-      console.error("Failed to save session resume setting:", err);
-      setSessionResume(!next);
+      console.error("Failed to save runtime settings:", err);
+      toast(err.message || "Failed to save runtime settings", "error");
+      setRuntimeSettings(previous);
     } finally {
-      setSessionResumeSaving(false);
+      setRuntimeSaving(false);
     }
+  };
+
+  const handleSessionResumeToggle = async () => {
+    await handleRuntimeChange({ sessionResume: !runtimeSettings.sessionResume });
+  };
+
+  const handleRuntimeNetworkSave = async () => {
+    const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 60000;
+    const wsSeconds = Math.round(websocketConnectTimeoutMs / 1000);
+    if (wsSeconds < 5 || wsSeconds > 180) {
+      toast("WebSocket connect timeout must be between 5 and 180 seconds", "error");
+      return;
+    }
+    await handleRuntimeChange({
+      codexTransport: runtimeSettings.codexTransport || "auto",
+      websocketConnectTimeoutMs,
+      httpIdleTimeoutMs: runtimeSettings.httpIdleTimeoutMs,
+    });
   };
 
   const handleTeamUpdateToggle = async () => {
@@ -172,32 +210,98 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
         />
       )}
 
-      {/* Session Resume */}
+      {/* Runtime */}
       {section === "runtime" && (
-      <div>
+      <div className="space-y-4">
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-ink-1">Session Resume</div>
               <div className="text-xs text-ink-3 mt-0.5">When enabled, new agent sessions resume from where they left off. Turning off only affects newly started sessions.</div>
             </div>
             <button
               onClick={handleSessionResumeToggle}
-              disabled={sessionResumeSaving}
+              disabled={runtimeSaving}
               className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
-                sessionResume ? "bg-accent" : "bg-surface-3"
+                runtimeSettings.sessionResume ? "bg-accent" : "bg-surface-3"
               }`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  sessionResume ? "translate-x-5" : "translate-x-0"
+                  runtimeSettings.sessionResume ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </button>
           </div>
-          <div className="text-xs text-ink-4">
-            {sessionResumeSaved && <span className="text-onair">Saved!</span>}
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
+          <div>
+            <div className="text-sm font-medium text-ink-1">Network Transport</div>
+            <div className="text-xs text-ink-3 mt-0.5">Applies to new or restarted pi SDK agents. Auto prefers WebSocket and may fall back to SSE.</div>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">Transport mode</span>
+              <select
+                className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
+                value={runtimeSettings.codexTransport || "auto"}
+                onChange={(e) => setRuntimeSettings({ ...runtimeSettings, codexTransport: e.target.value as PiTransportSetting })}
+              >
+                <option value="auto">Auto (recommended)</option>
+                <option value="websocket-cached">WebSocket cached</option>
+                <option value="websocket">WebSocket</option>
+                <option value="sse">SSE</option>
+              </select>
+              <span className="block text-[11px] text-ink-4">If Codex SSE header timeouts are frequent, try WebSocket cached.</span>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">WebSocket connect timeout</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={5}
+                  max={180}
+                  step={1}
+                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
+                  value={secondsFromMs(runtimeSettings.websocketConnectTimeoutMs, 60)}
+                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, websocketConnectTimeoutMs: Math.max(0, Number(e.target.value || 0)) * 1000 })}
+                />
+                <span className="text-xs text-ink-3">sec</span>
+              </div>
+              <span className="block text-[11px] text-ink-4">Default 60s. Suggested range: 5–180s.</span>
+            </label>
+          </div>
+          <details className="rounded-md border border-line-soft bg-inset/40 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-ink-2">Advanced</summary>
+            <label className="mt-3 block space-y-1 max-w-sm">
+              <span className="text-xs font-medium text-ink-2">HTTP idle timeout</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
+                  value={runtimeSettings.httpIdleTimeoutMs === undefined ? "" : Math.round(runtimeSettings.httpIdleTimeoutMs / 1000)}
+                  placeholder="SDK default"
+                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, httpIdleTimeoutMs: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value || 0)) * 1000 })}
+                />
+                <span className="text-xs text-ink-3">sec</span>
+              </div>
+              <span className="block text-[11px] text-ink-4">Does not control the Codex SSE response-header timeout; use this only for other HTTP idle cases.</span>
+            </label>
+          </details>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-ink-4">Changes affect newly started/recreated agents, not requests already in flight.</p>
+            <button
+              onClick={handleRuntimeNetworkSave}
+              disabled={runtimeSaving}
+              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
+            >
+              {runtimeSaving ? "Saving..." : "Save Runtime Network"}
+            </button>
+          </div>
+          {runtimeSaved && <div className="text-xs text-onair">Saved!</div>}
         </div>
       </div>
       )}

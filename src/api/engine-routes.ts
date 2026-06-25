@@ -2,6 +2,7 @@
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { getRegistry, invalidateModelCredentialProfile } from "../engine/agent-manager.js";
 import { readConfig, writeConfig } from "../shared/config.js";
+import type { PiTransportSetting } from "../shared/types.js";
 import {
   cancelOAuthLoginJob,
   connectBuiltinProviderApiKey,
@@ -191,29 +192,62 @@ addRoute("GET", "/api/models", async (_req, res) => {
   sendJson(res, 200, listAvailableModels());
 });
 
+const VALID_PI_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);
+
+function normalizeRuntimeSettings(runtime: any = {}) {
+  const transport = VALID_PI_TRANSPORTS.has(runtime.codexTransport) ? runtime.codexTransport : "auto";
+  const websocketConnectTimeoutMs = typeof runtime.websocketConnectTimeoutMs === "number" && Number.isFinite(runtime.websocketConnectTimeoutMs) && runtime.websocketConnectTimeoutMs >= 0
+    ? Math.floor(runtime.websocketConnectTimeoutMs)
+    : 60000;
+  const httpIdleTimeoutMs = typeof runtime.httpIdleTimeoutMs === "number" && Number.isFinite(runtime.httpIdleTimeoutMs) && runtime.httpIdleTimeoutMs >= 0
+    ? Math.floor(runtime.httpIdleTimeoutMs)
+    : undefined;
+  return {
+    sessionResume: runtime.sessionResume !== false,
+    codexTransport: transport,
+    websocketConnectTimeoutMs,
+    ...(httpIdleTimeoutMs !== undefined ? { httpIdleTimeoutMs } : {}),
+  };
+}
+
 // GET /api/settings/runtime — runtime behavior settings
 addRoute("GET", "/api/settings/runtime", async (_req, res) => {
   try {
     const config = readConfig();
-    sendJson(res, 200, {
-      sessionResume: config.runtime?.sessionResume !== false,
-    });
+    sendJson(res, 200, normalizeRuntimeSettings(config.runtime));
   } catch {
-    sendJson(res, 200, { sessionResume: true });
+    sendJson(res, 200, normalizeRuntimeSettings());
   }
 });
 
 // PUT /api/settings/runtime — update runtime behavior settings
 addRoute("PUT", "/api/settings/runtime", async (req, res) => {
-  const body = (await parseBody(req)) as { sessionResume?: boolean };
+  const body = (await parseBody(req)) as { sessionResume?: boolean; codexTransport?: PiTransportSetting; websocketConnectTimeoutMs?: number; httpIdleTimeoutMs?: number };
   try {
     const config = readConfig();
-    config.runtime = {
+    const runtime = {
       ...(config.runtime || {}),
-      sessionResume: body.sessionResume !== false,
+      sessionResume: body.sessionResume === undefined ? config.runtime?.sessionResume !== false : body.sessionResume !== false,
     };
+    if (body.codexTransport !== undefined) {
+      if (!VALID_PI_TRANSPORTS.has(body.codexTransport)) {
+        sendJson(res, 400, { error: "Invalid codexTransport" });
+        return;
+      }
+      runtime.codexTransport = body.codexTransport;
+    }
+    for (const field of ["websocketConnectTimeoutMs", "httpIdleTimeoutMs"] as const) {
+      if (body[field] !== undefined) {
+        if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
+          sendJson(res, 400, { error: `Invalid ${field}` });
+          return;
+        }
+        runtime[field] = Math.floor(body[field]);
+      }
+    }
+    config.runtime = runtime;
     writeConfig(config);
-    sendJson(res, 200, config.runtime);
+    sendJson(res, 200, normalizeRuntimeSettings(config.runtime));
   } catch (err: any) {
     sendJson(res, 500, { error: err.message });
   }

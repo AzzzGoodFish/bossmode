@@ -86,7 +86,7 @@ export function getDefaultConfig(): BossmodeConfig {
     auth: { username: "", passwordHash: "" },
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
-    runtime: { sessionResume: true },
+    runtime: { sessionResume: true, codexTransport: "auto", websocketConnectTimeoutMs: 60000 },
   };
 }
 

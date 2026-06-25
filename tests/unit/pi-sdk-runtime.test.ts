@@ -14,6 +14,10 @@ const resourceLoaderCtor = vi.fn();
 const sessionManagerCreate = vi.fn();
 const sessionManagerOpen = vi.fn();
 const settingsManagerCreate = vi.fn();
+const settingsApplyOverrides = vi.fn();
+const settingsGetTransport = vi.fn(() => "auto");
+const settingsGetWebSocketConnectTimeoutMs = vi.fn(() => 60000);
+const settingsGetHttpIdleTimeoutMs = vi.fn(() => 600000);
 let openedSessionModel: { provider: string; modelId: string } | null = null;
 let openedLeafEntry: any = null;
 const sessionBranch = vi.fn();
@@ -55,7 +59,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     SettingsManager: {
       create: (...args: any[]) => {
         settingsManagerCreate(...args);
-        return { kind: "settings", args };
+        return {
+          kind: "settings",
+          args,
+          applyOverrides: settingsApplyOverrides,
+          getTransport: settingsGetTransport,
+          getWebSocketConnectTimeoutMs: settingsGetWebSocketConnectTimeoutMs,
+          getHttpIdleTimeoutMs: settingsGetHttpIdleTimeoutMs,
+        };
       },
     },
     SessionManager: {
@@ -101,6 +112,9 @@ describe("PiSdkRuntime", () => {
     openedSessionModel = null;
     openedLeafEntry = null;
     vi.clearAllMocks();
+    settingsGetTransport.mockReturnValue("auto");
+    settingsGetWebSocketConnectTimeoutMs.mockReturnValue(60000);
+    settingsGetHttpIdleTimeoutMs.mockReturnValue(600000);
     createAgentSession.mockResolvedValue({
       session: {
         subscribe: vi.fn(() => vi.fn()),
@@ -142,6 +156,18 @@ describe("PiSdkRuntime", () => {
 
     expect(authCreate).toHaveBeenCalledWith(join(agentDir, "auth.json"));
     expect(modelRegistryCreate).toHaveBeenCalledWith(expect.anything(), join(agentDir, "models.json"));
+  });
+
+  it("applies Bossmode default pi transport overrides without persisting settings", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts());
+
+    expect(settingsApplyOverrides).toHaveBeenCalledWith({
+      transport: "auto",
+      websocketConnectTimeoutMs: 60000,
+    });
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {

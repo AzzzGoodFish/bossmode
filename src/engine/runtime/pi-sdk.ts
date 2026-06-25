@@ -12,6 +12,8 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
+import { readConfig } from "../../shared/config.js";
+import type { PiTransportSetting } from "../../shared/types.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
@@ -30,6 +32,59 @@ function splitModelRef(modelRef: string): { provider: string; modelId: string } 
 function resolveModelLabel(modelRef: string): string {
   const { provider, modelId } = splitModelRef(modelRef);
   return `${provider}/${modelId}`;
+}
+
+const VALID_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);
+
+interface RuntimeTransportSettings {
+  transport: PiTransportSetting;
+  websocketConnectTimeoutMs: number;
+  httpIdleTimeoutMs?: number;
+}
+
+function normalizeTimeout(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    logger.warn("runtime:pi-sdk", "invalid runtime timeout ignored", { field, value });
+    return undefined;
+  }
+  return Math.floor(value);
+}
+
+function resolveRuntimeTransportSettings(): RuntimeTransportSettings {
+  const defaults: RuntimeTransportSettings = { transport: "auto", websocketConnectTimeoutMs: 60000 };
+  try {
+    const runtime = readConfig().runtime;
+    const configuredTransport = runtime?.codexTransport;
+    const transport = configuredTransport && VALID_TRANSPORTS.has(configuredTransport)
+      ? configuredTransport
+      : defaults.transport;
+    if (configuredTransport && !VALID_TRANSPORTS.has(configuredTransport)) {
+      logger.warn("runtime:pi-sdk", "invalid runtime transport ignored", { transport: configuredTransport });
+    }
+    return {
+      transport,
+      websocketConnectTimeoutMs: normalizeTimeout(runtime?.websocketConnectTimeoutMs, "websocketConnectTimeoutMs") ?? defaults.websocketConnectTimeoutMs,
+      httpIdleTimeoutMs: normalizeTimeout(runtime?.httpIdleTimeoutMs, "httpIdleTimeoutMs"),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function applyRuntimeTransportSettings(settingsManager: SettingsManager): RuntimeTransportSettings {
+  const settings = resolveRuntimeTransportSettings();
+  const overrides: Record<string, unknown> = {
+    transport: settings.transport,
+    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs,
+  };
+  if (settings.httpIdleTimeoutMs !== undefined) overrides.httpIdleTimeoutMs = settings.httpIdleTimeoutMs;
+  settingsManager.applyOverrides(overrides as any);
+  return {
+    transport: settingsManager.getTransport() as PiTransportSetting,
+    websocketConnectTimeoutMs: settingsManager.getWebSocketConnectTimeoutMs() ?? settings.websocketConnectTimeoutMs,
+    httpIdleTimeoutMs: settingsManager.getHttpIdleTimeoutMs(),
+  };
 }
 
 function getSessionContextModel(sessionManager: SessionManager): { provider: string; modelId: string } | null {
@@ -234,6 +289,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const authStorage = piConfig.profile ? createSyncedAuthStorage(join(runtimeAgentDir, "auth.json"), piConfig.profile) : AuthStorage.create(join(runtimeAgentDir, "auth.json"));
     const modelRegistry = ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"));
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
+    const transportSettings = applyRuntimeTransportSettings(settingsManager);
     const model = modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);
 
@@ -327,7 +383,16 @@ export class PiSdkRuntime implements AgentRuntime {
     };
     const handle = new PiSdkAgentHandle(session, modelRegistry, runtimeParams);
     this.handles.add(handle);
-    logger.info("runtime:pi-sdk", "createAgent", { agent: opts.member.name, model: resolvedModel, thinking: runtimeParams.thinkingLevel, skills: skillPaths.length });
+    logger.info("runtime:pi-sdk", "createAgent", {
+      agent: opts.member.name,
+      model: resolvedModel,
+      thinking: runtimeParams.thinkingLevel,
+      skills: skillPaths.length,
+      transport: transportSettings.transport,
+      websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
+      httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
+      piSdkVersion: PI_SDK_VERSION,
+    });
     return handle;
   }
 

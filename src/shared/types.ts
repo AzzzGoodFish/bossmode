@@ -4,6 +4,18 @@
 
 // -- Config --
 
+export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
+
+export interface BossmodeRuntimeConfig {
+  sessionResume: boolean;
+  /** pi SDK transport override. Defaults to "auto" when omitted. */
+  codexTransport?: PiTransportSetting;
+  /** WebSocket connect timeout passed to pi SDK. Bossmode default: 60000. */
+  websocketConnectTimeoutMs?: number;
+  /** HTTP idle timeout passed to pi SDK when set. */
+  httpIdleTimeoutMs?: number;
+}
+
 export interface BossmodeConfig {
   auth: {
     username: string;
@@ -19,9 +31,7 @@ export interface BossmodeConfig {
     threshold: number;  // message count to trigger auto-summary
     keepCount: number;  // keep latest N messages unsummarized
   };
-  runtime?: {
-    sessionResume: boolean;
-  };
+  runtime?: BossmodeRuntimeConfig;
   integrations?: {
     linear?: {
       apiKey?: string;
