@@ -51,7 +51,7 @@ function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
     sessionResume: settings.sessionResume !== false,
     codexTransport: settings.codexTransport || "auto",
     websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 60000,
-    httpIdleTimeoutMs: settings.httpIdleTimeoutMs,
+    httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
   };
 }
 
@@ -282,13 +282,13 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                   min={0}
                   step={1}
                   className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
-                  value={runtimeSettings.httpIdleTimeoutMs === undefined ? "" : Math.round(runtimeSettings.httpIdleTimeoutMs / 1000)}
+                  value={runtimeSettings.httpIdleTimeoutMs == null ? "" : Math.round(runtimeSettings.httpIdleTimeoutMs / 1000)}
                   placeholder="SDK default"
-                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, httpIdleTimeoutMs: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value || 0)) * 1000 })}
+                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, httpIdleTimeoutMs: e.target.value === "" ? null : Math.max(0, Number(e.target.value || 0)) * 1000 })}
                 />
                 <span className="text-xs text-ink-3">sec</span>
               </div>
-              <span className="block text-[11px] text-ink-4">Does not control the Codex SSE response-header timeout; use this only for other HTTP idle cases.</span>
+              <span className="block text-[11px] text-ink-4">Leave empty to use the SDK default. Does not control the Codex SSE response-header timeout.</span>
             </label>
           </details>
           <div className="flex items-center justify-between gap-3">

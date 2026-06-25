@@ -222,7 +222,7 @@ addRoute("GET", "/api/settings/runtime", async (_req, res) => {
 
 // PUT /api/settings/runtime — update runtime behavior settings
 addRoute("PUT", "/api/settings/runtime", async (req, res) => {
-  const body = (await parseBody(req)) as { sessionResume?: boolean; codexTransport?: PiTransportSetting; websocketConnectTimeoutMs?: number; httpIdleTimeoutMs?: number };
+  const body = (await parseBody(req)) as { sessionResume?: boolean; codexTransport?: PiTransportSetting; websocketConnectTimeoutMs?: number | null; httpIdleTimeoutMs?: number | null };
   try {
     const config = readConfig();
     const runtime = {
@@ -238,6 +238,10 @@ addRoute("PUT", "/api/settings/runtime", async (req, res) => {
     }
     for (const field of ["websocketConnectTimeoutMs", "httpIdleTimeoutMs"] as const) {
       if (body[field] !== undefined) {
+        if (body[field] === null) {
+          delete runtime[field];
+          continue;
+        }
         if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
           sendJson(res, 400, { error: `Invalid ${field}` });
           return;

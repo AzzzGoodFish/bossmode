@@ -892,7 +892,7 @@ export interface RuntimeSettings {
   sessionResume: boolean;
   codexTransport?: PiTransportSetting;
   websocketConnectTimeoutMs?: number;
-  httpIdleTimeoutMs?: number;
+  httpIdleTimeoutMs?: number | null;
 }
 
 export interface TeamUpdateCandidate {
