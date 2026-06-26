@@ -6,7 +6,9 @@ import {
   countMcpServers,
   getBossmodeMcpConfigPath,
   parseMcpConfigText,
+  readMcpConfigText,
   readRedactedMcpConfigText,
+  restoreRedactedMcpConfig,
   writeMcpConfig,
 } from "../shared/mcp-settings.js";
 
@@ -44,7 +46,14 @@ addRoute("PUT", "/api/settings/mcp", async (req, res) => {
   try {
     let parsedConfig: Record<string, unknown> | undefined;
     if (body.configText !== undefined) {
-      parsedConfig = parseMcpConfigText(body.configText);
+      const submittedConfig = parseMcpConfigText(body.configText);
+      let existingConfig: Record<string, unknown> | undefined;
+      try {
+        existingConfig = parseMcpConfigText(readMcpConfigText());
+      } catch {
+        existingConfig = undefined;
+      }
+      parsedConfig = restoreRedactedMcpConfig(submittedConfig, existingConfig) as Record<string, unknown>;
     }
 
     const config = readConfig();

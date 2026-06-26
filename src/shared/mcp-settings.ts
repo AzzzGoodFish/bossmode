@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "n
 import { join } from "node:path";
 import { getBossmodeDir } from "./config.js";
 
+export const MCP_REDACTED_VALUE = "[REDACTED]";
+
 const SECRET_KEY_RE = /(?:token|secret|password|api[_-]?key|apikey|authorization|bearer)/i;
 const SECRET_OBJECT_KEYS = new Set(["env", "headers"]);
 
@@ -63,13 +65,17 @@ export function writeMcpConfig(config: Record<string, unknown>): void {
   try { chmodSync(path, 0o600); } catch { /* best effort */ }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function redactValue(value: unknown, key?: string): unknown {
-  if (key && SECRET_OBJECT_KEYS.has(key)) return "[REDACTED]";
-  if (key && SECRET_KEY_RE.test(key)) return "[REDACTED]";
+  if (key && SECRET_OBJECT_KEYS.has(key)) return MCP_REDACTED_VALUE;
+  if (key && SECRET_KEY_RE.test(key)) return MCP_REDACTED_VALUE;
   if (Array.isArray(value)) return value.map((item) => redactValue(item));
-  if (value && typeof value === "object") {
+  if (isRecord(value)) {
     const out: Record<string, unknown> = {};
-    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    for (const [childKey, childValue] of Object.entries(value)) {
       out[childKey] = redactValue(childValue, childKey);
     }
     return out;
@@ -79,6 +85,23 @@ function redactValue(value: unknown, key?: string): unknown {
 
 export function redactMcpConfig(config: unknown): unknown {
   return redactValue(config);
+}
+
+export function restoreRedactedMcpConfig(submitted: unknown, existing: unknown): unknown {
+  if (submitted === MCP_REDACTED_VALUE && existing !== undefined) return existing;
+  if (Array.isArray(submitted)) {
+    const existingArray = Array.isArray(existing) ? existing : [];
+    return submitted.map((item, index) => restoreRedactedMcpConfig(item, existingArray[index]));
+  }
+  if (isRecord(submitted)) {
+    const existingRecord = isRecord(existing) ? existing : {};
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(submitted)) {
+      out[key] = restoreRedactedMcpConfig(value, existingRecord[key]);
+    }
+    return out;
+  }
+  return submitted;
 }
 
 export function readRedactedMcpConfigText(): { configText: string; serverCount: number; exists: boolean } {

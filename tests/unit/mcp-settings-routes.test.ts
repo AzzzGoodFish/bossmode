@@ -74,7 +74,7 @@ describe("MCP settings routes", () => {
   it("redacts secret-like MCP fields in API responses", async () => {
     parseBodyMock.mockResolvedValue({
       enabled: true,
-      configText: JSON.stringify({ mcpServers: { private: { url: "https://example.test/mcp", headers: { Authorization: "Bearer secret" }, env: { API_KEY: "secret" } } } }),
+      configText: JSON.stringify({ mcpServers: { private: { url: "https://example.test/mcp", bearerToken: "token-secret", headers: { Authorization: "Bearer secret" }, env: { API_KEY: "secret" } } } }),
     });
 
     const put = routes.get("PUT /api/settings/mcp");
@@ -82,7 +82,41 @@ describe("MCP settings routes", () => {
 
     const response = sendJsonMock.mock.calls.at(-1)?.[2];
     expect(response.configText).toContain("[REDACTED]");
+    expect(response.configText).not.toContain("token-secret");
     expect(response.configText).not.toContain("Bearer secret");
     expect(response.configText).not.toContain("API_KEY");
+  });
+
+  it("preserves existing secrets when a redacted response is saved back with non-secret edits", async () => {
+    const put = routes.get("PUT /api/settings/mcp");
+    parseBodyMock.mockResolvedValue({
+      enabled: true,
+      configText: JSON.stringify({
+        mcpServers: {
+          private: {
+            url: "https://example.test/mcp",
+            bearerToken: "token-secret",
+            headers: { Authorization: "Bearer secret" },
+            env: { API_KEY: "env-secret" },
+          },
+        },
+      }),
+    });
+    await put({} as any, {} as any, {});
+
+    const redactedResponse = sendJsonMock.mock.calls.at(-1)?.[2];
+    const edited = JSON.parse(redactedResponse.configText);
+    edited.mcpServers.private.url = "https://changed.example.test/mcp";
+    parseBodyMock.mockResolvedValue({ enabled: true, configText: JSON.stringify(edited) });
+    await put({} as any, {} as any, {});
+
+    const saved = JSON.parse(readFileSync(join(dir, "mcp", "mcp.json"), "utf-8"));
+    expect(saved.mcpServers.private).toEqual({
+      url: "https://changed.example.test/mcp",
+      bearerToken: "token-secret",
+      headers: { Authorization: "Bearer secret" },
+      env: { API_KEY: "env-secret" },
+    });
+    expect(sendJsonMock.mock.calls.at(-1)?.[2].configText).not.toContain("token-secret");
   });
 });
