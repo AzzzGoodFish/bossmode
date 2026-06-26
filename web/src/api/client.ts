@@ -895,6 +895,14 @@ export interface RuntimeSettings {
   httpIdleTimeoutMs?: number | null;
 }
 
+export interface McpSettings {
+  enabled: boolean;
+  configPath: string;
+  configText: string;
+  serverCount: number;
+  sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
+}
+
 export interface TeamUpdateCandidate {
   category: "agent" | "skill" | "rule";
   relativePath: string;
@@ -934,6 +942,17 @@ export async function updateRuntimeSettings(settings: boolean | Partial<RuntimeS
   return apiFetch("/api/settings/runtime", {
     method: "PUT",
     body: JSON.stringify(typeof settings === "boolean" ? { sessionResume: settings } : settings),
+  });
+}
+
+export async function getMcpSettings(): Promise<McpSettings> {
+  return apiFetch("/api/settings/mcp");
+}
+
+export async function updateMcpSettings(settings: { enabled?: boolean; configText?: string }): Promise<McpSettings> {
+  return apiFetch("/api/settings/mcp", {
+    method: "PUT",
+    body: JSON.stringify(settings),
   });
 }
 

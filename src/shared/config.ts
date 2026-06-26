@@ -87,6 +87,7 @@ export function getDefaultConfig(): BossmodeConfig {
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
     runtime: { sessionResume: true, codexTransport: "auto", websocketConnectTimeoutMs: 60000 },
+    mcp: { enabled: false },
   };
 }
 

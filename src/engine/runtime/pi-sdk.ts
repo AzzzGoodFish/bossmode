@@ -1,5 +1,6 @@
 // Pi SDK Runtime — in-process pi Agent SDK integration behind the legacy pi-cli storage key
 import { existsSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   AuthStorage,
@@ -13,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
+import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir } from "../../shared/mcp-settings.js";
 import type { PiTransportSetting } from "../../shared/types.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
@@ -85,6 +87,57 @@ function applyRuntimeTransportSettings(settingsManager: SettingsManager): Runtim
     websocketConnectTimeoutMs: settingsManager.getWebSocketConnectTimeoutMs() ?? settings.websocketConnectTimeoutMs,
     httpIdleTimeoutMs: settingsManager.getHttpIdleTimeoutMs(),
   };
+}
+
+interface McpRuntimeSettings {
+  enabled: boolean;
+  adapterPath?: string;
+  configPath: string;
+  runtimeDir: string;
+}
+
+function resolveVendorMcpAdapterPath(): string {
+  return fileURLToPath(new URL("../../../vendor/pi-mcp-adapter/index.ts", import.meta.url));
+}
+
+function resolveMcpRuntimeSettings(): McpRuntimeSettings {
+  const configPath = getBossmodeMcpConfigPath();
+  const runtimeDir = getBossmodeMcpRuntimeDir();
+  let enabled = false;
+  try {
+    enabled = readConfig().mcp?.enabled === true;
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return { enabled: false, configPath, runtimeDir };
+
+  const adapterPath = resolveVendorMcpAdapterPath();
+  if (!existsSync(adapterPath)) {
+    throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
+  }
+  ensureBossmodeMcpDirs();
+  process.env.MCP_DIRECT_TOOLS = "__none__";
+  process.env.PI_CODING_AGENT_DIR = runtimeDir;
+  process.env.MCP_OAUTH_DIR = join(runtimeDir, "oauth");
+  return { enabled: true, adapterPath, configPath, runtimeDir };
+}
+
+async function bindMcpExtension(session: AgentSession, opts: { configPath: string; agent: string }): Promise<void> {
+  try {
+    session.extensionRunner.setFlagValue("mcp-config", opts.configPath);
+    await session.bindExtensions({
+      mode: "print",
+      onError: (err) => logger.warn("runtime:pi-sdk", "mcp extension error", {
+        agent: opts.agent,
+        event: err.event,
+        extensionPath: err.extensionPath,
+        error: err.error,
+      }),
+    });
+  } catch (err: any) {
+    logger.warn("runtime:pi-sdk", "mcp extension bind failed", { agent: opts.agent, error: err.message || String(err) });
+    throw err;
+  }
 }
 
 function getSessionContextModel(sessionManager: SessionManager): { provider: string; modelId: string } | null {
@@ -179,6 +232,13 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.destroyed) return;
     this.destroyed = true;
     try { this.abort(); } catch {}
+    try {
+      if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
+        this.session.extensionRunner.emit({ type: "session_shutdown" } as any).catch((err: any) => {
+          logger.warn("runtime:pi-sdk", "extension session_shutdown failed", { error: err.message || String(err) });
+        });
+      }
+    } catch {}
     try { this.unsubscribeSession?.(); } catch {}
     try { this.session.dispose(); } catch {}
     this.listeners.clear();
@@ -337,7 +397,11 @@ export class PiSdkRuntime implements AgentRuntime {
     const rolePrompt = opts.agentPrompt.trim();
     const appendSystemPrompt = [opts.envPrompt, opts.rulesPrompt].filter((v): v is string => !!v && v.trim().length > 0);
     const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
+    const mcpSettings = resolveMcpRuntimeSettings();
     const extensionPaths = piConfig?.extensionPaths ?? [];
+    const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
+      ? [...extensionPaths, mcpSettings.adapterPath]
+      : extensionPaths;
     const resourceLoader = new DefaultResourceLoader({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -345,13 +409,14 @@ export class PiSdkRuntime implements AgentRuntime {
       noExtensions: true,
       noSkills: true,
       additionalSkillPaths: skillPaths,
-      additionalExtensionPaths: extensionPaths,
+      additionalExtensionPaths: activeExtensionPaths,
       systemPrompt: rolePrompt || undefined,
       appendSystemPrompt,
     });
     await resourceLoader.reload();
 
     const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
+    const activeTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name), ...(mcpSettings.enabled ? ["mcp"] : [])];
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -363,8 +428,12 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager,
       settingsManager,
       customTools,
-      tools: ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)],
+      tools: activeTools,
     });
+
+    if (mcpSettings.enabled) {
+      await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
+    }
 
     if (appendConfiguredModelChange) {
       await session.setModel(model);
@@ -377,7 +446,7 @@ export class PiSdkRuntime implements AgentRuntime {
       thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
       systemPrompt: [rolePrompt, ...appendSystemPrompt].filter(Boolean).join("\n\n"),
       skills: opts.skillNames ?? skillPaths,
-      extensions: ["bossmode-sdk-tools", ...extensionPaths],
+      extensions: ["bossmode-sdk-tools", ...activeExtensionPaths],
       credentialId: piConfig.profile?.id,
       credentialName: piConfig.profile?.name,
     };
@@ -392,6 +461,7 @@ export class PiSdkRuntime implements AgentRuntime {
       websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
       httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
       piSdkVersion: PI_SDK_VERSION,
+      mcpEnabled: mcpSettings.enabled,
     });
     return handle;
   }

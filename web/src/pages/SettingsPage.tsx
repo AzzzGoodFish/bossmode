@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
   getRuntimeSettings,
   updateRuntimeSettings,
+  getMcpSettings,
+  updateMcpSettings,
   getTeamUpdateSettings,
   updateTeamUpdateSettings,
   checkTeamUpdates,
@@ -82,6 +84,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showConnectProvider, setShowConnectProvider] = useState(false);
   const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
+  const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
 
   useEffect(() => {
     getSummarySettings().then(setSummarySettings).catch(console.error);
@@ -89,6 +92,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     getTeamUpdateSettings().then(setTeamUpdateSettings).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
     getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
+    getMcpSettings().then(setMcpSettings).catch(console.error);
   }, []);
 
   const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
@@ -196,7 +200,10 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       </div>
 
       {section === "integrations" && (
-        <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
+        <div className="space-y-6">
+          <McpIntegrationSection settings={mcpSettings} onSettings={setMcpSettings} />
+          <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
+        </div>
       )}
 
       {section === "models" && (
@@ -408,6 +415,84 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       />
     )}
     </div>
+  );
+}
+
+function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings | null; onSettings: (settings: McpSettings) => void }) {
+  const { toast } = useDialog();
+  const [enabled, setEnabled] = useState(false);
+  const [configText, setConfigText] = useState("{\n  \"mcpServers\": {}\n}");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!settings) return;
+    setEnabled(settings.enabled);
+    setConfigText(settings.configText || "{\n  \"mcpServers\": {}\n}");
+  }, [settings?.enabled, settings?.configText]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const next = await updateMcpSettings({ enabled, configText });
+      onSettings(next);
+      setEnabled(next.enabled);
+      setConfigText(next.configText);
+      toast("MCP settings saved", "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to save MCP settings", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">MCP</h2>
+      <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium text-ink-1">MCP Integration</div>
+            <div className="text-xs text-ink-3 mt-0.5">Enable pi-mcp-adapter proxy mode for newly started or restarted agents. User-provided MCP config is treated as trusted.</div>
+            {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} · {settings.configPath}</div>}
+          </div>
+          <button
+            onClick={() => setEnabled(!enabled)}
+            disabled={!settings || saving}
+            className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
+          </button>
+        </div>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-ink-2">MCP JSON config</span>
+          <textarea
+            className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
+            value={configText}
+            onChange={(e) => setConfigText(e.target.value)}
+            spellCheck={false}
+            placeholder={'{\n  "mcpServers": {\n    "playwright": {\n      "url": "http://10.8.0.24:8931/mcp"\n    }\n  }\n}'}
+          />
+          <span className="block text-[11px] text-ink-4">Uses native MCP config format. Direct MCP tools are disabled in v1; agents receive one <code>mcp</code> proxy tool.</span>
+        </label>
+        {settings?.sources?.length ? (
+          <div className="rounded-md bg-inset/60 border border-line-soft p-3 space-y-1">
+            <div className="text-xs font-medium text-ink-2">Config sources</div>
+            {settings.sources.map((source) => (
+              <div key={source.id} className="text-[11px] text-ink-4 flex items-center justify-between gap-3">
+                <span className="truncate">{source.label}: {source.path}</span>
+                <span className="shrink-0">{source.exists ? `${source.serverCount} server${source.serverCount === 1 ? "" : "s"}` : "not created"}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] text-ink-4">Changes apply after agents are restarted or recreated. Secret-like fields are redacted when read back.</p>
+          <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
+            {saving ? "Saving..." : "Save MCP"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -21,7 +21,14 @@
   "files": [
     "dist",
     "templates",
-    "web/dist"
+    "web/dist",
+    "vendor/pi-mcp-adapter/*.ts",
+    "!vendor/pi-mcp-adapter/*.test.ts",
+    "!vendor/pi-mcp-adapter/vitest.config.ts",
+    "vendor/pi-mcp-adapter/*.js",
+    "vendor/pi-mcp-adapter/package.json",
+    "vendor/pi-mcp-adapter/LICENSE",
+    "vendor/pi-mcp-adapter/README.md"
   ],
   "bin": {
     "bossmode": "./dist/cli/index.js"
@@ -37,9 +44,14 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.2",
     "@earendil-works/pi-coding-agent": "0.80.2",
+    "@modelcontextprotocol/ext-apps": "^1.7.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "open": "^11.0.0",
+    "recheck": "^4.5.0",
     "typebox": "^1.1.39",
     "ws": "^8.18.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

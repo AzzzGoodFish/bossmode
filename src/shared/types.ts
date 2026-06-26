@@ -16,6 +16,10 @@ export interface BossmodeRuntimeConfig {
   httpIdleTimeoutMs?: number;
 }
 
+export interface BossmodeMcpConfig {
+  enabled: boolean;
+}
+
 export interface BossmodeConfig {
   auth: {
     username: string;
@@ -32,6 +36,7 @@ export interface BossmodeConfig {
     keepCount: number;  // keep latest N messages unsummarized
   };
   runtime?: BossmodeRuntimeConfig;
+  mcp?: BossmodeMcpConfig;
   integrations?: {
     linear?: {
       apiKey?: string;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let dir: string;
 let exportedConfig: any = null;
+let bossmodeConfig: any;
 const authCreate = vi.fn();
 const modelRegistryCreate = vi.fn();
 const modelRegistryRefresh = vi.fn();
@@ -18,6 +19,10 @@ const settingsApplyOverrides = vi.fn();
 const settingsGetTransport = vi.fn(() => "auto");
 const settingsGetWebSocketConnectTimeoutMs = vi.fn(() => 60000);
 const settingsGetHttpIdleTimeoutMs = vi.fn(() => 600000);
+const sessionExtensionSetFlagValue = vi.fn();
+const sessionExtensionEmit = vi.fn(async () => {});
+const sessionExtensionHasHandlers = vi.fn(() => false);
+const sessionBindExtensions = vi.fn(async () => {});
 let openedSessionModel: { provider: string; modelId: string } | null = null;
 let openedLeafEntry: any = null;
 const sessionBranch = vi.fn();
@@ -25,6 +30,11 @@ const sessionResetLeaf = vi.fn();
 
 vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("../../src/shared/config.js", () => ({
+  getBossmodeDir: () => join(dir, ".bossmode"),
+  readConfig: () => bossmodeConfig,
 }));
 
 vi.mock("../../src/engine/model-credentials.js", () => ({
@@ -112,6 +122,7 @@ describe("PiSdkRuntime", () => {
     openedSessionModel = null;
     openedLeafEntry = null;
     vi.clearAllMocks();
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: false } };
     settingsGetTransport.mockReturnValue("auto");
     settingsGetWebSocketConnectTimeoutMs.mockReturnValue(60000);
     settingsGetHttpIdleTimeoutMs.mockReturnValue(600000);
@@ -127,6 +138,12 @@ describe("PiSdkRuntime", () => {
         compact: vi.fn(),
         setModel: vi.fn(),
         setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: {
+          setFlagValue: sessionExtensionSetFlagValue,
+          emit: sessionExtensionEmit,
+          hasHandlers: sessionExtensionHasHandlers,
+        },
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",
@@ -168,6 +185,37 @@ describe("PiSdkRuntime", () => {
       transport: "auto",
       websocketConnectTimeoutMs: 60000,
     });
+  });
+
+  it("does not load MCP adapter or expose mcp tool when MCP is disabled", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts());
+
+    const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
+    expect(loaderOptions.noExtensions).toBe(true);
+    expect(loaderOptions.additionalExtensionPaths).toEqual([]);
+    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("mcp");
+    expect(sessionBindExtensions).not.toHaveBeenCalled();
+  });
+
+  it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts());
+
+    const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
+    expect(loaderOptions.noExtensions).toBe(true);
+    expect(loaderOptions.additionalExtensionPaths).toHaveLength(1);
+    expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
+    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
+    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("playwright_browser_navigate");
+    expect(sessionExtensionSetFlagValue).toHaveBeenCalledWith("mcp-config", expect.stringMatching(/\.bossmode\/mcp\/mcp\.json$/));
+    expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
+    expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {
