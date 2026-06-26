@@ -245,7 +245,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
           <div>
             <div className="text-sm font-medium text-ink-1">Network Transport</div>
-            <div className="text-xs text-ink-3 mt-0.5">Applies to new or restarted pi SDK agents. Auto prefers WebSocket and may fall back to SSE.</div>
+            <div className="text-xs text-ink-3 mt-0.5">Applies to new or restarted pi SDK agents. Auto / WebSocket cached may fall back to SSE if WebSocket fails before streaming starts, so final errors can still mention SSE.</div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="space-y-1">
@@ -260,7 +260,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 <option value="websocket">WebSocket</option>
                 <option value="sse">SSE</option>
               </select>
-              <span className="block text-[11px] text-ink-4">If Codex SSE header timeouts are frequent, try WebSocket cached.</span>
+              <span className="block text-[11px] text-ink-4">If Codex SSE header timeouts are frequent, try WebSocket cached. SSE mode uses SSE directly.</span>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-medium text-ink-2">WebSocket connect timeout</span>
@@ -270,13 +270,14 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                   min={5}
                   max={180}
                   step={1}
-                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
+                  disabled={(runtimeSettings.codexTransport || "auto") === "sse"}
+                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   value={secondsFromMs(runtimeSettings.websocketConnectTimeoutMs, 60)}
                   onChange={(e) => setRuntimeSettings({ ...runtimeSettings, websocketConnectTimeoutMs: Math.max(0, Number(e.target.value || 0)) * 1000 })}
                 />
                 <span className="text-xs text-ink-3">sec</span>
               </div>
-              <span className="block text-[11px] text-ink-4">Default 60s. Suggested range: 5–180s.</span>
+              <span className="block text-[11px] text-ink-4">{(runtimeSettings.codexTransport || "auto") === "sse" ? "SSE mode does not use WebSocket connect timeout." : "Only affects WebSocket connection setup for Auto / WebSocket cached / WebSocket. It does not change the SSE response-header timeout."}</span>
             </label>
           </div>
           <details className="rounded-md border border-line-soft bg-inset/40 p-3">
@@ -295,7 +296,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 />
                 <span className="text-xs text-ink-3">sec</span>
               </div>
-              <span className="block text-[11px] text-ink-4">Leave empty to use the SDK default. Does not control the Codex SSE response-header timeout.</span>
+              <span className="block text-[11px] text-ink-4">Leave empty to use the SDK default. This controls idle time after response/data begins; it does not control the Codex SSE response-header timeout. SSE header timeout is currently fixed at 20s by the pi SDK/provider.</span>
             </label>
           </details>
           <div className="flex items-center justify-between gap-3">
