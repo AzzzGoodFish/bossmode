@@ -17,6 +17,7 @@ import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
+import { getMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
 // ── Rooms ──
 
@@ -225,11 +226,12 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     return;
   }
 
-  const body = (await parseBody(req)) as { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null };
-  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null } = {};
+  const body = (await parseBody(req)) as { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null };
+  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null } = {};
   const hasModel = Object.prototype.hasOwnProperty.call(body, "model");
   const hasCredential = Object.prototype.hasOwnProperty.call(body, "credentialId");
   const hasThinking = Object.prototype.hasOwnProperty.call(body, "thinkingLevel");
+  const hasMcpServers = Object.prototype.hasOwnProperty.call(body, "mcpServers");
 
   let model: string | null | undefined;
   if (hasModel) {
@@ -262,7 +264,32 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     }
   }
 
-  if (!hasModel && !hasCredential && !hasThinking) {
+  if (hasMcpServers) {
+    if (body.mcpServers === null) patch.mcpServers = null;
+    else if (Array.isArray(body.mcpServers)) {
+      try {
+        const valid = new Set(getMcpServerNames(parseMcpConfigText(readMcpConfigText())));
+        const next = Array.from(new Set(body.mcpServers.map((value) => {
+          if (typeof value !== "string") throw new Error("mcpServers must be an array of strings");
+          return value.trim();
+        }).filter(Boolean)));
+        const invalid = next.filter((name) => !valid.has(name));
+        if (invalid.length > 0) {
+          sendJson(res, 400, { error: `Unknown MCP server: ${invalid.join(", ")}` });
+          return;
+        }
+        patch.mcpServers = next;
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message || String(err) });
+        return;
+      }
+    } else {
+      sendJson(res, 400, { error: "mcpServers must be an array of strings or null" });
+      return;
+    }
+  }
+
+  if (!hasModel && !hasCredential && !hasThinking && !hasMcpServers) {
     sendJson(res, 400, { error: "Nothing to update" });
     return;
   }

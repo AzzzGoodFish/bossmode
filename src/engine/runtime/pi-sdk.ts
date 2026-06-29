@@ -14,8 +14,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
-import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir } from "../../shared/mcp-settings.js";
-import type { PiTransportSetting } from "../../shared/types.js";
+import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
+import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
@@ -94,14 +94,15 @@ interface McpRuntimeSettings {
   adapterPath?: string;
   configPath: string;
   runtimeDir: string;
+  serverNames: string[];
 }
 
 function resolveVendorMcpAdapterPath(): string {
   return fileURLToPath(new URL("../../../vendor/pi-mcp-adapter/index.ts", import.meta.url));
 }
 
-function resolveMcpRuntimeSettings(): McpRuntimeSettings {
-  const configPath = getBossmodeMcpConfigPath();
+function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
+  const globalConfigPath = getBossmodeMcpConfigPath();
   const runtimeDir = getBossmodeMcpRuntimeDir();
   let enabled = false;
   try {
@@ -109,17 +110,24 @@ function resolveMcpRuntimeSettings(): McpRuntimeSettings {
   } catch {
     enabled = false;
   }
-  if (!enabled) return { enabled: false, configPath, runtimeDir };
+  const assignedServers = Array.isArray(args.member.mcpServers) ? args.member.mcpServers : [];
+  if (!enabled || assignedServers.length === 0) return { enabled: false, configPath: globalConfigPath, runtimeDir, serverNames: [] };
 
   const adapterPath = resolveVendorMcpAdapterPath();
   if (!existsSync(adapterPath)) {
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }
   ensureBossmodeMcpDirs();
+  const scoped = writeScopedMcpConfig({ roomId: args.roomId, memberName: args.member.name, serverNames: assignedServers });
+  if (scoped.serverNames.length === 0) {
+    logger.warn("runtime:pi-sdk", "mcp scoped config has no valid assigned servers", { roomId: args.roomId, member: args.member.name, assignedServers });
+    return { enabled: false, configPath: scoped.configPath, runtimeDir, serverNames: [] };
+  }
   process.env.MCP_DIRECT_TOOLS = "__none__";
+  process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
   process.env.PI_CODING_AGENT_DIR = runtimeDir;
   process.env.MCP_OAUTH_DIR = join(runtimeDir, "oauth");
-  return { enabled: true, adapterPath, configPath, runtimeDir };
+  return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames };
 }
 
 async function bindMcpExtension(session: AgentSession, opts: { configPath: string; agent: string }): Promise<void> {
@@ -397,7 +405,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const rolePrompt = opts.agentPrompt.trim();
     const appendSystemPrompt = [opts.envPrompt, opts.rulesPrompt].filter((v): v is string => !!v && v.trim().length > 0);
     const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
-    const mcpSettings = resolveMcpRuntimeSettings();
+    const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     const extensionPaths = piConfig?.extensionPaths ?? [];
     const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
       ? [...extensionPaths, mcpSettings.adapterPath]
@@ -462,6 +470,7 @@ export class PiSdkRuntime implements AgentRuntime {
       httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
       piSdkVersion: PI_SDK_VERSION,
       mcpEnabled: mcpSettings.enabled,
+      mcpServers: mcpSettings.serverNames,
     });
     return handle;
   }

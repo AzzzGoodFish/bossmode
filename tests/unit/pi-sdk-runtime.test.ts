@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -200,12 +200,25 @@ describe("PiSdkRuntime", () => {
     expect(sessionBindExtensions).not.toHaveBeenCalled();
   });
 
-  it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled", async () => {
+  it("does not expose mcp tool when MCP is globally enabled but member has no assigned servers", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
+
+    expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toEqual([]);
+    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("mcp");
+  });
+
+  it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled for an assigned server", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
+    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
+    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } }, null, 2));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
 
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
@@ -213,9 +226,14 @@ describe("PiSdkRuntime", () => {
     expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
     expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
     expect(createAgentSession.mock.calls[0][0].tools).not.toContain("playwright_browser_navigate");
-    expect(sessionExtensionSetFlagValue).toHaveBeenCalledWith("mcp-config", expect.stringMatching(/\.bossmode\/mcp\/mcp\.json$/));
+    const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
+    expect(scopedPath).toMatch(/\.bossmode\/mcp\/runtime\/scopes\/room-a\/pm\/mcp\.json$/);
+    const scoped = JSON.parse(readFileSync(scopedPath, "utf-8"));
+    expect(Object.keys(scoped.mcpServers)).toEqual(["playwright"]);
+    expect(scoped.mcpServers.github).toBeUndefined();
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
     expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
+    expect(process.env.BOSSMODE_MCP_CONFIG_STRICT).toBe("1");
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {

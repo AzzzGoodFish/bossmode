@@ -26,6 +26,7 @@ export function resolveRoomMember(roomId: string, memberName: string): AgentMemb
   member.model = override.model || member.model || agentDef?.model || DEFAULT_MODEL;
   member.credentialId = override.credentialId ?? member.credentialId;
   member.thinkingLevel = override.thinkingLevel || member.thinkingLevel || "off";
+  member.mcpServers = Array.isArray(override.mcpServers) ? override.mcpServers : [];
   return member;
 }
 

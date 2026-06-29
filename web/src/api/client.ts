@@ -149,6 +149,7 @@ export interface MemberInfo {
   avatar?: string;
   contextLimit?: number;
   credentialId?: string | null;
+  mcpServers?: string[];
 }
 
 export async function getMembers(): Promise<MemberInfo[]> {
@@ -174,7 +175,7 @@ export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
 export async function updateRoomMember(
   roomId: string,
   memberName: string,
-  data: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null },
+  data: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
 ): Promise<MemberInfo> {
   const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
   return result.member;
@@ -895,11 +896,31 @@ export interface RuntimeSettings {
   httpIdleTimeoutMs?: number | null;
 }
 
+export type McpAvailabilityStatus = "unchecked" | "checking" | "available" | "unavailable" | "auth-required" | "invalid-config";
+
+export interface McpServerAvailability {
+  name: string;
+  status: McpAvailabilityStatus;
+  checkedAt?: number;
+  toolCount?: number;
+  resourceCount?: number;
+  error?: string;
+}
+
+export interface McpServerSummary {
+  name: string;
+  transport: "http" | "stdio" | "invalid";
+  assignedCount?: number;
+  availability?: McpServerAvailability;
+}
+
 export interface McpSettings {
   enabled: boolean;
   configPath: string;
   configText: string;
   serverCount: number;
+  servers?: McpServerSummary[];
+  availability?: Record<string, McpServerAvailability>;
   sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
 }
 
@@ -953,6 +974,13 @@ export async function updateMcpSettings(settings: { enabled?: boolean; configTex
   return apiFetch("/api/settings/mcp", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+export async function checkMcpServers(server?: string, timeoutMs?: number): Promise<McpSettings & { results: McpServerAvailability[] }> {
+  return apiFetch("/api/settings/mcp/check", {
+    method: "POST",
+    body: JSON.stringify({ ...(server ? { server } : {}), ...(timeoutMs ? { timeoutMs } : {}) }),
   });
 }
 

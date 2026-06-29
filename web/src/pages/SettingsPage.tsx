@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, Room, MemberInfo } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -9,6 +9,10 @@ import {
   updateRuntimeSettings,
   getMcpSettings,
   updateMcpSettings,
+  checkMcpServers,
+  getRooms,
+  getRoomMembers,
+  updateRoomMember,
   getTeamUpdateSettings,
   updateTeamUpdateSettings,
   checkTeamUpdates,
@@ -424,12 +428,31 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
   const [enabled, setEnabled] = useState(false);
   const [configText, setConfigText] = useState("{\n  \"mcpServers\": {}\n}");
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState("");
+  const [roomMembers, setRoomMembers] = useState<MemberInfo[]>([]);
+  const [savingAccess, setSavingAccess] = useState<string | null>(null);
+
+  const servers = settings?.servers || [];
 
   useEffect(() => {
     if (!settings) return;
     setEnabled(settings.enabled);
     setConfigText(settings.configText || "{\n  \"mcpServers\": {}\n}");
   }, [settings?.enabled, settings?.configText]);
+
+  useEffect(() => {
+    getRooms().then((next) => {
+      setRooms(next);
+      setSelectedRoomId((current) => current || next[0]?.id || "");
+    }).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedRoomId) { setRoomMembers([]); return; }
+    getRoomMembers(selectedRoomId).then(setRoomMembers).catch(console.error);
+  }, [selectedRoomId]);
 
   const save = async () => {
     setSaving(true);
@@ -446,57 +469,165 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
     }
   };
 
+  const check = async (server?: string) => {
+    setChecking(server || "__all__");
+    try {
+      const next = await checkMcpServers(server, 10000);
+      onSettings(next);
+      toast(server ? `Checked ${server}` : "Checked MCP servers", "success");
+    } catch (err: any) {
+      toast(err.message || "MCP check failed", "error");
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  const toggleMemberServer = async (member: MemberInfo, server: string) => {
+    const current = new Set(member.mcpServers || []);
+    if (current.has(server)) current.delete(server); else current.add(server);
+    const nextServers = servers.map((s) => s.name).filter((name) => current.has(name));
+    setSavingAccess(member.name);
+    try {
+      const updated = await updateRoomMember(selectedRoomId, member.name, { mcpServers: nextServers });
+      setRoomMembers((prev) => prev.map((m) => m.name === updated.name ? updated : m));
+      const refreshed = await getMcpSettings();
+      onSettings(refreshed);
+      toast(`${member.name} MCP access saved`, "success");
+    } catch (err: any) {
+      toast(err.message || "Failed to save MCP access", "error");
+    } finally {
+      setSavingAccess(null);
+    }
+  };
+
+  const statusClass = (status?: string) => {
+    if (status === "available") return "text-onair border-onair/30 bg-onair/10";
+    if (status === "auth-required") return "text-think border-think/30 bg-think/10";
+    if (status === "unavailable" || status === "invalid-config") return "text-blocked border-blocked/30 bg-blocked-dim/40";
+    return "text-ink-4 border-line bg-surface-2";
+  };
+
   return (
     <section>
       <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">MCP</h2>
-      <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium text-ink-1">MCP Integration</div>
-            <div className="text-xs text-ink-3 mt-0.5">Enable pi-mcp-adapter proxy mode for newly started or restarted agents. User-provided MCP config is treated as trusted.</div>
-            {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} · {settings.configPath}</div>}
+      <div className="space-y-4">
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Registry</div>
+              <div className="text-xs text-ink-3 mt-0.5">MCP servers are a global registry. They are not available to members until assigned below.</div>
+              {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} · {settings.configPath}</div>}
+            </div>
+            <button
+              onClick={() => setEnabled(!enabled)}
+              disabled={!settings || saving}
+              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
           </div>
-          <button
-            onClick={() => setEnabled(!enabled)}
-            disabled={!settings || saving}
-            className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
-          </button>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-ink-2">MCP JSON config</span>
+            <textarea
+              className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
+              value={configText}
+              onChange={(e) => setConfigText(e.target.value)}
+              spellCheck={false}
+              placeholder={'{\n  "mcpServers": {\n    "playwright": {\n      "url": "http://10.8.0.24:8931/mcp"\n    }\n  }\n}'}
+            />
+            <span className="block text-[11px] text-ink-4">Uses native MCP config format. Direct MCP tools are disabled in v1; eligible members receive one <code>mcp</code> proxy tool.</span>
+          </label>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-ink-4">Secret-like fields are redacted when read back and preserved on save.</p>
+            <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
+              {saving ? "Saving..." : "Save MCP"}
+            </button>
+          </div>
         </div>
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-ink-2">MCP JSON config</span>
-          <textarea
-            className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
-            value={configText}
-            onChange={(e) => setConfigText(e.target.value)}
-            spellCheck={false}
-            placeholder={'{\n  "mcpServers": {\n    "playwright": {\n      "url": "http://10.8.0.24:8931/mcp"\n    }\n  }\n}'}
-          />
-          <span className="block text-[11px] text-ink-4">Uses native MCP config format. Direct MCP tools are disabled in v1; agents receive one <code>mcp</code> proxy tool.</span>
-        </label>
-        {settings?.sources?.length ? (
-          <div className="rounded-md bg-inset/60 border border-line-soft p-3 space-y-1">
-            <div className="text-xs font-medium text-ink-2">Config sources</div>
-            {settings.sources.map((source) => (
-              <div key={source.id} className="text-[11px] text-ink-4 flex items-center justify-between gap-3">
-                <span className="truncate">{source.label}: {source.path}</span>
-                <span className="shrink-0">{source.exists ? `${source.serverCount} server${source.serverCount === 1 ? "" : "s"}` : "not created"}</span>
-              </div>
-            ))}
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Availability</div>
+              <div className="text-xs text-ink-3 mt-0.5">Check configured HTTP/stdio MCP servers. Errors are sanitized.</div>
+            </div>
+            <button onClick={() => check()} disabled={!settings || servers.length === 0 || checking !== null} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 disabled:opacity-50">
+              {checking === "__all__" ? "Checking..." : "Check all"}
+            </button>
           </div>
-        ) : null}
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] text-ink-4">Changes apply after agents are restarted or recreated. Secret-like fields are redacted when read back.</p>
-          <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
-            {saving ? "Saving..." : "Save MCP"}
-          </button>
+          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">Add MCP servers in JSON first.</div>}
+          {servers.map((server: McpServerSummary) => {
+            const availability = server.availability;
+            const status = availability?.status || "unchecked";
+            return (
+              <div key={server.name} className="rounded-md bg-inset/60 border border-line-soft p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
+                    <span className="text-[10px] text-ink-4 border border-line rounded px-1.5 py-0.5 uppercase">{server.transport}</span>
+                    <span className={`text-[10px] border rounded px-1.5 py-0.5 uppercase ${statusClass(status)}`}>{status}</span>
+                  </div>
+                  <div className="text-[11px] text-ink-4 mt-1">
+                    {availability?.toolCount !== undefined ? `${availability.toolCount} tools · ` : ""}{server.assignedCount || 0} assignment{server.assignedCount === 1 ? "" : "s"}{availability?.checkedAt ? ` · ${new Date(availability.checkedAt).toLocaleTimeString()}` : ""}
+                  </div>
+                  {availability?.error && <div className="text-[11px] text-blocked mt-1 truncate" title={availability.error}>{availability.error}</div>}
+                </div>
+                <button onClick={() => check(server.name)} disabled={checking !== null} className="px-2 py-1 border border-line rounded text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50">
+                  {checking === server.name ? "Checking..." : "Check"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Member Access</div>
+              <div className="text-xs text-ink-3 mt-0.5">Changes apply after this member is restarted/recreated. Default empty means no MCP tool.</div>
+            </div>
+            <select value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} className="bg-inset border border-line rounded px-2 py-1.5 text-sm text-ink-1">
+              {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+            </select>
+          </div>
+          {!enabled && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">MCP is globally disabled. Enable and save the registry before member access can take effect.</div>}
+          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
+          {enabled && servers.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] text-ink-4 border-b border-line-soft">
+                    <th className="py-2 pr-3 font-medium">Member</th>
+                    <th className="py-2 font-medium">MCP servers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roomMembers.map((member) => (
+                    <tr key={member.name} className="border-b border-line-soft last:border-0">
+                      <td className="py-2 pr-3 text-ink-2 font-medium whitespace-nowrap">{member.name}</td>
+                      <td className="py-2">
+                        <div className="flex flex-wrap gap-2">
+                          {servers.map((server) => {
+                            const checked = (member.mcpServers || []).includes(server.name);
+                            return (
+                              <button key={server.name} onClick={() => toggleMemberServer(member, server.name)} disabled={savingAccess === member.name} className={`px-2 py-1 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : "border-line text-ink-3 hover:bg-surface-2"}`}>
+                                {checked ? "✓ " : ""}{server.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </section>
   );
 }
-
 function LinearIntegrationSection({ status, onStatus }: { status: LinearIntegrationStatus; onStatus: (status: LinearIntegrationStatus) => void }) {
   const { toast, confirm } = useDialog();
   const [apiKey, setApiKey] = useState("");

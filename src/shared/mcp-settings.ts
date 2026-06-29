@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getBossmodeDir } from "./config.js";
+import type { McpServerAvailability, McpServerSummary } from "./types.js";
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";
 
@@ -27,6 +29,10 @@ export function getBossmodeMcpRuntimeDir(): string {
   return join(getBossmodeMcpDir(), "runtime");
 }
 
+export function getBossmodeMcpStatusPath(): string {
+  return join(getBossmodeMcpDir(), "status.json");
+}
+
 export function ensureBossmodeMcpDirs(): void {
   mkdirSync(getBossmodeMcpDir(), { recursive: true });
   mkdirSync(getBossmodeMcpRuntimeDir(), { recursive: true });
@@ -45,11 +51,19 @@ export function parseMcpConfigText(text: string): Record<string, unknown> {
   return config;
 }
 
-export function countMcpServers(config: unknown): number {
-  if (!config || typeof config !== "object" || Array.isArray(config)) return 0;
+export function getMcpServersObject(config: unknown): Record<string, unknown> {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return {};
   const servers = (config as Record<string, unknown>).mcpServers;
-  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return 0;
-  return Object.keys(servers).length;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return {};
+  return servers as Record<string, unknown>;
+}
+
+export function countMcpServers(config: unknown): number {
+  return Object.keys(getMcpServersObject(config)).length;
+}
+
+export function getMcpServerNames(config: unknown): string[] {
+  return Object.keys(getMcpServersObject(config));
 }
 
 export function readMcpConfigText(): string {
@@ -118,4 +132,97 @@ export function readRedactedMcpConfigText(): { configText: string; serverCount: 
   } catch {
     return { configText: raw, serverCount: 0, exists };
   }
+}
+
+export function inferMcpServerTransport(entry: unknown): McpServerSummary["transport"] {
+  if (!isRecord(entry)) return "invalid";
+  if (typeof entry.url === "string" && entry.url.trim()) return "http";
+  if (typeof entry.command === "string" && entry.command.trim()) return "stdio";
+  return "invalid";
+}
+
+export function configFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
+}
+
+export function readMcpStatusCache(): Record<string, McpServerAvailability & { configHash?: string }> {
+  const path = getBossmodeMcpStatusPath();
+  if (!existsSync(path)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    return isRecord(parsed) ? parsed as Record<string, McpServerAvailability & { configHash?: string }> : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeMcpStatusCache(cache: Record<string, McpServerAvailability & { configHash?: string }>): void {
+  ensureBossmodeMcpDirs();
+  const path = getBossmodeMcpStatusPath();
+  writeFileSync(path, `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(path, 0o600); } catch { /* best effort */ }
+}
+
+export function listMcpServers(config: unknown, availabilityCache: Record<string, McpServerAvailability & { configHash?: string }> = {}, assignedCounts: Record<string, number> = {}): McpServerSummary[] {
+  const servers = getMcpServersObject(config);
+  return Object.entries(servers).map(([name, entry]) => {
+    const hash = configFingerprint(entry);
+    const cached = availabilityCache[name]?.configHash === hash ? availabilityCache[name] : undefined;
+    const availability = cached
+      ? ({ name: cached.name, status: cached.status, checkedAt: cached.checkedAt, toolCount: cached.toolCount, resourceCount: cached.resourceCount, error: cached.error } satisfies McpServerAvailability)
+      : ({ name, status: "unchecked" } satisfies McpServerAvailability);
+    return {
+      name,
+      transport: inferMcpServerTransport(entry),
+      assignedCount: assignedCounts[name] || 0,
+      availability,
+    };
+  });
+}
+
+function safeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "_";
+}
+
+export function filterMcpConfigForServers(config: unknown, serverNames: string[]): Record<string, unknown> {
+  const servers = getMcpServersObject(config);
+  const allowed = new Set(serverNames);
+  const mcpServers: Record<string, unknown> = {};
+  for (const name of getMcpServerNames(config)) {
+    if (allowed.has(name)) mcpServers[name] = servers[name];
+  }
+  const out: Record<string, unknown> = { mcpServers };
+  if (isRecord(config) && isRecord(config.settings)) out.settings = config.settings;
+  return out;
+}
+
+export function writeScopedMcpConfig(args: { roomId: string; memberName: string; serverNames: string[]; config?: Record<string, unknown> }): { configPath: string; serverNames: string[] } {
+  const config = args.config ?? parseMcpConfigText(readMcpConfigText());
+  const validNames = getMcpServerNames(config).filter((name) => args.serverNames.includes(name));
+  const scoped = filterMcpConfigForServers(config, validNames);
+  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberName));
+  mkdirSync(dir, { recursive: true });
+  const configPath = join(dir, "mcp.json");
+  writeFileSync(configPath, `${JSON.stringify(scoped, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
+  return { configPath, serverNames: validNames };
+}
+
+function collectSecretLiterals(value: unknown, key?: string, out: string[] = []): string[] {
+  if (typeof value === "string" && key && (SECRET_KEY_RE.test(key) || SECRET_OBJECT_KEYS.has(key))) out.push(value);
+  if (Array.isArray(value)) value.forEach((item) => collectSecretLiterals(item, key, out));
+  else if (isRecord(value)) {
+    for (const [childKey, childValue] of Object.entries(value)) collectSecretLiterals(childValue, childKey, out);
+  }
+  return out;
+}
+
+export function sanitizeMcpError(error: unknown, serverConfig?: unknown): string {
+  let text = error instanceof Error ? error.message : String(error ?? "Unknown MCP error");
+  for (const secret of collectSecretLiterals(serverConfig)) {
+    if (secret) text = text.split(secret).join(MCP_REDACTED_VALUE);
+  }
+  text = text.replace(/Bearer\s+[^\s,;]+/gi, `Bearer ${MCP_REDACTED_VALUE}`);
+  text = text.replace(/Authorization\s*[:=]\s*[^\n,;]+/gi, `Authorization: ${MCP_REDACTED_VALUE}`);
+  return text.slice(0, 500);
 }

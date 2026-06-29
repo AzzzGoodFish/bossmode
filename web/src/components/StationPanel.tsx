@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary,
 } from "../api/client";
+import { Sheet } from "./Sheet";
 import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
@@ -61,6 +62,9 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [thinkingAnchor, setThinkingAnchor] = useState<DOMRect | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
+  const [mcpEnabled, setMcpEnabled] = useState(false);
 
   useEffect(() => {
     getRoomMembers(roomId)
@@ -75,6 +79,18 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   useEffect(() => {
     getConfiguredModels().then(setModels).catch(console.error);
   }, []);
+
+  const refreshMcpSettings = useCallback(async () => {
+    try {
+      const settings = await getMcpSettings();
+      setMcpEnabled(settings.enabled);
+      setMcpServers(settings.servers || []);
+    } catch (err) {
+      console.error("Failed to load MCP settings:", err);
+    }
+  }, []);
+
+  useEffect(() => { void refreshMcpSettings(); }, [refreshMcpSettings]);
 
   // 点击外部关闭模型弹层
   useEffect(() => {
@@ -134,6 +150,20 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     return () => ws.close();
   }, [roomId, members.join("\u0000")]);
 
+  const toggleMemberMcpServer = useCallback(async (member: MemberInfo, server: string) => {
+    const current = new Set(member.mcpServers || []);
+    if (current.has(server)) current.delete(server); else current.add(server);
+    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name));
+    try {
+      const updated = await updateRoomMember(roomId, member.name, { mcpServers: nextServers });
+      setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
+      await refreshMcpSettings();
+      toast(`${member.name} MCP access saved（重启该 member 后生效）`, "success");
+    } catch (err: any) {
+      toast(`MCP access 保存失败: ${err.message}`, "error");
+    }
+  }, [mcpServers, refreshMcpSettings, roomId, toast]);
+
   const workingCount = members.filter((m) => agentStatus[m] === "working").length;
 
   return (
@@ -161,17 +191,17 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
               <div className="flex items-center gap-2.5">
                 <button
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => onOpenLens?.(name)}
+                  onClick={() => setSelectedMember(name)}
                   className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`打开 ${name} 工位 · ${statusLabel(status)}`}
+                  title={`配置 ${name} · ${statusLabel(status)}`}
                 >
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
                 </button>
                 <div className="flex-1 min-w-0">
                   <button
-                    onClick={() => onOpenLens?.(name)}
+                    onClick={() => setSelectedMember(name)}
                     className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors max-w-full"
-                    title={`打开 ${name} 工位`}
+                    title={`配置 ${name}`}
                   >
                     <span className="truncate">{name}</span>
                     {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
@@ -300,6 +330,57 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           );
         })}
       </div>
+      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="md">
+        {selectedMember && memberInfos[selectedMember] && (
+          <MemberConfigPanel
+            member={memberInfos[selectedMember]}
+            mcpEnabled={mcpEnabled}
+            mcpServers={mcpServers}
+            onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
+            onToggleMcp={(server) => toggleMemberMcpServer(memberInfos[selectedMember], server)}
+          />
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
+function MemberConfigPanel({ member, mcpEnabled, mcpServers, onOpenWorkstation, onToggleMcp }: { member: MemberInfo; mcpEnabled: boolean; mcpServers: McpServerSummary[]; onOpenWorkstation: () => void; onToggleMcp: (server: string) => void }) {
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold tracking-[0.08em] text-ink-4 uppercase">Member</div>
+          <div className="text-lg font-semibold text-ink-1 mt-1">{member.name}</div>
+          <div className="text-xs text-ink-4 font-mono mt-0.5">{member.model || "agent default"} · think {member.thinkingLevel || "off"}</div>
+        </div>
+        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Open workstation</button>
+      </div>
+
+      <section className="rounded-lg border border-line bg-inset/50 p-3 space-y-2">
+        <div>
+          <div className="text-sm font-medium text-ink-1">Tools</div>
+          <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this room member. Changes apply after this member is restarted/recreated.</div>
+        </div>
+        {!mcpEnabled && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP registry is globally disabled.</div>}
+        {mcpServers.length === 0 && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured in Settings.</div>}
+        <div className="flex flex-wrap gap-2">
+          {mcpServers.map((server) => {
+            const checked = (member.mcpServers || []).includes(server.name);
+            const unavailable = server.availability?.status && !["available", "unchecked"].includes(server.availability.status);
+            return (
+              <button key={server.name} onClick={() => onToggleMcp(server.name)} disabled={!mcpEnabled} className={`px-2.5 py-1.5 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : "border-line text-ink-3 hover:bg-surface-2"}`} title={server.availability?.error || server.availability?.status || "unchecked"}>
+                {checked ? "✓ " : ""}{server.name}{unavailable ? ` · ${server.availability?.status}` : ""}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-inset/50 p-3">
+        <div className="text-sm font-medium text-ink-1">Context & session</div>
+        <div className="text-xs text-ink-4 mt-1">Compact status and actions are not shown in this RC; tracked separately.</div>
+      </section>
     </div>
   );
 }

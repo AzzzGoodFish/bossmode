@@ -125,10 +125,11 @@ function cleanOverride(override: RoomMemberOverride): RoomMemberOverride {
   if (override.model) next.model = override.model;
   if (override.credentialId) next.credentialId = override.credentialId;
   if (override.thinkingLevel) next.thinkingLevel = override.thinkingLevel;
+  if (Array.isArray(override.mcpServers) && override.mcpServers.length > 0) next.mcpServers = Array.from(new Set(override.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
   return next;
 }
 
-export function updateRoomMemberOverride(roomId: string, memberName: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null }): Room | null {
+export function updateRoomMemberOverride(roomId: string, memberName: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null }): Room | null {
   const room = getRoom(roomId);
   if (!room) return null;
   const current = room.memberOverrides?.[memberName] || {};
@@ -148,6 +149,10 @@ export function updateRoomMemberOverride(roomId: string, memberName: string, pat
   if (Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) {
     if (patch.thinkingLevel) next.thinkingLevel = patch.thinkingLevel;
     else delete next.thinkingLevel;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "mcpServers")) {
+    if (Array.isArray(patch.mcpServers) && patch.mcpServers.length > 0) next.mcpServers = Array.from(new Set(patch.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
+    else delete next.mcpServers;
   }
 
   const cleaned = cleanOverride(next);

@@ -20,6 +20,24 @@ export interface BossmodeMcpConfig {
   enabled: boolean;
 }
 
+export type McpServerAvailabilityStatus = "unchecked" | "checking" | "available" | "unavailable" | "auth-required" | "invalid-config";
+
+export interface McpServerAvailability {
+  name: string;
+  status: McpServerAvailabilityStatus;
+  checkedAt?: number;
+  toolCount?: number;
+  resourceCount?: number;
+  error?: string;
+}
+
+export interface McpServerSummary {
+  name: string;
+  transport: "http" | "stdio" | "invalid";
+  assignedCount?: number;
+  availability?: McpServerAvailability;
+}
+
 export interface BossmodeConfig {
   auth: {
     username: string;
@@ -239,6 +257,7 @@ export interface AgentMemberConfig extends MemberBase {
   thinkingLevel: string;
   contextLimit?: number;     // max messages per activation (default 50)
   credentialId?: string;     // optional Model Credential Profile override
+  mcpServers?: string[];     // room-member scoped MCP server allowlist
 }
 
 export interface HumanMemberConfig extends MemberBase {
@@ -258,6 +277,7 @@ export interface LegacyMemberConfig {
   avatar?: string;
   contextLimit?: number;
   credentialId?: string;
+  mcpServers?: string[];
   type?: "agent";
   skills?: string[];
 }
@@ -314,6 +334,7 @@ export interface RoomMemberOverride {
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;
+  mcpServers?: string[];
 }
 
 export interface Room {
