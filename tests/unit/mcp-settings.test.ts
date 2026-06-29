@@ -36,4 +36,32 @@ describe("mcp-settings helpers", () => {
     expect(saved.imports).toBeUndefined();
     expect(saved.settings).toEqual({ timeout: 1000 });
   });
+
+  it("forces deferred MCP capabilities off in scoped configs", async () => {
+    const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    writeMcpConfig({
+      settings: {
+        timeout: 1000,
+        sampling: true,
+        samplingAutoApprove: true,
+        elicitation: true,
+        directTools: true,
+        nested: { sampling: { enabled: true }, elicitation: { mode: "url" } },
+      },
+      mcpServers: {
+        playwright: { url: "http://127.0.0.1:8931/mcp", directTools: true },
+      },
+    });
+
+    const scoped = writeScopedMcpConfig({ roomId: "room/one", memberName: "developer", serverNames: ["playwright"] });
+    const saved = JSON.parse(readFileSync(scoped.configPath, "utf-8"));
+    expect(saved.settings.timeout).toBe(1000);
+    expect(saved.settings.sampling).toBe(false);
+    expect(saved.settings.samplingAutoApprove).toBe(false);
+    expect(saved.settings.elicitation).toBe(false);
+    expect(saved.settings.directTools).toBe(false);
+    expect(saved.settings.nested.sampling).toBe(false);
+    expect(saved.settings.nested.elicitation).toBe(false);
+    expect(saved.mcpServers.playwright.directTools).toBe(false);
+  });
 });

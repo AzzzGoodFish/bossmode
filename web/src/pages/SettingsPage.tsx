@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, Room, MemberInfo } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -10,9 +10,6 @@ import {
   getMcpSettings,
   updateMcpSettings,
   checkMcpServers,
-  getRooms,
-  getRoomMembers,
-  updateRoomMember,
   getTeamUpdateSettings,
   updateTeamUpdateSettings,
   checkTeamUpdates,
@@ -429,10 +426,6 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
   const [configText, setConfigText] = useState("{\n  \"mcpServers\": {}\n}");
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [selectedRoomId, setSelectedRoomId] = useState("");
-  const [roomMembers, setRoomMembers] = useState<MemberInfo[]>([]);
-  const [savingAccess, setSavingAccess] = useState<string | null>(null);
 
   const servers = settings?.servers || [];
 
@@ -441,18 +434,6 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
     setEnabled(settings.enabled);
     setConfigText(settings.configText || "{\n  \"mcpServers\": {}\n}");
   }, [settings?.enabled, settings?.configText]);
-
-  useEffect(() => {
-    getRooms().then((next) => {
-      setRooms(next);
-      setSelectedRoomId((current) => current || next[0]?.id || "");
-    }).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedRoomId) { setRoomMembers([]); return; }
-    getRoomMembers(selectedRoomId).then(setRoomMembers).catch(console.error);
-  }, [selectedRoomId]);
 
   const save = async () => {
     setSaving(true);
@@ -482,24 +463,6 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
     }
   };
 
-  const toggleMemberServer = async (member: MemberInfo, server: string) => {
-    const current = new Set(member.mcpServers || []);
-    if (current.has(server)) current.delete(server); else current.add(server);
-    const nextServers = servers.map((s) => s.name).filter((name) => current.has(name));
-    setSavingAccess(member.name);
-    try {
-      const updated = await updateRoomMember(selectedRoomId, member.name, { mcpServers: nextServers });
-      setRoomMembers((prev) => prev.map((m) => m.name === updated.name ? updated : m));
-      const refreshed = await getMcpSettings();
-      onSettings(refreshed);
-      toast(`${member.name} MCP access saved`, "success");
-    } catch (err: any) {
-      toast(err.message || "Failed to save MCP access", "error");
-    } finally {
-      setSavingAccess(null);
-    }
-  };
-
   const statusClass = (status?: string) => {
     if (status === "available") return "text-onair border-onair/30 bg-onair/10";
     if (status === "auth-required") return "text-think border-think/30 bg-think/10";
@@ -515,7 +478,7 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-ink-1">Registry</div>
-              <div className="text-xs text-ink-3 mt-0.5">MCP servers are a global registry. They are not available to members until assigned below.</div>
+              <div className="text-xs text-ink-3 mt-0.5">MCP servers are a global registry. Assign servers from the member panel opened via Station avatar/name.</div>
               {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} · {settings.configPath}</div>}
             </div>
             <button
@@ -578,51 +541,6 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
               </div>
             );
           })}
-        </div>
-
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Member Access</div>
-              <div className="text-xs text-ink-3 mt-0.5">Changes apply after this member is restarted/recreated. Default empty means no MCP tool.</div>
-            </div>
-            <select value={selectedRoomId} onChange={(e) => setSelectedRoomId(e.target.value)} className="bg-inset border border-line rounded px-2 py-1.5 text-sm text-ink-1">
-              {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
-            </select>
-          </div>
-          {!enabled && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">MCP is globally disabled. Enable and save the registry before member access can take effect.</div>}
-          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
-          {enabled && servers.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] text-ink-4 border-b border-line-soft">
-                    <th className="py-2 pr-3 font-medium">Member</th>
-                    <th className="py-2 font-medium">MCP servers</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roomMembers.map((member) => (
-                    <tr key={member.name} className="border-b border-line-soft last:border-0">
-                      <td className="py-2 pr-3 text-ink-2 font-medium whitespace-nowrap">{member.name}</td>
-                      <td className="py-2">
-                        <div className="flex flex-wrap gap-2">
-                          {servers.map((server) => {
-                            const checked = (member.mcpServers || []).includes(server.name);
-                            return (
-                              <button key={server.name} onClick={() => toggleMemberServer(member, server.name)} disabled={savingAccess === member.name} className={`px-2 py-1 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : "border-line text-ink-3 hover:bg-surface-2"}`}>
-                                {checked ? "✓ " : ""}{server.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     </section>

@@ -184,15 +184,28 @@ function safeSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "_";
 }
 
+const DEFERRED_MCP_CAPABILITY_KEYS = new Set(["sampling", "samplingautoapprove", "elicitation", "directtools"]);
+
+function disableDeferredMcpCapabilities(value: unknown, key?: string): unknown {
+  if (key && DEFERRED_MCP_CAPABILITY_KEYS.has(key.toLowerCase())) return false;
+  if (Array.isArray(value)) return value.map((item) => disableDeferredMcpCapabilities(item));
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [childKey, childValue] of Object.entries(value)) {
+    out[childKey] = disableDeferredMcpCapabilities(childValue, childKey);
+  }
+  return out;
+}
+
 export function filterMcpConfigForServers(config: unknown, serverNames: string[]): Record<string, unknown> {
   const servers = getMcpServersObject(config);
   const allowed = new Set(serverNames);
   const mcpServers: Record<string, unknown> = {};
   for (const name of getMcpServerNames(config)) {
-    if (allowed.has(name)) mcpServers[name] = servers[name];
+    if (allowed.has(name)) mcpServers[name] = disableDeferredMcpCapabilities(servers[name]);
   }
   const out: Record<string, unknown> = { mcpServers };
-  if (isRecord(config) && isRecord(config.settings)) out.settings = config.settings;
+  if (isRecord(config) && isRecord(config.settings)) out.settings = disableDeferredMcpCapabilities(config.settings);
   return out;
 }
 
