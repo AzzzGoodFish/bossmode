@@ -136,9 +136,25 @@ export function readRedactedMcpConfigText(): { configText: string; serverCount: 
 
 export function inferMcpServerTransport(entry: unknown): McpServerSummary["transport"] {
   if (!isRecord(entry)) return "invalid";
-  if (typeof entry.url === "string" && entry.url.trim()) return "http";
+  if (typeof entry.url === "string" && entry.url.trim()) {
+    try {
+      const url = new URL(entry.url);
+      return url.protocol === "http:" || url.protocol === "https:" ? "http" : "invalid";
+    } catch {
+      return "invalid";
+    }
+  }
   if (typeof entry.command === "string" && entry.command.trim()) return "stdio";
   return "invalid";
+}
+
+export function isAssignableMcpServerConfig(entry: unknown): boolean {
+  return inferMcpServerTransport(entry) !== "invalid";
+}
+
+export function getAssignableMcpServerNames(config: unknown): string[] {
+  const servers = getMcpServersObject(config);
+  return getMcpServerNames(config).filter((name) => isAssignableMcpServerConfig(servers[name]));
 }
 
 export function configFingerprint(value: unknown): string {
@@ -211,7 +227,7 @@ export function filterMcpConfigForServers(config: unknown, serverNames: string[]
 
 export function writeScopedMcpConfig(args: { roomId: string; memberName: string; serverNames: string[]; config?: Record<string, unknown> }): { configPath: string; serverNames: string[] } {
   const config = args.config ?? parseMcpConfigText(readMcpConfigText());
-  const validNames = getMcpServerNames(config).filter((name) => args.serverNames.includes(name));
+  const validNames = getAssignableMcpServerNames(config).filter((name) => args.serverNames.includes(name));
   const scoped = filterMcpConfigForServers(config, validNames);
   const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberName));
   mkdirSync(dir, { recursive: true });

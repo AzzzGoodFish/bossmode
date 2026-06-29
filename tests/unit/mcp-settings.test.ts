@@ -25,16 +25,33 @@ describe("mcp-settings helpers", () => {
       mcpServers: {
         playwright: { url: "http://127.0.0.1:8931/mcp" },
         github: { url: "http://127.0.0.1:8932/mcp" },
+        invalid: {},
+        badUrl: { url: "not a url" },
       },
     });
 
-    const scoped = writeScopedMcpConfig({ roomId: "room/one", memberName: "developer", serverNames: ["playwright", "missing"] });
+    const scoped = writeScopedMcpConfig({ roomId: "room/one", memberName: "developer", serverNames: ["playwright", "invalid", "badUrl", "missing"] });
     expect(scoped.serverNames).toEqual(["playwright"]);
     const saved = JSON.parse(readFileSync(scoped.configPath, "utf-8"));
     expect(Object.keys(saved.mcpServers)).toEqual(["playwright"]);
     expect(saved.mcpServers.github).toBeUndefined();
     expect(saved.imports).toBeUndefined();
     expect(saved.settings).toEqual({ timeout: 1000 });
+  });
+
+  it("returns only assignable MCP server names", async () => {
+    const { getAssignableMcpServerNames } = await import("../../src/shared/mcp-settings.js");
+    expect(getAssignableMcpServerNames({
+      mcpServers: {
+        http: { url: "http://127.0.0.1:8931/mcp" },
+        https: { url: "https://example.test/mcp" },
+        stdio: { command: "node", args: ["server.mjs"] },
+        missing: {},
+        badUrl: { url: "not a url" },
+        badProtocol: { url: "ftp://example.test/mcp" },
+        emptyCommand: { command: "   " },
+      },
+    })).toEqual(["http", "https", "stdio"]);
   });
 
   it("forces deferred MCP capabilities off in scoped configs", async () => {

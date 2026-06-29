@@ -17,7 +17,7 @@ import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
-import { getMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
+import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
 // ── Rooms ──
 
@@ -268,14 +268,14 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     if (body.mcpServers === null) patch.mcpServers = null;
     else if (Array.isArray(body.mcpServers)) {
       try {
-        const valid = new Set(getMcpServerNames(parseMcpConfigText(readMcpConfigText())));
+        const valid = new Set(getAssignableMcpServerNames(parseMcpConfigText(readMcpConfigText())));
         const next = Array.from(new Set(body.mcpServers.map((value) => {
           if (typeof value !== "string") throw new Error("mcpServers must be an array of strings");
           return value.trim();
         }).filter(Boolean)));
         const invalid = next.filter((name) => !valid.has(name));
         if (invalid.length > 0) {
-          sendJson(res, 400, { error: `Unknown MCP server: ${invalid.join(", ")}` });
+          sendJson(res, 400, { error: `Unknown or invalid MCP server: ${invalid.join(", ")}` });
           return;
         }
         patch.mcpServers = next;

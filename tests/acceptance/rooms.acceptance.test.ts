@@ -15,7 +15,9 @@
  * From test plan: docs/test-plan.md §2, §3
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
@@ -137,6 +139,49 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
 
       expect(patchRes.status).toBe(400);
       expect(JSON.parse(patchRes.body).error).toContain("Directory does not exist");
+    });
+  });
+
+  describe("Room member MCP access PATCH", () => {
+    it("rejects invalid-config MCP servers", async () => {
+      const mcpDir = join(getTestBossmodeDir(), "mcp");
+      mkdirSync(mcpDir, { recursive: true });
+      writeFileSync(join(mcpDir, "mcp.json"), JSON.stringify({
+        mcpServers: {
+          valid: { url: "http://127.0.0.1:8931/mcp" },
+          invalid: {},
+          badUrl: { url: "not a url" },
+        },
+      }, null, 2));
+      const { saveMember } = await import("../../src/workforce/member-store.js");
+      saveMember({ name: "pm", agent: "pm", runtime: "test" });
+
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "mcp-access-room", cwd: "/tmp", members: ["pm"] },
+      });
+      if (createRes.status === 501) return;
+      const room: Room = JSON.parse(createRes.body);
+
+      const invalidRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+        token,
+        body: { mcpServers: ["invalid"] },
+      });
+      expect(invalidRes.status).toBe(400);
+      expect(JSON.parse(invalidRes.body).error).toContain("Unknown or invalid MCP server");
+
+      const badUrlRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+        token,
+        body: { mcpServers: ["badUrl"] },
+      });
+      expect(badUrlRes.status).toBe(400);
+
+      const validRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+        token,
+        body: { mcpServers: ["valid"] },
+      });
+      expect(validRes.status).toBe(200);
+      expect(JSON.parse(validRes.body).member.mcpServers).toEqual(["valid"]);
     });
   });
 

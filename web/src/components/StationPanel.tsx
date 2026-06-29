@@ -51,6 +51,10 @@ export function thinkLevelTextClass(level?: string | null): string {
   }
 }
 
+function isAssignableMcpServer(server: McpServerSummary): boolean {
+  return server.transport !== "invalid" && server.availability?.status !== "invalid-config";
+}
+
 /** 工位墙 — 每个 agent 一张工位卡：工牌 + 状态 + 模型热切换 + context 油量 + 快捷操作 */
 export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, unreadAgents }: StationPanelProps) {
   const { toast } = useDialog();
@@ -153,7 +157,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const toggleMemberMcpServer = useCallback(async (member: MemberInfo, server: string) => {
     const current = new Set(member.mcpServers || []);
     if (current.has(server)) current.delete(server); else current.add(server);
-    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name));
+    const assignableNames = new Set(mcpServers.filter(isAssignableMcpServer).map((s) => s.name));
+    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name) && assignableNames.has(name));
     try {
       const updated = await updateRoomMember(roomId, member.name, { mcpServers: nextServers });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
@@ -367,10 +372,11 @@ function MemberConfigPanel({ member, mcpEnabled, mcpServers, onOpenWorkstation, 
         <div className="flex flex-wrap gap-2">
           {mcpServers.map((server) => {
             const checked = (member.mcpServers || []).includes(server.name);
-            const unavailable = server.availability?.status && !["available", "unchecked"].includes(server.availability.status);
+            const invalid = server.transport === "invalid" || server.availability?.status === "invalid-config";
+            const unavailable = invalid || (server.availability?.status && !["available", "unchecked"].includes(server.availability.status));
             return (
-              <button key={server.name} onClick={() => onToggleMcp(server.name)} disabled={!mcpEnabled} className={`px-2.5 py-1.5 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : "border-line text-ink-3 hover:bg-surface-2"}`} title={server.availability?.error || server.availability?.status || "unchecked"}>
-                {checked ? "✓ " : ""}{server.name}{unavailable ? ` · ${server.availability?.status}` : ""}
+              <button key={server.name} onClick={() => onToggleMcp(server.name)} disabled={!mcpEnabled || (!checked && invalid)} className={`px-2.5 py-1.5 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : invalid ? "border-line text-ink-4 bg-surface-1 cursor-not-allowed" : "border-line text-ink-3 hover:bg-surface-2"}`} title={server.availability?.error || (invalid ? "Invalid MCP server config" : server.availability?.status || "unchecked")}>
+                {checked ? "✓ " : ""}{server.name}{unavailable ? ` · ${invalid ? "invalid-config" : server.availability?.status}` : ""}
               </button>
             );
           })}
