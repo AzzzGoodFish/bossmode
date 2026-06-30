@@ -41,6 +41,7 @@ interface MainProps {
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
   onNavigateToKnowledge?: (path: string) => void;
+  onOpenMcpSettings?: () => void;
 }
 
 type RoomView = "chat" | "tasks";
@@ -57,6 +58,7 @@ export function Main({
   onOpenMobileSidebar,
   onNavigateToTask,
   onNavigateToKnowledge,
+  onOpenMcpSettings,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -440,6 +442,7 @@ export function Main({
             contextUsage={contextUsage}
             roomId={room.id}
             onOpenLens={openLens}
+            onOpenMcpSettings={onOpenMcpSettings}
             unreadAgents={unreadTabs}
           />
         </div>
@@ -453,6 +456,7 @@ export function Main({
               contextUsage={contextUsage}
               roomId={room.id}
               onOpenLens={openLens}
+              onOpenMcpSettings={onOpenMcpSettings}
               unreadAgents={unreadTabs}
             />
           </MobileDrawer>

@@ -2,14 +2,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary,
 } from "../api/client";
 import { Sheet } from "./Sheet";
 import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
-import { modelProfileLabel } from "./ModelPicker";
+import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
 
 interface StationPanelProps {
@@ -18,6 +18,7 @@ interface StationPanelProps {
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
   onOpenLens?: (agentName: string) => void;
+  onOpenMcpSettings?: () => void;
   unreadAgents?: Set<string> | null;
 }
 
@@ -56,7 +57,7 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** 工位墙 — 每个 agent 一张工位卡：工牌 + 状态 + 模型热切换 + context 油量 + 快捷操作 */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, onOpenMcpSettings, unreadAgents }: StationPanelProps) {
   const { toast } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -105,7 +106,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   }, [openChip]);
 
   const handleSwitchModel = useCallback(
-    async (member: MemberInfo, model: string, credentialId: string) => {
+    async (member: MemberInfo, model: string | null, credentialId: string | null) => {
       setOpenChip(null);
       try {
         const updated = await updateRoomMember(roomId, member.name, { model, credentialId });
@@ -118,6 +119,33 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     [roomId, toast],
   );
 
+  const handleSwitchThinking = useCallback(async (member: MemberInfo, thinkingLevel: string | null) => {
+    try {
+      const updated = await updateRoomMember(roomId, member.name, { thinkingLevel });
+      setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
+      toast(`${member.name} thinking → ${thinkingLevel ?? "default"}`, "success");
+    } catch (err: any) {
+      toast(`切换失败: ${err.message}`, "error");
+    }
+  }, [roomId, toast]);
+
+  const handleRestartMember = useCallback(async (member: MemberInfo) => {
+    try {
+      await restartMember(member.id || member.name, roomId);
+      toast(`${member.name} restarted`, "success");
+    } catch (err: any) {
+      toast(`Restart failed: ${err.message}`, "error");
+    }
+  }, [roomId, toast]);
+
+  const handleResetSession = useCallback(async (member: MemberInfo) => {
+    try {
+      await resetAgentSession(roomId, member.name);
+      toast(`${member.name} session reset`, "success");
+    } catch (err: any) {
+      toast(`Reset failed: ${err.message}`, "error");
+    }
+  }, [roomId, toast]);
 
   const loadRecentEvents = useCallback(async (name: string) => {
     try {
@@ -274,12 +302,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                         onSelect={(thinkingLevel) => {
                           setOpenThinkingChip(null);
                           setThinkingAnchor(null);
-                          updateRoomMember(roomId, info.name, { thinkingLevel })
-                            .then((updated) => {
-                              setMemberInfos((prev) => ({ ...prev, [info.name]: updated }));
-                              toast(`${info.name} thinking → ${thinkingLevel ?? "default"}`, "success");
-                            })
-                            .catch((err: any) => toast(`切换失败: ${err.message}`, "error"));
+                          void handleSwitchThinking(info, thinkingLevel);
                         }}
                       />
                     )}
@@ -335,13 +358,21 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           );
         })}
       </div>
-      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="md">
+      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl">
         {selectedMember && memberInfos[selectedMember] && (
           <MemberConfigPanel
             member={memberInfos[selectedMember]}
+            status={agentStatus[selectedMember] || "inactive"}
+            contextUsage={contextUsage[selectedMember]}
+            models={models}
             mcpEnabled={mcpEnabled}
             mcpServers={mcpServers}
             onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
+            onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
+            onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
+            onSwitchThinking={(thinkingLevel) => handleSwitchThinking(memberInfos[selectedMember], thinkingLevel)}
+            onRestart={() => handleRestartMember(memberInfos[selectedMember])}
+            onResetSession={() => handleResetSession(memberInfos[selectedMember])}
             onToggleMcp={(server) => toggleMemberMcpServer(memberInfos[selectedMember], server)}
           />
         )}
@@ -350,42 +381,167 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   );
 }
 
-function MemberConfigPanel({ member, mcpEnabled, mcpServers, onOpenWorkstation, onToggleMcp }: { member: MemberInfo; mcpEnabled: boolean; mcpServers: McpServerSummary[]; onOpenWorkstation: () => void; onToggleMcp: (server: string) => void }) {
-  return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold tracking-[0.08em] text-ink-4 uppercase">Member</div>
-          <div className="text-lg font-semibold text-ink-1 mt-1">{member.name}</div>
-          <div className="text-xs text-ink-4 font-mono mt-0.5">{member.model || "agent default"} · think {member.thinkingLevel || "off"}</div>
-        </div>
-        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Open workstation</button>
-      </div>
+const THINKING_LEVEL_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
-      <section className="rounded-lg border border-line bg-inset/50 p-3 space-y-2">
+function availabilityTone(status?: string): string {
+  if (status === "available") return "text-onair border-onair/30 bg-onair/10";
+  if (status === "auth-required") return "text-think border-think/30 bg-think/10";
+  if (status === "unavailable" || status === "invalid-config") return "text-blocked border-blocked/30 bg-blocked-dim/40";
+  return "text-ink-4 border-line bg-surface-2";
+}
+
+function MemberConfigPanel({
+  member,
+  status,
+  contextUsage,
+  models,
+  mcpEnabled,
+  mcpServers,
+  onOpenWorkstation,
+  onOpenMcpSettings,
+  onSwitchModel,
+  onSwitchThinking,
+  onRestart,
+  onResetSession,
+  onToggleMcp,
+}: {
+  member: MemberInfo;
+  status: string;
+  contextUsage?: ContextUsageData;
+  models: AvailableModelOption[];
+  mcpEnabled: boolean;
+  mcpServers: McpServerSummary[];
+  onOpenWorkstation: () => void;
+  onOpenMcpSettings: () => void;
+  onSwitchModel: (model: string | null, credentialId: string | null) => void;
+  onSwitchThinking: (thinkingLevel: string | null) => void;
+  onRestart: () => void;
+  onResetSession: () => void;
+  onToggleMcp: (server: string) => void;
+}) {
+  const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
+  const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
+  const statusText = statusLabel(status).toLowerCase();
+  return (
+    <div className="p-5 space-y-4">
+      <header className="flex items-start justify-between gap-4 pb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="text-lg font-semibold text-ink-1 truncate">{member.name}</div>
+              <span className={`text-[10px] border rounded-full px-2 py-0.5 uppercase ${status === "working" ? "text-onair border-onair/30 bg-onair/10" : "text-ink-4 border-line bg-surface-2"}`}>{statusText}</span>
+            </div>
+            <div className="text-xs text-ink-4 font-mono mt-1">@{member.name} · source {member.agent || member.name}</div>
+          </div>
+        </div>
+        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 shrink-0">Open workstation</button>
+      </header>
+
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
         <div>
-          <div className="text-sm font-medium text-ink-1">Tools</div>
-          <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this room member. Changes apply after this member is restarted/recreated.</div>
+          <div className="text-sm font-semibold text-ink-1">Profile</div>
+          <div className="text-xs text-ink-4 mt-0.5">Room member identity is read-only in this RC.</div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
+            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Mention name</div>
+            <div className="font-mono text-sm text-ink-1 mt-1">@{member.name}</div>
+          </div>
+          <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
+            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Created from</div>
+            <div className="font-mono text-sm text-ink-1 mt-1">{member.agent || member.name}</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+        <div>
+          <div className="text-sm font-semibold text-ink-1">How this member works</div>
+          <div className="text-xs text-ink-4 mt-0.5">Overrides apply to this room member.</div>
+        </div>
+        <div className="space-y-3">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-ink-3">Model / credential</span>
+            <ModelPicker
+              value={{ model: member.model ?? null, credentialId: member.credentialId ?? null }}
+              models={models}
+              onChange={(value) => onSwitchModel(value.model, value.credentialId)}
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-ink-3">Think level</span>
+            <select
+              value={member.thinkingLevel || "off"}
+              onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
+              className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
+            >
+              {THINKING_LEVEL_OPTIONS.map((level) => <option key={level} value={level}>{level}</option>)}
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-ink-1">Tools</div>
+            <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Restart to apply tool changes.</div>
+          </div>
+          <button onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">Manage servers</button>
         </div>
         {!mcpEnabled && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP registry is globally disabled.</div>}
         {mcpServers.length === 0 && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured in Settings.</div>}
-        <div className="flex flex-wrap gap-2">
+        <div className="space-y-2">
           {mcpServers.map((server) => {
             const checked = (member.mcpServers || []).includes(server.name);
-            const invalid = server.transport === "invalid" || server.availability?.status === "invalid-config";
-            const unavailable = invalid || (server.availability?.status && !["available", "unchecked"].includes(server.availability.status));
+            const availability = server.availability;
+            const statusValue = availability?.status || "unchecked";
+            const invalid = server.transport === "invalid" || statusValue === "invalid-config";
+            const unavailable = statusValue === "unavailable" || statusValue === "auth-required";
+            const disabled = !mcpEnabled || (!checked && (invalid || unavailable));
             return (
-              <button key={server.name} onClick={() => onToggleMcp(server.name)} disabled={!mcpEnabled || (!checked && invalid)} className={`px-2.5 py-1.5 rounded-full border text-xs transition-colors disabled:opacity-50 ${checked ? "border-accent bg-accent-dim text-accent-ink" : invalid ? "border-line text-ink-4 bg-surface-1 cursor-not-allowed" : "border-line text-ink-3 hover:bg-surface-2"}`} title={server.availability?.error || (invalid ? "Invalid MCP server config" : server.availability?.status || "unchecked")}>
-                {checked ? "✓ " : ""}{server.name}{unavailable ? ` · ${invalid ? "invalid-config" : server.availability?.status}` : ""}
-              </button>
+              <div key={server.name} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
+                <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink uppercase shrink-0">{server.name.slice(0, 2)}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
+                    <span className="text-[10px] text-ink-4 border border-line rounded px-1.5 py-0.5 uppercase">{server.transport}</span>
+                    <span className={`text-[10px] border rounded px-1.5 py-0.5 uppercase ${availabilityTone(statusValue)}`}>{statusValue}</span>
+                  </div>
+                  <div className="text-[11px] text-ink-4 mt-1 truncate">
+                    {availability?.toolCount !== undefined ? `${availability.toolCount} tools` : "Tool count unknown"}{checked ? " · enabled for this member" : " · off for this member"}
+                  </div>
+                  {availability?.error && <div className="text-[11px] text-blocked mt-1 truncate" title={availability.error}>{availability.error}</div>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onToggleMcp(server.name)}
+                  disabled={disabled}
+                  className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50 ${checked ? "bg-accent" : "bg-surface-3"}`}
+                  title={invalid ? "Invalid MCP server config" : unavailable ? "MCP server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
             );
           })}
         </div>
       </section>
 
-      <section className="rounded-lg border border-line bg-inset/50 p-3">
-        <div className="text-sm font-medium text-ink-1">Context & session</div>
-        <div className="text-xs text-ink-4 mt-1">Compact status and actions are not shown in this RC; tracked separately.</div>
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+        <div className="text-sm font-semibold text-ink-1">Context & session</div>
+        {hasUsage && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
+            <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button onClick={onOpenWorkstation} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Open workstation</button>
+          <button onClick={onRestart} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Restart member</button>
+          <button onClick={onResetSession} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Reset session</button>
+        </div>
       </section>
     </div>
   );
