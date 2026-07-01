@@ -26,15 +26,15 @@ function agentEventsPath(roomId: string, agentName: string): string {
   return join(agentEventsDir(roomId), `${agentName}.jsonl`);
 }
 
-export function appendEventToDisk(roomId: string, agentName: string, event: AgentHistoryEvent): void {
+export function appendEventToDisk(roomId: string, agentRef: string, event: AgentHistoryEvent): void {
   const dir = agentEventsDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const withTs = { ...event, ts: Date.now() };
-  appendFileSync(agentEventsPath(roomId, agentName), JSON.stringify(withTs) + "\n", "utf-8");
+  appendFileSync(agentEventsPath(roomId, agentRef), JSON.stringify(withTs) + "\n", "utf-8");
 }
 
-export function loadEventsFromDisk(roomId: string, agentName: string): AgentHistoryEvent[] {
-  const path = agentEventsPath(roomId, agentName);
+export function loadEventsFromDisk(roomId: string, agentRef: string): AgentHistoryEvent[] {
+  const path = agentEventsPath(roomId, agentRef);
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
@@ -42,8 +42,8 @@ export function loadEventsFromDisk(roomId: string, agentName: string): AgentHist
 }
 
 /** Load events with tail-based pagination. Returns { events, total, hasMore }. */
-export function loadEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): { events: AgentHistoryEvent[]; total: number; hasMore: boolean } {
-  const all = loadEventsFromDisk(roomId, agentName);
+export function loadEventsPaginated(roomId: string, agentRef: string, limit: number, before?: number): { events: AgentHistoryEvent[]; total: number; hasMore: boolean } {
+  const all = loadEventsFromDisk(roomId, agentRef);
   const total = all.length;
   const endIdx = before !== undefined ? Math.min(before, total) : total;
   const startIdx = Math.max(0, endIdx - limit);
@@ -73,6 +73,7 @@ export function handleAgentEvent(
   instanceKey: string,
   event: AgentStreamEvent,
   eventBuffer: AgentHistoryEvent[],
+  memberId?: string,
 ): AgentStatus | undefined {
   // Log significant events
   if (event.type === "agent_start" || event.type === "agent_end") {
@@ -111,6 +112,7 @@ export function handleAgentEvent(
       type: "agent:event",
       roomId,
       agent: agentName,
+      memberId,
       event,
     });
     return undefined;
@@ -124,7 +126,7 @@ export function handleAgentEvent(
       agent: agentName, code: event.code, signal: event.signal, unexpected: event.unexpected,
     });
     broadcastToAgentSubscribers(roomId, agentName, {
-      type: "agent:event", roomId, agent: agentName, event,
+      type: "agent:event", roomId, agent: agentName, memberId, event,
     });
     if (event.unexpected) {
       return "inactive";
@@ -160,7 +162,7 @@ export function handleAgentEvent(
   // Persist non-streaming events to disk
   if (processedEvent.type !== "message_update" && processedEvent.type !== "tool_update") {
     eventBuffer.push(processedEvent);
-    try { appendEventToDisk(roomId, agentName, processedEvent); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
+    try { appendEventToDisk(roomId, memberId || agentName, processedEvent); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
   }
 
   // WebSocket push — forward all events for live streaming
@@ -168,6 +170,7 @@ export function handleAgentEvent(
     type: "agent:event",
     roomId,
     agent: agentName,
+    memberId,
     event: processedEvent,
   });
 
@@ -180,7 +183,7 @@ export function handleAgentEvent(
   if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
     // Proactively refresh context usage cache while agent is idle (responsive to control_request)
-    refreshContextUsageOnIdle(roomId, agentName);
+    refreshContextUsageOnIdle(roomId, memberId || agentName);
     return "idle";
   }
 

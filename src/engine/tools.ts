@@ -19,6 +19,21 @@ import type { RoomMessage, SummaryMeta } from "../shared/types.js";
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
 
+function mentionIdsFromNames(message: string, roomMembers: Array<{ id: string; name: string }>): string[] {
+  const byName = new Map(roomMembers.map((member) => [member.name, member.id]));
+  return parseMentions(message, roomMembers.map((member) => member.name))
+    .map((name) => byName.get(name))
+    .filter((id): id is string => Boolean(id));
+}
+
+function messageMeta(meta: { attachments?: RoomMessageAttachment[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; mentions?: string[] }) {
+  const out: { attachments?: RoomMessageAttachment[]; senderMemberId?: string; mentionMemberIds?: string[] } = {};
+  if (meta.attachments?.length) out.attachments = meta.attachments;
+  if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
+  if (meta.mentionMemberIds?.length && meta.mentionMemberIds.join("\0") !== (meta.mentions || []).join("\0")) out.mentionMemberIds = meta.mentionMemberIds;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** Truncate a serialized tool result if it exceeds the limit. */
 import { processAgentAttachments } from "./agent-attachments.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
@@ -81,11 +96,15 @@ export async function handleToolCallback(
       }
 
       const room = roomStore.getRoom(roomId);
-      const mentions = room ? parseMentions(message, room.members) : [];
+      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
+      const mentions = room ? parseMentions(message, roomMembers.map((member: any) => member.name)) : [];
+      const mentionMemberIds = room ? mentionIdsFromNames(message, roomMembers) : [];
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      if (attachments.length > 0) postMessage(roomId, agentName, message, mentions, { attachments });
+      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, mentions });
+      if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
       return warning ? { ok: true, warning } : { ok: true };
@@ -97,7 +116,12 @@ export async function handleToolCallback(
       const message = params?.message || "";
       const content = target ? `@${target} ${message}`.trim() : message;
       const room = roomStore.getRoom(roomId);
-      postMessage(roomId, agentName, content, room ? parseMentions(content, room.members) : []);
+      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
+      const mentions = room ? parseMentions(content, roomMembers.map((member: any) => member.name)) : [];
+      const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds: room ? mentionIdsFromNames(content, roomMembers) : [], mentions });
+      if (meta) postMessage(roomId, agentName, content, mentions, meta);
+      else postMessage(roomId, agentName, content, mentions);
       return { ok: true };
     }
     case "query_room_messages": {

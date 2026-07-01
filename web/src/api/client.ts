@@ -143,6 +143,8 @@ export interface MemberInfo {
   id: string;
   name: string;
   agent: string;
+  sourceAgent?: string;
+  roomId?: string;
   model?: string | null;
   runtime?: "pi-cli";
   thinkingLevel: string;
@@ -175,7 +177,7 @@ export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
 export async function updateRoomMember(
   roomId: string,
   memberName: string,
-  data: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
+  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
 ): Promise<MemberInfo> {
   const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
   return result.member;
@@ -556,11 +558,31 @@ export async function batchDeleteKnowledge(paths: string[]): Promise<{ deleted: 
 
 // -- Rooms --
 
+export interface RoomMemberRecord {
+  id: string;
+  roomId?: string;
+  name: string;
+  sourceAgent: string;
+  sourceMemberId?: string;
+  avatar?: string;
+  config?: {
+    model?: string;
+    credentialId?: string;
+    thinkingLevel?: string;
+    contextLimit?: number;
+    skills?: string[];
+    mcpServers?: string[];
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Room {
   id: string;
   name: string;
   cwd: string;
   members: string[];
+  roomMembers?: RoomMemberRecord[];
   createdAt: number;
   /** Document paths injected into agents' system prompts as rules. */
   ruleDocs?: string[];
@@ -703,8 +725,10 @@ export interface RoomMessageAttachment {
 export interface RoomMessage {
   id: string;
   sender: string;
+  senderMemberId?: string;
   content: string;
   mentions: string[];
+  mentionMemberIds?: string[];
   ts: number;
   type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
   summary_meta?: SummaryMeta;

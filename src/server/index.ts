@@ -5,6 +5,7 @@ import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
 import { removePidFile, writePidFile, ensureBossmodeDir, readConfig } from "../shared/config.js";
 import { runKnowledgeMigration } from "../knowledge/migration.js";
+import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
 import { initAutoSummary } from "../engine/summarizer.js";
@@ -49,6 +50,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runKnowledgeMigration();
   } catch (err) {
     logger.error("server", "knowledge migration failed", { error: String(err) });
+  }
+
+  try {
+    runRoomMemberMigration();
+  } catch (err) {
+    logger.error("server", "room member migration failed", { error: String(err) });
   }
 
   // Initialize runtime registry

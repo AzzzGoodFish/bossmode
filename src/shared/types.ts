@@ -330,25 +330,50 @@ export interface RoomLinearIntegration {
   syncCount?: number;
 }
 
-export interface RoomMemberOverride {
+export interface RoomMemberConfig {
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;
+  contextLimit?: number;
+  skills?: string[];
   mcpServers?: string[];
 }
+
+export interface RoomMemberRecord {
+  /** Hidden stable globally unique room-member identity. */
+  id: string;
+  /** Owning room id. Persisted for API clarity; parent room remains authoritative. */
+  roomId?: string;
+  /** User-facing member name, unique inside the owning room, used for @ mentions. */
+  name: string;
+  /** Read-only source role/template name. */
+  sourceAgent: string;
+  /** Legacy/global member id this room member was migrated/created from, when available. */
+  sourceMemberId?: string;
+  avatar?: string;
+  config?: RoomMemberConfig;
+  createdAt: number;
+  updatedAt: number;
+  migratedFrom?: { memberName: string; memberId?: string };
+}
+
+export interface RoomMemberOverride extends RoomMemberConfig {}
 
 export interface Room {
   id: string;
   name: string;
   cwd: string;
+  /** Compatibility/derived member names. v0.14 identity lives in roomMembers. */
   members: string[];
+  /** Authoritative room-local members for v0.14+. */
+  roomMembers?: RoomMemberRecord[];
   createdAt: number;
   /**
    * Document paths (relative to ~/.bossmode/knowledge/docs/) injected into
    * agents' system prompts as rules.
    */
   ruleDocs?: string[];
-  /** Room-scoped member/workstation overrides keyed by member name. */
+  /** Legacy room-scoped overrides keyed by member name. Read as migration source only. */
   memberOverrides?: Record<string, RoomMemberOverride>;
   integrations?: {
     linear?: RoomLinearIntegration;
@@ -375,9 +400,11 @@ import type { RoomMessageAttachment } from "./attachments.js";
 
 export interface RoomMessage {
   id: string;
-  sender: string; // member name or "user" (legacy) or "system"
+  sender: string; // member name snapshot or "user" (legacy) or "system"
+  senderMemberId?: string;
   content: string;
-  mentions: string[];
+  mentions: string[]; // member name snapshots
+  mentionMemberIds?: string[];
   ts: number;
   type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
   summary_meta?: SummaryMeta;
@@ -394,6 +421,7 @@ export type AgentStatus = "inactive" | "idle" | "working";
 
 export interface AgentStatusInfo {
   name: string;
+  memberId?: string;
   status: AgentStatus;
   roomId: string | null;
 }
@@ -436,10 +464,12 @@ export interface Task {
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
-  assignee?: string;       // member name
+  assignee?: string;       // member name snapshot
+  assigneeMemberId?: string;
   description?: string;   // markdown stable spec / acceptance criteria
   references?: string[];   // soft links to knowledge docs or URLs
   subscribers?: string[];  // passive watchers; never activates members
+  subscriberMemberIds?: string[];
   comments?: TaskComment[];
   linearIssueId?: string;
   linearIssueUrl?: string;
@@ -491,10 +521,12 @@ export interface Gate {
   summary: string;
   /** Knowledge doc paths, file paths, or URLs backing this deliverable */
   artifacts: string[];
-  /** Member name that requested approval */
+  /** Member name snapshot that requested approval */
   requestedBy: string;
+  requestedByMemberId?: string;
   /** Member to activate when approved (next stage in the pipeline) */
   handoffTo?: string;
+  handoffMemberId?: string;
   status: GateStatus;
   /** User's note on approve/reject */
   decisionNote?: string;
@@ -507,7 +539,9 @@ export interface GateEventMeta {
   gateId: string;
   gateTitle: string;
   requestedBy: string;
+  requestedByMemberId?: string;
   handoffTo?: string;
+  handoffMemberId?: string;
   /** Present on requested: summary + artifacts for inline card rendering */
   summary?: string;
   artifacts?: string[];
@@ -518,9 +552,9 @@ export interface GateEventMeta {
 
 export type WsServerEvent =
   | { type: "room:message"; roomId: string; message: RoomMessage }
-  | { type: "agent:status"; roomId: string; agent: string; status: AgentStatus }
-  | { type: "agent:event"; roomId: string; agent: string; event: unknown }
-  | { type: "agent:context_usage"; roomId: string; agent: string; usage: ContextUsage | null }
+  | { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }
+  | { type: "agent:event"; roomId: string; agent: string; memberId?: string; event: unknown }
+  | { type: "agent:context_usage"; roomId: string; agent: string; memberId?: string; usage: ContextUsage | null }
   | { type: "task:created"; roomId: string; task: Task }
   | { type: "task:updated"; roomId: string; task: Task }
   | { type: "task:deleted"; roomId: string; taskId: string };
@@ -530,8 +564,8 @@ export type WsServerEvent =
 export type WsClientCommand =
   | { type: "subscribe:room"; roomId: string }
   | { type: "unsubscribe:room"; roomId: string }
-  | { type: "subscribe:agent"; roomId: string; agent: string }
-  | { type: "unsubscribe:agent"; roomId: string; agent: string };
+  | { type: "subscribe:agent"; roomId: string; agent: string; memberId?: string }
+  | { type: "unsubscribe:agent"; roomId: string; agent: string; memberId?: string };
 
 // -- API Responses --
 

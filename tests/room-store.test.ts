@@ -45,8 +45,11 @@ describe("room-store", () => {
 
     it("should initialize cursors to null for all members", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm", "dev", "qa"]);
+      const roomMembers = roomStore.getRoomMembers(room.id);
       const cursors = roomStore.getCursors(room.id);
-      expect(cursors).toEqual({ pm: null, dev: null, qa: null });
+      expect(roomMembers.map((m) => m.name)).toEqual(["pm", "dev", "qa"]);
+      expect(Object.keys(cursors).sort()).toEqual(roomMembers.map((m) => m.id).sort());
+      expect(Object.values(cursors)).toEqual([null, null, null]);
     });
   });
 
@@ -183,6 +186,27 @@ describe("room-store", () => {
     });
   });
 
+  describe("roomMembers", () => {
+    it("renames a room-local member without changing member id", () => {
+      const room = roomStore.createRoom("test", "/tmp", ["qa", "developer"]);
+      const before = roomStore.findRoomMemberByName(room.id, "qa")!;
+      const result = roomStore.renameRoomMember(room.id, before.id, "qa-browser");
+      expect(result.ok).toBe(true);
+      const after = roomStore.findRoomMemberByName(room.id, "qa-browser")!;
+      expect(after.id).toBe(before.id);
+      expect(roomStore.getRoom(room.id)!.members).toEqual(["qa-browser", "developer"]);
+      expect(roomStore.findRoomMemberByName(room.id, "qa")).toBeNull();
+    });
+
+    it("rejects duplicate member name inside one room", () => {
+      const room = roomStore.createRoom("test", "/tmp", ["qa", "developer"]);
+      const dev = roomStore.findRoomMemberByName(room.id, "developer")!;
+      const result = roomStore.renameRoomMember(room.id, dev.id, "qa");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("duplicate");
+    });
+  });
+
   describe("addMember", () => {
     it("should add new member to room", () => {
       const room = roomStore.createRoom("test", "/tmp", ["pm"]);
@@ -204,7 +228,8 @@ describe("room-store", () => {
 
       roomStore.addMember(room.id, "qa");
       const cursors = roomStore.getCursors(room.id);
-      expect(cursors.qa).toBe(msg.id);
+      const qa = roomStore.findRoomMemberByName(room.id, "qa")!;
+      expect(cursors[qa.id]).toBe(msg.id);
     });
   });
 });

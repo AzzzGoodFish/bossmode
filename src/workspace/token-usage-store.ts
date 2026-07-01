@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { listRooms, roomDir } from "./room-store.js";
+import { getRoomMembers, listRooms, roomDir } from "./room-store.js";
 import { logger } from "../foundation/logger.js";
 
 export interface MemberTokenUsageSummary {
@@ -24,18 +24,21 @@ export function getMemberTokenUsage(memberName: string): MemberTokenUsageSummary
   let totalTokens = 0;
 
   for (const room of listRooms()) {
-    const path = join(roomDir(room.id), "agent-events", `${memberName}.jsonl`);
-    if (!existsSync(path)) continue;
+    const memberIds = getRoomMembers(room.id).filter((member) => member.name === memberName || member.sourceAgent === memberName).map((member) => member.id);
+    const refs = Array.from(new Set([memberName, ...memberIds]));
+    for (const ref of refs) {
+      const path = join(roomDir(room.id), "agent-events", `${ref}.jsonl`);
+      if (!existsSync(path)) continue;
 
-    let content = "";
-    try {
-      content = readFileSync(path, "utf-8");
-    } catch (err) {
-      logger.error("token-usage-store", "failed to read agent events", { roomId: room.id, memberName, error: String(err) });
-      continue;
-    }
+      let content = "";
+      try {
+        content = readFileSync(path, "utf-8");
+      } catch (err) {
+        logger.error("token-usage-store", "failed to read agent events", { roomId: room.id, memberName, memberRef: ref, error: String(err) });
+        continue;
+      }
 
-    for (const line of content.split("\n")) {
+      for (const line of content.split("\n")) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as { type?: string; usage?: unknown };
@@ -43,7 +46,8 @@ export function getMemberTokenUsage(memberName: string): MemberTokenUsageSummary
           totalTokens += usageTotal(event.usage);
         }
       } catch (err) {
-        logger.error("token-usage-store", "failed to parse agent event", { roomId: room.id, memberName, error: String(err) });
+        logger.error("token-usage-store", "failed to parse agent event", { roomId: room.id, memberName, memberRef: ref, error: String(err) });
+        }
       }
     }
   }

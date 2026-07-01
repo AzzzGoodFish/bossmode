@@ -19,6 +19,7 @@ interface StationPanelProps {
   roomId: string;
   onOpenLens?: (agentName: string) => void;
   onOpenMcpSettings?: () => void;
+  onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
 }
 
@@ -57,7 +58,7 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** 工位墙 — 每个 agent 一张工位卡：工牌 + 状态 + 模型热切换 + context 油量 + 快捷操作 */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, onOpenMcpSettings, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
   const { toast } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -109,7 +110,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     async (member: MemberInfo, model: string | null, credentialId: string | null) => {
       setOpenChip(null);
       try {
-        const updated = await updateRoomMember(roomId, member.name, { model, credentialId });
+        const updated = await updateRoomMember(roomId, member.id, { model, credentialId });
         setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
         toast(`${member.name} → ${model}（下一回合生效）`, "success");
       } catch (err: any) {
@@ -121,7 +122,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
 
   const handleSwitchThinking = useCallback(async (member: MemberInfo, thinkingLevel: string | null) => {
     try {
-      const updated = await updateRoomMember(roomId, member.name, { thinkingLevel });
+      const updated = await updateRoomMember(roomId, member.id, { thinkingLevel });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
       toast(`${member.name} thinking → ${thinkingLevel ?? "default"}`, "success");
     } catch (err: any) {
@@ -140,17 +141,35 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
 
   const handleResetSession = useCallback(async (member: MemberInfo) => {
     try {
-      await resetAgentSession(roomId, member.name);
+      await resetAgentSession(roomId, member.id);
       toast(`${member.name} session reset`, "success");
     } catch (err: any) {
       toast(`Reset failed: ${err.message}`, "error");
     }
   }, [roomId, toast]);
 
+  const handleRenameMember = useCallback(async (member: MemberInfo, name: string) => {
+    try {
+      const updated = await updateRoomMember(roomId, member.id, { name });
+      setMemberInfos((prev) => {
+        const next = { ...prev };
+        delete next[member.name];
+        next[updated.name] = updated;
+        return next;
+      });
+      setSelectedMember(updated.name);
+      await onMembersChanged?.();
+      toast(`Member renamed: ${member.name} → ${updated.name}`, "success");
+    } catch (err: any) {
+      toast(`Rename failed: ${err.message}`, "error");
+      throw err;
+    }
+  }, [onMembersChanged, roomId, toast]);
+
   const loadRecentEvents = useCallback(async (name: string) => {
     try {
       const result = await getAgentEventsPaginated(roomId, name, 40);
-      const stationEvents = (result.events as AgentEvent[]).filter(isStationDisplayEvent).slice(-8);
+      const stationEvents = coalesceStationActivity(result.events as AgentEvent[]).slice(-8);
       setRecentEvents((prev) => ({ ...prev, [name]: stationEvents }));
     } catch (err) {
       console.error("Failed to load recent agent events:", err);
@@ -176,7 +195,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
         if (data.type !== "agent:event" || data.roomId !== roomId || !members.includes(data.agent)) return;
         const event = data.event as AgentEvent;
         if (!isStationDisplayEvent(event)) return;
-        setRecentEvents((prev) => ({ ...prev, [data.agent]: [...(prev[data.agent] || []), event].slice(-8) }));
+        setRecentEvents((prev) => ({ ...prev, [data.agent]: coalesceStationActivity([...(prev[data.agent] || []), event]).slice(-8) }));
       } catch {}
     };
     return () => ws.close();
@@ -188,7 +207,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     const assignableNames = new Set(mcpServers.filter(isAssignableMcpServer).map((s) => s.name));
     const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name) && assignableNames.has(name));
     try {
-      const updated = await updateRoomMember(roomId, member.name, { mcpServers: nextServers });
+      const updated = await updateRoomMember(roomId, member.id, { mcpServers: nextServers });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
       await refreshMcpSettings();
       toast(`${member.name} MCP access saved（重启该 member 后生效）`, "success");
@@ -369,6 +388,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
             mcpServers={mcpServers}
             onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
             onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
+            onRename={(name) => handleRenameMember(memberInfos[selectedMember], name)}
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
             onSwitchThinking={(thinkingLevel) => handleSwitchThinking(memberInfos[selectedMember], thinkingLevel)}
             onRestart={() => handleRestartMember(memberInfos[selectedMember])}
@@ -399,6 +419,7 @@ function MemberConfigPanel({
   mcpServers,
   onOpenWorkstation,
   onOpenMcpSettings,
+  onRename,
   onSwitchModel,
   onSwitchThinking,
   onRestart,
@@ -413,6 +434,7 @@ function MemberConfigPanel({
   mcpServers: McpServerSummary[];
   onOpenWorkstation: () => void;
   onOpenMcpSettings: () => void;
+  onRename: (name: string) => Promise<void>;
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
   onSwitchThinking: (thinkingLevel: string | null) => void;
   onRestart: () => void;
@@ -422,6 +444,22 @@ function MemberConfigPanel({
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
   const statusText = statusLabel(status).toLowerCase();
+  const [draftName, setDraftName] = useState(member.name);
+  const [savingName, setSavingName] = useState(false);
+
+  useEffect(() => { setDraftName(member.name); }, [member.id, member.name]);
+
+  const canSaveName = draftName.trim() && draftName.trim() !== member.name && !savingName;
+  const saveName = async () => {
+    if (!canSaveName) return;
+    setSavingName(true);
+    try {
+      await onRename(draftName.trim());
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   return (
     <div className="p-5 space-y-4">
       <header className="flex items-start justify-between gap-4 pb-1">
@@ -441,16 +479,35 @@ function MemberConfigPanel({
       <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
         <div>
           <div className="text-sm font-semibold text-ink-1">Profile</div>
-          <div className="text-xs text-ink-4 mt-0.5">Room member identity is read-only in this RC.</div>
+          <div className="text-xs text-ink-4 mt-0.5">Member name is room-local and used for @ mentions. Source agent is read-only.</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
+            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Member name</div>
+            <div className="flex gap-2">
+              <input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveName(); }}
+                className="min-w-0 flex-1 bg-surface-3 border border-line rounded px-2 py-1.5 font-mono text-sm text-ink-1 focus:outline-none focus:border-line-strong"
+                placeholder="member-name"
+                disabled={status === "working" || savingName}
+              />
+              <button
+                type="button"
+                onClick={() => void saveName()}
+                disabled={!canSaveName || status === "working"}
+                className="px-3 py-1.5 rounded border border-line text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50"
+              >
+                {savingName ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <div className="text-[11px] text-ink-4">Mention as <span className="font-mono">@{member.name}</span>{status === "working" ? " · rename disabled while working" : ""}</div>
+          </label>
           <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Mention name</div>
-            <div className="font-mono text-sm text-ink-1 mt-1">@{member.name}</div>
-          </div>
-          <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Created from</div>
-            <div className="font-mono text-sm text-ink-1 mt-1">{member.agent || member.name}</div>
+            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Source agent</div>
+            <div className="font-mono text-sm text-ink-1 mt-1">{member.agent || member.sourceAgent || member.name}</div>
+            <div className="text-[11px] text-ink-4 mt-2">Read-only role/template this room member was created from.</div>
           </div>
         </div>
       </section>
@@ -549,7 +606,41 @@ function MemberConfigPanel({
 
 
 function isStationDisplayEvent(event: AgentEvent): boolean {
+  if (event.type === "message_end" || event.type === "message_update" || event.type === "message_start" || event.type === "tool_update") return false;
   return isStationActionEvent(event) || event.type === "tool_end";
+}
+
+function toolLifecycleKey(event: AgentEvent): string | null {
+  if (event.type !== "tool_start" && event.type !== "tool_end") return null;
+  return event.toolCallId ? `id:${event.toolCallId}` : `name:${event.toolName || "tool"}`;
+}
+
+function coalesceStationActivity(events: AgentEvent[]): AgentEvent[] {
+  const rows: AgentEvent[] = [];
+  const toolRowIndex = new Map<string, number>();
+  for (const event of events) {
+    if (!isStationDisplayEvent(event)) continue;
+    const key = toolLifecycleKey(event);
+    if (!key) {
+      rows.push(event);
+      continue;
+    }
+    const existingIndex = toolRowIndex.get(key);
+    if (existingIndex === undefined) {
+      rows.push(event);
+      toolRowIndex.set(key, rows.length - 1);
+      continue;
+    }
+    const previous = rows[existingIndex];
+    rows[existingIndex] = {
+      ...previous,
+      ...event,
+      args: event.args ?? previous.args,
+      ts: event.ts ?? previous.ts,
+      lifecycleStartedAt: previous.lifecycleStartedAt ?? previous.ts,
+    };
+  }
+  return rows;
 }
 
 function safeEventDetail(value: unknown): string {

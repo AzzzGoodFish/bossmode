@@ -17,13 +17,20 @@ import {
   writeMcpStatusCache,
 } from "../shared/mcp-settings.js";
 import { checkMcpServerAvailability } from "../engine/mcp-availability.js";
-import { listRooms } from "../workspace/room-store.js";
+import { getRoomMembers, listRooms } from "../workspace/room-store.js";
 
 function assignedServerCounts(): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const room of listRooms()) {
-    for (const override of Object.values(room.memberOverrides || {})) {
-      for (const name of override.mcpServers || []) counts[name] = (counts[name] || 0) + 1;
+    const roomMembers = getRoomMembers(room.id);
+    if (roomMembers.length > 0) {
+      for (const member of roomMembers) {
+        for (const name of member.config?.mcpServers || []) counts[name] = (counts[name] || 0) + 1;
+      }
+    } else {
+      for (const override of Object.values(room.memberOverrides || {})) {
+        for (const name of override.mcpServers || []) counts[name] = (counts[name] || 0) + 1;
+      }
     }
   }
   return counts;

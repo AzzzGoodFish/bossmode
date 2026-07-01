@@ -104,7 +104,9 @@ interface PendingCredentialRefresh {
 interface AgentInstance {
   handle: AgentHandle;
   roomId: string;
-  agentName: string;
+  memberId: string;
+  agentName: string; // current member name snapshot for display/mentions
+  sourceAgent: string;
   status: AgentStatus;
   dispatchState: DispatchState;
   promptInFlight: boolean;
@@ -122,8 +124,12 @@ interface AgentInstance {
 const instances = new Map<string, AgentInstance>();
 const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
 
-function instanceKey(roomId: string, agentName: string): string {
-  return `${roomId}:${agentName}`;
+function instanceKey(roomId: string, memberId: string): string {
+  return `${roomId}:${memberId}`;
+}
+
+function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
+  return memberId && memberId !== agentName ? { memberId } : {};
 }
 
 function transition(
@@ -137,7 +143,7 @@ function transition(
   const prev = instance.status;
   instance.status = newStatus;
   logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
-  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, status: newStatus });
+  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
 }
 
 function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
@@ -224,7 +230,7 @@ function shouldRecreateForModelSwitch(instance: AgentInstance, model: string, cr
 }
 
 async function recreateInstanceForModelSwitch(instance: AgentInstance, model: string, credentialId: string | undefined, trigger: string): Promise<void> {
-  const key = instanceKey(instance.roomId, instance.agentName);
+  const key = instanceKey(instance.roomId, instance.memberId);
   const queuedInputs = instance.queuedInputs.splice(0);
   try { await instance.handle.waitForIdle?.(); } catch {}
   try { instance.unsubscribe(); } catch {}
@@ -232,14 +238,14 @@ async function recreateInstanceForModelSwitch(instance: AgentInstance, model: st
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
 
-  const next = await getOrCreate(instance.roomId, instance.agentName);
+  const next = await getOrCreate(instance.roomId, instance.memberId);
   if (!next) throw new Error(`Failed to recreate member "${instance.agentName}" for model switch`);
   next.queuedInputs.push(...queuedInputs);
   next.appliedModel = model;
   next.appliedProvider = providerFromModelRef(model);
   next.appliedCredentialId = credentialId;
   logger.info("agent", "modelSwitchRecreated", { member: instance.agentName, roomId: instance.roomId, model, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: next.status });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: next.status });
 }
 
 async function applyModelSwitchToInstance(instance: AgentInstance, pending: PendingModelSwitch, trigger: string): Promise<void> {
@@ -247,7 +253,7 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
   const credentialId = pending.credentialId;
   const exported = exportPiConfigForMember({
     roomId: instance.roomId,
-    memberName: instance.agentName,
+    memberName: instance.memberId,
     modelRef: model,
     credentialId,
   });
@@ -271,7 +277,7 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
   instance.appliedProvider = providerFromModelRef(model);
   instance.appliedCredentialId = resolvedCredentialId;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: instance.status });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
 }
 
 function applyPendingModelSwitch(instance: AgentInstance, trigger: string): void {
@@ -289,7 +295,7 @@ async function applyThinkingSwitchToInstance(instance: AgentInstance, pending: P
   await instance.handle.setThinkingLevel(pending.thinkingLevel);
   if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
   logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, roomId: instance.roomId, thinkingLevel: pending.thinkingLevel, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: instance.status });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
 }
 
 function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): void {
@@ -307,14 +313,14 @@ function instanceUsesCredentialProfile(instance: AgentInstance, profileId: strin
 }
 
 function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason: string): void {
-  const key = instanceKey(instance.roomId, instance.agentName);
+  const key = instanceKey(instance.roomId, instance.memberId);
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
   try { instance.unsubscribe(); } catch {}
   try { instance.handle.destroy(); } catch {}
   instance.status = "inactive";
   updateDispatchState(instance, "idle", "credential_unavailable");
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, status: "inactive" });
+  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: "inactive" });
   logger.warn("agent", "credentialRefreshUnavailable", { member: instance.agentName, roomId: instance.roomId, reason });
   postMessage(instance.roomId, "system", `Member "${instance.agentName}" model credential is no longer available. Update Settings → Model Credentials or choose another model before the next turn.`);
 }
@@ -323,7 +329,7 @@ async function applyCredentialRefreshToInstance(instance: AgentInstance, pending
   try {
     const exported = exportPiConfigForMember({
       roomId: instance.roomId,
-      memberName: instance.agentName,
+      memberName: instance.memberId,
       modelRef: instance.appliedModel,
       credentialId: instance.appliedCredentialId,
     });
@@ -444,8 +450,21 @@ function resolveSkills(member: AgentMemberConfig, agentDef: { skills?: string[] 
 
 // -- Instance creation --
 
-async function getOrCreate(roomId: string, memberName: string): Promise<AgentInstance | null> {
-  const key = instanceKey(roomId, memberName);
+async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInstance | null> {
+  const room = roomStore.getRoom(roomId);
+  if (!room) {
+    logger.error("agent", "room not found", { roomId });
+    return null;
+  }
+
+  const member = resolveRoomMember(roomId, memberRef);
+  if (!member) {
+    logger.error("agent", "no member or agent definition found", { name: memberRef });
+    return null;
+  }
+  const memberId = member.id;
+  const memberName = member.name;
+  const key = instanceKey(roomId, memberId);
   const existing = instances.get(key);
   if (existing) return existing;
 
@@ -458,20 +477,8 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       return null;
     }
 
-    logger.info("agent", "getOrCreate", { member: memberName, roomId, found: false });
-
-    const room = roomStore.getRoom(roomId);
-    if (!room) {
-      logger.error("agent", "room not found", { roomId });
-      return null;
-    }
-
-    const member = resolveRoomMember(roomId, memberName);
-    if (!member) {
-      logger.error("agent", "no member or agent definition found", { name: memberName });
-      return null;
-    }
-    logger.info("agent", "loadMember", { member: memberName, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
+    logger.info("agent", "getOrCreate", { member: memberName, memberId, roomId, found: false });
+    logger.info("agent", "loadMember", { member: memberName, memberId, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
 
     const agentDef = loadAgentDefinition(member.agent);
     if (!agentDef) {
@@ -520,7 +527,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
     }
 
     const sessions = sessionStore.getSessions(roomId);
-    const savedSession = sessions[memberName];
+    const savedSession = sessions[memberId] || sessions[memberName];
     const resumeSession = (sessionResumeEnabled && savedSession)
       ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
       : undefined;
@@ -541,20 +548,21 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
         roomMembers: room.members,
         resumeSession,
         onSessionChanged: (session) => {
-          sessionStore.saveSession(roomId, memberName, {
+          sessionStore.saveSession(roomId, memberId, {
             runtime: member.runtime,
             sessionId: session.sessionId,
             sessionFile: session.sessionFile,
           });
-          logger.info("agent", "sessionSaved", { member: memberName, sessionId: session.sessionId, sessionFile: session.sessionFile });
+          logger.info("agent", "sessionSaved", { member: memberName, memberId, sessionId: session.sessionId, sessionFile: session.sessionFile });
         },
         callbacks: {
           onChat: async (message: string) => {
-            postMessage(roomId, memberName, message);
+            postMessage(roomId, memberName, message, [], { senderMemberId: memberId });
           },
           onMention: async (targetMember: string, message: string) => {
             // Mention activation is handled by router listener via message-bus.
-            postMessage(roomId, memberName, message, [targetMember]);
+            const target = roomStore.resolveRoomMemberRef(roomId, targetMember);
+            postMessage(roomId, memberName, message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
           },
         },
       });
@@ -564,7 +572,9 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       const instance: AgentInstance = {
         handle,
         roomId,
+        memberId,
         agentName: memberName,
+        sourceAgent: member.agent,
         status: "idle",
         dispatchState: "idle",
         promptInFlight: false,
@@ -577,7 +587,7 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer);
+        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
         if (event.type === "agent_start") {
           updateDispatchState(instance, "running", event.type);
           flushQueuedInputs(instance, event.type);
@@ -639,24 +649,26 @@ async function getOrCreate(roomId: string, memberName: string): Promise<AgentIns
 
 // -- Activation --
 
-export async function activateAgent(roomId: string, memberName: string): Promise<void> {
-  logger.info("agent", "activateAgent", { roomId, member: memberName });
+export async function activateAgent(roomId: string, memberRef: string): Promise<void> {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberName = member?.name || memberRef;
+  const memberId = member?.id || memberRef;
+  logger.info("agent", "activateAgent", { roomId, member: memberName, memberId });
 
-  const instance = await getOrCreate(roomId, memberName);
+  const instance = await getOrCreate(roomId, memberId);
   if (!instance) {
     postMessage(roomId, "system", `Failed to activate member "${memberName}": not found or runtime unavailable.`);
     return;
   }
 
   const cursors = roomStore.getCursors(roomId);
-  const lastCursor = cursors[memberName] ?? null;
+  const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
   const allNewMessages = getMessagesSince(roomId, lastCursor);
   const latestId = getLatestMessageId(roomId);
-  if (latestId) roomStore.setCursor(roomId, memberName, latestId);
+  if (latestId) roomStore.setCursor(roomId, memberId, latestId);
   if (allNewMessages.length === 0) return;
 
   // Context limit
-  const member = resolveRoomMember(roomId, memberName);
   const contextLimit = (member as any)?.contextLimit || 50;
   const visibleMessages = filterAgentVisibleMessages(allNewMessages, memberName);
   if (visibleMessages.length === 0) return;
@@ -668,7 +680,7 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 
   const formattedMessages = formatMessagesForAgent(roomId, newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
-  setActivationSource(roomId, memberName, "room_mention");
+  setActivationSource(roomId, memberId, "room_mention");
 
   if (instance.status === "working") {
     instance.handle.steer(formattedMessages);
@@ -692,31 +704,34 @@ export async function activateAgent(roomId: string, memberName: string): Promise
 export async function activateAll(roomId: string): Promise<void> {
   const room = roomStore.getRoom(roomId);
   if (!room) return;
-  const activations = room.members.map((agentName) => {
-    const key = instanceKey(roomId, agentName);
+  const activations = roomStore.getRoomMembers(roomId).map((member) => {
+    const key = instanceKey(roomId, member.id);
     const instance = instances.get(key);
     if (instance && (instance.status === "working" || instance.dispatchState !== "idle")) return Promise.resolve();
-    return activateAgent(roomId, agentName);
+    return activateAgent(roomId, member.id);
   });
   await Promise.allSettled(activations);
 }
 
 // -- Model switching --
 
-export async function switchMemberModel(roomId: string, memberName: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
+export async function switchMemberModel(roomId: string, memberRef: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const memberName = member?.name || memberRef;
   const normalizedModel = normalizeSwitchModelRef(model);
   const available = listAvailableModels().some((m) => m.ref === normalizedModel);
   if (!available) throw new Error(`Model is not available or credential is missing: ${normalizedModel}`);
-  if (persistRoomOverride) roomStore.updateRoomMemberOverride(roomId, memberName, { model: normalizedModel, credentialId: credentialId || null });
+  if (persistRoomOverride) roomStore.updateRoomMemberOverride(roomId, memberId, { model: normalizedModel, credentialId: credentialId || null });
 
-  const key = instanceKey(roomId, memberName);
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance) return { applied: false, pending: false, active: false, model: normalizedModel };
 
   const pending = { model: normalizedModel, credentialId: credentialId || undefined };
   if (instance.status === "working" || instance.dispatchState !== "idle") {
     instance.pendingModelSwitch = pending;
-    logger.info("agent", "modelSwitchQueued", { member: memberName, roomId, model: normalizedModel, status: instance.status, dispatchState: instance.dispatchState });
+    logger.info("agent", "modelSwitchQueued", { member: memberName, memberId, roomId, model: normalizedModel, status: instance.status, dispatchState: instance.dispatchState });
     return { applied: false, pending: true, active: true, model: normalizedModel };
   }
 
@@ -724,15 +739,18 @@ export async function switchMemberModel(roomId: string, memberName: string, mode
   return { applied: true, pending: false, active: true, model: normalizedModel };
 }
 
-export async function switchMemberThinkingLevel(roomId: string, memberName: string, thinkingLevel: string): Promise<{ applied: boolean; pending: boolean; active: boolean; thinkingLevel: string }> {
-  const key = instanceKey(roomId, memberName);
+export async function switchMemberThinkingLevel(roomId: string, memberRef: string, thinkingLevel: string): Promise<{ applied: boolean; pending: boolean; active: boolean; thinkingLevel: string }> {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const memberName = member?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance) return { applied: false, pending: false, active: false, thinkingLevel };
 
   const pending = { thinkingLevel };
   if (instance.status === "working" || instance.dispatchState !== "idle") {
     instance.pendingThinkingSwitch = pending;
-    logger.info("agent", "thinkingSwitchQueued", { member: memberName, roomId, thinkingLevel, status: instance.status, dispatchState: instance.dispatchState });
+    logger.info("agent", "thinkingSwitchQueued", { member: memberName, memberId, roomId, thinkingLevel, status: instance.status, dispatchState: instance.dispatchState });
     return { applied: false, pending: true, active: true, thinkingLevel };
   }
 
@@ -752,17 +770,17 @@ export async function switchMemberModelInActiveRooms(memberName: string, model: 
 
 // -- Status --
 
-export function getAgentStatus(roomId: string, agentName: string): AgentStatus {
-  const instance = instances.get(instanceKey(roomId, agentName));
+export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const instance = instances.get(instanceKey(roomId, memberId));
   if (!instance) return "inactive";
   return instance.status;
 }
 
 export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus> {
-  const room = roomStore.getRoom(roomId);
-  if (!room) return {};
   const result: Record<string, AgentStatus> = {};
-  for (const m of room.members) result[m] = getAgentStatus(roomId, m);
+  for (const member of roomStore.getRoomMembers(roomId)) result[member.name] = getAgentStatus(roomId, member.id);
   return result;
 }
 
@@ -770,14 +788,19 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
 
 const contextUsageCache = new Map<string, ContextUsage>();
 
-export function getAgentContextUsage(roomId: string, agentName: string): ContextUsage | null {
-  const key = instanceKey(roomId, agentName);
+export function getAgentContextUsage(roomId: string, memberRef: string): ContextUsage | null {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const key = instanceKey(roomId, memberId);
   return contextUsageCache.get(key) ?? null;
 }
 
 /** Proactively refresh context usage cache (called on agent_end). Fire-and-forget, non-blocking. */
-export function refreshContextUsageOnIdle(roomId: string, agentName: string): void {
-  const key = instanceKey(roomId, agentName);
+export function refreshContextUsageOnIdle(roomId: string, memberRef: string): void {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const agentName = member?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance?.handle.getContextUsage) return;
 
@@ -788,6 +811,7 @@ export function refreshContextUsageOnIdle(roomId: string, agentName: string): vo
       type: "agent:context_usage",
       roomId,
       agent: agentName,
+      ...memberIdentityMeta(agentName, memberId),
       usage,
     });
   }).catch(() => {});
@@ -795,19 +819,24 @@ export function refreshContextUsageOnIdle(roomId: string, agentName: string): vo
 
 // -- Event history --
 
-export function getAgentEventHistory(roomId: string, agentName: string): AgentHistoryEvent[] {
-  return loadEventsFromDisk(roomId, agentName);
+export function getAgentEventHistory(roomId: string, memberRef: string): AgentHistoryEvent[] {
+  const member = resolveRoomMember(roomId, memberRef);
+  return loadEventsFromDisk(roomId, member?.id || memberRef);
 }
 
-function emitAgentLocalEvent(roomId: string, agentName: string, event: AgentHistoryEvent): void {
-  const key = instanceKey(roomId, agentName);
+function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHistoryEvent): void {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const agentName = member?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (instance) instance.eventBuffer.push(event);
-  try { appendEventToDisk(roomId, agentName, event); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
+  try { appendEventToDisk(roomId, memberId, event); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
   broadcastToAgentSubscribers(roomId, agentName, {
     type: "agent:event",
     roomId,
     agent: agentName,
+    memberId,
     event,
   });
 }
@@ -820,13 +849,14 @@ export function emitAgentReply(roomId: string, agentName: string, text: string):
 
 // -- Steer --
 
-export async function steerAgent(roomId: string, agentName: string, instruction: string): Promise<void> {
-  const instance = await getOrCreate(roomId, agentName);
+export async function steerAgent(roomId: string, memberRef: string, instruction: string): Promise<void> {
+  const instance = await getOrCreate(roomId, memberRef);
+  const agentName = instance?.agentName || memberRef;
   if (!instance) throw new Error(`Cannot steer agent "${agentName}": not found`);
 
   const steerEvent: AgentHistoryEvent = { type: "user_steer", text: instruction };
   instance.eventBuffer.push(steerEvent);
-  try { appendEventToDisk(roomId, agentName, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, error: String(err) }); }
+  try { appendEventToDisk(roomId, instance.memberId, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId: instance.memberId, error: String(err) }); }
 
   // Slash commands (e.g. /compact, /model) are transparently forwarded to the runtime.
   // Only regular text gets wrapped with the private envelope + footer.
@@ -835,7 +865,7 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
     ? instruction
     : `${wrapPrivateMessage(instruction, USER_DISPLAY_NAME)}\n\n${PRIVATE_REPLY_FOOTER}`;
 
-  setActivationSource(roomId, agentName, isSlashCommand ? "system" : "private_instruction");
+  setActivationSource(roomId, instance.memberId, isSlashCommand ? "system" : "private_instruction");
 
   if (instance.status === "working") {
     instance.handle.steer(userMessage);
@@ -854,8 +884,11 @@ export async function steerAgent(roomId: string, agentName: string, instruction:
 
 // -- Abort --
 
-export function abortAgent(roomId: string, memberName: string): { ok: boolean; action: string } {
-  const key = instanceKey(roomId, memberName);
+export function abortAgent(roomId: string, memberRef: string): { ok: boolean; action: string } {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const memberName = member?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
@@ -864,7 +897,7 @@ export function abortAgent(roomId: string, memberName: string): { ok: boolean; a
   instance.handle.abort();
   updateDispatchState(instance, "aborting", "abort");
   instance.queuedInputs = [];
-  logger.info("agent", "aborted", { member: memberName, roomId });
+  logger.info("agent", "aborted", { member: memberName, memberId, roomId });
   return { ok: true, action: "aborted" };
 }
 
@@ -881,7 +914,7 @@ export function getMemberInstances(memberName: string): Array<{
 }> {
   const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("./runtime/types.js").AgentRuntimeParams }> = [];
   for (const [key, instance] of instances) {
-    if (key.endsWith(`:${memberName}`)) {
+    if (instance.agentName === memberName || instance.memberId === memberName) {
       const roomId = key.split(":")[0];
       const room = roomStore.getRoom(roomId);
       const handle = instance.handle as any;
@@ -899,26 +932,35 @@ export function getMemberInstances(memberName: string): Array<{
   return result;
 }
 
-export function resetAgentSession(roomId: string, agentName: string): { ok: true; message: string } {
+export function resetAgentSession(roomId: string, memberRef: string): { ok: true; message: string } {
+  const resolved = resolveRoomMember(roomId, memberRef);
+  const memberId = resolved?.id || memberRef;
+  const agentName = resolved?.name || memberRef;
   const sessions = sessionStore.getSessions(roomId);
-  const member = getMemberByName(agentName);
-  const key = instanceKey(roomId, agentName);
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
-  const runtime = member?.runtime || sessions[agentName]?.runtime || instance?.handle.runtimeName || "pi-cli";
+  const runtime = sessions[memberId]?.runtime || sessions[agentName]?.runtime || instance?.handle.runtimeName || "pi-cli";
 
-  destroyInstance(roomId, agentName);
-  clearActivationSource(roomId, agentName);
-  sessionStore.clearSession(roomId, agentName, runtime);
-  roomStore.setCursor(roomId, agentName, null);
+  destroyInstance(roomId, memberId);
+  clearActivationSource(roomId, memberId);
+  sessionStore.clearSession(roomId, memberId, runtime);
+  roomStore.setCursor(roomId, memberId, null);
+  if (memberId !== agentName) {
+    sessionStore.clearSession(roomId, agentName, runtime);
+    roomStore.setCursor(roomId, agentName, null);
+  }
 
   const message = "Session reset. Next activation will start fresh.";
-  emitAgentLocalEvent(roomId, agentName, { type: "system", text: message });
-  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, status: "inactive" });
+  emitAgentLocalEvent(roomId, memberId, { type: "system", text: message });
+  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" });
   return { ok: true, message };
 }
 
-export function destroyInstance(roomId: string, memberName: string): void {
-  const key = instanceKey(roomId, memberName);
+export function destroyInstance(roomId: string, memberRef: string): void {
+  const resolved = resolveRoomMember(roomId, memberRef);
+  const memberId = resolved?.id || memberRef;
+  const memberName = resolved?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (instance) {
     instance.handle.abort();
@@ -926,8 +968,8 @@ export function destroyInstance(roomId: string, memberName: string): void {
     instance.unsubscribe();
     instances.delete(key);
     contextUsageCache.delete(key);
-    clearActivationSource(roomId, memberName);
-    logger.info("agent", "instance destroyed", { member: memberName, roomId });
+    clearActivationSource(roomId, memberId);
+    logger.info("agent", "instance destroyed", { member: memberName, memberId, roomId });
   }
   pendingCreations.delete(key);
 }

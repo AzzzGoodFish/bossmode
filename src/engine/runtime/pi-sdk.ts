@@ -118,7 +118,7 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }
   ensureBossmodeMcpDirs();
-  const scoped = writeScopedMcpConfig({ roomId: args.roomId, memberName: args.member.name, serverNames: assignedServers });
+  const scoped = writeScopedMcpConfig({ roomId: args.roomId, memberId: args.member.id, serverNames: assignedServers });
   if (scoped.serverNames.length === 0) {
     logger.warn("runtime:pi-sdk", "mcp scoped config has no valid assigned servers", { roomId: args.roomId, member: args.member.name, assignedServers });
     return { enabled: false, configPath: scoped.configPath, runtimeDir, serverNames: [] };
@@ -339,7 +339,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const { provider, modelId } = splitModelRef(resolvedModel);
     const piConfig = exportPiConfigForMember({
       roomId: opts.roomId,
-      memberName: opts.member.name,
+      memberName: opts.member.id,
       modelRef: resolvedModel,
       credentialId: opts.member.credentialId,
     });
@@ -348,7 +348,7 @@ export class PiSdkRuntime implements AgentRuntime {
     }
 
     const safeRoom = safeSegment(opts.roomId);
-    const safeMember = safeSegment(opts.member.name);
+    const safeMember = safeSegment(opts.member.id);
     const runtimeAgentDir = piConfig?.agentDir || join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
     const sessionDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });

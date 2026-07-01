@@ -8,8 +8,8 @@ import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
-import { parseMentions } from "../communication/router.js";
-import { getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
+import { destroyInstance, getAgentStatus, getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
@@ -168,11 +168,13 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
   }
 
   // Parse @ mentions from content
-  const mentions = parseMentions(content, room.members);
+  const roomMembers = roomStore.getRoomMembers(params.id);
+  const mentions = parseMentions(content, roomMembers.map((member) => member.name));
+  const mentionMemberIds = parseMentionMemberIds(content, roomMembers);
 
   // Post via message-bus (writes + broadcasts + notifies router listeners)
-  if (attachments.length > 0) postMessage(params.id, "user", content, mentions, { attachments });
-  else postMessage(params.id, "user", content, mentions);
+  const extra = { mentionMemberIds, ...(attachments.length > 0 ? { attachments } : {}) };
+  postMessage(params.id, "user", content, mentions, extra);
 
   // Return the latest message
   const messages = messageStore.getMessages(params.id, { limit: 1 });
@@ -212,7 +214,7 @@ addRoute("GET", "/api/rooms/:id/members", async (_req, res, params) => {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
-  sendJson(res, 200, resolveRoomMembers(params.id, room.members));
+  sendJson(res, 200, resolveRoomMembers(params.id));
 });
 
 addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params) => {
@@ -221,13 +223,15 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
-  if (!room.members.includes(params.memberName)) {
+  const roomMember = roomStore.resolveRoomMemberRef(params.id, params.memberName);
+  if (!roomMember) {
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
 
-  const body = (await parseBody(req)) as { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null };
+  const body = (await parseBody(req)) as { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null };
   const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null } = {};
+  const hasName = Object.prototype.hasOwnProperty.call(body, "name");
   const hasModel = Object.prototype.hasOwnProperty.call(body, "model");
   const hasCredential = Object.prototype.hasOwnProperty.call(body, "credentialId");
   const hasThinking = Object.prototype.hasOwnProperty.call(body, "thinkingLevel");
@@ -247,7 +251,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
   }
 
   try {
-    const credentialTargetModel = model === undefined ? resolveRoomMember(params.id, params.memberName)?.model : model;
+    const credentialTargetModel = model === undefined ? resolveRoomMember(params.id, roomMember.id)?.model : model;
     const credentialId = hasCredential ? validateCredentialMatchesModel(body.credentialId, credentialTargetModel) : undefined;
     if (hasCredential) patch.credentialId = credentialId ?? null;
   } catch (err: any) {
@@ -289,17 +293,40 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     }
   }
 
-  if (!hasModel && !hasCredential && !hasThinking && !hasMcpServers) {
+  if (!hasName && !hasModel && !hasCredential && !hasThinking && !hasMcpServers) {
     sendJson(res, 400, { error: "Nothing to update" });
     return;
   }
 
-  roomStore.updateRoomMemberOverride(params.id, params.memberName, patch);
-  const effective = resolveRoomMember(params.id, params.memberName);
-  const result: Record<string, unknown> = { member: effective };
+  let currentMemberRef = roomMember.id;
+  const result: Record<string, unknown> = {};
+  if (hasName) {
+    if (typeof body.name !== "string") {
+      sendJson(res, 400, { error: "name must be a string" });
+      return;
+    }
+    if (getAgentStatus(params.id, roomMember.id) === "working") {
+      sendJson(res, 409, { error: "Cannot rename a working member. Stop or wait for it to become idle first." });
+      return;
+    }
+    const renamed = roomStore.renameRoomMember(params.id, roomMember.id, body.name);
+    if (!renamed.ok) {
+      sendJson(res, renamed.code === "duplicate" ? 409 : 400, { error: renamed.error });
+      return;
+    }
+    currentMemberRef = renamed.member.id;
+    destroyInstance(params.id, renamed.member.id);
+    result.renamed = true;
+  }
+
+  if (hasModel || hasCredential || hasThinking || hasMcpServers) {
+    roomStore.updateRoomMemberOverride(params.id, currentMemberRef, patch);
+  }
+  const effective = resolveRoomMember(params.id, currentMemberRef);
+  result.member = effective;
   try {
-    if (hasModel && effective?.model) result.modelSwitch = await switchMemberModel(params.id, params.memberName, effective.model, effective.credentialId);
-    if (hasThinking && effective?.thinkingLevel) result.thinkingSwitch = await switchMemberThinkingLevel(params.id, params.memberName, effective.thinkingLevel);
+    if (hasModel && effective?.model) result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, effective.model, effective.credentialId);
+    if (hasThinking && effective?.thinkingLevel) result.thinkingSwitch = await switchMemberThinkingLevel(params.id, currentMemberRef, effective.thinkingLevel);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
     return;
@@ -344,7 +371,8 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (req, res, params) 
   const limit = parseInt(url.searchParams.get("limit") || "0");
   if (limit > 0) {
     const before = url.searchParams.get("before") ? parseInt(url.searchParams.get("before")!) : undefined;
-    const result = loadEventsPaginated(params.id, params.agent, limit, before);
+    const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+    const result = loadEventsPaginated(params.id, member?.id || params.agent, limit, before);
     sendJson(res, 200, result);
   } else {
     // Legacy: return all events (no pagination)
@@ -360,7 +388,8 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
     return;
   }
 
-  if (!room.members.includes(params.agent)) {
+  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+  if (!member) {
     sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
     return;
   }
@@ -372,7 +401,7 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
   }
 
   try {
-    steerAgent(params.id, params.agent, body.content).catch((err) => {
+    steerAgent(params.id, member.id, body.content).catch((err) => {
       logger.error("api", "steer error", { agent: params.agent, roomId: params.id, error: String(err) });
     });
     sendJson(res, 200, { ok: true });
@@ -390,12 +419,13 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/reset-session", async (_req, res,
     return;
   }
 
-  if (!room.members.includes(params.agent)) {
+  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+  if (!member) {
     sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
     return;
   }
 
-  const result = resetAgentSession(params.id, params.agent);
+  const result = resetAgentSession(params.id, member.id);
   logger.info("api", "POST /api/rooms/:id/agents/:agent/reset-session", { agent: params.agent, roomId: params.id });
   sendJson(res, 200, result);
 });
@@ -409,12 +439,13 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/abort", async (_req, res, params)
     return;
   }
 
-  if (!room.members.includes(params.agent)) {
+  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+  if (!member) {
     sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
     return;
   }
 
-  const result = abortAgent(params.id, params.agent);
+  const result = abortAgent(params.id, member.id);
   logger.info("api", "POST /api/rooms/:id/agents/:agent/abort", { agent: params.agent, roomId: params.id, ...result });
   sendJson(res, 200, result);
 });
@@ -428,12 +459,13 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, 
     return;
   }
 
-  if (!room.members.includes(params.agent)) {
+  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+  if (!member) {
     sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
     return;
   }
 
-  const usage = getAgentContextUsage(params.id, params.agent);
+  const usage = getAgentContextUsage(params.id, member.id);
   if (usage === null) {
     // Cache-only: no data yet (e.g. agent never reached idle)
     sendJson(res, 200, { supported: true, unavailable: true });

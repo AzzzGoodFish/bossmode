@@ -443,6 +443,7 @@ export function Main({
             roomId={room.id}
             onOpenLens={openLens}
             onOpenMcpSettings={onOpenMcpSettings}
+            onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
           />
         </div>
@@ -457,6 +458,7 @@ export function Main({
               roomId={room.id}
               onOpenLens={openLens}
               onOpenMcpSettings={onOpenMcpSettings}
+              onMembersChanged={reloadRoom}
               unreadAgents={unreadTabs}
             />
           </MobileDrawer>

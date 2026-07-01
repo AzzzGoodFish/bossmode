@@ -225,11 +225,11 @@ export function filterMcpConfigForServers(config: unknown, serverNames: string[]
   return out;
 }
 
-export function writeScopedMcpConfig(args: { roomId: string; memberName: string; serverNames: string[]; config?: Record<string, unknown> }): { configPath: string; serverNames: string[] } {
+export function writeScopedMcpConfig(args: { roomId: string; memberId?: string; memberName?: string; serverNames: string[]; config?: Record<string, unknown> }): { configPath: string; serverNames: string[] } {
   const config = args.config ?? parseMcpConfigText(readMcpConfigText());
   const validNames = getAssignableMcpServerNames(config).filter((name) => args.serverNames.includes(name));
   const scoped = filterMcpConfigForServers(config, validNames);
-  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberName));
+  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId || args.memberName || "unknown"));
   mkdirSync(dir, { recursive: true });
   const configPath = join(dir, "mcp.json");
   writeFileSync(configPath, `${JSON.stringify(scoped, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
