@@ -104,6 +104,39 @@ describe("agent event UI helpers", () => {
     expect(preview.length).toBeLessThan(600);
   });
 
+  it("redacts secrets nested inside MCP args JSON strings", () => {
+    const preview = formatToolArgsPreview({
+      tool: "playwright_browser_navigate",
+      args: JSON.stringify({
+        url: "https://example.com",
+        headers: {
+          authorization: "Bearer nested-secret",
+          "x-api-key": "nested-api-key",
+        },
+        token: "nested-token",
+        longBody: "y".repeat(260),
+      }),
+    });
+
+    expect(preview).toContain("https://example.com");
+    expect(preview).toContain("[redacted]");
+    expect(preview).not.toContain("nested-secret");
+    expect(preview).not.toContain("nested-api-key");
+    expect(preview).not.toContain("nested-token");
+    expect(preview.length).toBeLessThan(800);
+  });
+
+  it("regex-redacts malformed MCP args strings when JSON parsing fails", () => {
+    const preview = formatToolArgsPreview({
+      tool: "playwright_browser_navigate",
+      args: '{"headers":{"authorization":"Bearer broken-secret","x-api-key":"broken-key",',
+    });
+
+    expect(preview).toContain("[redacted]");
+    expect(preview).not.toContain("broken-secret");
+    expect(preview).not.toContain("broken-key");
+  });
+
   it("computes diffstat only for edit/write tools", () => {
     expect(diffStatForTool({ type: "tool_start", toolName: "Edit", args: { old_string: "a\nb", new_string: "a\nb\nc" } })).toEqual({ added: 3, removed: 2 });
     expect(diffStatForTool({ type: "tool_start", toolName: "Write", args: { content: "a\nb" } })).toEqual({ added: 2, removed: 0 });

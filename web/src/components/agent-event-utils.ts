@@ -81,11 +81,30 @@ export function toolTarget(args: unknown): string {
   return truncateText(obj.file_path ?? obj.path ?? obj.command ?? obj.pattern ?? obj.url ?? "", 64);
 }
 
-const SENSITIVE_ARG_KEY = /(?:authorization|password|token|secret|credential|api[_-]?key|cookie|session)/i;
+const SENSITIVE_ARG_KEY = /(?:authorization|password|token|secret|credential|api[_-]?key|x-api-key|cookie|session)/i;
+const JSON_CONTAINER_RE = /^\s*[\[{]/;
+
+function redactSensitiveString(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/((?:authorization|x-api-key|api[_-]?key|token|secret|password|credential|cookie|session)\s*[=:]\s*["']?)([^"'\s,}\\]+)/gi, "$1[redacted]")
+    .replace(/("(?:authorization|x-api-key|api[_-]?key|token|secret|password|credential|cookie|session)"\s*:\s*")([^"]*)"/gi, "$1[redacted]\"");
+}
+
+function sanitizeStringPreview(value: string, depth: number): unknown {
+  if (depth <= 4 && JSON_CONTAINER_RE.test(value)) {
+    try {
+      return sanitizeArgPreview(JSON.parse(value), depth + 1);
+    } catch {
+      // Fall through to regex redaction for malformed/stringified snippets.
+    }
+  }
+  return truncateText(redactSensitiveString(value), 160);
+}
 
 function sanitizeArgPreview(value: unknown, depth = 0): unknown {
   if (value == null) return value;
-  if (typeof value === "string") return truncateText(value, 160);
+  if (typeof value === "string") return sanitizeStringPreview(value, depth);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     const items = value.slice(0, 8).map((item) => sanitizeArgPreview(item, depth + 1));
