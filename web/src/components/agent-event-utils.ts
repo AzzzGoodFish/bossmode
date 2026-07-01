@@ -44,8 +44,40 @@ function argsObject(args: unknown): Record<string, unknown> {
   return args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {};
 }
 
+export interface ToolDisplay {
+  label: string;
+  detail: string;
+}
+
+function stringArg(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+export function mcpToolDisplay(args: unknown): ToolDisplay | null {
+  const obj = argsObject(args);
+  const action = stringArg(obj, "action").toLowerCase();
+  const command = stringArg(obj, "command").toLowerCase();
+  const mode = action || command;
+  if (obj.search != null || mode === "search") return { label: "MCP search", detail: truncateText(obj.search ?? obj.query ?? obj.pattern ?? "", 64) };
+  if (obj.describe != null || mode === "describe") return { label: "MCP describe", detail: truncateText(obj.describe ?? obj.tool ?? obj.name ?? "", 64) };
+  if (obj.connect != null || mode === "connect") return { label: "MCP connect", detail: truncateText(obj.connect ?? obj.server ?? obj.name ?? "", 64) };
+  if (obj.tool != null || obj.toolName != null || mode === "call") return { label: "MCP call", detail: truncateText(obj.tool ?? obj.toolName ?? obj.name ?? "", 64) };
+  return null;
+}
+
+export function toolDisplay(toolName: unknown, args: unknown): ToolDisplay {
+  const tool = String(toolName || "tool");
+  if (tool.toLowerCase() === "mcp") {
+    return mcpToolDisplay(args) || { label: "MCP", detail: toolTarget(args) };
+  }
+  return { label: tool, detail: toolTarget(args) };
+}
+
 export function toolTarget(args: unknown): string {
   const obj = argsObject(args);
+  const mcp = mcpToolDisplay(args);
+  if (mcp) return mcp.detail;
   return truncateText(obj.file_path ?? obj.path ?? obj.command ?? obj.pattern ?? obj.url ?? "", 64);
 }
 
@@ -53,15 +85,15 @@ export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
-    const tool = String(event.toolName || "tool");
-    return { kind: "tool-running", label: `RUNNING · ${tool}`, detail: toolTarget(event.args) || "running", ts };
+    const tool = toolDisplay(event.toolName, event.args);
+    return { kind: "tool-running", label: `RUNNING · ${tool.label}`, detail: tool.detail || "running", ts };
   }
   if (event.type === "tool_end") {
-    const tool = String(event.toolName || "tool");
+    const tool = toolDisplay(event.toolName, event.args);
     if (event.isError) {
-      return { kind: "tool-error", label: `ERROR · ${tool}`, detail: truncateText(event.result ?? event.text ?? "failed", 78), ts };
+      return { kind: "tool-error", label: `ERROR · ${tool.label}`, detail: truncateText(event.result ?? event.text ?? "failed", 78), ts };
     }
-    return { kind: "tool-done", label: `DONE · ${tool}`, detail: toolTarget(event.args) || truncateText(event.result ?? event.text ?? "completed", 78), ts };
+    return { kind: "tool-done", label: `DONE · ${tool.label}`, detail: tool.detail || truncateText(event.result ?? event.text ?? "completed", 78), ts };
   }
   if ((event.type === "message_end" || event.type === "message_update") && event.text) {
     return { kind: "reply", label: event.type === "message_update" ? "DRAFT" : "REPLY", detail: truncateText(event.text, 78), ts };
@@ -87,6 +119,13 @@ export function eventSearchText(event: AgentEvent): string {
     event.type,
     event.toolName,
     obj.command,
+    obj.action,
+    obj.search,
+    obj.describe,
+    obj.connect,
+    obj.tool,
+    obj.toolName,
+    obj.query,
     obj.file_path,
     obj.path,
     event.text,

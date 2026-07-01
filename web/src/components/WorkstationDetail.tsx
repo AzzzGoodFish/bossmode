@@ -3,7 +3,7 @@ import { Search, RotateCcw, RefreshCw, X, Send } from "lucide-react";
 import { abortAgent, getAgentEventsPaginated, getRoomMembers, getMemberTokenUsage, getToken, resetAgentSession, restartMember, type ContextUsageData, type MemberInfo } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
-import { diffStatForTool, eventSearchText, formatEventTime, isReplyEvent, isToolEvent, summarizeAgentEvent, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, eventSearchText, formatEventTime, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { thinkLevelTextClass } from "./StationPanel";
 
 const PAGE_SIZE = 120;
@@ -224,7 +224,8 @@ function EventRow({ event, query }: { event: AgentEvent; query: string }) {
   if (event.type === "tool_end") return null;
   if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4">{summary.detail} · {time}</div>;
   if (event.type === "tool_start") {
-    return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.1em] text-accent-ink">TOOL·{event.toolName}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4">{time}</span></div><pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{JSON.stringify(event.args, null, 2)}</pre></div>;
+    const tool = toolDisplay(event.toolName, event.args);
+    return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.1em] text-accent-ink">TOOL·{tool.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4">{time}</span></div><pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{JSON.stringify(event.args, null, 2)}</pre></div>;
   }
   if (event.type === "message_end" && event.thinking) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3 text-xs text-ink-3"><span className="font-bold text-think tracking-[0.1em] text-[10px]">THINKING</span><div className="mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div>;
   if (event.type === "message_end" && event.text) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-ink-2 tracking-[0.1em] text-[10px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto">{time}</span></div><Markdown content={String(event.text)} /></div>;

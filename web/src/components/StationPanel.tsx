@@ -6,7 +6,7 @@ import {
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary,
 } from "../api/client";
 import { Sheet } from "./Sheet";
-import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
+import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
@@ -669,12 +669,14 @@ function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: 
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
   if (event.type === "tool_start") {
-    return { kind: "running", label: String(event.toolName || "tool"), detail: toolTarget(event.args) || "running", ts, pulse: true };
+    const tool = toolDisplay(event.toolName, event.args);
+    return { kind: "running", label: tool.label, detail: tool.detail || "running", ts, pulse: true };
   }
   if (event.type === "tool_end") {
+    const tool = toolDisplay(event.toolName, event.args);
     return {
       kind: event.isError ? "error" : "done",
-      label: String(event.toolName || "tool"),
+      label: tool.label,
       detail: toolEndDetail(event, events),
       ts,
     };

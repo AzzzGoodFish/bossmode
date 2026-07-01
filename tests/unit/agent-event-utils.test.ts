@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffStatForTool, eventSearchText, isStationActionEvent, latestActionSummary } from "../../web/src/components/agent-event-utils";
+import { diffStatForTool, eventSearchText, isStationActionEvent, latestActionSummary, toolDisplay, toolTarget } from "../../web/src/components/agent-event-utils";
 
 // Local test helper mirrors UI grouping contract: unclosed turns are valid.
 function groupTurns(events: any[]): any[][] {
@@ -66,6 +66,23 @@ describe("agent event UI helpers", () => {
   it("searches command and file path fields", () => {
     expect(eventSearchText({ type: "tool_start", toolName: "Bash", args: { command: "npm test" } })).toContain("npm test");
     expect(eventSearchText({ type: "tool_start", toolName: "Read", args: { file_path: "src/index.ts" } })).toContain("src/index.ts");
+  });
+
+  it("formats MCP proxy tool actions without changing the runtime tool name", () => {
+    expect(toolDisplay("mcp", { search: "navigate" })).toEqual({ label: "MCP search", detail: "navigate" });
+    expect(toolDisplay("mcp", { describe: "playwright_browser_navigate" })).toEqual({ label: "MCP describe", detail: "playwright_browser_navigate" });
+    expect(toolDisplay("mcp", { tool: "playwright_browser_navigate", args: { url: "https://example.com" } })).toEqual({ label: "MCP call", detail: "playwright_browser_navigate" });
+    expect(toolDisplay("mcp", { connect: "playwright" })).toEqual({ label: "MCP connect", detail: "playwright" });
+    expect(toolTarget({ tool: "playwright_browser_click" })).toBe("playwright_browser_click");
+  });
+
+  it("summarizes MCP proxy actions as readable UI labels", () => {
+    const summary = latestActionSummary([
+      { type: "tool_start", toolName: "mcp", args: { tool: "playwright_browser_navigate", args: { url: "https://example.com" } }, ts: 2 },
+    ]);
+
+    expect(summary).toMatchObject({ kind: "tool-running", label: "RUNNING · MCP call", detail: "playwright_browser_navigate" });
+    expect(eventSearchText({ type: "tool_start", toolName: "mcp", args: { search: "navigate" } })).toContain("navigate");
   });
 
   it("computes diffstat only for edit/write tools", () => {
