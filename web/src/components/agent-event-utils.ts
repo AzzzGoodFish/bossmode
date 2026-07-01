@@ -81,6 +81,30 @@ export function toolTarget(args: unknown): string {
   return truncateText(obj.file_path ?? obj.path ?? obj.command ?? obj.pattern ?? obj.url ?? "", 64);
 }
 
+const SENSITIVE_ARG_KEY = /(?:authorization|password|token|secret|credential|api[_-]?key|cookie|session)/i;
+
+function sanitizeArgPreview(value: unknown, depth = 0): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") return truncateText(value, 160);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 8).map((item) => sanitizeArgPreview(item, depth + 1));
+    return value.length > 8 ? [...items, `… ${value.length - 8} more`] : items;
+  }
+  if (typeof value === "object") {
+    if (depth > 4) return "…";
+    const entries = Object.entries(value as Record<string, unknown>);
+    const previewEntries = entries.slice(0, 16).map(([key, item]) => [key, SENSITIVE_ARG_KEY.test(key) ? "[redacted]" : sanitizeArgPreview(item, depth + 1)]);
+    if (entries.length > 16) previewEntries.push(["…", `${entries.length - 16} more keys`]);
+    return Object.fromEntries(previewEntries);
+  }
+  return truncateText(String(value), 160);
+}
+
+export function formatToolArgsPreview(args: unknown): string {
+  return JSON.stringify(sanitizeArgPreview(args), null, 2);
+}
+
 export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;

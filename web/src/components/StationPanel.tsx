@@ -654,7 +654,7 @@ function findMatchingToolStart(events: AgentEvent[], endEvent: AgentEvent): Agen
   const reversed = [...events].reverse();
   return reversed.find((event) => {
     if (event.type !== "tool_start") return false;
-    if (endEvent.toolCallId && event.toolCallId === endEvent.toolCallId) return true;
+    if (endEvent.toolCallId) return event.toolCallId === endEvent.toolCallId;
     if (endEvent.toolName && event.toolName === endEvent.toolName) return true;
     return false;
   });

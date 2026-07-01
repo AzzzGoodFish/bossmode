@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffStatForTool, eventSearchText, isStationActionEvent, latestActionSummary, toolDisplay, toolTarget } from "../../web/src/components/agent-event-utils";
+import { diffStatForTool, eventSearchText, formatToolArgsPreview, isStationActionEvent, latestActionSummary, toolDisplay, toolTarget } from "../../web/src/components/agent-event-utils";
 
 // Local test helper mirrors UI grouping contract: unclosed turns are valid.
 function groupTurns(events: any[]): any[][] {
@@ -83,6 +83,25 @@ describe("agent event UI helpers", () => {
 
     expect(summary).toMatchObject({ kind: "tool-running", label: "RUNNING · MCP call", detail: "playwright_browser_navigate" });
     expect(eventSearchText({ type: "tool_start", toolName: "mcp", args: { search: "navigate" } })).toContain("navigate");
+  });
+
+  it("redacts sensitive values from tool argument previews", () => {
+    const preview = formatToolArgsPreview({
+      tool: "playwright_browser_navigate",
+      args: {
+        url: "https://example.com",
+        headers: { authorization: "Bearer secret" },
+        apiKey: "secret-key",
+        large: "x".repeat(220),
+      },
+    });
+
+    expect(preview).toContain("playwright_browser_navigate");
+    expect(preview).toContain("https://example.com");
+    expect(preview).toContain("[redacted]");
+    expect(preview).not.toContain("Bearer secret");
+    expect(preview).not.toContain("secret-key");
+    expect(preview.length).toBeLessThan(600);
   });
 
   it("computes diffstat only for edit/write tools", () => {
