@@ -40,4 +40,19 @@ describe("token usage store", () => {
 
     expect(getMemberTokenUsage("developer")).toEqual({ totalTokens: 45 });
   });
+
+  it("reads token usage by stable room member id", async () => {
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const { getRoomMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
+
+    const room = roomStore.createRoom("A", dir, ["developer"]);
+    const [member] = roomStore.getRoomMembers(room.id);
+    const events = join(roomStore.roomDir(room.id), "agent-events");
+    mkdirSync(events, { recursive: true });
+    writeFileSync(join(events, `${member.id}.jsonl`), [
+      JSON.stringify({ type: "message_end", usage: { inputTokens: 4, outputTokens: 6 } }),
+    ].join("\n"));
+
+    expect(getRoomMemberTokenUsage(room.id, member.id)).toEqual({ totalTokens: 10 });
+  });
 });

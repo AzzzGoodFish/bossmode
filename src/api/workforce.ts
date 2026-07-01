@@ -16,8 +16,8 @@ import { getMemberInstances, destroyInstance, switchMemberModelInActiveRooms } f
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
-import { setCursor } from "../workspace/room-store.js";
-import { getMemberTokenUsage } from "../workspace/token-usage-store.js";
+import * as roomStore from "../workspace/room-store.js";
+import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 
@@ -276,7 +276,17 @@ addRoute("DELETE", "/api/members/:id", async (_req, res, params) => {
   sendJson(res, 200, { ok: true });
 });
 
-addRoute("GET", "/api/members/:id/token-usage", async (_req, res, params) => {
+addRoute("GET", "/api/members/:id/token-usage", async (req, res, params) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const roomId = url.searchParams.get("roomId");
+  if (roomId) {
+    const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string } | null : undefined;
+    const roomMember = resolveRoomMemberRef?.(roomId, params.id);
+    if (roomMember) {
+      sendJson(res, 200, getRoomMemberTokenUsage(roomId, roomMember.id));
+      return;
+    }
+  }
   const member = getMember(params.id);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
   sendJson(res, 200, getMemberTokenUsage(member.name));
@@ -292,12 +302,16 @@ addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {
 addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
   const url = new URL(req.url || "", "http://localhost");
   const roomId = url.searchParams.get("roomId");
-  const member = getMember(params.id);
-  if (!member || !roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
-  destroyInstance(roomId, member.name);
+  if (!roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
+  const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string } | null : undefined;
+  const roomMember = resolveRoomMemberRef?.(roomId, params.id);
+  const legacyMember = roomMember ? null : getMember(params.id);
+  const memberRef = roomMember?.id || legacyMember?.name;
+  if (!memberRef) { sendJson(res, 400, { error: "member and roomId required" }); return; }
+  destroyInstance(roomId, memberRef);
 
   const latestId = getLatestMessageId(roomId);
-  setCursor(roomId, member.name, latestId);
+  roomStore.setCursor(roomId, memberRef, latestId);
 
   sendJson(res, 200, {
     ok: true,

@@ -197,6 +197,18 @@ describe("agent-manager model hot switch", () => {
     expect(handles[1].runtimeParams.model).toBe("anthropic/claude-b");
   });
 
+  it("reports member busy while dispatch is not idle", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+
+    handles[0].emit({ type: "agent_start" });
+    expect(manager.getMemberBusyState("room", "pm")).toMatchObject({ busy: true, reason: "working" });
+
+    handles[0].emit({ type: "agent_end" });
+    expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+  });
+
   it("queues a cross-provider switch while working and recreates after agent_end", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");

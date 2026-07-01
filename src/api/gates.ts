@@ -13,7 +13,7 @@ import * as knowledgeStore from "../knowledge/store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
 import { checkPath } from "../shared/path-security.js";
-import type { Gate, GateEventMeta, Room } from "../shared/types.js";
+import type { Gate, GateEventMeta, Room, RoomMemberRecord } from "../shared/types.js";
 
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 
@@ -76,17 +76,29 @@ function validateGateArtifacts(room: Room, artifacts?: string[]): void {
 }
 
 /** Emit a structured gate_event system message into the room stream. */
+function resolveGateMember(roomId: string, memberId?: string, name?: string): RoomMemberRecord | null {
+  if (memberId) {
+    const byId = roomStore.resolveRoomMemberRef(roomId, memberId);
+    if (byId) return byId;
+  }
+  return name ? roomStore.resolveRoomMemberRef(roomId, name) : null;
+}
+
 export function emitGateEvent(
   roomId: string,
   action: GateEventMeta["action"],
   gate: Gate,
 ): void {
+  const requester = resolveGateMember(roomId, gate.requestedByMemberId, gate.requestedBy);
+  const handoff = resolveGateMember(roomId, gate.handoffMemberId, gate.handoffTo);
   const meta: GateEventMeta = {
     action,
     gateId: gate.id,
     gateTitle: gate.title,
-    requestedBy: gate.requestedBy,
-    handoffTo: gate.handoffTo,
+    requestedBy: requester?.name || gate.requestedBy,
+    requestedByMemberId: requester?.id || gate.requestedByMemberId,
+    handoffTo: handoff?.name || gate.handoffTo,
+    handoffMemberId: handoff?.id || gate.handoffMemberId,
     summary: action === "requested" ? gate.summary : undefined,
     artifacts: action === "requested" ? gate.artifacts : undefined,
     decisionNote: gate.decisionNote,
@@ -116,16 +128,56 @@ export function createGateAndAnnounce(
 ): Gate {
   const room = roomStore.getRoom(roomId);
   if (!room) throw new Error("Room not found");
+  const requester = resolveGateMember(roomId, undefined, data.requestedBy);
+  const handoff = data.handoffTo ? resolveGateMember(roomId, undefined, data.handoffTo) : null;
   // Validate handoff target is a room member (prevents dead-end pipelines).
-  if (data.handoffTo && !room.members.includes(data.handoffTo)) {
+  if (data.handoffTo && !handoff) {
     throw new Error(
-      `handoff_to "${data.handoffTo}" is not a member of this room. Members: ${room.members.join(", ")}`,
+      `handoff_to "${data.handoffTo}" is not a member of this room. Members: ${roomStore.getRoomMembers(roomId).map((member) => member.name).join(", ")}`,
     );
   }
   validateGateArtifacts(room, data.artifacts);
-  const gate = gateStore.createGate(roomId, data);
+  const gate = gateStore.createGate(roomId, {
+    ...data,
+    requestedBy: requester?.name || data.requestedBy,
+    requestedByMemberId: requester?.id,
+    handoffTo: handoff?.name || data.handoffTo,
+    handoffMemberId: handoff?.id,
+  });
   emitGateEvent(roomId, "requested", gate);
   return gate;
+}
+
+export function postGateDecisionFollowup(
+  roomId: string,
+  gate: Gate,
+  action: "approve" | "reject",
+  note?: string,
+): void {
+  if (action === "approve") {
+    const handoff = resolveGateMember(roomId, gate.handoffMemberId, gate.handoffTo);
+    if (!handoff) return;
+    const noteText = note ? `\n\n备注: ${note}` : "";
+    postMessage(
+      roomId,
+      "user",
+      `@${handoff.name} 「${gate.title}」已验收通过,交接给你继续。请基于交付物开展下一阶段工作:${gate.artifacts.length ? "\n" + gate.artifacts.map((a) => `- ${a}`).join("\n") : "(见上方交付说明)"}${noteText}`,
+      [handoff.name],
+      { mentionMemberIds: [handoff.id] },
+    );
+    return;
+  }
+
+  // Reject always goes back to the requester.
+  const requester = resolveGateMember(roomId, gate.requestedByMemberId, gate.requestedBy);
+  if (!requester) return;
+  postMessage(
+    roomId,
+    "user",
+    `@${requester.name} 「${gate.title}」被打回,请根据意见修改后重新提交验收。${note ? `\n\n意见: ${note}` : ""}`,
+    [requester.name],
+    { mentionMemberIds: [requester.id] },
+  );
 }
 
 // -- Routes --
@@ -180,27 +232,7 @@ addRoute("POST", "/api/rooms/:id/gates/:gateId/decision", async (req, res, param
 
   // 2. Drive the pipeline through the existing mention-activation path:
   //    approve → activate handoff target; reject → reactivate requester with feedback.
-  if (action === "approve") {
-    if (gate.handoffTo) {
-      const noteText = note ? `\n\n备注: ${note}` : "";
-      postMessage(
-        params.id,
-        "user",
-        `@${gate.handoffTo} 「${gate.title}」已验收通过,交接给你继续。请基于交付物开展下一阶段工作:${gate.artifacts.length ? "\n" + gate.artifacts.map((a) => `- ${a}`).join("\n") : "(见上方交付说明)"}${noteText}`,
-        [gate.handoffTo],
-      );
-    }
-  } else {
-    // Reject always goes back to the requester.
-    if (room.members.includes(gate.requestedBy)) {
-      postMessage(
-        params.id,
-        "user",
-        `@${gate.requestedBy} 「${gate.title}」被打回,请根据意见修改后重新提交验收。${note ? `\n\n意见: ${note}` : ""}`,
-        [gate.requestedBy],
-      );
-    }
-  }
+  postGateDecisionFollowup(params.id, gate, action, note);
 
   sendJson(res, 200, gate);
 });

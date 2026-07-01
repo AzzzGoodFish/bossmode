@@ -121,6 +121,31 @@ describe("gate API behaviors (createGateAndAnnounce + decision messaging)", () =
     expect(gateMsg!.gate_event_meta?.handoffTo).toBe("developer");
   });
 
+  it("uses stored member ids after rename for decision follow-up mentions", async () => {
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const gateStore = await import("../../src/workspace/gate-store.js");
+    const { createGateAndAnnounce, postGateDecisionFollowup } = await import("../../src/api/gates.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+
+    const room = roomStore.createRoom("gate-rename", "/tmp", ["pm", "developer"]);
+    const developer = roomStore.findRoomMemberByName(room.id, "developer")!;
+    const gate = createGateAndAnnounce(room.id, {
+      title: "Impl", summary: "done", requestedBy: "pm", handoffTo: "developer",
+    });
+    expect(gate.handoffMemberId).toBe(developer.id);
+
+    const renamed = roomStore.renameRoomMember(room.id, developer.id, "dev2");
+    expect(renamed.ok).toBe(true);
+    const decided = gateStore.decideGate(room.id, gate.id, "approve", "go")!;
+    postGateDecisionFollowup(room.id, decided, "approve", "go");
+
+    const messages = messageStore.getMessages(room.id);
+    const followup = messages.find((m) => m.sender === "user" && m.content.includes("已验收通过"));
+    expect(followup?.content).toContain("@dev2");
+    expect(followup?.mentions).toEqual(["dev2"]);
+    expect(followup?.mentionMemberIds).toEqual([developer.id]);
+  });
+
   it("rejects missing local artifacts before creating a gate", async () => {
     const { createGateAndAnnounce } = await import("../../src/api/gates.js");
     const messageStore = await import("../../src/workspace/message-store.js");

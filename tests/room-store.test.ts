@@ -51,6 +51,14 @@ describe("room-store", () => {
       expect(Object.keys(cursors).sort()).toEqual(roomMembers.map((m) => m.id).sort());
       expect(Object.values(cursors)).toEqual([null, null, null]);
     });
+
+    it("rejects duplicate room-local member names", () => {
+      expect(() => roomStore.createRoom("test", "/tmp", ["pm", "pm"])).toThrow(/Duplicate member name/);
+    });
+
+    it("rejects invalid room-local member names", () => {
+      expect(() => roomStore.createRoom("test", "/tmp", ["pm", "bad name"])).toThrow(/member name may contain/);
+    });
   });
 
   describe("getRoom", () => {

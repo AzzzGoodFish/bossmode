@@ -778,6 +778,19 @@ export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
   return instance.status;
 }
 
+export function getMemberBusyState(roomId: string, memberRef: string): { busy: boolean; reason?: string } {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const key = instanceKey(roomId, memberId);
+  if (pendingCreations.has(key)) return { busy: true, reason: "pending_creation" };
+  const instance = instances.get(key);
+  if (!instance) return { busy: false };
+  if (instance.status === "working") return { busy: true, reason: "working" };
+  if (instance.dispatchState !== "idle") return { busy: true, reason: instance.dispatchState };
+  if (instance.promptInFlight) return { busy: true, reason: "prompt_in_flight" };
+  return { busy: false };
+}
+
 export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus> {
   const result: Record<string, AgentStatus> = {};
   for (const member of roomStore.getRoomMembers(roomId)) result[member.name] = getAgentStatus(roomId, member.id);

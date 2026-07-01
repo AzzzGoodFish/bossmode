@@ -6,20 +6,23 @@ import { logger } from "../foundation/logger.js";
 import type { Room, CursorMap, RoomLinearIntegration, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
 import { getMemberByName } from "../workforce/member-store.js";
 
-const ROOMS_DIR = join(getBossmodeDir(), "rooms");
+function roomsDir(): string {
+  return join(getBossmodeDir(), "rooms");
+}
 
 export function getRoomsDir(): string {
-  return ROOMS_DIR;
+  return roomsDir();
 }
 
 function ensureRoomsDir(): void {
-  if (!existsSync(ROOMS_DIR)) {
-    mkdirSync(ROOMS_DIR, { recursive: true });
+  const dir = roomsDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
 export function roomDir(roomId: string): string {
-  return join(ROOMS_DIR, roomId);
+  return join(roomsDir(), roomId);
 }
 
 function roomJsonPath(roomId: string): string {
@@ -117,13 +120,29 @@ export function roomMemberNames(room: Room): string[] {
   return getRoomMembersFromRoom(room).map((member) => member.name);
 }
 
+export function validateRoomMemberNameList(names: string[]): string | null {
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = normalizeMemberName(String(raw || ""));
+    const validation = validateRoomMemberName(name);
+    if (validation) return validation;
+    if (seen.has(name)) return `Duplicate member name in room: ${name}`;
+    seen.add(name);
+  }
+  return null;
+}
+
 // -- Room CRUD --
 
 export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[]): Room {
   ensureRoomsDir();
 
+  const normalizedMembers = members.map((memberName) => normalizeMemberName(String(memberName || "")));
+  const validation = validateRoomMemberNameList(normalizedMembers);
+  if (validation) throw new Error(validation);
+
   const roomId = randomUUID();
-  const roomMembers = members.map((memberName) => buildRoomMemberRecord(roomId, memberName));
+  const roomMembers = normalizedMembers.map((memberName) => buildRoomMemberRecord(roomId, memberName));
   const room: Room = {
     id: roomId,
     name,
@@ -395,9 +414,10 @@ export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string)
 export function listRooms(): Room[] {
   ensureRoomsDir();
 
-  if (!existsSync(ROOMS_DIR)) return [];
+  const dir = roomsDir();
+  if (!existsSync(dir)) return [];
 
-  const entries = readDirSafe(ROOMS_DIR);
+  const entries = readDirSafe(dir);
   const rooms: Room[] = [];
 
   for (const entry of entries) {

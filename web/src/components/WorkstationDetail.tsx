@@ -64,7 +64,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
       for (const m of all) map[m.name] = m;
       setMembers(map);
       const current = all.find((m) => m.name === agentName);
-      if (current) getMemberTokenUsage(current.id).then((v) => setTokenTotal(v.totalTokens)).catch(() => {});
+      if (current) getMemberTokenUsage(current.id, roomId).then((v) => setTokenTotal(v.totalTokens)).catch(() => {});
     }).catch(console.error);
   }, [roomId, agentName]);
 

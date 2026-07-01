@@ -9,7 +9,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getAgentStatus, getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
@@ -46,8 +46,21 @@ addRoute("POST", "/api/rooms", async (req, res) => {
   }
 
   const members = body.members || [];
-  const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs);
-  sendJson(res, 200, room);
+  if (!Array.isArray(members)) {
+    sendJson(res, 400, { error: "members must be an array" });
+    return;
+  }
+  const validation = roomStore.validateRoomMemberNameList(members.map(String));
+  if (validation) {
+    sendJson(res, 400, { error: validation });
+    return;
+  }
+  try {
+    const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs);
+    sendJson(res, 200, room);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
 });
 
 addRoute("GET", "/api/rooms/:id", async (_req, res, params) => {
@@ -305,8 +318,9 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
       sendJson(res, 400, { error: "name must be a string" });
       return;
     }
-    if (getAgentStatus(params.id, roomMember.id) === "working") {
-      sendJson(res, 409, { error: "Cannot rename a working member. Stop or wait for it to become idle first." });
+    const busy = getMemberBusyState(params.id, roomMember.id);
+    if (busy.busy) {
+      sendJson(res, 409, { error: `Cannot rename a busy member (${busy.reason || "busy"}). Stop or wait for it to become idle first.` });
       return;
     }
     const renamed = roomStore.renameRoomMember(params.id, roomMember.id, body.name);

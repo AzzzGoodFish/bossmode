@@ -17,7 +17,9 @@ function normalizeGate(raw: any): Gate {
     summary: String(raw?.summary || ""),
     artifacts: Array.isArray(raw?.artifacts) ? raw.artifacts.map(String).filter(Boolean) : [],
     requestedBy: String(raw?.requestedBy || "unknown"),
+    requestedByMemberId: raw?.requestedByMemberId ? String(raw.requestedByMemberId) : undefined,
     handoffTo: raw?.handoffTo ? String(raw.handoffTo) : undefined,
+    handoffMemberId: raw?.handoffMemberId ? String(raw.handoffMemberId) : undefined,
     status: (["pending", "approved", "rejected"].includes(raw?.status) ? raw.status : "pending") as GateStatus,
     decisionNote: raw?.decisionNote ? String(raw.decisionNote) : undefined,
     createdAt: Number(raw?.createdAt) || Date.now(),
@@ -42,7 +44,7 @@ function writeGates(roomId: string, gates: Gate[]): void {
 
 export function createGate(
   roomId: string,
-  data: { title: string; summary: string; artifacts?: string[]; requestedBy: string; handoffTo?: string },
+  data: { title: string; summary: string; artifacts?: string[]; requestedBy: string; requestedByMemberId?: string; handoffTo?: string; handoffMemberId?: string },
 ): Gate {
   const gate: Gate = {
     id: `gate-${randomUUID().slice(0, 8)}`,
@@ -51,7 +53,9 @@ export function createGate(
     summary: data.summary.trim(),
     artifacts: (data.artifacts || []).map((a) => String(a).trim()).filter(Boolean),
     requestedBy: data.requestedBy,
+    requestedByMemberId: data.requestedByMemberId,
     handoffTo: data.handoffTo?.trim() || undefined,
+    handoffMemberId: data.handoffMemberId,
     status: "pending",
     createdAt: Date.now(),
   };

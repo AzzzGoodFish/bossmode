@@ -187,8 +187,9 @@ export async function deleteMemberApi(id: string): Promise<void> {
   await apiFetch(`/api/members/${id}`, { method: "DELETE" });
 }
 
-export async function getMemberTokenUsage(id: string): Promise<{ totalTokens: number }> {
-  return apiFetch(`/api/members/${id}/token-usage`);
+export async function getMemberTokenUsage(id: string, roomId?: string): Promise<{ totalTokens: number }> {
+  const query = roomId ? `?roomId=${encodeURIComponent(roomId)}` : "";
+  return apiFetch(`/api/members/${id}/token-usage${query}`);
 }
 
 export interface AgentRuntimeParams {
