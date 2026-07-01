@@ -8,6 +8,7 @@ import { MessageBubble } from "./MessageBubble";
 import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
 import type { GateArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
+import { formatMessageDateSeparator, isSameLocalDate } from "../utils/message-date";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
@@ -447,24 +448,19 @@ function GateEventCard({ meta, roomId, decided, onNavigateToKnowledge, onPreview
 
 function shouldShowDateSeparator(prev: RoomMessage | null, current: RoomMessage): boolean {
   if (!prev) return true;
-  return new Date(prev.ts).toDateString() !== new Date(current.ts).toDateString();
+  return !isSameLocalDate(prev.ts, current.ts);
 }
 
 function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): boolean {
   if (!prev) return false;
   if (prev.sender !== current.sender) return false;
   if (current.ts - prev.ts > GROUP_INTERVAL_MS) return false;
-  if (new Date(prev.ts).toDateString() !== new Date(current.ts).toDateString()) return false;
+  if (!isSameLocalDate(prev.ts, current.ts)) return false;
   return true;
 }
 
 function DateSeparator({ ts }: { ts: number }) {
-  const date = new Date(ts);
-  const formatted = date.toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const formatted = formatMessageDateSeparator(ts);
   return (
     <div className="flex items-center gap-3 my-4">
       <div className="flex-1 border-t border-line-soft" />
