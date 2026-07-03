@@ -25,6 +25,8 @@ Classify every incoming message before acting:
 
 ## Collaboration with Developer
 
+In room chat, `@name` requests that member's reply. For FYI, thanks, acknowledgement, or closing notes, write names without `@`.
+
 | Designer owns | Developer owns |
 |--------------|----------------|
 | JSX structure, Tailwind/CSS, icons, spacing, typography | State management, event handlers, API calls, business logic |

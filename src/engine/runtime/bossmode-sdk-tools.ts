@@ -1,6 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { buildChatToolDescription } from "../../shared/chat-tool-description.js";
+import { buildChatToolDescription, CHAT_MESSAGE_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
 import {
   QUERY_ROOM_MESSAGES_DESCRIPTION,
   CREATE_TASK_DESCRIPTION,
@@ -35,7 +35,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       label: "Chat",
       description: buildChatToolDescription(opts.roomMembers.filter((m) => m !== opts.agentName).join(", ")),
       parameters: Type.Object({
-        message: Type.String({ description: "Message to post" }),
+        message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
         target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
         artifacts: Type.Optional(Type.Array(Type.String(), { description: "Document or file paths to show as previewable artifact chips on the room message." })),

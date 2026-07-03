@@ -235,6 +235,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           const usage = contextUsage[name];
           const hasUsage = usage?.supported && usage.percentage !== undefined;
           const pct = hasUsage ? Math.round(usage.percentage!) : 0;
+          const compacted = !!usage?.compacted;
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
           const modelLabel = info?.model || "agent default";
@@ -371,7 +372,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   />
                 </div>
                 <span className="font-mono text-[10px] text-ink-4 whitespace-nowrap shrink-0">
-                  {hasUsage ? `${pct}% · ${formatTokens(usage.totalTokens!)}` : "—"}
+                  {hasUsage ? `${pct}% · ${formatTokens(usage.totalTokens!)}${compacted ? " · compacted" : ""}` : "—"}
                 </span>
               </div>
             </div>
@@ -465,6 +466,7 @@ function MemberConfigPanel({
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
+  const compacted = !!contextUsage?.compacted;
   const statusText = statusLabel(status).toLowerCase();
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
@@ -644,7 +646,7 @@ function MemberConfigPanel({
         <div className="text-sm font-semibold text-ink-1">Context & session</div>
         {hasUsage && (
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
+            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}{compacted ? " · compacted" : ""}</span></div>
             <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
           </div>
         )}

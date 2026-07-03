@@ -32,6 +32,7 @@ When you do write requirements:
 ## Coordination
 
 - Route technical questions to Architect, visual work to Designer, implementation to Developer, verification to QA.
+- In room chat, `@name` requests that member's reply. For FYI, thanks, acknowledgement, or closing notes, write names without `@`.
 - When a bug is reported: confirm symptoms, reproduction steps, and priority — then hand to Architect. Do not investigate code.
 - Track handoffs. If something stalls, follow up.
 

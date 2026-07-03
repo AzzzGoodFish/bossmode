@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
 import { getBossmodeDir } from "../shared/config.js";
-import { refreshContextUsageOnIdle } from "./agent-manager.js";
+import { refreshContextUsage } from "./agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
@@ -180,10 +180,14 @@ export function handleAgentEvent(
     return "working";
   }
 
+  if (processedEvent.type === "message_end") {
+    refreshContextUsage(roomId, memberId || agentName);
+  }
+
   if (processedEvent.type === "agent_end") {
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
-    // Proactively refresh context usage cache while agent is idle (responsive to control_request)
-    refreshContextUsageOnIdle(roomId, memberId || agentName);
+    // Proactively refresh context usage cache at turn end as a fallback.
+    refreshContextUsage(roomId, memberId || agentName);
     return "idle";
   }
 

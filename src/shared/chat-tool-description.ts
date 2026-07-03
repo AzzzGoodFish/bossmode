@@ -13,9 +13,9 @@ Parameters:
   - The envelope footer suggests a default target. You may override it when the user explicitly asks (e.g. "post this to the room" or "reply privately").
 
 Activation:
-- In room messages, write @name in the message text to activate a member and request their reply.
+- IMPORTANT: @name activates that member and asks them to reply. Only use @name when you need a response from that member.
+- For status updates, acknowledgements, thanks, FYI, or referring to someone without needing a reply, write their name without @.
 - @name must exactly match a member name.
-- Use @name only when you want that member to reply. To refer to someone without activating them, write their name without @.
 - Private messages do not activate members.
 
 Artifacts:
@@ -31,4 +31,4 @@ Available @ targets in this room: ${memberList}`;
 export const CHAT_TARGET_PARAM_DESCRIPTION =
   '"room" or "user"; default follows triggering envelope footer';
 
-export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post";
+export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post. In room messages, @name activates that member and requests a reply; for acknowledgements/FYI/thanks, write names without @.";

@@ -306,11 +306,11 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
 
   describe("T6.2: Agent re-activation after error (F19)", () => {
     it("agent can be activated again after error", async () => {
-      // First call fails, second succeeds
-      let callCount = 0;
-      setMockPromptFn(vi.fn().mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return Promise.reject(new Error("First attempt fails"));
+      // First activation fails, second succeeds; chat-enforcement warning prompts are private follow-ups.
+      let activationCallCount = 0;
+      setMockPromptFn(vi.fn().mockImplementation((content: string) => {
+        if (!content.includes("ended your turn without calling the `chat` tool")) activationCallCount++;
+        if (activationCallCount === 1) return Promise.reject(new Error("First attempt fails"));
         return Promise.resolve(undefined);
       }));
 
@@ -324,8 +324,8 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       await sendMessage(room.id, "@pm second attempt");
       await new Promise((r) => setTimeout(r, 500));
 
-      // Agent should have been called twice
-      expect(callCount).toBe(2);
+      // Agent should have handled two room activations.
+      expect(activationCallCount).toBe(2);
     });
   });
 

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mapContextUsage } from "../../src/engine/runtime/pi-events.js";
 
 /**
  * Unit tests for context usage feature:
@@ -209,6 +210,20 @@ describe("control_request/response matching", () => {
     await expect(p1).rejects.toThrow("Destroyed");
     await expect(p2).rejects.toThrow("Destroyed");
     expect(tracker.pending.size).toBe(0);
+  });
+});
+
+// -- API endpoint logic --
+
+describe("mapContextUsage", () => {
+  it("marks SDK null-token interval as compacted", () => {
+    expect(mapContextUsage({ tokens: null, contextWindow: 200000, model: "sonnet" })).toEqual({
+      totalTokens: 0,
+      rawMaxTokens: 200000,
+      percentage: 0,
+      model: "sonnet",
+      compacted: true,
+    });
   });
 });
 

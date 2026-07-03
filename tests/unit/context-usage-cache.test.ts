@@ -101,7 +101,7 @@ import {
   activateAgent,
   getAgentContextUsage,
   initAgentManager,
-  refreshContextUsageOnIdle,
+  refreshContextUsage,
   shutdownAll,
 } from "../../src/engine/agent-manager.js";
 
@@ -139,7 +139,7 @@ describe("agent-manager context usage cache", () => {
   });
 
   it("refreshes cache from runtime on idle and broadcasts agent:context_usage", async () => {
-    refreshContextUsageOnIdle("room1", "developer");
+    refreshContextUsage("room1", "developer");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(contextUsageCallCount).toBe(1);
@@ -152,7 +152,7 @@ describe("agent-manager context usage cache", () => {
   });
 
   it("reads cached context usage without calling runtime again", async () => {
-    refreshContextUsageOnIdle("room1", "developer");
+    refreshContextUsage("room1", "developer");
     await new Promise((resolve) => setTimeout(resolve, 0));
     contextUsageCallCount = 0;
 
@@ -160,5 +160,21 @@ describe("agent-manager context usage cache", () => {
 
     expect(usage).toEqual({ totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet" });
     expect(contextUsageCallCount).toBe(0);
+  });
+
+  it("preserves previous usage and marks compacted when SDK reports null tokens", async () => {
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    mocks.broadcastToRoom.mockReset();
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 0, rawMaxTokens: 200000, percentage: 0, model: "sonnet", compacted: true });
+
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getAgentContextUsage("room1", "developer")).toEqual({ totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet", compacted: true });
+    expect(mocks.broadcastToRoom).toHaveBeenCalledWith("room1", expect.objectContaining({
+      type: "agent:context_usage",
+      usage: { totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet", compacted: true },
+    }));
   });
 });

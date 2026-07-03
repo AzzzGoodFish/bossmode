@@ -113,6 +113,9 @@ interface AgentInstance {
   pendingModelSwitch?: PendingModelSwitch;
   pendingThinkingSwitch?: PendingThinkingSwitch;
   pendingCredentialRefresh?: PendingCredentialRefresh;
+  pendingChatReply: boolean;
+  hadErrorInTurn: boolean;
+  currentPromptTrigger?: string;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -174,6 +177,24 @@ function applyPendingAfterPromptSettlement(instance: AgentInstance, trigger: str
   applyPendingThinkingSwitch(instance, trigger);
 }
 
+function isSummarizerInstance(instance: AgentInstance): boolean {
+  return instance.sourceAgent === "summarizer";
+}
+
+function markPendingChatReply(instance: AgentInstance, trigger: string): void {
+  if (isSummarizerInstance(instance)) return;
+  if (!instance.pendingChatReply) logger.info("agent", "pendingChatReplySet", { member: instance.agentName, roomId: instance.roomId, trigger });
+  instance.pendingChatReply = true;
+}
+
+function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
+  if (!instance.pendingChatReply) return;
+  instance.pendingChatReply = false;
+  logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
+}
+
+const CHAT_REPLY_WARNING = "⚠ You were activated by a room message but ended your turn without calling the `chat` tool — your reply was not delivered to anyone. Please respond now with a single `chat` call. If you have nothing substantial to add, send a one-line status.";
+
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
   if (instance.queuedInputs.length === 0) return;
   if (instance.status === "working" || instance.dispatchState !== "idle") return;
@@ -186,10 +207,20 @@ function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): vo
   });
 }
 
-async function finalizePromptSettlement(instance: AgentInstance, trigger: string): Promise<void> {
+async function finalizePromptSettlement(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<void> {
   updateDispatchState(instance, "idle", trigger);
   applyPendingAfterPromptSettlement(instance, trigger);
-  drainQueuedInputsAsPrompt(instance, trigger);
+  if (instance.queuedInputs.length > 0) {
+    drainQueuedInputsAsPrompt(instance, trigger);
+    return;
+  }
+  if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn && !isSummarizerInstance(instance)) {
+    clearPendingChatReply(instance, "chat_warning");
+    logger.warn("agent", "pendingChatReplyWarning", { member: instance.agentName, roomId: instance.roomId, trigger });
+    await runPrompt(instance, `${CHAT_REPLY_WARNING}\n\n${ROOM_REPLY_FOOTER}`, "chat_warning", (err) => {
+      logger.error("agent", "chat warning prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
+    });
+  }
 }
 
 async function runPrompt(
@@ -200,12 +231,16 @@ async function runPrompt(
 ): Promise<void> {
   updateDispatchState(instance, "promptSubmitted", trigger);
   instance.promptInFlight = true;
+  instance.hadErrorInTurn = false;
+  instance.currentPromptTrigger = trigger;
   try {
     await instance.handle.prompt(message);
     instance.promptInFlight = false;
-    await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`);
+    instance.currentPromptTrigger = undefined;
+    await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
   } catch (err: any) {
     instance.promptInFlight = false;
+    instance.currentPromptTrigger = undefined;
     onError(err);
     updateDispatchState(instance, "idle", `${trigger}_prompt_error`);
     instance.queuedInputs = [];
@@ -539,11 +574,15 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         callbacks: {
           onChat: async (message: string) => {
             postMessage(roomId, memberName, message, [], { senderMemberId: memberId });
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:chat");
           },
           onMention: async (targetMember: string, message: string) => {
             // Mention activation is handled by router listener via message-bus.
             const target = roomStore.resolveRoomMemberRef(roomId, targetMember);
             postMessage(roomId, memberName, message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:mention");
           },
         },
       });
@@ -560,6 +599,8 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         dispatchState: "idle",
         promptInFlight: false,
         queuedInputs: [],
+        pendingChatReply: false,
+        hadErrorInTurn: false,
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: normalizeSwitchModelRef(member.model || "claude-sonnet-4-6"),
@@ -568,7 +609,12 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
+        const suppressRoomState = instance.currentPromptTrigger === "chat_warning";
+        const newStatus = suppressRoomState ? undefined : processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
+        if (event.type === "tool_end" && (event.toolName === "chat" || event.toolName === "write_summary") && !(event as any).isError) {
+          clearPendingChatReply(instance, `tool:${event.toolName}`);
+        }
+        if (suppressRoomState) return;
         if (event.type === "agent_start") {
           updateDispatchState(instance, "running", event.type);
           flushQueuedInputs(instance, event.type);
@@ -589,6 +635,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
 
         if (event.type === "message_end" && event.stopReason === "error") {
+          instance.hadErrorInTurn = true;
           const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
           const detail = formattedError
             ? ` Error: ${formattedError}`
@@ -662,6 +709,7 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
   const formattedMessages = formatMessagesForAgent(roomId, newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
 
   setActivationSource(roomId, memberId, "room_mention");
+  markPendingChatReply(instance, "activate");
 
   if (instance.status === "working") {
     instance.handle.steer(formattedMessages);
@@ -790,7 +838,7 @@ export function getAgentContextUsage(roomId: string, memberRef: string): Context
 }
 
 /** Proactively refresh context usage cache (called on agent_end). Fire-and-forget, non-blocking. */
-export function refreshContextUsageOnIdle(roomId: string, memberRef: string): void {
+export function refreshContextUsage(roomId: string, memberRef: string): void {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const agentName = member?.name || memberRef;
@@ -800,6 +848,9 @@ export function refreshContextUsageOnIdle(roomId: string, memberRef: string): vo
 
   instance.handle.getContextUsage().then((usage) => {
     if (!usage) return;
+    const previous = contextUsageCache.get(key);
+    if (usage.compacted && previous) usage = { ...previous, compacted: true };
+    if (usage.compacted && !previous) return;
     contextUsageCache.set(key, usage);
     broadcastToRoom(roomId, {
       type: "agent:context_usage",
@@ -810,6 +861,8 @@ export function refreshContextUsageOnIdle(roomId: string, memberRef: string): vo
     });
   }).catch(() => {});
 }
+
+export const refreshContextUsageOnIdle = refreshContextUsage;
 
 // -- Event history --
 

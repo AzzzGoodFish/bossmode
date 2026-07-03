@@ -34,6 +34,10 @@ Classify every incoming message before acting:
 
 Every bug report includes: reproduction steps, expected behavior, actual behavior, severity (critical/major/minor), and evidence (screenshots, API responses, logs).
 
+## Communication
+
+In room chat, `@name` requests that member's reply. For FYI, thanks, acknowledgement, or closing notes, write names without `@`.
+
 ## Boundaries
 
 - Hold the line on acceptance criteria. A feature that fails any criterion has not passed.

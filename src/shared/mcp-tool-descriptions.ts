@@ -20,7 +20,7 @@ Use this tool when:
 
 A task is a unit of work that someone can complete in a focused session. Use description for stable requirements, scope, and acceptance criteria; use comment_task for process notes, implementation progress, QA results, blockers, and handoff records.
 
-Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name.
+Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.
 
 When you should NOT create a task:
 - The work is so small it fits in a single agent turn (just do it)
@@ -38,7 +38,7 @@ Use this tool when:
 
 Task event messages:
 - Status changes are recorded as system messages in the room so others see progress.
-- Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name.
+- Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.
 
 Always update task status promptly — stale task states erode the team's awareness.
 
@@ -60,7 +60,7 @@ Use this before adding a subscriber, when you need task context before implement
 
 export const COMMENT_TASK_DESCRIPTION = `Add a comment to a task in the current room.
 
-Use comments for implementation notes, QA results, blockers, decisions, and handoff records. Comments are persisted on the task but do not activate members, even if the text contains @name. To request action, send a room chat message with exact @name.`;
+Use comments for implementation notes, QA results, blockers, decisions, and handoff records. Comments are persisted on the task but do not activate members, even if the text contains @name. To request action, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.`;
 
 export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
 
@@ -91,7 +91,7 @@ export const PARAM_DESCRIPTIONS = {
   taskStatusUpdate: "New status",
   taskPriority: "P0 | P1 | P2 (default: P1)",
   taskAssignee: "Member name to assign",
-  taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name to request action.",
+  taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name only when requesting action/reply.",
   taskId: "Task ID",
   taskComment: "Markdown comment to append to the task. Does not activate members.",
   taskStatusFilter: "Filter: todo | in-progress | review | done",

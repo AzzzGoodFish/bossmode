@@ -129,6 +129,7 @@ export interface ContextUsage {
   rawMaxTokens: number;
   percentage: number;
   model: string;
+  compacted?: boolean;
 }
 
 // -- Runtimes config --

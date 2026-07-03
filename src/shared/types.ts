@@ -453,6 +453,8 @@ export interface ContextUsage {
   rawMaxTokens: number;
   percentage: number;
   model: string;
+  /** True during the post-compact interval where SDK token counts are temporarily unavailable. */
+  compacted?: boolean;
 }
 
 // -- Cursors --

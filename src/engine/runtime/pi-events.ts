@@ -50,8 +50,9 @@ export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
 
 export function mapContextUsage(raw: any, modelLabel = "unknown"): ContextUsage | null {
   if (!raw) return null;
-  const total = raw.tokens ?? raw.totalTokens ?? raw.total ?? 0;
+  const compacted = raw.tokens === null || raw.totalTokens === null || raw.total === null;
+  const total = compacted ? 0 : (raw.tokens ?? raw.totalTokens ?? raw.total ?? 0);
   const max = raw.contextWindow ?? raw.rawMaxTokens ?? raw.maxTokens ?? 0;
   const pct = raw.percent ?? raw.percentage ?? (max > 0 ? (total / max) * 100 : 0);
-  return { totalTokens: total, rawMaxTokens: max, percentage: pct, model: raw.model?.id || raw.model || modelLabel };
+  return { totalTokens: total, rawMaxTokens: max, percentage: pct, model: raw.model?.id || raw.model || modelLabel, ...(compacted ? { compacted: true } : {}) };
 }

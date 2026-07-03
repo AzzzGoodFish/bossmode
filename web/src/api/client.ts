@@ -825,6 +825,7 @@ export interface ContextUsageData {
   rawMaxTokens?: number;
   percentage?: number;
   model?: string;
+  compacted?: boolean;
 }
 
 export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsageData> {
