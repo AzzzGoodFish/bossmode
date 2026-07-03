@@ -65,7 +65,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   async function createRoom(name: string, members: string[]): Promise<Room> {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members },
+      body: { name, cwd: "/tmp", members, promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);

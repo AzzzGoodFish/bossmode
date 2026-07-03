@@ -53,10 +53,10 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   // ── T2.3: Create room ──
 
   describe("T2.3: Create room (F4)", () => {
-    it("POST /api/rooms creates a room with name, cwd, members", async () => {
+    it("POST /api/rooms creates a room with a required leader stored by memberId", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "test-room", cwd: "/tmp", members: ["pm", "architect"] },
+        body: { name: "test-room", cwd: "/tmp", members: ["pm", "architect"], promptLeaderMemberName: "architect" },
       });
       // Should succeed once Phase 2 is implemented (currently 501)
       if (res.status === 501) {
@@ -71,13 +71,60 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(room.members).toContain("pm");
       expect(room.members).toContain("architect");
       expect(room.createdAt).toBeGreaterThan(0);
+      const leader = room.roomMembers?.find((member) => member.name === "architect");
+      expect(leader?.id).toBeTruthy();
+      expect(room.promptLeaderMemberId).toBe(leader?.id);
+    });
+
+    it("POST /api/rooms without promptLeaderMemberName returns error", async () => {
+      const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "missing-leader-room", cwd: "/tmp", members: ["pm"] },
+      });
+      if (res.status === 501) return;
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("promptLeaderMemberName is required");
+    });
+
+    it("POST /api/rooms rejects leader outside selected members", async () => {
+      const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "bad-leader-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "architect" },
+      });
+      if (res.status === 501) return;
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("promptLeaderMemberName must be one of the room members");
+    });
+
+    it("keeps prompt leader stable when the leader member is renamed", async () => {
+      const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "rename-leader-room", cwd: "/tmp", members: ["pm", "qa"], promptLeaderMemberName: "pm" },
+      });
+      if (res.status === 501) return;
+      expect(res.status).toBe(200);
+      const room: Room = JSON.parse(res.body);
+      const leaderId = room.promptLeaderMemberId;
+      expect(leaderId).toBeTruthy();
+
+      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+        token,
+        body: { name: "lead" },
+      });
+      expect(renameRes.status).toBe(200);
+
+      const getRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
+      expect(getRes.status).toBe(200);
+      const updated: Room = JSON.parse(getRes.body);
+      expect(updated.promptLeaderMemberId).toBe(leaderId);
+      expect(updated.roomMembers?.find((member) => member.id === leaderId)?.name).toBe("lead");
     });
 
     // T2.4: Invalid cwd
     it("POST /api/rooms with nonexistent cwd returns error", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "bad-room", cwd: "/nonexistent/path/xxx", members: ["pm"] },
+        body: { name: "bad-room", cwd: "/nonexistent/path/xxx", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (res.status === 501) return; // skip until implemented
       expect(res.status).toBeGreaterThanOrEqual(400);
@@ -85,15 +132,14 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     });
 
     // T2.5: No members
-    it("POST /api/rooms with empty members is allowed", async () => {
+    it("POST /api/rooms with empty members returns error", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
         body: { name: "empty-room", cwd: "/tmp", members: [] },
       });
       if (res.status === 501) return;
-      expect(res.status).toBe(200);
-      const room: Room = JSON.parse(res.body);
-      expect(room.members).toEqual([]);
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("promptLeaderMemberName is required");
     });
   });
 
@@ -103,7 +149,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("PATCH /api/rooms/:id updates name, cwd, and ruleDocs", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "settings-room", cwd: "/tmp", members: ["pm"] },
+        body: { name: "settings-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -127,7 +173,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("PATCH /api/rooms/:id rejects nonexistent cwd", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "settings-room-2", cwd: "/tmp", members: ["pm"] },
+        body: { name: "settings-room-2", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -158,7 +204,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
 
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "mcp-access-room", cwd: "/tmp", members: ["pm"] },
+        body: { name: "mcp-access-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -202,11 +248,11 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("two rooms with same cwd are independent", async () => {
       const res1 = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "room-a", cwd: "/tmp", members: ["pm"] },
+        body: { name: "room-a", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       const res2 = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "room-b", cwd: "/tmp", members: ["architect"] },
+        body: { name: "room-b", cwd: "/tmp", members: ["architect"], promptLeaderMemberName: "architect" },
       });
       if (res1.status === 501 || res2.status === 501) return;
 
@@ -224,7 +270,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       // First create a room
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "msg-test", cwd: "/tmp", members: ["pm"] },
+        body: { name: "msg-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -269,7 +315,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("mentioning non-member returns error", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "mention-test", cwd: "/tmp", members: ["pm"] },
+        body: { name: "mention-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -296,7 +342,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("message appears on all subscribed WS clients simultaneously", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "realtime-test", cwd: "/tmp", members: ["pm"] },
+        body: { name: "realtime-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -333,7 +379,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("GET /api/rooms/:id returns members with status", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "status-test", cwd: "/tmp", members: ["pm", "architect"] },
+        body: { name: "status-test", cwd: "/tmp", members: ["pm", "architect"], promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);

@@ -35,7 +35,6 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     name?: string; cwd?: string; members?: string[];
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
-    promptLeaderMemberId?: string;
   };
 
   if (!body.name || !body.cwd) {
@@ -59,13 +58,20 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     return;
   }
   try {
-    if (body.promptLeaderMemberName && !members.map(String).includes(body.promptLeaderMemberName)) {
+    const promptLeaderMemberName = typeof body.promptLeaderMemberName === "string"
+      ? roomStore.normalizeMemberName(body.promptLeaderMemberName)
+      : "";
+    if (!promptLeaderMemberName) {
+      sendJson(res, 400, { error: "promptLeaderMemberName is required" });
+      return;
+    }
+    const normalizedMembers = members.map((member) => roomStore.normalizeMemberName(String(member || "")));
+    if (!normalizedMembers.includes(promptLeaderMemberName)) {
       sendJson(res, 400, { error: "promptLeaderMemberName must be one of the room members" });
       return;
     }
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
-      promptLeaderMemberName: body.promptLeaderMemberName,
-      promptLeaderMemberId: body.promptLeaderMemberId,
+      promptLeaderMemberName,
     });
     sendJson(res, 200, room);
   } catch (err: any) {

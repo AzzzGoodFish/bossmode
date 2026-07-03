@@ -137,7 +137,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("rulesroom"), cwd: "/tmp", members: ["pm"], ruleDocs: [rulePath] },
+        body: { name: uid("rulesroom"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -148,7 +148,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
     it("POST /api/rooms without ruleDocs creates a plain room", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("plainroom"), cwd: "/tmp", members: ["pm"] },
+        body: { name: uid("plainroom"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -166,7 +166,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-move"), cwd: "/tmp", members: ["pm"], ruleDocs: [oldPath] },
+        body: { name: uid("room-move"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [oldPath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string; ruleDocs?: string[] };
@@ -193,7 +193,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-delete"), cwd: "/tmp", members: ["pm"], ruleDocs: [rulePath] },
+        body: { name: uid("room-delete"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string };

@@ -84,7 +84,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   async function createRoom(name: string, members: string[]): Promise<Room> {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members },
+      body: { name, cwd: "/tmp", members, promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);

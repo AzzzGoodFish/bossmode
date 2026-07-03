@@ -287,7 +287,8 @@ export interface LegacyMemberConfig {
 // 0.8.0: KnowledgeBase (per-project container) is removed. All documents live
 // in a single global tree: ~/.bossmode/knowledge/docs/. Users organize projects
 // by top-level folders (e.g. docs/bossmode/..., docs/freeu/...). Rooms pick
-// which docs to inject as rules via `ruleDocs: string[]`.
+// Legacy rooms may still preserve selected document paths in `ruleDocs`, but
+// Prompt Supplements v1 no longer injects them into agent prompts automatically.
 
 export interface KnowledgeEntry {
   /** Document path relative to KB docs root, e.g. "architecture/overview.md". Acts as stable ID. */
@@ -302,7 +303,7 @@ export interface KnowledgeEntry {
   updatedAt: number;
 }
 
-/** Lightweight tree node for UI and agent context injection. */
+/** Lightweight tree node for UI document browsing. */
 export interface KnowledgeTreeNode {
   /** File or folder path relative to docs root. */
   path: string;
@@ -387,8 +388,8 @@ export interface Room {
   roomMembers?: RoomMemberRecord[];
   createdAt: number;
   /**
-   * Document paths (relative to ~/.bossmode/knowledge/docs/) injected into
-   * agents' system prompts as rules.
+   * Legacy selected document paths (relative to ~/.bossmode/knowledge/docs/).
+   * Preserved for migration/cascade compatibility; no longer prompt-injected.
    */
   ruleDocs?: string[];
   /** Legacy room-scoped overrides keyed by member name. Read as migration source only. */

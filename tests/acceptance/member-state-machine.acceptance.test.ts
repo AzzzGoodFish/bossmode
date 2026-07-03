@@ -79,7 +79,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
   async function createRoom(name: string, members: string[] = ["pm"]): Promise<Room> {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members },
+      body: { name, cwd: "/tmp", members, promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);

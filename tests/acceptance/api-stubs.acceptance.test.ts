@@ -61,7 +61,7 @@ describe("Acceptance: API Stubs & Routing", () => {
   it("POST /api/rooms — exists and responds", async () => {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name: "test", cwd: "/tmp", members: ["pm"] },
+      body: { name: "test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
     });
     expect(res.status).not.toBe(401);
     expect(res.status).not.toBe(404);
