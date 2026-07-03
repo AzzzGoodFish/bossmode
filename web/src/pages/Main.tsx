@@ -19,6 +19,7 @@ import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
 import { ArtifactPreviewPanel, type MessageArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
 import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSurface";
+import { TaskPreviewSurface, TaskPreviewPanel } from "../components/TaskPreviewSurface";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
@@ -74,6 +75,7 @@ export function Main({
     setSurfaceExpandedRaw(v);
     localStorage.setItem("bossmode_preview_surface", v ? "expanded" : "panel");
   };
+  const [taskPreviewId, setTaskPreviewId] = useState<string | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
     const raw = localStorage.getItem(PREVIEW_WIDTH_STORAGE_KEY);
     const n = raw ? parseInt(raw, 10) : NaN;
@@ -128,6 +130,7 @@ export function Main({
     setLensAgent(openLensAgent || null);
     setOpenLensTabs(openLensAgent ? [openLensAgent] : []);
     setArtifactPreview(null);
+    setTaskPreviewId(null);
   }, [selectedRoomId]);
 
   // 通知 Layout 当前关注的 tab key（unread 逻辑）
@@ -158,7 +161,10 @@ export function Main({
   const switchView = useCallback((v: RoomView) => {
     setView(v);
     setLensAgent(null);
-    if (v !== "chat") setArtifactPreview(null);
+    if (v !== "chat") {
+      setArtifactPreview(null);
+      setTaskPreviewId(null);
+    }
     if (selectedRoomId) onClearUnreadTab(selectedRoomId, v === "chat" ? "room" : "tasks");
   }, [selectedRoomId, onClearUnreadTab]);
 
@@ -410,7 +416,7 @@ export function Main({
           )}
           {lensFull ? lensPanel : view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : selectedRoomId ? (
@@ -422,7 +428,7 @@ export function Main({
           ) : null}
         </div>
 
-        {artifactPreview && view === "chat" && selectedRoomId && !isMobile && !lensFull && (
+        {(artifactPreview || taskPreviewId) && view === "chat" && selectedRoomId && !isMobile && !lensFull && (
           <>
             <div
               role="separator"
@@ -434,20 +440,30 @@ export function Main({
               <div className="h-10 w-0.5 rounded-full bg-line-strong group-hover:bg-accent" />
             </div>
             <div className="hidden md:block shrink-0 min-h-0" style={{ width: previewWidth }}>
-              <ArtifactPreviewPanel
-                roomId={selectedRoomId}
-                state={artifactPreview}
-                onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
-                onClose={() => setArtifactPreview(null)}
-                variant="panel"
-                onExpand={() => setSurfaceExpanded(true)}
-              />
+              {artifactPreview ? (
+                <ArtifactPreviewPanel
+                  roomId={selectedRoomId}
+                  state={artifactPreview}
+                  onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
+                  onClose={() => setArtifactPreview(null)}
+                  variant="panel"
+                  onExpand={() => setSurfaceExpanded(true)}
+                />
+              ) : (
+                <TaskPreviewPanel
+                  roomId={selectedRoomId}
+                  taskId={taskPreviewId!}
+                  onExpand={() => setSurfaceExpanded(true)}
+                  onOpenFull={() => { const id = taskPreviewId; setTaskPreviewId(null); onNavigateToTask?.(selectedRoomId, id!, "chat"); }}
+                  onClose={() => setTaskPreviewId(null)}
+                />
+              )}
             </div>
           </>
         )}
 
         {/* 工位墙（桌面） */}
-        <div className={`${artifactPreview && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[280px] border-l border-line shrink-0`}>
+        <div className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[280px] border-l border-line shrink-0`}>
           <StationPanel
             members={room.members}
             agentStatus={agentStatus}
@@ -490,6 +506,16 @@ export function Main({
             />
           </div>
         </Sheet>
+      )}
+
+      {taskPreviewId && selectedRoomId && (surfaceExpanded || isMobile) && (
+        <TaskPreviewSurface
+          roomId={selectedRoomId}
+          taskId={taskPreviewId}
+          onOpenFull={() => { const id = taskPreviewId; setTaskPreviewId(null); onNavigateToTask?.(selectedRoomId, id!, "chat"); }}
+          onCollapse={!isMobile ? () => setSurfaceExpanded(false) : undefined}
+          onClose={() => setTaskPreviewId(null)}
+        />
       )}
 
       {artifactPreview && selectedRoomId && surfaceExpanded && (

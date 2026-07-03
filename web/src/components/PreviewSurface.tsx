@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Code2, ExternalLink, FileText, Loader2, Minimize2, X } from "lucide-react";
+import { Code2, ExternalLink, FileText, Loader2, Minimize2 } from "lucide-react";
 import type { ArtifactPreviewData, RoomMessageAttachment } from "../api/client";
 import { getArtifactPreview, getAttachmentPreview } from "../api/client";
 import { Markdown } from "./Markdown";
+import { SurfaceShell } from "./SurfaceShell";
 
 /**
  * Preview Surface — the near-fullscreen in-place preview (GOO-113).
@@ -73,16 +74,6 @@ export function PreviewSurface({
   useEffect(() => { setHtmlMode("preview"); }, [item?.path]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [onClose]);
-
-  useEffect(() => {
     if (!item?.path) { setLoad({ status: "idle" }); return; }
     let cancelled = false;
     setLoad({ status: "loading" });
@@ -104,32 +95,26 @@ export function PreviewSurface({
   }, [load]);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-surface-0 flex flex-col" data-testid="preview-surface">
-      {/* slim context bar — the only chrome; everything below is content */}
-      <div className="h-11 shrink-0 border-b border-line bg-surface-1 px-3 flex items-center gap-2">
-        <Code2 size={15} className="text-accent-ink shrink-0" />
-        <div className="min-w-0 flex items-baseline gap-2">
-          <div className="text-sm font-semibold text-ink-1 truncate">{title}</div>
-          <div className="hidden sm:block font-mono text-[10px] text-ink-4 truncate" title={item?.path}>{item?.path}</div>
+    <SurfaceShell
+      testid="preview-surface"
+      icon={<Code2 size={15} className="text-accent-ink shrink-0" />}
+      title={title}
+      meta={<div className="hidden sm:block font-mono text-[10px] text-ink-4 truncate" title={item?.path}>{item?.path}</div>}
+      center={state.items.length > 1 ? (
+        <div className="ml-2 flex items-center gap-1 overflow-x-auto min-w-0">
+          {state.items.map((it, index) => (
+            <button
+              key={`${it.path}:${index}`}
+              onClick={() => onSelect(index)}
+              className={`shrink-0 max-w-[180px] truncate px-2 py-1 rounded-md border text-[10px] cursor-pointer ${index === state.selectedIndex ? "border-accent/40 bg-accent-dim text-ink-1" : "border-line bg-surface-0/40 text-ink-3 hover:text-ink-2 hover:border-line-strong"}`}
+              title={it.label}
+            >
+              {it.label.split(/[\\/]/).pop()}
+            </button>
+          ))}
         </div>
-
-        {state.items.length > 1 && (
-          <div className="ml-2 flex items-center gap-1 overflow-x-auto min-w-0">
-            {state.items.map((it, index) => (
-              <button
-                key={`${it.path}:${index}`}
-                onClick={() => onSelect(index)}
-                className={`shrink-0 max-w-[180px] truncate px-2 py-1 rounded-md border text-[10px] cursor-pointer ${index === state.selectedIndex ? "border-accent/40 bg-accent-dim text-ink-1" : "border-line bg-surface-0/40 text-ink-3 hover:text-ink-2 hover:border-line-strong"}`}
-                title={it.label}
-              >
-                {it.label.split(/[\\/]/).pop()}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex-1" />
-
+      ) : undefined}
+      actions={<>
         {canSource && (
           <div className="flex items-center gap-0.5 rounded-md border border-line bg-inset p-0.5 shrink-0">
             <button onClick={() => setHtmlMode("preview")} className={`px-2 py-1 text-[10px] rounded cursor-pointer ${htmlMode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>Preview</button>
@@ -146,15 +131,11 @@ export function PreviewSurface({
             <Minimize2 size={14} />
           </button>
         )}
-        <button onClick={onClose} title="Close (Esc)" aria-label="Close preview" className="w-8 h-8 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
-          <X size={15} />
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0">
-        <SurfaceBody load={load} htmlMode={htmlMode} />
-      </div>
-    </div>
+      </>}
+      onClose={onClose}
+    >
+      <SurfaceBody load={load} htmlMode={htmlMode} />
+    </SurfaceShell>
   );
 }
 
