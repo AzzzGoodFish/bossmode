@@ -252,6 +252,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
             selectedRoomId={activePage.id}
             onSelectRoom={(id) => handleNavigate({ type: "room", id })}
             onRoomCreated={handleRoomCreated}
+            onRoomDeleted={(roomId) => {
+              refreshSidebar();
+              if (activePageRef.current?.type === "room" && activePageRef.current.id === roomId) handleNavigate(null);
+            }}
             username={username}
             connected={connected}
             reconnecting={reconnecting}

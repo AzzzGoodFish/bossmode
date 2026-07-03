@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary,
+  getRoomPromptSupplement, getMemberPromptSupplement,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type PromptSupplement,
 } from "../api/client";
 import { Sheet } from "./Sheet";
 import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
@@ -380,6 +381,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
       <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl">
         {selectedMember && memberInfos[selectedMember] && (
           <MemberConfigPanel
+            roomId={roomId}
             member={memberInfos[selectedMember]}
             status={agentStatus[selectedMember] || "inactive"}
             contextUsage={contextUsage[selectedMember]}
@@ -410,7 +412,26 @@ function availabilityTone(status?: string): string {
   return "text-ink-4 border-line bg-surface-2";
 }
 
+function PromptSupplementPreview({ title, supplement, empty }: { title: string; supplement: PromptSupplement | null; empty: string }) {
+  const content = supplement?.content?.trim() || "";
+  return (
+    <div>
+      <div className="text-[11px] text-ink-4 uppercase tracking-wide mb-1.5">{title}</div>
+      <div className="rounded-lg border border-line-soft bg-surface-1 p-3 min-h-32 max-h-56 overflow-auto">
+        {supplement === null ? (
+          <div className="text-xs text-ink-4">Loading…</div>
+        ) : content ? (
+          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-ink-2 font-mono">{content}</pre>
+        ) : (
+          <div className="text-xs text-ink-4 leading-relaxed">{empty}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MemberConfigPanel({
+  roomId,
   member,
   status,
   contextUsage,
@@ -426,6 +447,7 @@ function MemberConfigPanel({
   onResetSession,
   onToggleMcp,
 }: {
+  roomId: string;
   member: MemberInfo;
   status: string;
   contextUsage?: ContextUsageData;
@@ -446,8 +468,29 @@ function MemberConfigPanel({
   const statusText = statusLabel(status).toLowerCase();
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
+  const [roomSupplement, setRoomSupplement] = useState<PromptSupplement | null>(null);
+  const [memberSupplement, setMemberSupplement] = useState<PromptSupplement | null>(null);
 
   useEffect(() => { setDraftName(member.name); }, [member.id, member.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoomSupplement(null);
+    setMemberSupplement(null);
+    Promise.all([
+      getRoomPromptSupplement(roomId),
+      getMemberPromptSupplement(roomId, member.id || member.name),
+    ]).then(([roomPrompt, memberPrompt]) => {
+      if (cancelled) return;
+      setRoomSupplement(roomPrompt);
+      setMemberSupplement(memberPrompt);
+    }).catch(() => {
+      if (cancelled) return;
+      setRoomSupplement({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+      setMemberSupplement({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+    });
+    return () => { cancelled = true; };
+  }, [roomId, member.id, member.name]);
 
   const canSaveName = draftName.trim() && draftName.trim() !== member.name && !savingName;
   const saveName = async () => {
@@ -536,6 +579,17 @@ function MemberConfigPanel({
               {THINKING_LEVEL_OPTIONS.map((level) => <option key={level} value={level}>{level}</option>)}
             </select>
           </label>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+        <div>
+          <div className="text-sm font-semibold text-ink-1">Prompt supplements</div>
+          <div className="text-xs text-ink-4 mt-0.5">Preview only. This member uses the shared room prompt plus its own member prompt on next runtime create/restart.</div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <PromptSupplementPreview title="Current Room Supplemental Prompt" supplement={roomSupplement} empty="Room supplement is empty." />
+          <PromptSupplementPreview title={`${member.name} Member Supplemental Prompt`} supplement={memberSupplement} empty="Member supplement is empty." />
         </div>
       </section>
 

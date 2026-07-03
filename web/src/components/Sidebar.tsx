@@ -6,10 +6,7 @@ import {
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
 import { getRooms, getAgents, getSkills, getKnowledgeTree } from "../api/client";
-import { RoomMenu } from "./RoomMenu";
-import { RoomSettingsDialog } from "./RoomSettingsDialog";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
-import { useDialog } from "./dialogs";
 
 export type SettingsSection = "models" | "runtime" | "summary" | "integrations" | "team-updates";
 
@@ -89,12 +86,10 @@ export function Sidebar({
   unreadRoomIds, onRoomsLoaded, liveRooms, collapsed, onToggle,
 }: SidebarProps) {
   const isMobile = useIsMobile();
-  const { toast, confirm, prompt } = useDialog();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
-  const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
 
   // 当前域：由 activePage 推导，但允许用户点 rail 切换浏览域（不改变页面，直到点选具体条目）
   const pageDomain = domainOf(activePage);
@@ -132,8 +127,6 @@ export function Sidebar({
   const activeSettingsSection = activePage?.type === "settings" ? (activePage.section ?? "models") : null;
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
-  const settingsRoom = settingsRoomId ? displayRooms.find((r) => r.id === settingsRoomId) || null : null;
-
   const openTasksLabel = useMemo(() => "All Tasks", []);
 
   const toggleTheme = () => {
@@ -203,7 +196,7 @@ export function Sidebar({
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
   const roomItemCls = (active: boolean) =>
-    `w-full text-left rounded-lg pl-2.5 pr-[72px] py-2 mb-px transition-colors cursor-pointer ${
+    `w-full text-left rounded-lg pl-2.5 pr-7 py-2 mb-px transition-colors cursor-pointer ${
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
 
@@ -245,35 +238,12 @@ export function Sidebar({
                     </div>
                   </button>
                   <span
-                    className="absolute right-[54px] top-[17px] w-3 h-3 grid place-items-center pointer-events-none"
+                    className="absolute right-3 top-[17px] w-3 h-3 grid place-items-center pointer-events-none"
                     title={presence.title}
                     aria-label={presence.title}
                   >
                     <span className={`w-[7px] h-[7px] rounded-full ${roomBeaconClass(presence.state)}`} />
                   </span>
-                  <div className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <RoomMenu
-                      onRename={async () => {
-                        const newName = await prompt("New room name:");
-                        if (!newName) return;
-                        try {
-                          const { updateRoomSettings } = await import("../api/client");
-                          await updateRoomSettings(r.id, { name: newName });
-                          refresh();
-                        } catch (err: any) { toast(err.message, "error"); }
-                      }}
-                      onSettings={() => setSettingsRoomId(r.id)}
-                      onDelete={async () => {
-                        if (!(await confirm("Delete this room?"))) return;
-                        try {
-                          const { deleteRoom } = await import("../api/client");
-                          await deleteRoom(r.id);
-                          refresh();
-                          if (selectedRoomId === r.id) onNavigate(null);
-                        } catch (err: any) { toast(err.message, "error"); }
-                      }}
-                    />
-                  </div>
                 </div>
               );
             })}
@@ -360,18 +330,6 @@ export function Sidebar({
       {rail}
       {(!collapsed || isMobile) && panel}
 
-      {settingsRoom && (
-        <RoomSettingsDialog
-          room={settingsRoom}
-          open={!!settingsRoom}
-          onClose={() => setSettingsRoomId(null)}
-          onSaved={(updatedRoom) => {
-            setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
-            setSettingsRoomId(null);
-            refresh();
-          }}
-        />
-      )}
     </div>
   );
 }

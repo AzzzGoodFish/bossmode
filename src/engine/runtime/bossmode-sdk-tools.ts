@@ -67,6 +67,50 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       },
     }),
     defineTool({
+      name: "read_prompt_supplement",
+      label: "Read Prompt Supplement",
+      description: "Read the current room or member supplemental prompt. All room members may read the room supplement; members may read their own member supplement.",
+      parameters: Type.Object({
+        scope: Type.String({ description: "'room' for the shared room supplement, or 'member' for your own member supplement" }),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("read_prompt_supplement", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Read prompt supplement failed");
+        return textResult(truncate(JSON.stringify(data, null, 2)));
+      },
+    }),
+    defineTool({
+      name: "edit_prompt_supplement",
+      label: "Edit Prompt Supplement",
+      description: "Edit your own member supplement, or the room supplement if you are the configured room leader. oldText must match exactly once.",
+      parameters: Type.Object({
+        scope: Type.String({ description: "'room' or 'member'" }),
+        oldText: Type.String({ description: "Exact text to replace. Must occur exactly once." }),
+        newText: Type.String({ description: "Replacement text" }),
+        note: Type.Optional(Type.String({ description: "Optional short reason for audit history" })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("edit_prompt_supplement", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Edit prompt supplement failed");
+        return textResult(`Saved ${data.scope} prompt supplement revision ${data.revision}. Applies on next member restart/reset/recreate.`);
+      },
+    }),
+    defineTool({
+      name: "write_prompt_supplement",
+      label: "Write Prompt Supplement",
+      description: "Overwrite your own member supplement, or the room supplement if you are the configured room leader.",
+      parameters: Type.Object({
+        scope: Type.String({ description: "'room' or 'member'" }),
+        content: Type.String({ description: "Full markdown content to save" }),
+        note: Type.Optional(Type.String({ description: "Optional short reason for audit history" })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("write_prompt_supplement", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Write prompt supplement failed");
+        return textResult(`Saved ${data.scope} prompt supplement revision ${data.revision}. Applies on next member restart/reset/recreate.`);
+      },
+    }),
+    defineTool({
       name: "create_task",
       label: "Create Task",
       description: CREATE_TASK_DESCRIPTION,

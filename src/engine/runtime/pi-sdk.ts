@@ -403,7 +403,10 @@ export class PiSdkRuntime implements AgentRuntime {
     }
 
     const rolePrompt = opts.agentPrompt.trim();
-    const appendSystemPrompt = [opts.envPrompt, opts.rulesPrompt].filter((v): v is string => !!v && v.trim().length > 0);
+    const appendSystemPrompt = (opts.appendSystemPrompt && opts.appendSystemPrompt.length > 0
+      ? opts.appendSystemPrompt
+      : [opts.envPrompt, opts.rulesPrompt]
+    ).filter((v): v is string => !!v && v.trim().length > 0);
     const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     const extensionPaths = piConfig?.extensionPaths ?? [];

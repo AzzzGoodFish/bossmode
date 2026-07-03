@@ -12,10 +12,9 @@ import { getBossmodeDir, readConfig } from "../shared/config.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
-import * as knowledgeStore from "../knowledge/store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
-import { buildAgentPrompt } from "./prompt-assembler.js";
+import { compileMemberPrompt } from "./prompt-compiler.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
   wrapPrivateMessage,
@@ -492,26 +491,8 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
       return null;
     }
 
-    // Load global document tree (injected as index) + active rule docs
-    // (injected as full content). The tree is always present; rules depend on
-    // what the room explicitly picks via room.ruleDocs.
-    const knowledgeEntries = knowledgeStore.listEntries();
-    const tree = knowledgeStore.getDocumentTree();
-
-    const ruleDocPaths: string[] = Array.isArray(room.ruleDocs) ? room.ruleDocs : [];
-
-    let rulesPrompt: string | undefined;
-    if (ruleDocPaths.length > 0) {
-      const rules = ruleDocPaths
-        .map((p) => knowledgeStore.getEntry(p))
-        .filter(Boolean);
-      if (rules.length > 0) {
-        rulesPrompt = rules.map((r) => `# ${r!.title}\n\n${r!.content}`).join("\n\n---\n\n");
-      }
-    }
-
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
-    const assembled = buildAgentPrompt(agentDef, knowledgeEntries, room.members, room.name, memberName, tree, ruleDocPaths, docsRootPath);
+    const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
 
     // Resolve skills: member config takes precedence over agent definition
     const skills = resolveSkills(member, agentDef);
@@ -540,11 +521,11 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         cwd: room.cwd,
         roomId,
         member,
-        agentPrompt: assembled.agentPrompt,
-        envPrompt: assembled.envPrompt,
+        agentPrompt: compiled.agentPrompt,
+        envPrompt: compiled.envPrompt,
+        appendSystemPrompt: compiled.appendSystemPrompt,
         skillPaths,
         skillNames: skills,
-        rulesPrompt,
         roomMembers: room.members,
         resumeSession,
         onSessionChanged: (session) => {

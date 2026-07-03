@@ -8,6 +8,7 @@ import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as taskStore from "../workspace/task-store.js";
+import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
@@ -153,6 +154,61 @@ export async function handleToolCallback(
 
       // Default: inline text (may be truncated by MAX_RESULT_CHARS)
       return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts }));
+    }
+    case "read_prompt_supplement": {
+      const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
+      if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const scope = String(params?.scope || "member");
+      if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
+      const supplement = promptSupplementStore.readPromptSupplement(roomId, scope, scope === "member" ? actor.id : undefined);
+      return {
+        ok: true,
+        scope,
+        content: supplement.content,
+        revision: supplement.revision,
+        contentHash: supplement.contentHash,
+        contentLength: supplement.contentLength,
+        updatedAt: supplement.updatedAt,
+        updatedBy: supplement.updatedBy,
+        updatedByMemberId: supplement.updatedByMemberId,
+        updatedByName: supplement.updatedByName,
+        suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE,
+      };
+    }
+    case "write_prompt_supplement":
+    case "edit_prompt_supplement": {
+      const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
+      if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const room = roomStore.getRoom(roomId);
+      if (!room) return { ok: false, error: "Room not found" };
+      const scope = String(params?.scope || "member");
+      if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
+      if (scope === "room") {
+        if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room supplement writes are disabled" };
+        if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room supplement" };
+      }
+      try {
+        const common = {
+          roomId,
+          scope: scope as promptSupplementStore.PromptSupplementScope,
+          memberId: scope === "member" ? actor.id : undefined,
+          actor: { type: "member" as const, memberId: actor.id, name: actor.name },
+          note: params?.note ? String(params.note) : undefined,
+        };
+        const supplement = tool === "write_prompt_supplement"
+          ? promptSupplementStore.writePromptSupplement({ ...common, content: String(params?.content ?? "") })
+          : promptSupplementStore.editPromptSupplement({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
+        return {
+          ok: true,
+          scope,
+          revision: supplement.revision,
+          contentHash: supplement.contentHash,
+          contentLength: supplement.contentLength,
+          message: "Saved. Applies on next member restart/reset/recreate.",
+        };
+      } catch (err: any) {
+        return { ok: false, error: err.message || String(err) };
+      }
     }
     case "create_task": {
       const title = params?.title ? String(params.title).trim() : "";

@@ -45,11 +45,12 @@ export interface CreateAgentOpts {
   member: AgentMemberConfig;
 
   // Layered prompt content
-  agentPrompt: string;       // Layer 1: agent definition role prompt only. Empty for builtin/general.
-  envPrompt: string;         // Bossmode overlays: docs index + environment info. Always appended.
-  skillPaths: string[];      // Layer 2: skill directory paths
+  agentPrompt: string;       // Source agent role prompt only. Empty for builtin/general.
+  envPrompt?: string;        // Legacy compatibility: Bossmode overlay. Prefer appendSystemPrompt.
+  appendSystemPrompt?: string[]; // Bossmode core + prompt supplements.
+  skillPaths: string[];      // Skill directory paths
   skillNames?: string[];     // Resolved skill names for status display
-  rulesPrompt?: string;      // Layer 3: rules from knowledge base
+  rulesPrompt?: string;      // Legacy compatibility; ignored by new prompt compiler.
 
   roomMembers: string[];
   callbacks: AgentCallbacks;

@@ -5,7 +5,7 @@ import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
-import { Search, Plus, ScrollText, X } from "lucide-react";
+import { Search, Plus, ScrollText, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
@@ -23,12 +23,14 @@ import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
 import { WorkstationDetail } from "../components/WorkstationDetail";
 import { AddMemberDialog } from "../components/AddMemberDialog";
+import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
 import { useDialog } from "../components/dialogs";
 
 interface MainProps {
   selectedRoomId: string | null;
   onSelectRoom: (roomId: string) => void;
   onRoomCreated: (room: Room) => void;
+  onRoomDeleted?: (roomId: string) => void;
   username: string;
   externalShowCreateRoom?: boolean;
   onCreateRoomShown?: () => void;
@@ -51,7 +53,7 @@ const PREVIEW_MIN_WIDTH = 320;
 const PREVIEW_MAX_WIDTH = 760;
 
 export function Main({
-  selectedRoomId, onSelectRoom, onRoomCreated, username,
+  selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
   externalShowCreateRoom, onCreateRoomShown,
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
@@ -63,6 +65,7 @@ export function Main({
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showRoomSettings, setShowRoomSettings] = useState(false);
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
   const [artifactPreview, setArtifactPreview] = useState<GateArtifactPreviewState | ChatAttachmentPreviewState | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
@@ -195,9 +198,9 @@ export function Main({
   );
 
   const handleCreateRoom = useCallback(
-    async (name: string, cwd: string, members: string[], ruleDocs?: string[]) => {
+    async (name: string, cwd: string, members: string[], ruleDocs?: string[], promptLeaderMemberName?: string) => {
       try {
-        const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs);
+        const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName);
         onRoomCreated(newRoom);
         setShowCreateRoom(false);
       } catch (err: any) {
@@ -339,17 +342,16 @@ export function Main({
         />
       )}
 
-      {/* 台口：房间名 + cwd + rule + segmented + 工具组 */}
+      {/* 台口：房间名 + cwd + segmented + 工具组 */}
       <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
-        <div className="flex items-baseline gap-2.5 min-w-0">
+        <button
+          onClick={() => setShowRoomSettings(true)}
+          className="flex items-baseline gap-2.5 min-w-0 rounded-lg px-2 py-1 -ml-2 hover:bg-surface-2 transition-colors text-left cursor-pointer"
+          title="Open Room Settings"
+        >
           <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{room.name}</h2>
           <span className="font-mono text-[11px] text-ink-4 truncate hidden sm:block">{room.cwd}</span>
-          {(room.ruleDocs?.length ?? 0) > 0 && (
-            <span className="text-[10px] px-2 py-px rounded-full border border-line text-ink-3 whitespace-nowrap hidden md:block">
-              rule · {room.ruleDocs!.length}
-            </span>
-          )}
-        </div>
+        </button>
 
         <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">
           <button onClick={() => switchView("chat")} className={segBtn(view === "chat" && !lensFull)}>
@@ -370,6 +372,9 @@ export function Main({
             }`} />
             {connected && <span className="text-[10px] text-ink-4 hidden sm:block">live</span>}
           </span>
+          <button onClick={() => setShowRoomSettings(true)} className={toolBtn} title="Room Settings">
+            <Settings size={13} />
+          </button>
           <button onClick={() => setShowAddMember(true)} className={toolBtn} title="Add member">
             <Plus size={14} />
           </button>
@@ -481,6 +486,15 @@ export function Main({
 
       {showCreateRoom && (
         <CreateRoomDialog onClose={() => setShowCreateRoom(false)} onSubmit={handleCreateRoom} />
+      )}
+      {showRoomSettings && (
+        <RoomSettingsDialog
+          room={room}
+          open={showRoomSettings}
+          onClose={() => setShowRoomSettings(false)}
+          onSaved={async () => { await reloadRoom(); (window as any).__bossmode_refreshSidebar?.(); }}
+          onDeleted={(roomId) => { (window as any).__bossmode_refreshSidebar?.(); onRoomDeleted?.(roomId); }}
+        />
       )}
       {showAddMember && (
         <AddMemberDialog currentMembers={room.members} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />

@@ -134,7 +134,7 @@ export function validateRoomMemberNameList(names: string[]): string | null {
 
 // -- Room CRUD --
 
-export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[]): Room {
+export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[], opts?: { promptLeaderMemberName?: string; promptLeaderMemberId?: string }): Room {
   ensureRoomsDir();
 
   const normalizedMembers = members.map((memberName) => normalizeMemberName(String(memberName || "")));
@@ -143,12 +143,17 @@ export function createRoom(name: string, cwd: string, members: string[], ruleDoc
 
   const roomId = randomUUID();
   const roomMembers = normalizedMembers.map((memberName) => buildRoomMemberRecord(roomId, memberName));
+  const leaderName = opts?.promptLeaderMemberName ? normalizeMemberName(opts.promptLeaderMemberName) : undefined;
+  const promptLeaderMemberId = opts?.promptLeaderMemberId || (leaderName ? roomMembers.find((member) => member.name === leaderName)?.id : undefined);
+  if (leaderName && !promptLeaderMemberId) throw new Error("promptLeaderMemberName must be one of the room members");
+  if (opts?.promptLeaderMemberId && !roomMembers.some((member) => member.id === opts.promptLeaderMemberId)) throw new Error("promptLeaderMemberId must be one of the room members");
   const room: Room = {
     id: roomId,
     name,
     cwd,
     members: roomMembers.map((member) => member.name),
     roomMembers,
+    ...(promptLeaderMemberId ? { promptLeaderMemberId } : {}),
     createdAt: Date.now(),
     ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
@@ -193,6 +198,21 @@ export function updateRoomCwd(roomId: string, cwd: string): Room | null {
   const room = getRoom(roomId);
   if (!room) return null;
   room.cwd = cwd;
+  writeRoom(room);
+  return room;
+}
+
+export function updateRoomPromptLeader(roomId: string, promptLeaderMemberId: string | null): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  if (promptLeaderMemberId === null || promptLeaderMemberId === "") {
+    delete room.promptLeaderMemberId;
+    writeRoom(room);
+    return room;
+  }
+  const member = findRoomMemberByIdInRoom(room, promptLeaderMemberId);
+  if (!member) throw new Error("promptLeaderMemberId must be a current room member");
+  room.promptLeaderMemberId = member.id;
   writeRoom(room);
   return room;
 }

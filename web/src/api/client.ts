@@ -578,14 +578,29 @@ export interface RoomMemberRecord {
   updatedAt: number;
 }
 
+export interface PromptSupplement {
+  content: string;
+  revision: number;
+  contentHash: string;
+  contentLength: number;
+  updatedAt?: number;
+  updatedBy?: "user" | "member";
+  updatedByMemberId?: string;
+  updatedByName?: string;
+  suggestedTemplate?: string;
+  memberId?: string;
+  memberName?: string;
+}
+
 export interface Room {
   id: string;
   name: string;
   cwd: string;
   members: string[];
+  promptLeaderMemberId?: string;
   roomMembers?: RoomMemberRecord[];
   createdAt: number;
-  /** Document paths injected into agents' system prompts as rules. */
+  /** Legacy. No longer injected into prompts or shown in Room Settings. */
   ruleDocs?: string[];
   agentStatuses?: Record<string, string>;
 }
@@ -599,10 +614,11 @@ export async function createRoom(
   cwd: string,
   members: string[],
   ruleDocs?: string[],
+  promptLeaderMemberName?: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, cwd, members, ruleDocs }),
+    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName }),
   });
 }
 
@@ -618,7 +634,7 @@ export async function updateRoomBindings(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; cwd?: string; ruleDocs?: string[] },
+  patch: { name?: string; cwd?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",
@@ -639,6 +655,14 @@ export async function renameRoom(id: string, name: string): Promise<Room> {
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
+}
+
+export async function getRoomPromptSupplement(roomId: string): Promise<PromptSupplement> {
+  return apiFetch(`/api/rooms/${roomId}/prompt-supplement`);
+}
+
+export async function getMemberPromptSupplement(roomId: string, memberRef: string): Promise<PromptSupplement> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/prompt-supplement`);
 }
 
 // -- Messages --

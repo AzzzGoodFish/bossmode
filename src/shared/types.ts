@@ -316,6 +316,22 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
+// -- Prompt Supplements --
+
+export interface PromptSupplementMeta {
+  revision: number;
+  contentHash: string;
+  contentLength: number;
+  updatedAt?: number;
+  updatedBy?: "user" | "member";
+  updatedByMemberId?: string;
+  updatedByName?: string;
+}
+
+export interface PromptSupplement extends PromptSupplementMeta {
+  content: string;
+}
+
 // -- Room --
 
 export interface RoomLinearIntegration {
@@ -365,6 +381,8 @@ export interface Room {
   cwd: string;
   /** Compatibility/derived member names. v0.14 identity lives in roomMembers. */
   members: string[];
+  /** Room leader room-member id. Rename-stable; may be absent for legacy rooms. */
+  promptLeaderMemberId?: string;
   /** Authoritative room-local members for v0.14+. */
   roomMembers?: RoomMemberRecord[];
   createdAt: number;

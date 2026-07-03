@@ -1,16 +1,15 @@
-import { useState, useEffect, useMemo, type FormEvent } from "react";
-import type { MemberInfo, KnowledgeTreeNode, ModelOption, AgentInfo } from "../api/client";
+import { useState, useEffect, type FormEvent } from "react";
+import type { MemberInfo, ModelOption, AgentInfo } from "../api/client";
 import { ModelPicker } from "./ModelPicker";
 import { Sheet } from "./Sheet";
 import { FolderPicker } from "./FolderPicker";
-import { getMembers, getKnowledgeTree, createMember, getConfiguredModels, getAgents } from "../api/client";
+import { getMembers, createMember, getConfiguredModels, getAgents } from "../api/client";
 import { useDialog } from "./dialogs";
-import { RulesTree } from "./RulesTree";
-import { Shield, FolderOpen } from "lucide-react";
+import { Crown, FolderOpen } from "lucide-react";
 
 interface CreateRoomDialogProps {
   onClose: () => void;
-  onSubmit: (name: string, cwd: string, members: string[], ruleDocs?: string[]) => void;
+  onSubmit: (name: string, cwd: string, members: string[], ruleDocs?: string[], promptLeaderMemberName?: string) => void;
 }
 
 
@@ -21,11 +20,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
-
-  // Knowledge tree for rules selection
-  const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
-  const [selectedRuleDocs, setSelectedRuleDocs] = useState<Set<string>>(new Set());
-  const [autoSelectApplied, setAutoSelectApplied] = useState(false);
+  const [leaderName, setLeaderName] = useState("");
 
   // Inline member creation
   const [creatingForAgent, setCreatingForAgent] = useState<string | null>(null);
@@ -35,60 +30,26 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   useEffect(() => {
     refreshMembers();
     getAgents().then(setAgents).catch(console.error);
-    getKnowledgeTree().then(setTree).catch(console.error);
   }, []);
-
-  // All markdown file paths in the tree (flat)
-  const allDocPaths = useMemo(() => {
-    if (!tree?.children) return [] as string[];
-    const out: string[] = [];
-    const walk = (nodes: KnowledgeTreeNode[]) => {
-      for (const n of nodes) {
-        if (n.kind === "file") out.push(n.path);
-        else if (n.children) walk(n.children);
-      }
-    };
-    walk(tree.children);
-    return out;
-  }, [tree]);
-
-  // Heuristic auto-select: when user types a cwd, suggest rules/ docs under
-  // <cwd-basename>/ (e.g. "/home/fish/dev/llm/bossmode" → "bossmode/rules/*").
-  // Falls back to top-level "rules/*" if no project-specific rules exist.
-  useEffect(() => {
-    if (autoSelectApplied || allDocPaths.length === 0 || !cwd.trim()) return;
-    const basename = cwd.trim().replace(/\/+$/, "").split("/").pop() || "";
-    const candidates = basename
-      ? allDocPaths.filter((p) => p.startsWith(`${basename}/rules/`))
-      : [];
-    const fallback = candidates.length === 0
-      ? allDocPaths.filter((p) => p.startsWith("rules/"))
-      : candidates;
-    if (fallback.length > 0) {
-      setSelectedRuleDocs(new Set(fallback));
-      setAutoSelectApplied(true);
-    }
-  }, [cwd, allDocPaths, autoSelectApplied]);
 
   const toggleMember = (memberName: string) => {
     setSelectedMembers((prev) => {
       const next = new Set(prev);
-      next.has(memberName) ? next.delete(memberName) : next.add(memberName);
+      if (next.has(memberName)) {
+        next.delete(memberName);
+      } else {
+        next.add(memberName);
+        if (!leaderName) setLeaderName(memberName);
+      }
       return next;
     });
   };
 
-  const toggleRuleDoc = (docPath: string) => {
-    setSelectedRuleDocs((prev) => {
-      const next = new Set(prev);
-      next.has(docPath) ? next.delete(docPath) : next.add(docPath);
-      return next;
-    });
-    // Once the user manually touches the selection, disable auto-apply
-    setAutoSelectApplied(true);
-  };
+  useEffect(() => {
+    if (leaderName && !selectedMembers.has(leaderName)) setLeaderName("");
+  }, [leaderName, selectedMembers]);
 
-  const canSubmit = name.trim() && cwd.trim() && selectedMembers.size > 0;
+  const canSubmit = name.trim() && cwd.trim() && selectedMembers.size > 0 && leaderName;
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -97,7 +58,8 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
       name.trim(),
       cwd.trim(),
       Array.from(selectedMembers),
-      selectedRuleDocs.size > 0 ? Array.from(selectedRuleDocs) : undefined,
+      undefined,
+      leaderName,
     );
   };
 
@@ -163,28 +125,24 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           </div>
         </div>
 
-        {/* Rules: pick from the knowledge tree */}
-        {allDocPaths.length > 0 && (
-          <div>
-            <label className="text-sm text-ink-4 mb-1 flex items-center gap-1.5">
-              <Shield size={13} className="text-think" />
-              Rules ({selectedRuleDocs.size} selected)
-            </label>
-            <p className="text-xs text-ink-3 mb-2">
-              Selected documents are injected into every agent's system prompt.
-              Docs under <code>{"<cwd-basename>/rules/"}</code> or root <code>rules/</code> are preselected.
-            </p>
-            <div className="border border-line-soft rounded p-2 max-h-56 overflow-y-auto">
-              {tree?.children && (
-                <RulesTree
-                  nodes={tree.children}
-                  selected={selectedRuleDocs}
-                  onToggle={toggleRuleDoc}
-                />
-              )}
-            </div>
-          </div>
-        )}
+        <div>
+          <label className="text-sm text-ink-4 mb-1 flex items-center gap-1.5">
+            <Crown size={13} className="text-think" />
+            Room leader
+          </label>
+          <select
+            value={leaderName}
+            onChange={(e) => setLeaderName(e.target.value)}
+            className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
+            required
+          >
+            <option value="">Select a room leader…</option>
+            {Array.from(selectedMembers).map((memberName) => (
+              <option key={memberName} value={memberName}>{memberName}</option>
+            ))}
+          </select>
+          <p className="text-xs text-ink-3 mt-1.5">The leader can maintain the Room Supplemental Prompt through tools. You can change this later in Room Settings.</p>
+        </div>
 
         <div className="flex gap-2 justify-end pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-ink-4 hover:text-ink-1 cursor-pointer">Cancel</button>

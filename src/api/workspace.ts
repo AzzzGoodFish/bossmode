@@ -16,6 +16,7 @@ import { readConfig, writeConfig } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
+import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
@@ -33,6 +34,8 @@ addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
     name?: string; cwd?: string; members?: string[];
     ruleDocs?: string[];
+    promptLeaderMemberName?: string;
+    promptLeaderMemberId?: string;
   };
 
   if (!body.name || !body.cwd) {
@@ -56,7 +59,14 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     return;
   }
   try {
-    const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs);
+    if (body.promptLeaderMemberName && !members.map(String).includes(body.promptLeaderMemberName)) {
+      sendJson(res, 400, { error: "promptLeaderMemberName must be one of the room members" });
+      return;
+    }
+    const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
+      promptLeaderMemberName: body.promptLeaderMemberName,
+      promptLeaderMemberId: body.promptLeaderMemberId,
+    });
     sendJson(res, 200, room);
   } catch (err: any) {
     sendJson(res, 400, { error: String(err?.message || err) });
@@ -93,6 +103,7 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     name?: string;
     cwd?: string;
     ruleDocs?: string[];
+    promptLeaderMemberId?: string | null;
   };
 
   let changed = false;
@@ -123,11 +134,51 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "promptLeaderMemberId")) {
+    try {
+      const nextLeader = body.promptLeaderMemberId ?? null;
+      if ((room.promptLeaderMemberId || null) !== nextLeader) {
+        updated = roomStore.updateRoomPromptLeader(params.id, nextLeader) || updated;
+        changed = true;
+      }
+    } catch (err: any) {
+      sendJson(res, 400, { error: err.message || String(err) });
+      return;
+    }
+  }
+
   if (!changed) {
-    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, or ruleDocs)" });
+    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, ruleDocs, or promptLeaderMemberId)" });
     return;
   }
   sendJson(res, 200, updated);
+});
+
+// ── Prompt Supplements (preview-only public API) ──
+
+addRoute("GET", "/api/rooms/:id/prompt-supplement", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const supplement = promptSupplementStore.readPromptSupplement(params.id, "room");
+  sendJson(res, 200, { ...supplement, suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE });
+});
+
+addRoute("GET", "/api/rooms/:id/members/:memberRef/prompt-supplement", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const member = roomStore.resolveRoomMemberRef(params.id, params.memberRef);
+  if (!member) {
+    sendJson(res, 404, { error: "Member is not in this room" });
+    return;
+  }
+  const supplement = promptSupplementStore.readPromptSupplement(params.id, "member", member.id);
+  sendJson(res, 200, { ...supplement, memberId: member.id, memberName: member.name, suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE });
 });
 
 // ── Messages ──
