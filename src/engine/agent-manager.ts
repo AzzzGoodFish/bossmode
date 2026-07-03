@@ -830,6 +830,22 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
 
 const contextUsageCache = new Map<string, ContextUsage>();
 
+function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
+  if (!previous) return false;
+  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
+  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
+  const max = next.rawMaxTokens || previous.rawMaxTokens || 0;
+  const wasNearOrOverLimit = max > 0 ? previous.totalTokens >= max * 0.8 : previous.percentage >= 80;
+  return wasNearOrOverLimit && next.totalTokens <= previous.totalTokens * 0.25;
+}
+
+function shouldKeepCompactedMarker(previous: ContextUsage | undefined, next: ContextUsage): boolean {
+  if (!previous?.compacted) return false;
+  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
+  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
+  return next.totalTokens <= previous.totalTokens * 1.25;
+}
+
 export function getAgentContextUsage(roomId: string, memberRef: string): ContextUsage | null {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
@@ -850,6 +866,7 @@ export function refreshContextUsage(roomId: string, memberRef: string): void {
     if (!usage) return;
     const previous = contextUsageCache.get(key);
     if (usage.compacted && previous) usage = { ...previous, compacted: true };
+    else if (isCompactUsageDrop(previous, usage) || shouldKeepCompactedMarker(previous, usage)) usage = { ...usage, compacted: true };
     if (usage.compacted && !previous) return;
     contextUsageCache.set(key, usage);
     broadcastToRoom(roomId, {

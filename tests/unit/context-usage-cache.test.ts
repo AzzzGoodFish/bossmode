@@ -99,6 +99,7 @@ vi.mock("../../src/engine/event-handler.js", () => ({
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import {
   activateAgent,
+  destroyInstance,
   getAgentContextUsage,
   initAgentManager,
   refreshContextUsage,
@@ -176,5 +177,36 @@ describe("agent-manager context usage cache", () => {
       type: "agent:context_usage",
       usage: { totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet", compacted: true },
     }));
+  });
+
+  it("marks compacted on a same-session significant context drop and keeps the marker across immediate fallback refresh", async () => {
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 18017, rawMaxTokens: 1200, percentage: 1501.4, model: "sonnet" });
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    mocks.broadcastToRoom.mockReset();
+
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 82, rawMaxTokens: 1200, percentage: 6.83, model: "sonnet" });
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getAgentContextUsage("room1", "developer")).toEqual({ totalTokens: 82, rawMaxTokens: 1200, percentage: 6.83, model: "sonnet", compacted: true });
+
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 82, rawMaxTokens: 1200, percentage: 6.83, model: "sonnet" });
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getAgentContextUsage("room1", "developer")?.compacted).toBe(true);
+  });
+
+  it("does not mark compacted after restart/reset clears the active instance usage history", async () => {
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 18017, rawMaxTokens: 1200, percentage: 1501.4, model: "sonnet" });
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    destroyInstance("room1", "developer");
+    await activateAgent("room1", "developer");
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 82, rawMaxTokens: 1200, percentage: 6.83, model: "sonnet" });
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getAgentContextUsage("room1", "developer")).toEqual({ totalTokens: 82, rawMaxTokens: 1200, percentage: 6.83, model: "sonnet" });
   });
 });
