@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -43,8 +43,13 @@ async function getRoomMessages(roomId: string) {
 
 describe("knowledge-activity", () => {
   beforeEach(async () => {
+    vi.resetModules();
     const { _resetDedup } = await import("../../src/engine/knowledge-activity.js");
     _resetDedup();
+  });
+
+  afterEach(() => {
+    vi.resetModules();
   });
 
   it("emits a knowledge_event card for write tool inside docs root", async () => {
