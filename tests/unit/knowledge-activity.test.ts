@@ -21,11 +21,11 @@ vi.mock("../../src/shared/config.js", () => ({
   configExists: () => true,
 }));
 
-function ensureRoom(roomId: string) {
+function ensureRoom(roomId: string, extra: Record<string, unknown> = {}) {
   const dir = join(tmpDir, "rooms", roomId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "room.json"), JSON.stringify({
-    id: roomId, name: `Room ${roomId}`, cwd: "/tmp", members: ["architect"], createdAt: Date.now(),
+    id: roomId, name: `Room ${roomId}`, cwd: "/tmp", members: ["architect"], createdAt: Date.now(), ...extra,
   }), "utf-8");
 }
 
@@ -107,5 +107,17 @@ describe("knowledge-activity", () => {
     maybeEmitKnowledgeActivity("k6", "dev", "write", { path: "proj/rel.md" }, false, docsRoot);
     const messages = await getRoomMessages("k6");
     expect(messages.find((m) => m.type === "knowledge_event")!.knowledge_event_meta?.path).toBe("proj/rel.md");
+  });
+
+  it("marks doc writes outside the room docsPath", async () => {
+    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    ensureRoom("k7", { docsPath: "bossmode/" });
+    const inside = writeDoc("bossmode/inside.md", "# In");
+    const outside = writeDoc("other/outside.md", "# Out");
+    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: inside }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: outside }, false, "/tmp");
+    const cards = (await getRoomMessages("k7")).filter((m) => m.type === "knowledge_event");
+    expect(cards[0].knowledge_event_meta?.outsideRoomDocsPath).toBeUndefined();
+    expect(cards[1].knowledge_event_meta?.outsideRoomDocsPath).toBe(true);
   });
 });

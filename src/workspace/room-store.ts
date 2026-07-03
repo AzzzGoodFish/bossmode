@@ -132,9 +132,31 @@ export function validateRoomMemberNameList(names: string[]): string | null {
   return null;
 }
 
+export function slugifyRoomDocsPath(input: string): string {
+  const slug = String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, "-")
+    .replace(/[^\w\-.\u4e00-\u9fff]/gu, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || `room-${Date.now()}`;
+  return `${slug}/`;
+}
+
+export function normalizeRoomDocsPath(input: string | null | undefined): string | undefined {
+  const raw = String(input || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!raw) return undefined;
+  const parts = raw.split("/").filter(Boolean);
+  if (parts.some((part) => part === "." || part === "..")) throw new Error("docsPath must stay inside the knowledge docs root");
+  const safe = parts.join("/");
+  if (!/^[\w\-.\u4e00-\u9fff/]+$/u.test(safe)) throw new Error("docsPath contains unsupported characters");
+  return `${safe}/`;
+}
+
 // -- Room CRUD --
 
-export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[], opts?: { promptLeaderMemberName?: string; promptLeaderMemberId?: string }): Room {
+export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[], opts?: { promptLeaderMemberName?: string; promptLeaderMemberId?: string; docsPath?: string | null }): Room {
   ensureRoomsDir();
 
   const normalizedMembers = members.map((memberName) => normalizeMemberName(String(memberName || "")));
@@ -154,12 +176,14 @@ export function createRoom(name: string, cwd: string, members: string[], ruleDoc
     members: roomMembers.map((member) => member.name),
     roomMembers,
     ...(promptLeaderMemberId ? { promptLeaderMemberId } : {}),
+    docsPath: normalizeRoomDocsPath(opts?.docsPath) || slugifyRoomDocsPath(name),
     createdAt: Date.now(),
     ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
 
   const dir = roomDir(room.id);
   mkdirSync(dir, { recursive: true });
+  if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
   writeRoom(room);
 
   // Initialize empty cursors for all members by stable memberId.
@@ -213,6 +237,16 @@ export function updateRoomPromptLeader(roomId: string, promptLeaderMemberId: str
   const member = findRoomMemberByIdInRoom(room, promptLeaderMemberId);
   if (!member) throw new Error("promptLeaderMemberId must be a current room member");
   room.promptLeaderMemberId = member.id;
+  writeRoom(room);
+  return room;
+}
+
+export function updateRoomDocsPath(roomId: string, docsPath: string | null): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  const normalized = normalizeRoomDocsPath(docsPath);
+  if (normalized) room.docsPath = normalized;
+  else delete room.docsPath;
   writeRoom(room);
   return room;
 }

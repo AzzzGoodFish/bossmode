@@ -100,7 +100,6 @@ async function ensureRoutesRegistered(): Promise<void> {
   await import("./team-updates.js");
   await import("./fs.js");
   await import("./tasks.js");
-  await import("./gates.js");
   await import("./artifacts.js");
   await import("./integrations.js");
 }

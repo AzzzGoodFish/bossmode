@@ -34,6 +34,7 @@ describe("room-store", () => {
       expect(room.name).toBe("test room");
       expect(room.cwd).toBe("/tmp/project");
       expect(room.members).toEqual(["pm", "dev"]);
+      expect(room.docsPath).toBe("test-room/");
       expect(room.createdAt).toBeGreaterThan(0);
 
       // Verify files created
@@ -41,6 +42,7 @@ describe("room-store", () => {
       expect(existsSync(join(roomDir, "room.json"))).toBe(true);
       expect(existsSync(join(roomDir, "messages.jsonl"))).toBe(true);
       expect(existsSync(join(roomDir, "cursors.json"))).toBe(true);
+      expect(existsSync(join(tempDir, "knowledge", "docs", "test-room"))).toBe(true);
     });
 
     it("should initialize cursors to null for all members", () => {
@@ -58,6 +60,14 @@ describe("room-store", () => {
 
     it("rejects invalid room-local member names", () => {
       expect(() => roomStore.createRoom("test", "/tmp", ["pm", "bad name"])).toThrow(/member name may contain/);
+    });
+
+    it("accepts an explicit normalized docsPath and can clear legacy bindings", () => {
+      const room = roomStore.createRoom("test", "/tmp", ["pm"], undefined, { docsPath: "bossmode" });
+      expect(room.docsPath).toBe("bossmode/");
+      expect(existsSync(join(tempDir, "knowledge", "docs", "bossmode"))).toBe(true);
+      const cleared = roomStore.updateRoomDocsPath(room.id, null);
+      expect(cleared?.docsPath).toBeUndefined();
     });
   });
 

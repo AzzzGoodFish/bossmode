@@ -17,7 +17,8 @@ import {
 import { useRoom } from "../hooks/useRoom";
 import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
-import { ArtifactPreviewPanel, type GateArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
+import { ArtifactPreviewPanel, type MessageArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
+import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSurface";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
@@ -48,7 +49,7 @@ interface MainProps {
 
 type RoomView = "chat" | "tasks";
 
-const PREVIEW_WIDTH_STORAGE_KEY = "bossmode.stageGatePreviewWidth";
+const PREVIEW_WIDTH_STORAGE_KEY = "bossmode.artifactPreviewWidth";
 const PREVIEW_MIN_WIDTH = 320;
 const PREVIEW_MAX_WIDTH = 760;
 
@@ -67,7 +68,12 @@ export function Main({
   const [showAddMember, setShowAddMember] = useState(false);
   const [showRoomSettings, setShowRoomSettings] = useState(false);
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
-  const [artifactPreview, setArtifactPreview] = useState<GateArtifactPreviewState | ChatAttachmentPreviewState | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<MessageArtifactPreviewState | ChatAttachmentPreviewState | null>(null);
+  const [surfaceExpanded, setSurfaceExpandedRaw] = useState(() => localStorage.getItem("bossmode_preview_surface") === "expanded");
+  const setSurfaceExpanded = (v: boolean) => {
+    setSurfaceExpandedRaw(v);
+    localStorage.setItem("bossmode_preview_surface", v ? "expanded" : "panel");
+  };
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
     const raw = localStorage.getItem(PREVIEW_WIDTH_STORAGE_KEY);
     const n = raw ? parseInt(raw, 10) : NaN;
@@ -404,7 +410,7 @@ export function Main({
           )}
           {lensFull ? lensPanel : view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { gateId: artifactPreview.gateId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => onNavigateToTask?.(selectedRoomId, taskId, "chat") : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : selectedRoomId ? (
@@ -434,6 +440,7 @@ export function Main({
                 onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
                 onClose={() => setArtifactPreview(null)}
                 variant="panel"
+                onExpand={() => setSurfaceExpanded(true)}
               />
             </div>
           </>
@@ -470,7 +477,7 @@ export function Main({
         )}
       </div>
 
-      {artifactPreview && selectedRoomId && isMobile && (
+      {artifactPreview && selectedRoomId && isMobile && !surfaceExpanded && (
         <Sheet open={!!artifactPreview} onClose={() => setArtifactPreview(null)} closeOnOverlayClick size="2xl">
           <div className="h-[86vh] min-h-0">
             <ArtifactPreviewPanel
@@ -479,9 +486,20 @@ export function Main({
               onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
               onClose={() => setArtifactPreview(null)}
               variant="sheet"
+              onExpand={() => setSurfaceExpanded(true)}
             />
           </div>
         </Sheet>
+      )}
+
+      {artifactPreview && selectedRoomId && surfaceExpanded && (
+        <PreviewSurface
+          roomId={selectedRoomId}
+          state={previewSurfaceStateFrom(artifactPreview)}
+          onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
+          onCollapse={() => setSurfaceExpanded(false)}
+          onClose={() => { setSurfaceExpanded(false); setArtifactPreview(null); }}
+        />
       )}
 
       {showCreateRoom && (

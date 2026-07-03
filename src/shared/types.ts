@@ -384,6 +384,8 @@ export interface Room {
   members: string[];
   /** Room leader room-member id. Rename-stable; may be absent for legacy rooms. */
   promptLeaderMemberId?: string;
+  /** Default docs subtree prefix relative to ~/.bossmode/knowledge/docs/, e.g. "bossmode/". */
+  docsPath?: string;
   /** Authoritative room-local members for v0.14+. */
   roomMembers?: RoomMemberRecord[];
   createdAt: number;
@@ -425,11 +427,12 @@ export interface RoomMessage {
   mentions: string[]; // member name snapshots
   mentionMemberIds?: string[];
   ts: number;
-  type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
+  type?: "summary" | "task_event" | "knowledge_event";
   summary_meta?: SummaryMeta;
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
-  gate_event_meta?: GateEventMeta;
+  /** Message-level deliverable/document references previewable through artifact-preview. */
+  artifacts?: string[];
   /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
   attachments?: RoomMessageAttachment[];
 }
@@ -526,45 +529,8 @@ export interface KnowledgeEventMeta {
   actor: string;
   /** Which tool produced the write */
   tool: "write" | "edit";
-}
-
-// -- Artifact Gates (stage approval checkpoints) --
-
-export type GateStatus = "pending" | "approved" | "rejected";
-
-export interface Gate {
-  id: string;
-  roomId: string;
-  title: string;
-  /** Markdown delivery note from the requesting agent */
-  summary: string;
-  /** Knowledge doc paths, file paths, or URLs backing this deliverable */
-  artifacts: string[];
-  /** Member name snapshot that requested approval */
-  requestedBy: string;
-  requestedByMemberId?: string;
-  /** Member to activate when approved (next stage in the pipeline) */
-  handoffTo?: string;
-  handoffMemberId?: string;
-  status: GateStatus;
-  /** User's note on approve/reject */
-  decisionNote?: string;
-  createdAt: number;
-  decidedAt?: number;
-}
-
-export interface GateEventMeta {
-  action: "requested" | "approved" | "rejected";
-  gateId: string;
-  gateTitle: string;
-  requestedBy: string;
-  requestedByMemberId?: string;
-  handoffTo?: string;
-  handoffMemberId?: string;
-  /** Present on requested: summary + artifacts for inline card rendering */
-  summary?: string;
-  artifacts?: string[];
-  decisionNote?: string;
+  /** True when the doc write is outside the room's configured docsPath. */
+  outsideRoomDocsPath?: boolean;
 }
 
 // -- WebSocket Events (server → client) --

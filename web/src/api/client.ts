@@ -598,6 +598,7 @@ export interface Room {
   cwd: string;
   members: string[];
   promptLeaderMemberId?: string;
+  docsPath?: string;
   roomMembers?: RoomMemberRecord[];
   createdAt: number;
   /** Legacy. No longer injected into prompts or shown in Room Settings. */
@@ -634,7 +635,7 @@ export async function updateRoomBindings(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; cwd?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null },
+  patch: { name?: string; cwd?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",
@@ -695,45 +696,7 @@ export interface KnowledgeEventMeta {
   title: string;
   actor: string;
   tool: "write" | "edit";
-}
-
-export type GateStatus = "pending" | "approved" | "rejected";
-
-export interface Gate {
-  id: string;
-  roomId: string;
-  title: string;
-  summary: string;
-  artifacts: string[];
-  requestedBy: string;
-  handoffTo?: string;
-  status: GateStatus;
-  decisionNote?: string;
-  createdAt: number;
-  decidedAt?: number;
-}
-
-export interface GateEventMeta {
-  action: "requested" | "approved" | "rejected";
-  gateId: string;
-  gateTitle: string;
-  requestedBy: string;
-  handoffTo?: string;
-  summary?: string;
-  artifacts?: string[];
-  decisionNote?: string;
-}
-
-export async function decideGate(
-  roomId: string,
-  gateId: string,
-  action: "approve" | "reject",
-  note?: string,
-): Promise<Gate> {
-  return apiFetch(`/api/rooms/${roomId}/gates/${gateId}/decision`, {
-    method: "POST",
-    body: JSON.stringify({ action, note }),
-  });
+  outsideRoomDocsPath?: boolean;
 }
 
 export type AttachmentPreviewType = "image" | "markdown" | "html" | "download";
@@ -755,11 +718,11 @@ export interface RoomMessage {
   mentions: string[];
   mentionMemberIds?: string[];
   ts: number;
-  type?: "summary" | "task_event" | "knowledge_event" | "gate_event";
+  type?: "summary" | "task_event" | "knowledge_event";
   summary_meta?: SummaryMeta;
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
-  gate_event_meta?: GateEventMeta;
+  artifacts?: string[];
   attachments?: RoomMessageAttachment[];
 }
 

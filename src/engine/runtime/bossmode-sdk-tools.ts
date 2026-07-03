@@ -11,7 +11,6 @@ import {
   QUERY_INTEGRATION_DESCRIPTION,
   CONFIGURE_INTEGRATION_DESCRIPTION,
   WRITE_SUMMARY_DESCRIPTION,
-  REQUEST_APPROVAL_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 
@@ -39,6 +38,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
         message: Type.String({ description: "Message to post" }),
         target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
+        artifacts: Type.Optional(Type.Array(Type.String(), { description: "Document or file paths to show as previewable artifact chips on the room message." })),
       }),
       execute: async (_id, params) => {
         const data = await call("chat", params as any) as any;
@@ -181,22 +181,6 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       execute: async (_id, params) => {
         const data = await call("comment_task", params as any) as any;
         return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
-      },
-    }),
-    defineTool({
-      name: "request_approval",
-      label: "Request Approval",
-      description: REQUEST_APPROVAL_DESCRIPTION,
-      parameters: Type.Object({
-        title: Type.String({ description: PARAM_DESCRIPTIONS.gateTitle }),
-        summary: Type.String({ description: PARAM_DESCRIPTIONS.gateSummary }),
-        artifacts: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.gateArtifacts })),
-        handoff_to: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gateHandoffTo })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("request_approval", params as any) as any;
-        if (data?.ok === false) return textResult("Failed: " + data.error);
-        return textResult(`Approval requested (gate ${data.gateId}). ${data.note}`);
       },
     }),
     defineTool({

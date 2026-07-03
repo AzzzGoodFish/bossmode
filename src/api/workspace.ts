@@ -35,6 +35,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     name?: string; cwd?: string; members?: string[];
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
+    docsPath?: string | null;
   };
 
   if (!body.name || !body.cwd) {
@@ -72,6 +73,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     }
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
       promptLeaderMemberName,
+      docsPath: body.docsPath,
     });
     sendJson(res, 200, room);
   } catch (err: any) {
@@ -110,6 +112,7 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     cwd?: string;
     ruleDocs?: string[];
     promptLeaderMemberId?: string | null;
+    docsPath?: string | null;
   };
 
   let changed = false;
@@ -153,8 +156,21 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "docsPath")) {
+    try {
+      const nextDocsPath = roomStore.normalizeRoomDocsPath(body.docsPath ?? null) || null;
+      if ((room.docsPath || null) !== nextDocsPath) {
+        updated = roomStore.updateRoomDocsPath(params.id, body.docsPath ?? null) || updated;
+        changed = true;
+      }
+    } catch (err: any) {
+      sendJson(res, 400, { error: err.message || String(err) });
+      return;
+    }
+  }
+
   if (!changed) {
-    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, ruleDocs, or promptLeaderMemberId)" });
+    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, ruleDocs, promptLeaderMemberId, or docsPath)" });
     return;
   }
   sendJson(res, 200, updated);
@@ -212,8 +228,9 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { content?: string; attachments?: Array<{ storedFilename?: string; filename?: string; originalFilename?: string; size?: number }> };
+  const body = (await parseBody(req)) as { content?: string; attachments?: Array<{ storedFilename?: string; filename?: string; originalFilename?: string; size?: number }>; artifacts?: string[] };
   const content = typeof body.content === "string" ? body.content : "";
+  const artifacts = Array.isArray(body.artifacts) ? body.artifacts.map(String).map((value) => value.trim()).filter(Boolean) : [];
   const attachments: RoomMessageAttachment[] = [];
   if (Array.isArray(body.attachments)) {
     for (const raw of body.attachments) {
@@ -232,8 +249,8 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
       });
     }
   }
-  if (!content.trim() && attachments.length === 0) {
-    sendJson(res, 400, { error: "content or attachments is required" });
+  if (!content.trim() && attachments.length === 0 && artifacts.length === 0) {
+    sendJson(res, 400, { error: "content, attachments, or artifacts is required" });
     return;
   }
 
@@ -243,7 +260,7 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
   const mentionMemberIds = parseMentionMemberIds(content, roomMembers);
 
   // Post via message-bus (writes + broadcasts + notifies router listeners)
-  const extra = { mentionMemberIds, ...(attachments.length > 0 ? { attachments } : {}) };
+  const extra = { mentionMemberIds, ...(attachments.length > 0 ? { attachments } : {}), ...(artifacts.length > 0 ? { artifacts } : {}) };
   postMessage(params.id, "user", content, mentions, extra);
 
   // Return the latest message

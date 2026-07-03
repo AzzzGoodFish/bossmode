@@ -107,6 +107,29 @@ describe("chat attachment artifacts", () => {
     expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
   });
 
+  it("agent chat can add previewable message artifact references", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const knowledgeStore = await import("../../src/knowledge/store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-artifacts-"));
+    const room = roomStore.createRoom("Agent Artifacts", cwd, ["developer"]);
+    knowledgeStore.addEntry("Artifact Doc", "# Artifact Doc\n\nBody", "developer", "agent-artifacts/doc.md");
+
+    const result = await handleToolCallback("chat", room.id, "developer", {
+      message: "Delivered doc",
+      artifacts: ["agent-artifacts/doc.md"],
+    }) as any;
+    expect(result.ok).toBe(true);
+
+    const [message] = messageStore.getMessages(room.id, { limit: 1 });
+    expect(message.content).toBe("Delivered doc");
+    expect(message.artifacts).toEqual(["agent-artifacts/doc.md"]);
+  });
+
   it("agent chat attachments use structured metadata and do not leak source/store absolute paths in message JSON", async () => {
     const ts = await createTestServer();
     servers.push(ts);

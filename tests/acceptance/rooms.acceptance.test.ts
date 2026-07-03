@@ -71,6 +71,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(room.members).toContain("pm");
       expect(room.members).toContain("architect");
       expect(room.createdAt).toBeGreaterThan(0);
+      expect(room.docsPath).toBe("test-room/");
       const leader = room.roomMembers?.find((member) => member.name === "architect");
       expect(leader?.id).toBeTruthy();
       expect(room.promptLeaderMemberId).toBe(leader?.id);
@@ -168,6 +169,22 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(updated.name).toBe("settings-room-renamed");
       expect(updated.cwd).toBe("/");
       expect(updated.ruleDocs).toEqual(["bossmode/rules/dev-team-protocol.md"]);
+    });
+
+    it("PATCH /api/rooms/:id updates docsPath", async () => {
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "docs-path-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+      });
+      if (createRes.status === 501) return;
+      const room: Room = JSON.parse(createRes.body);
+
+      const patchRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}`, {
+        token,
+        body: { docsPath: "bossmode" },
+      });
+      expect(patchRes.status).toBe(200);
+      expect(JSON.parse(patchRes.body).docsPath).toBe("bossmode/");
     });
 
     it("PATCH /api/rooms/:id rejects nonexistent cwd", async () => {

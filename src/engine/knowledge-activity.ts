@@ -11,6 +11,7 @@ import { resolve, sep, relative, isAbsolute, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { postMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
+import * as roomStore from "../workspace/room-store.js";
 import type { KnowledgeEventMeta } from "../shared/types.js";
 
 function docsRoot(): string {
@@ -83,7 +84,10 @@ export function maybeEmitKnowledgeActivity(
 
   const title = extractTitle(abs, relPath);
   const verb = existsSync(abs) && toolName === "write" ? "更新了文档" : toolName === "edit" ? "修改了文档" : "写入了文档";
-  const meta: KnowledgeEventMeta = { path: relPath, title, actor: agentName, tool: toolName as "write" | "edit" };
+  const room = roomStore.getRoom(roomId);
+  const docsPath = room?.docsPath;
+  const outsideRoomDocsPath = !!docsPath && !relPath.startsWith(docsPath);
+  const meta: KnowledgeEventMeta = { path: relPath, title, actor: agentName, tool: toolName as "write" | "edit", ...(outsideRoomDocsPath ? { outsideRoomDocsPath: true } : {}) };
 
   try {
     postMessage(roomId, "system", `[Knowledge] ${agentName} ${verb}: **${title}**`, [], {

@@ -27,9 +27,10 @@ function mentionIdsFromNames(message: string, roomMembers: Array<{ id: string; n
     .filter((id): id is string => Boolean(id));
 }
 
-function messageMeta(meta: { attachments?: RoomMessageAttachment[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; mentions?: string[] }) {
-  const out: { attachments?: RoomMessageAttachment[]; senderMemberId?: string; mentionMemberIds?: string[] } = {};
+function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; mentions?: string[] }) {
+  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[] } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
+  if (meta.artifacts?.length) out.artifacts = meta.artifacts;
   if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
   if (meta.mentionMemberIds?.length && meta.mentionMemberIds.join("\0") !== (meta.mentions || []).join("\0")) out.mentionMemberIds = meta.mentionMemberIds;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -61,6 +62,9 @@ export async function handleToolCallback(
       const source = getActivationSource(roomId, agentName);
 
       const attachments: RoomMessageAttachment[] = [];
+      const artifacts = Array.isArray(params?.artifacts)
+        ? params.artifacts.map(String).map((value) => value.trim()).filter(Boolean)
+        : [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
@@ -104,7 +108,7 @@ export async function handleToolCallback(
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, mentions });
+      const meta = messageMeta({ attachments, artifacts, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, mentions });
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
@@ -273,30 +277,6 @@ export async function handleToolCallback(
       if (!result) return { ok: false, error: `Task not found: ${taskId}` };
       emitTaskEvent(roomId, "commented", result.task, agentName, { commentId: result.comment.id });
       return { ok: true, taskId: result.task.id, commentId: result.comment.id };
-    }
-    case "request_approval": {
-      const title = params?.title ? String(params.title).trim() : "";
-      const summary = params?.summary ? String(params.summary).trim() : "";
-      if (!title) return { ok: false, error: "title is required" };
-      if (!summary) return { ok: false, error: "summary is required" };
-      try {
-        const { createGateAndAnnounce } = await import("../api/gates.js");
-        const gate = createGateAndAnnounce(roomId, {
-          title,
-          summary,
-          artifacts: Array.isArray(params?.artifacts) ? params.artifacts.map(String) : undefined,
-          requestedBy: agentName,
-          handoffTo: params?.handoff_to ? String(params.handoff_to) : undefined,
-        });
-        return {
-          ok: true,
-          gateId: gate.id,
-          status: "pending",
-          note: "Approval requested. STOP here — do not continue to the next stage. The user will approve or reject; you will be re-activated with their decision.",
-        };
-      } catch (err: any) {
-        return { ok: false, error: String(err?.message || err) };
-      }
     }
     case "query_integration": {
       const provider = String(params?.provider || "linear");

@@ -69,11 +69,12 @@ Room leader: ${leader}
 
 Messages you receive are wrapped in envelopes that tell you where they came from and how to reply. Follow the envelope footer.
 Communication goes exclusively through the \`chat\` tool. Bare text responses are not visible to anyone.
-Use tasks for tracked work, task comments for durable progress, and artifact gates for stage deliverables when appropriate.
+Use tasks for tracked work and task comments for durable progress, blockers, decisions, and handoffs.
 
 ## Documents
 
 Project documents are available on demand at \`${args.docsRoot}/\`.
+${args.room.docsPath ? `This room's default docs space is \`${args.docsRoot}/${args.room.docsPath}\`. Create new room-specific documents there; read/search may still use the full docs tree when needed.` : "No default room docs space is configured for this legacy room; use the docs tree on demand and keep new document paths explicit."}
 Do not assume the full document tree is already in your prompt. Search/read files only when needed, and keep long plans/reports in docs with concise links or summaries in prompt supplements.
 `;
 }

@@ -6,9 +6,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      "/api": "http://localhost:8080",
+      "/api": `http://localhost:${process.env.BOSSMODE_API_PORT || 8080}`,
       "/ws": {
-        target: "ws://localhost:8080",
+        target: `ws://localhost:${process.env.BOSSMODE_API_PORT || 8080}`,
         ws: true,
       },
     },

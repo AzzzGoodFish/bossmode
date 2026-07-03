@@ -26,6 +26,7 @@ function room(): Room {
     cwd: "/tmp/project",
     members: ["pm", "qa"],
     promptLeaderMemberId: "rm_pm",
+    docsPath: "bossmode/",
     roomMembers: [
       { id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 },
       { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1 },
@@ -50,6 +51,7 @@ describe("prompt compiler", () => {
     expect(compiled.appendSystemPrompt.join("\n")).toContain("Room rule");
     expect(compiled.appendSystemPrompt.join("\n")).toContain("QA note");
     expect(compiled.fullPrompt).toContain("Project documents are available on demand");
+    expect(compiled.fullPrompt).toContain("This room's default docs space is `/docs/bossmode/`");
     expect(compiled.fullPrompt).not.toContain("Project Documents\n```\ndocs/");
     expect(compiled.fullPrompt).not.toContain("old.md");
   });

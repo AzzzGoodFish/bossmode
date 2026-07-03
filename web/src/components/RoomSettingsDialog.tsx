@@ -13,6 +13,11 @@ interface RoomSettingsDialogProps {
   onDeleted?: (roomId: string) => void;
 }
 
+function normalizeDocsPathInput(value: string): string {
+  const trimmed = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return trimmed ? `${trimmed}/` : "";
+}
+
 function PromptPreview({ supplement }: { supplement: PromptSupplement | null }) {
   const content = supplement?.content?.trim() || "";
   return (
@@ -33,6 +38,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   const [name, setName] = useState(room.name);
   const [cwd, setCwd] = useState(room.cwd);
   const [leaderId, setLeaderId] = useState<string>(room.promptLeaderMemberId || "");
+  const [docsPath, setDocsPath] = useState(room.docsPath || "");
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [supplement, setSupplement] = useState<PromptSupplement | null>(null);
   const [saving, setSaving] = useState(false);
@@ -44,6 +50,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setName(room.name);
     setCwd(room.cwd);
     setLeaderId(room.promptLeaderMemberId || "");
+    setDocsPath(room.docsPath || "");
     setError(null);
     getRoomMembers(room.id).then(setMembers).catch((err: any) => toast(err.message || "Failed to load members", "error"));
     getRoomPromptSupplement(room.id).then(setSupplement).catch((err: any) => toast(err.message || "Failed to load prompt supplement", "error"));
@@ -61,8 +68,9 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   const hasChanges = useMemo(() => {
     if (name.trim() !== room.name) return true;
     if (cwd.trim() !== room.cwd) return true;
-    return (leaderId || "") !== (room.promptLeaderMemberId || "");
-  }, [name, cwd, leaderId, room]);
+    if ((leaderId || "") !== (room.promptLeaderMemberId || "")) return true;
+    return normalizeDocsPathInput(docsPath) !== (room.docsPath || "");
+  }, [name, cwd, leaderId, docsPath, room]);
 
   const cwdChanged = cwd.trim() !== room.cwd;
   const canSave = name.trim().length > 0 && hasChanges && !saving;
@@ -74,10 +82,12 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setSaving(true);
     setError(null);
     try {
-      const patch: { name?: string; cwd?: string; promptLeaderMemberId?: string | null } = {};
+      const patch: { name?: string; cwd?: string; promptLeaderMemberId?: string | null; docsPath?: string | null } = {};
       if (name.trim() !== room.name) patch.name = name.trim();
       if (cwd.trim() !== room.cwd) patch.cwd = cwd.trim();
       if ((leaderId || "") !== (room.promptLeaderMemberId || "")) patch.promptLeaderMemberId = leaderId || null;
+      const nextDocsPath = normalizeDocsPathInput(docsPath);
+      if (nextDocsPath !== (room.docsPath || "")) patch.docsPath = nextDocsPath || null;
 
       const updated = await updateRoomSettings(room.id, patch);
       onSaved(updated);
@@ -133,6 +143,11 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
               <input type="text" value={cwd} onChange={(e) => setCwd(e.target.value)} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors font-mono" />
               {cwdChanged && <p className="text-xs text-think mt-1 flex items-center gap-1"><AlertCircle size={12} />Running agents need restart to use new directory</p>}
               {error === "Directory does not exist" && <p className="text-xs text-blocked mt-1">Directory does not exist</p>}
+            </div>
+            <div>
+              <label className="block text-xs text-ink-3 mb-1.5">Default docs space</label>
+              <input type="text" value={docsPath} onChange={(e) => setDocsPath(e.target.value)} placeholder="bossmode/" className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors font-mono" />
+              <p className="text-xs text-ink-4 mt-1">New room-specific docs should be written under this folder in the knowledge docs tree. Leave empty for legacy/global behavior.</p>
             </div>
           </section>
 

@@ -4,10 +4,10 @@ import type { ArtifactPreviewData, RoomMessageAttachment } from "../api/client";
 import { getArtifactPreview, getAttachmentPreview } from "../api/client";
 import { Markdown } from "./Markdown";
 
-export interface GateArtifactPreviewState {
-  kind?: "gate";
-  gateId: string;
-  gateTitle: string;
+export interface MessageArtifactPreviewState {
+  kind: "message";
+  messageId: string;
+  title: string;
   artifacts: string[];
   selectedIndex: number;
 }
@@ -20,7 +20,7 @@ export interface ChatAttachmentPreviewState {
   selectedIndex: number;
 }
 
-type PreviewState = GateArtifactPreviewState | ChatAttachmentPreviewState;
+type PreviewState = MessageArtifactPreviewState | ChatAttachmentPreviewState;
 
 interface ArtifactPreviewPanelProps {
   roomId: string;
@@ -28,6 +28,8 @@ interface ArtifactPreviewPanelProps {
   onSelect: (index: number) => void;
   onClose: () => void;
   variant: "panel" | "sheet";
+  /** When provided, the expand button hands off to the near-fullscreen Preview Surface instead of the legacy lightbox. */
+  onExpand?: () => void;
 }
 
 type LoadState =
@@ -45,7 +47,7 @@ function artifactName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant }: ArtifactPreviewPanelProps) {
+export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant, onExpand }: ArtifactPreviewPanelProps) {
   const isAttachment = state.kind === "attachment";
   const items = isAttachment ? state.attachments : state.artifacts;
   const selectedAttachment = isAttachment ? state.attachments[state.selectedIndex] || state.attachments[0] : null;
@@ -105,10 +107,10 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
             </div>
           )}
           <button
-            onClick={() => setFocusOpen(true)}
+            onClick={() => (onExpand ? onExpand() : setFocusOpen(true))}
             className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer"
-            title="Focus preview"
-            aria-label="Focus preview"
+            title="Expand preview"
+            aria-label="Expand preview"
           >
             <Maximize2 size={13} />
           </button>

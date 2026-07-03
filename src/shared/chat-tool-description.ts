@@ -18,6 +18,10 @@ Activation:
 - Use @name only when you want that member to reply. To refer to someone without activating them, write their name without @.
 - Private messages do not activate members.
 
+Artifacts:
+- Optionally include artifacts: [path] on room messages to show previewable document/file chips.
+- Use artifacts for deliverables and referenced docs; the user can preview them in-place and reply naturally.
+
 Rules:
 - Follow the envelope footer's suggested target unless the user explicitly requests otherwise.
 

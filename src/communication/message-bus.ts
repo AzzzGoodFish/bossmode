@@ -29,7 +29,7 @@ export function postMessage(
   sender: string,
   content: string,
   mentions: string[] = [],
-  extra?: Partial<Pick<RoomMessage, "type" | "summary_meta" | "task_event_meta" | "knowledge_event_meta" | "gate_event_meta" | "attachments" | "senderMemberId" | "mentionMemberIds">>,
+  extra?: Partial<Pick<RoomMessage, "type" | "summary_meta" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds">>,
 ): RoomMessage {
   const message = messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
 
