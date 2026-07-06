@@ -9,6 +9,7 @@ let bossmodeConfig: any;
 const authCreate = vi.fn();
 const modelRegistryCreate = vi.fn();
 const modelRegistryRefresh = vi.fn();
+const modelRegistryGetApiKeyAndHeaders = vi.fn(async () => ({ ok: true, apiKey: "sk-test" }));
 const authReload = vi.fn();
 const createAgentSession = vi.fn();
 const resourceLoaderCtor = vi.fn();
@@ -63,7 +64,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     ModelRegistry: {
       create: (...args: any[]) => {
         modelRegistryCreate(...args);
-        return { find: () => ({ provider: "anthropic", id: "claude-sonnet-4-6" }), refresh: modelRegistryRefresh, authStorage: { reload: authReload } };
+        return { find: () => ({ provider: "anthropic", id: "claude-sonnet-4-6" }), getApiKeyAndHeaders: modelRegistryGetApiKeyAndHeaders, refresh: modelRegistryRefresh, authStorage: { reload: authReload } };
       },
     },
     SettingsManager: {
@@ -125,6 +126,7 @@ describe("PiSdkRuntime", () => {
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: false } };
     settingsGetTransport.mockReturnValue("auto");
     settingsGetWebSocketConnectTimeoutMs.mockReturnValue(60000);
+    modelRegistryGetApiKeyAndHeaders.mockResolvedValue({ ok: true, apiKey: "sk-test" });
     settingsGetHttpIdleTimeoutMs.mockReturnValue(600000);
     createAgentSession.mockResolvedValue({
       session: {
@@ -183,7 +185,7 @@ describe("PiSdkRuntime", () => {
 
     expect(settingsApplyOverrides).toHaveBeenCalledWith({
       transport: "auto",
-      websocketConnectTimeoutMs: 60000,
+      websocketConnectTimeoutMs: 15000,
     });
   });
 

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync, cpSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "./room-store.js";
+import { getBossmodeDir } from "../shared/config.js";
 import type { AgentMemberConfig, AgentSession, CursorMap, LegacyMemberConfig, Room, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
 
 function roomJsonPath(roomId: string): string {
@@ -27,7 +28,70 @@ function readJson<T>(path: string, fallback: T): T {
 }
 
 function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
+}
+
+function piRuntimeRoot(): string {
+  return join(getBossmodeDir(), "pi-agent", "runtime");
+}
+
+function migrationMarkerPath(): string {
+  return join(piRuntimeRoot(), ".migrations", "member-runtime-unified-v1.json");
+}
+
+function snapshotRuntimeRoom(roomId: string): string | null {
+  const source = join(piRuntimeRoot(), roomId);
+  if (!existsSync(source)) return null;
+  const target = join(piRuntimeRoot(), ".migration-snapshots", `member-runtime-unified-v1-${roomId}-${Date.now()}`);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, { recursive: true, force: false, errorOnExist: false });
+  return target;
+}
+
+function copyRuntimeTreeMissing(source: string, target: string): number {
+  if (!existsSync(source)) return 0;
+  let copied = 0;
+  if (!existsSync(target)) {
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target, { recursive: true, force: false, errorOnExist: false });
+    return 1;
+  }
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, entry.name);
+    const to = join(target, entry.name);
+    if (entry.isDirectory()) copied += copyRuntimeTreeMissing(from, to);
+    else if (!existsSync(to)) {
+      copyFileSync(from, to);
+      copied += 1;
+    }
+  }
+  return copied;
+}
+
+function migrateRuntimeMemberDirs(room: Room): number {
+  const marker = migrationMarkerPath();
+  const done = readJson<{ rooms?: Record<string, boolean> }>(marker, { rooms: {} });
+  if (done.rooms?.[room.id]) return 0;
+  const members = room.roomMembers || [];
+  let copied = 0;
+  let snapshotted = false;
+  for (const member of members) {
+    const legacyName = member.migratedFrom?.memberName || member.name;
+    if (legacyName === member.id) continue;
+    const source = join(piRuntimeRoot(), room.id, legacyName.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const target = join(piRuntimeRoot(), room.id, member.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    if (existsSync(source)) {
+      if (!snapshotted) {
+        snapshotRuntimeRoom(room.id);
+        snapshotted = true;
+      }
+      copied += copyRuntimeTreeMissing(source, target);
+    }
+  }
+  done.rooms = { ...(done.rooms || {}), [room.id]: true };
+  writeJson(marker, { migration: "member-runtime-unified-v1", rooms: done.rooms, updatedAt: Date.now() });
+  return copied;
 }
 
 function cleanConfig(config: RoomMemberConfig): RoomMemberConfig {
@@ -157,8 +221,9 @@ export function runRoomMemberMigration(): void {
       }
 
       const persistence = ensurePersistenceKeys(room);
-      if (created > 0 || persistence.cursors > 0 || persistence.sessions > 0 || persistence.events > 0) {
-        logger.info("room-member-migration", "room migrated", { roomId: room.id, created, ...persistence });
+      const runtimeDirs = migrateRuntimeMemberDirs(room);
+      if (created > 0 || persistence.cursors > 0 || persistence.sessions > 0 || persistence.events > 0 || runtimeDirs > 0) {
+        logger.info("room-member-migration", "room migrated", { roomId: room.id, created, ...persistence, runtimeDirs });
       }
     } catch (err) {
       logger.error("room-member-migration", "failed to migrate room", { roomId: entry, error: String(err) });

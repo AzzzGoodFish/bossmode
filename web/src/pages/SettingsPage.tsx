@@ -53,7 +53,7 @@ function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     sessionResume: settings.sessionResume !== false,
     codexTransport: settings.codexTransport || "auto",
-    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 60000,
+    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
     httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
   };
 }
@@ -74,7 +74,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
     codexTransport: "auto",
-    websocketConnectTimeoutMs: 60000,
+    websocketConnectTimeoutMs: 15000,
   });
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [runtimeSaved, setRuntimeSaved] = useState(false);
@@ -135,7 +135,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   };
 
   const handleRuntimeNetworkSave = async () => {
-    const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 60000;
+    const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 15000;
     const wsSeconds = Math.round(websocketConnectTimeoutMs / 1000);
     if (wsSeconds < 5 || wsSeconds > 180) {
       toast("WebSocket connect timeout must be between 5 and 180 seconds", "error");
@@ -273,7 +273,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                   step={1}
                   disabled={(runtimeSettings.codexTransport || "auto") === "sse"}
                   className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  value={secondsFromMs(runtimeSettings.websocketConnectTimeoutMs, 60)}
+                  value={secondsFromMs(runtimeSettings.websocketConnectTimeoutMs, 15)}
                   onChange={(e) => setRuntimeSettings({ ...runtimeSettings, websocketConnectTimeoutMs: Math.max(0, Number(e.target.value || 0)) * 1000 })}
                 />
                 <span className="text-xs text-ink-3">sec</span>

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
@@ -43,6 +43,9 @@ describe("room-member v0.14 migration", () => {
     ], null, 2));
     writeLegacyRoom("room-a", ["qa", "developer"], { qa: { thinkingLevel: "high", mcpServers: ["playwright"] } });
     writeLegacyRoom("room-b", ["qa"], { qa: { thinkingLevel: "low" } });
+    mkdirSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "sessions"), { recursive: true });
+    writeFileSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "sk-old" } }));
+    writeFileSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "sessions", "session.json"), JSON.stringify({ messages: ["keep"] }));
 
     const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
     runRoomMemberMigration();
@@ -64,6 +67,10 @@ describe("room-member v0.14 migration", () => {
     expect(cursorsA[qaA.id]).toBe("cursor-room-a-qa");
     expect(sessionsA[qaA.id].sessionId).toBe("s-room-a-qa");
     expect(existsSync(join(tempDir, "rooms", "room-a", "agent-events", `${qaA.id}.jsonl`))).toBe(true);
+    expect(readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "auth.json"), "utf-8")).toContain("sk-old");
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"))).toBe(true);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v1.json"))).toBe(true);
+    expect(readdirSync(join(tempDir, "pi-agent", "runtime", ".migration-snapshots")).length).toBeGreaterThan(0);
 
     const beforeIds = roomA.roomMembers.map((m: any) => m.id);
     runRoomMemberMigration();

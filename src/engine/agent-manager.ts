@@ -271,6 +271,7 @@ async function recreateInstanceForModelSwitch(instance: AgentInstance, model: st
   try { instance.handle.destroy(); } catch {}
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
+  contextCompactionWarningCache.delete(key);
 
   const next = await getOrCreate(instance.roomId, instance.memberId);
   if (!next) throw new Error(`Failed to recreate member "${instance.agentName}" for model switch`);
@@ -350,6 +351,7 @@ function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason:
   const key = instanceKey(instance.roomId, instance.memberId);
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
+  contextCompactionWarningCache.delete(key);
   try { instance.unsubscribe(); } catch {}
   try { instance.handle.destroy(); } catch {}
   instance.status = "inactive";
@@ -829,6 +831,7 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
 // -- Context usage (cache-only API + idle refresh push) --
 
 const contextUsageCache = new Map<string, ContextUsage>();
+const contextCompactionWarningCache = new Set<string>();
 
 function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
   if (!previous) return false;
@@ -868,6 +871,20 @@ export function refreshContextUsage(roomId: string, memberRef: string): void {
     if (usage.compacted && previous) usage = { ...previous, compacted: true };
     else if (isCompactUsageDrop(previous, usage) || shouldKeepCompactedMarker(previous, usage)) usage = { ...usage, compacted: true };
     if (usage.compacted && !previous) return;
+    const crossedCompactionThreshold = !usage.compacted && usage.percentage >= 80 && (!previous || previous.percentage < 80);
+    if (crossedCompactionThreshold && !contextCompactionWarningCache.has(key)) {
+      contextCompactionWarningCache.add(key);
+      logger.warn("agent", "context usage crossed compaction threshold without compacted marker", {
+        roomId,
+        agent: agentName,
+        memberId,
+        totalTokens: usage.totalTokens,
+        rawMaxTokens: usage.rawMaxTokens,
+        percentage: usage.percentage,
+        model: usage.model,
+      });
+    }
+    if (usage.compacted || usage.percentage < 50) contextCompactionWarningCache.delete(key);
     contextUsageCache.set(key, usage);
     broadcastToRoom(roomId, {
       type: "agent:context_usage",
@@ -1032,6 +1049,7 @@ export function destroyInstance(roomId: string, memberRef: string): void {
     instance.unsubscribe();
     instances.delete(key);
     contextUsageCache.delete(key);
+    contextCompactionWarningCache.delete(key);
     clearActivationSource(roomId, memberId);
     logger.info("agent", "instance destroyed", { member: memberName, memberId, roomId });
   }
@@ -1049,6 +1067,7 @@ export async function shutdownAll(): Promise<void> {
   instances.clear();
   pendingCreations.clear();
   contextUsageCache.clear();
+  contextCompactionWarningCache.clear();
   clearAllActivationSources();
   if (registry) {
     for (const rt of registry.getAll()) {

@@ -54,7 +54,7 @@ function normalizeTimeout(value: unknown, field: string): number | undefined {
 }
 
 function resolveRuntimeTransportSettings(): RuntimeTransportSettings {
-  const defaults: RuntimeTransportSettings = { transport: "auto", websocketConnectTimeoutMs: 60000 };
+  const defaults: RuntimeTransportSettings = { transport: "auto", websocketConnectTimeoutMs: 15000 };
   try {
     const runtime = readConfig().runtime;
     const configuredTransport = runtime?.codexTransport;
@@ -360,6 +360,9 @@ export class PiSdkRuntime implements AgentRuntime {
     const transportSettings = applyRuntimeTransportSettings(settingsManager);
     const model = modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);
+    const authCheck = await modelRegistry.getApiKeyAndHeaders(model);
+    if (!authCheck.ok) throw new Error(`Credential projection failed for ${resolvedModel}: ${authCheck.error}`);
+    if (!authCheck.apiKey && piConfig.profile?.authType !== "ambient") throw new Error(`Credential projection failed for ${resolvedModel}: no API key available for provider ${provider}`);
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;

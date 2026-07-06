@@ -198,7 +198,7 @@ function normalizeRuntimeSettings(runtime: any = {}) {
   const transport = VALID_PI_TRANSPORTS.has(runtime.codexTransport) ? runtime.codexTransport : "auto";
   const websocketConnectTimeoutMs = typeof runtime.websocketConnectTimeoutMs === "number" && Number.isFinite(runtime.websocketConnectTimeoutMs) && runtime.websocketConnectTimeoutMs >= 0
     ? Math.floor(runtime.websocketConnectTimeoutMs)
-    : 60000;
+    : 15000;
   const httpIdleTimeoutMs = typeof runtime.httpIdleTimeoutMs === "number" && Number.isFinite(runtime.httpIdleTimeoutMs) && runtime.httpIdleTimeoutMs >= 0
     ? Math.floor(runtime.httpIdleTimeoutMs)
     : undefined;

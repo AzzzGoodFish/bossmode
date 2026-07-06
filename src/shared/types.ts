@@ -10,7 +10,7 @@ export interface BossmodeRuntimeConfig {
   sessionResume: boolean;
   /** pi SDK transport override. Defaults to "auto" when omitted. */
   codexTransport?: PiTransportSetting;
-  /** WebSocket connect timeout passed to pi SDK. Bossmode default: 60000. */
+  /** WebSocket connect timeout passed to pi SDK. Bossmode default: 15000. */
   websocketConnectTimeoutMs?: number;
   /** HTTP idle timeout passed to pi SDK when set. */
   httpIdleTimeoutMs?: number;

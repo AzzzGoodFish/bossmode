@@ -250,7 +250,7 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
-  it("exports agent-scoped pi models/auth without leaking api key into models.json", async () => {
+  it("exports agent-scoped pi models/auth with real auth.json and no placeholder in models.json", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
@@ -259,8 +259,8 @@ describe("model credential profiles", () => {
     expect(exported?.agentDir).toContain(join("pi-agent", "runtime"));
     const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
     const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
-    expect(modelsJson).toContain("__bossmode_managed_key__");
-    expect(modelsJson).not.toContain("sk-secret");
+    expect(modelsJson).not.toContain("__bossmode_managed_key__");
+    expect(JSON.parse(modelsJson).providers.openrouter.apiKey).toBe("sk-secret");
     expect(authJson).toContain("sk-secret");
     expect(statSync(join(exported!.agentDir, "auth.json")).mode & 0o777).toBe(0o600);
   });
@@ -563,6 +563,19 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
+  it("persists API key rotations from runtime auth storage back to the Bossmode profile", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile(baseProfile);
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
+    const profile = mod.getModelCredentialProfile(saved.id)!;
+    const authStorage = mod.createSyncedAuthStorage(join(exported!.agentDir, "auth.json"), profile);
+
+    authStorage.set("openrouter", { type: "api_key", key: "sk-rotated" });
+
+    expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toContain("sk-rotated");
+    expect(mod.getModelCredentialProfile(saved.id)!.apiKey).toBe("sk-rotated");
+  });
+
   it("persists OAuth refreshes from runtime auth storage back to the Bossmode profile", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
@@ -580,6 +593,9 @@ describe("model credential profiles", () => {
     });
 
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
+    const oauthModelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(oauthModelsJson.providers["openai-codex"].apiKey).toBe("old-access");
+    expect(JSON.stringify(oauthModelsJson)).not.toContain("__bossmode_managed_key__");
     const profile = mod.getModelCredentialProfile(saved.id)!;
     const authStorage = mod.createSyncedAuthStorage(join(exported!.agentDir, "auth.json"), profile);
 

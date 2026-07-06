@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +11,14 @@ beforeAll(() => {
 });
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  vi.resetModules();
+});
+
+afterEach(() => {
+  vi.resetModules();
 });
 
 vi.mock("../../src/shared/config.js", () => ({
