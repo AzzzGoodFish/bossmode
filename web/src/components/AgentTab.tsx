@@ -20,7 +20,7 @@ export interface RawAgentEventLine {
 
 // Committed events — finalized items in the stream
 export interface CommittedEvent {
-  type: "agent_start" | "agent_end" | "message" | "thinking" | "tool" | "user_steer" | "agent_reply" | "system";
+  type: "agent_start" | "agent_end" | "message" | "thinking" | "tool" | "compaction" | "user_steer" | "agent_reply" | "system";
   text?: string;
   thinking?: string;
   toolName?: string;
@@ -29,6 +29,11 @@ export interface CommittedEvent {
   result?: unknown;
   isError?: boolean;
   usage?: unknown;
+  reason?: unknown;
+  aborted?: boolean;
+  willRetry?: boolean;
+  errorMessage?: string;
+  tokensBefore?: number;
   ts?: number; // timestamp
 }
 
@@ -65,6 +70,8 @@ function rawToCommitted(event: AgentEvent): CommittedEvent[] {
     }
     case "tool_start":
       return [{ type: "tool", toolName: event.toolName as string, toolCallId: event.toolCallId as string, args: event.args, ts }];
+    case "compaction_start":
+      return [{ type: "compaction", reason: event.reason, ts }];
     case "user_steer":
       return [{ type: "user_steer", text: event.text as string, ts }];
     case "agent_reply":
@@ -83,6 +90,20 @@ function buildFromHistory(events: AgentEvent[]): CommittedEvent[] {
       if (idx !== -1) {
         result[idx] = { ...result[idx], result: raw.result, isError: raw.isError as boolean };
       }
+    } else if (raw.type === "compaction_end") {
+      const idx = result.findLastIndex((e) => e.type === "compaction" && e.reason === raw.reason && e.result === undefined && !e.errorMessage && !e.aborted);
+      const next = {
+        type: "compaction" as const,
+        reason: raw.reason,
+        result: raw.result,
+        aborted: !!raw.aborted,
+        willRetry: !!raw.willRetry,
+        errorMessage: typeof raw.errorMessage === "string" ? raw.errorMessage : undefined,
+        tokensBefore: typeof raw.tokensBefore === "number" ? raw.tokensBefore : undefined,
+        ts: (raw.ts as number) || now(),
+      };
+      if (idx !== -1) result[idx] = { ...result[idx], ...next };
+      else result.push(next);
     } else {
       result.push(...rawToCommitted(raw));
     }
@@ -258,6 +279,27 @@ export function AgentTab({ roomId, agentName, onClose, onSteer, cachedEvents, on
         if (idx !== -1) {
           eventsRef.current[idx] = { ...eventsRef.current[idx], result: event.result, isError: event.isError as boolean };
           flushEvents();
+        }
+        break;
+      }
+      case "compaction_start":
+        pushEvent({ type: "compaction", reason: event.reason, ts });
+        break;
+      case "compaction_end": {
+        const next = {
+          result: event.result,
+          aborted: !!event.aborted,
+          willRetry: !!event.willRetry,
+          errorMessage: typeof event.errorMessage === "string" ? event.errorMessage : undefined,
+          tokensBefore: typeof event.tokensBefore === "number" ? event.tokensBefore : undefined,
+          ts,
+        };
+        const idx = eventsRef.current.findLastIndex((e) => e.type === "compaction" && e.reason === event.reason && e.result === undefined && !e.errorMessage && !e.aborted);
+        if (idx !== -1) {
+          eventsRef.current[idx] = { ...eventsRef.current[idx], ...next };
+          flushEvents();
+        } else {
+          pushEvent({ type: "compaction", reason: event.reason, ...next });
         }
         break;
       }
@@ -917,7 +959,7 @@ function AgentActivity({
   const [newPrependCount, setNewPrependCount] = useState(0);
   const prevCommittedLen = useRef(committed.length);
   const hasVisibleContent = committed.some(
-    (e) => e.type === "message" || e.type === "tool" || e.type === "user_steer" || e.type === "thinking" || e.type === "agent_reply" || e.type === "system",
+    (e) => e.type === "message" || e.type === "tool" || e.type === "compaction" || e.type === "user_steer" || e.type === "thinking" || e.type === "agent_reply" || e.type === "system",
   );
 
   // Initial scroll to bottom (instant)
@@ -1070,6 +1112,8 @@ function ActivityItem({ event, agentName, roomId }: { event: CommittedEvent; age
       return <MessageCard text={event.text || ""} time={ts} fullTime={fullTs} />;
     case "tool":
       return <ToolCard event={event} time={ts} fullTime={fullTs} />;
+    case "compaction":
+      return <CompactCard event={event} time={ts} fullTime={fullTs} />;
     case "user_steer":
       return <MessageBubble sender="user" content={event.text || ""} time={ts} fullTime={fullTs} roomId={roomId} />;
     case "agent_reply":
@@ -1171,6 +1215,58 @@ function ToolCard({ event, time, fullTime }: { event: CommittedEvent; time?: str
       )}
     </div>
   );
+}
+
+function CompactCard({ event, time, fullTime }: { event: CommittedEvent; time?: string; fullTime?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isDone = event.result !== undefined || typeof event.tokensBefore === "number" || Boolean(event.errorMessage) || Boolean(event.aborted);
+  const isError = Boolean(event.errorMessage);
+  const statusColor = !isDone ? "text-think" : isError ? "text-blocked" : event.aborted ? "text-ink-4" : "text-onair";
+  const statusIcon = !isDone ? "⏳" : isError ? "✗" : event.aborted ? "■" : "✓";
+  const label = !isDone ? "COMPACTING · context" : isError ? "COMPACT FAILED" : event.aborted ? "COMPACT CANCELLED" : "COMPACTED · context";
+  const detail = !isDone ? compactReasonLabel(event.reason) : compactResultDetail(event);
+  return (
+    <div className="border border-line-soft rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1.5 text-xs hover:bg-surface-2/50 transition-colors cursor-pointer"
+      >
+        <span className={statusColor}>{statusIcon}</span>
+        <span className="text-ink-4 font-mono">{label}</span>
+        <span className="text-ink-4 truncate max-w-[100px] md:max-w-56">{detail}</span>
+        {time && <span className={`${TS_CLS} ml-auto shrink-0 hidden md:inline`} title={fullTime}>{time}</span>}
+        <span className={`${time ? "ml-2" : "ml-auto"} text-ink-3`}>{expanded ? "▼" : "▶"}</span>
+      </button>
+      {expanded && isDone && (
+        <div className="px-3 py-2 border-t border-line-soft text-xs">
+          <div className={`mb-1 ${isError ? "text-blocked" : "text-ink-3"}`}>{isError ? "Error:" : "Result:"}</div>
+          <pre className="text-ink-4 bg-inset rounded p-2 overflow-x-auto max-h-32">
+            {typeof event.result === "string" ? event.result : JSON.stringify(event.result ?? compactResultObject(event), null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function compactReasonLabel(reason: unknown): string {
+  if (reason === "threshold") return "auto · threshold";
+  if (reason === "overflow") return "context overflow";
+  if (reason === "manual") return "manual";
+  return reason ? String(reason) : "context";
+}
+
+function compactResultDetail(event: CommittedEvent): string {
+  if (event.errorMessage) return event.errorMessage;
+  if (event.aborted) return event.willRetry ? "aborted · will retry" : "aborted";
+  const result = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : null;
+  const summary = result?.summary;
+  if (typeof summary === "string" && summary.trim()) return summary.length > 80 ? `${summary.slice(0, 79)}…` : summary;
+  return typeof event.tokensBefore === "number" ? `tokens before: ${event.tokensBefore}` : compactReasonLabel(event.reason);
+}
+
+function compactResultObject(event: CommittedEvent): Record<string, unknown> {
+  return { reason: event.reason, aborted: event.aborted, willRetry: event.willRetry, errorMessage: event.errorMessage, tokensBefore: event.tokensBefore };
 }
 
 function truncateArgs(args: unknown): string {

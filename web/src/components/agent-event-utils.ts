@@ -124,6 +124,33 @@ export function formatToolArgsPreview(args: unknown): string {
   return JSON.stringify(sanitizeArgPreview(args), null, 2);
 }
 
+export function compactionReasonLabel(reason: unknown): string {
+  if (reason === "threshold") return "auto · threshold";
+  if (reason === "overflow") return "context overflow";
+  if (reason === "manual") return "manual";
+  return reason ? String(reason) : "context";
+}
+
+export function compactionEndDetail(event: AgentEvent): string {
+  const tokens = typeof event.tokensBefore === "number" ? `tokens before: ${event.tokensBefore}` : "context";
+  const retry = event.willRetry ? " · will retry" : "";
+  if (event.errorMessage) return `${truncateText(event.errorMessage, 72)}${retry}`;
+  if (event.aborted) return `aborted${retry}`;
+  const result = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : null;
+  return truncateText(result?.summary ?? tokens, 78);
+}
+
+export function formatCompactionPreview(event: AgentEvent): string {
+  const result = event.result !== undefined ? event.result : {
+    reason: event.reason,
+    aborted: event.aborted,
+    willRetry: event.willRetry,
+    errorMessage: event.errorMessage,
+    tokensBefore: event.tokensBefore,
+  };
+  return JSON.stringify(sanitizeArgPreview(result), null, 2);
+}
+
 export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
   if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
   const ts = typeof event.ts === "number" ? event.ts : undefined;
@@ -137,6 +164,14 @@ export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
       return { kind: "tool-error", label: `ERROR · ${tool.label}`, detail: truncateText(event.result ?? event.text ?? "failed", 78), ts };
     }
     return { kind: "tool-done", label: `DONE · ${tool.label}`, detail: tool.detail || truncateText(event.result ?? event.text ?? "completed", 78), ts };
+  }
+  if (event.type === "compaction_start") {
+    return { kind: "tool-running", label: "COMPACTING · context", detail: compactionReasonLabel(event.reason), ts };
+  }
+  if (event.type === "compaction_end") {
+    if (event.errorMessage) return { kind: "tool-error", label: "COMPACT FAILED", detail: compactionEndDetail(event), ts };
+    if (event.aborted) return { kind: "system", label: "COMPACT CANCELLED", detail: compactionEndDetail(event), ts };
+    return { kind: "tool-done", label: "COMPACTED · context", detail: compactionEndDetail(event), ts };
   }
   if ((event.type === "message_end" || event.type === "message_update") && event.text) {
     return { kind: "reply", label: event.type === "message_update" ? "DRAFT" : "REPLY", detail: truncateText(event.text, 78), ts };
@@ -171,6 +206,8 @@ export function eventSearchText(event: AgentEvent): string {
     obj.query,
     obj.file_path,
     obj.path,
+    event.reason,
+    event.errorMessage,
     event.text,
     event.thinking,
   ].filter(Boolean).join(" ").toLowerCase();
@@ -178,6 +215,10 @@ export function eventSearchText(event: AgentEvent): string {
 
 export function isToolEvent(event: AgentEvent): boolean {
   return event.type === "tool_start" || event.type === "tool_end";
+}
+
+export function isCompactionEvent(event: AgentEvent): boolean {
+  return event.type === "compaction_start" || event.type === "compaction_end";
 }
 
 export function isReplyEvent(event: AgentEvent): boolean {

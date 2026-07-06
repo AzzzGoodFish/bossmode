@@ -104,6 +104,10 @@ export function handleAgentEvent(
     } catch (err) {
       logger.error("knowledge-activity", "hook failed", { roomId, error: String(err) });
     }
+  } else if (event.type === "compaction_start") {
+    logger.info("runtime", "event", { agent: agentName, type: "compaction_start", reason: event.reason });
+  } else if (event.type === "compaction_end") {
+    logger.info("runtime", "event", { agent: agentName, type: "compaction_end", reason: event.reason, aborted: event.aborted, willRetry: event.willRetry, hasError: Boolean(event.errorMessage) });
   }
 
   // cli:stdout / cli:stderr — forward via WS only, no disk persistence, no status change
@@ -180,7 +184,7 @@ export function handleAgentEvent(
     return "working";
   }
 
-  if (processedEvent.type === "message_end") {
+  if (processedEvent.type === "message_end" || processedEvent.type === "compaction_end") {
     refreshContextUsage(roomId, memberId || agentName);
   }
 

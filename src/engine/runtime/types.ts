@@ -110,6 +110,8 @@ export type AgentStreamEvent =
   | { type: "tool_start"; toolName: string; toolCallId: string; args: unknown }
   | { type: "tool_update"; toolName: string; toolCallId: string; partialResult: unknown }
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
+  | { type: "compaction_start"; reason?: "manual" | "threshold" | "overflow" | string }
+  | { type: "compaction_end"; reason?: "manual" | "threshold" | "overflow" | string; aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }
   | { type: "cli:stdout"; text: string }
   | { type: "cli:stderr"; text: string }
   // Emitted when a runtime ends unexpectedly or during normal shutdown.

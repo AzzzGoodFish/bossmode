@@ -63,6 +63,16 @@ describe("agent event UI helpers", () => {
     expect(summary).toMatchObject({ kind: "reply", label: "REPLY", detail: "final answer" });
   });
 
+  it("summarizes compaction lifecycle events like tool lifecycle", () => {
+    const running = latestActionSummary([{ type: "compaction_start", reason: "threshold", ts: 1 }]);
+    const done = latestActionSummary([{ type: "compaction_end", reason: "threshold", result: { summary: "short summary", tokensBefore: 28100 }, tokensBefore: 28100, aborted: false, willRetry: false, ts: 2 }]);
+    const failed = latestActionSummary([{ type: "compaction_end", reason: "manual", errorMessage: "compact failed", aborted: false, willRetry: true, ts: 3 }]);
+
+    expect(running).toMatchObject({ kind: "tool-running", label: "COMPACTING · context", detail: "auto · threshold" });
+    expect(done).toMatchObject({ kind: "tool-done", label: "COMPACTED · context", detail: "short summary" });
+    expect(failed).toMatchObject({ kind: "tool-error", label: "COMPACT FAILED", detail: "compact failed · will retry" });
+  });
+
   it("searches command and file path fields", () => {
     expect(eventSearchText({ type: "tool_start", toolName: "Bash", args: { command: "npm test" } })).toContain("npm test");
     expect(eventSearchText({ type: "tool_start", toolName: "Read", args: { file_path: "src/index.ts" } })).toContain("src/index.ts");

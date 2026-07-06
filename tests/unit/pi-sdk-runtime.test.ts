@@ -430,6 +430,84 @@ describe("PiSdkRuntime", () => {
     expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "saved session file missing, starting fresh", expect.objectContaining({ sessionFile: missing }));
   });
 
+  it("manual compact emits compaction lifecycle without synthetic assistant message", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const compact = vi.fn(async () => ({ summary: "short summary", tokensBefore: 28100 }));
+    createAgentSession.mockResolvedValueOnce({
+      session: {
+        subscribe: vi.fn(() => vi.fn()),
+        prompt: vi.fn(),
+        steer: vi.fn(),
+        abort: vi.fn(),
+        abortCompaction: vi.fn(),
+        abortBranchSummary: vi.fn(),
+        dispose: vi.fn(),
+        compact,
+        setModel: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+        sessionId: "session-a",
+        sessionFile: join(dir, "session.json"),
+        thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const events: any[] = [];
+    handle.subscribe((event) => events.push(event));
+    await handle.prompt("/compact");
+
+    expect(compact).toHaveBeenCalled();
+    expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
+    expect(events[2]).toMatchObject({ type: "compaction_end", reason: "manual", tokensBefore: 28100, result: { summary: "short summary", tokensBefore: 28100 } });
+    expect(events.some((event) => event.type === "message_update" || event.type === "message_end")).toBe(false);
+  });
+
+  it("does not duplicate manual compaction events when SDK emits raw lifecycle events", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    let listener: ((event: any) => void) | undefined;
+    const compact = vi.fn(async () => {
+      listener?.({ type: "compaction_start", reason: "manual" });
+      listener?.({ type: "compaction_end", reason: "manual", result: { summary: "sdk summary", tokensBefore: 30000 }, aborted: false, willRetry: false });
+      return { summary: "sdk summary", tokensBefore: 30000 };
+    });
+    createAgentSession.mockResolvedValueOnce({
+      session: {
+        subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
+        prompt: vi.fn(),
+        steer: vi.fn(),
+        abort: vi.fn(),
+        abortCompaction: vi.fn(),
+        abortBranchSummary: vi.fn(),
+        dispose: vi.fn(),
+        compact,
+        setModel: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+        sessionId: "session-a",
+        sessionFile: join(dir, "session.json"),
+        thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const events: any[] = [];
+    handle.subscribe((event) => events.push(event));
+    await handle.prompt("/compact");
+
+    expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
+    expect(events.filter((event) => event.type === "compaction_start")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "compaction_end")).toHaveLength(1);
+  });
+
   it("refreshes registry and awaits SDK model switch", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
     const setModel = vi.fn().mockResolvedValue(undefined);

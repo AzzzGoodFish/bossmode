@@ -7,7 +7,7 @@ import {
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type PromptSupplement,
 } from "../api/client";
 import { Sheet } from "./Sheet";
-import { formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
+import { compactionEndDetail, compactionReasonLabel, formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
@@ -667,7 +667,8 @@ function isStationDisplayEvent(event: AgentEvent): boolean {
 }
 
 function toolLifecycleKey(event: AgentEvent): string | null {
-  if (event.type !== "tool_start" && event.type !== "tool_end") return null;
+  if (event.type !== "tool_start" && event.type !== "tool_end" && event.type !== "compaction_start" && event.type !== "compaction_end") return null;
+  if (event.type === "compaction_start" || event.type === "compaction_end") return `compaction:${event.reason || "context"}`;
   return event.toolCallId ? `id:${event.toolCallId}` : `name:${event.toolName || "tool"}`;
 }
 
@@ -734,6 +735,17 @@ function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: 
       kind: event.isError ? "error" : "done",
       label: tool.label,
       detail: toolEndDetail(event, events),
+      ts,
+    };
+  }
+  if (event.type === "compaction_start") {
+    return { kind: "running", label: "COMPACTING · context", detail: compactionReasonLabel(event.reason), ts, pulse: true };
+  }
+  if (event.type === "compaction_end") {
+    return {
+      kind: event.errorMessage ? "error" : event.aborted ? "system" : "done",
+      label: event.errorMessage ? "COMPACT FAILED" : event.aborted ? "COMPACT CANCELLED" : "COMPACTED · context",
+      detail: compactionEndDetail(event),
       ts,
     };
   }

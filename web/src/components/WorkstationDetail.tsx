@@ -3,7 +3,7 @@ import { Search, RotateCcw, RefreshCw, X, Send } from "lucide-react";
 import { abortAgent, getAgentEventsPaginated, getRoomMembers, getMemberTokenUsage, getToken, resetAgentSession, restartMember, type ContextUsageData, type MemberInfo } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
-import { diffStatForTool, eventSearchText, formatEventTime, formatToolArgsPreview, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { thinkLevelTextClass } from "./StationPanel";
 
 const PAGE_SIZE = 120;
@@ -98,7 +98,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
   const filteredEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
     return events.filter((event) => {
-      if (filter === "tools" && !isToolEvent(event)) return false;
+      if (filter === "tools" && !isToolEvent(event) && !isCompactionEvent(event)) return false;
       if (filter === "replies" && !isReplyEvent(event)) return false;
       if (q && !eventSearchText(event).includes(q)) return false;
       return event.type !== "message_update" && event.type !== "tool_update" && event.type !== "message_start";
@@ -107,7 +107,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
 
   const counts = useMemo(() => ({
     all: events.filter((e) => e.type !== "message_update" && e.type !== "tool_update" && e.type !== "message_start").length,
-    tools: events.filter(isToolEvent).length,
+    tools: events.filter((event) => isToolEvent(event) || isCompactionEvent(event)).length,
     replies: events.filter(isReplyEvent).length,
   }), [events]);
 
@@ -226,6 +226,10 @@ function EventRow({ event, query }: { event: AgentEvent; query: string }) {
   if (event.type === "tool_start") {
     const tool = toolDisplay(event.toolName, event.args);
     return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.1em] text-accent-ink">TOOL·{tool.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4">{time}</span></div><pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{formatToolArgsPreview(event.args)}</pre></div>;
+  }
+  if (event.type === "compaction_start" || event.type === "compaction_end") {
+    const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
+    return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className={`text-[10px] font-bold tracking-[0.1em] ${tone}`}>{summary.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(summary.detail, query)}</span><span className="font-mono text-[10px] text-ink-4">{time}</span></div>{event.type === "compaction_end" && <pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{formatCompactionPreview(event)}</pre>}</div>;
   }
   if (event.type === "message_end" && event.thinking) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3 text-xs text-ink-3"><span className="font-bold text-think tracking-[0.1em] text-[10px]">THINKING</span><div className="mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div>;
   if (event.type === "message_end" && event.text) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-ink-2 tracking-[0.1em] text-[10px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto">{time}</span></div><Markdown content={String(event.text)} /></div>;

@@ -43,6 +43,20 @@ export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
       return { type: "tool_update", toolName: raw.toolName, toolCallId: raw.toolCallId, partialResult: raw.partialResult };
     case "tool_execution_end":
       return { type: "tool_end", toolName: raw.toolName, toolCallId: raw.toolCallId, result: raw.result, isError: !!raw.isError };
+    case "compaction_start":
+      return { type: "compaction_start", reason: raw.reason };
+    case "compaction_end": {
+      const tokensBefore = Number(raw.result?.tokensBefore);
+      return {
+        type: "compaction_end",
+        reason: raw.reason,
+        aborted: !!raw.aborted,
+        willRetry: !!raw.willRetry,
+        ...(typeof raw.errorMessage === "string" && raw.errorMessage ? { errorMessage: raw.errorMessage } : {}),
+        ...(Number.isFinite(tokensBefore) ? { tokensBefore } : {}),
+        ...(raw.result !== undefined ? { result: raw.result } : {}),
+      };
+    }
     default:
       return null;
   }

@@ -194,6 +194,7 @@ class PiSdkAgentHandle implements AgentHandle {
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
+  private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
   private destroyed = false;
 
   constructor(
@@ -204,6 +205,18 @@ class PiSdkAgentHandle implements AgentHandle {
     this.runtimeParams = runtimeParams;
     this.unsubscribeSession = session.subscribe((raw) => {
       this.observeCompactionWatchdog(raw);
+      const bridge = this.manualCompactionBridge;
+      const rawEvent = raw as any;
+      if (bridge && rawEvent?.reason === "manual") {
+        if (rawEvent?.type === "compaction_start") {
+          bridge.rawStartSeen = true;
+          if (bridge.syntheticStartEmitted) return;
+        }
+        if (rawEvent?.type === "compaction_end") {
+          bridge.rawEndSeen = true;
+          if (bridge.syntheticEndEmitted) return;
+        }
+      }
       const mapped = mapPiAgentEvent(raw);
       if (mapped) this.emit(mapped);
     });
@@ -356,16 +369,35 @@ class PiSdkAgentHandle implements AgentHandle {
 
   private async compact(): Promise<void> {
     this.emit({ type: "agent_start" });
-    this.emit({ type: "message_start" });
-    this.emit({ type: "message_update", text: "Compacting context..." });
+    const bridge = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
+    this.manualCompactionBridge = bridge;
+    const emitSyntheticStartIfNeeded = () => {
+      if (bridge.rawStartSeen || bridge.syntheticStartEmitted) return;
+      bridge.syntheticStartEmitted = true;
+      this.emit({ type: "compaction_start", reason: "manual" });
+    };
+    const emitSyntheticEndIfNeeded = (event: { aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }) => {
+      if (bridge.rawEndSeen || bridge.syntheticEndEmitted) return;
+      bridge.syntheticEndEmitted = true;
+      this.emit({ type: "compaction_end", reason: "manual", ...event });
+    };
     try {
-      const result = await this.session.compact();
-      const summary = String((result as any)?.summary || "No summary").slice(0, 300);
-      const tokensBefore = (result as any)?.tokensBefore ?? "unknown";
-      this.emit({ type: "message_end", text: `Context compacted.\nTokens before: ${tokensBefore}\nSummary: ${summary}` });
+      const compactRun = this.session.compact();
+      await Promise.resolve();
+      emitSyntheticStartIfNeeded();
+      const result = await compactRun;
+      const tokensBefore = Number((result as any)?.tokensBefore);
+      emitSyntheticEndIfNeeded({
+        aborted: false,
+        willRetry: false,
+        ...(Number.isFinite(tokensBefore) ? { tokensBefore } : {}),
+        ...(result !== undefined ? { result } : {}),
+      });
     } catch (err: any) {
-      this.emit({ type: "message_end", text: `Compaction failed: ${err.message || String(err)}` });
+      emitSyntheticStartIfNeeded();
+      emitSyntheticEndIfNeeded({ aborted: false, willRetry: false, errorMessage: err.message || String(err), result: { error: err.message || String(err) } });
     } finally {
+      this.manualCompactionBridge = null;
       this.emit({ type: "agent_end" });
     }
   }
