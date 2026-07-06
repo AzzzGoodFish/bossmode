@@ -65,16 +65,22 @@ describe("room-member v0.14 migration", () => {
     const cursorsA = JSON.parse(readFileSync(join(tempDir, "rooms", "room-a", "cursors.json"), "utf-8"));
     const sessionsA = JSON.parse(readFileSync(join(tempDir, "rooms", "room-a", "sessions.json"), "utf-8"));
     expect(cursorsA[qaA.id]).toBe("cursor-room-a-qa");
+    expect(cursorsA.qa).toBeUndefined();
     expect(sessionsA[qaA.id].sessionId).toBe("s-room-a-qa");
+    expect(sessionsA.qa).toBeUndefined();
     expect(existsSync(join(tempDir, "rooms", "room-a", "agent-events", `${qaA.id}.jsonl`))).toBe(true);
     expect(readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "auth.json"), "utf-8")).toContain("sk-old");
     expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"))).toBe(true);
-    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v1.json"))).toBe(true);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa"))).toBe(false);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v2.json"))).toBe(true);
     expect(readdirSync(join(tempDir, "pi-agent", "runtime", ".migration-snapshots")).length).toBeGreaterThan(0);
 
     const beforeIds = roomA.roomMembers.map((m: any) => m.id);
+    const beforeRuntimeFiles = readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"), "utf-8");
     runRoomMemberMigration();
     const rerunA = JSON.parse(readFileSync(join(tempDir, "rooms", "room-a", "room.json"), "utf-8"));
     expect(rerunA.roomMembers.map((m: any) => m.id)).toEqual(beforeIds);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa"))).toBe(false);
+    expect(readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"), "utf-8")).toBe(beforeRuntimeFiles);
   });
 });

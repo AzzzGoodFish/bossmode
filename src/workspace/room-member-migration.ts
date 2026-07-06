@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { logger } from "../foundation/logger.js";
@@ -36,14 +36,16 @@ function piRuntimeRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
 }
 
+const MEMBER_RUNTIME_MIGRATION_ID = "member-runtime-unified-v2";
+
 function migrationMarkerPath(): string {
-  return join(piRuntimeRoot(), ".migrations", "member-runtime-unified-v1.json");
+  return join(piRuntimeRoot(), ".migrations", `${MEMBER_RUNTIME_MIGRATION_ID}.json`);
 }
 
 function snapshotRuntimeRoom(roomId: string): string | null {
   const source = join(piRuntimeRoot(), roomId);
   if (!existsSync(source)) return null;
-  const target = join(piRuntimeRoot(), ".migration-snapshots", `member-runtime-unified-v1-${roomId}-${Date.now()}`);
+  const target = join(piRuntimeRoot(), ".migration-snapshots", `${MEMBER_RUNTIME_MIGRATION_ID}-${roomId}-${Date.now()}`);
   mkdirSync(dirname(target), { recursive: true });
   cpSync(source, target, { recursive: true, force: false, errorOnExist: false });
   return target;
@@ -87,10 +89,12 @@ function migrateRuntimeMemberDirs(room: Room): number {
         snapshotted = true;
       }
       copied += copyRuntimeTreeMissing(source, target);
+      rmSync(source, { recursive: true, force: true });
+      copied += 1;
     }
   }
   done.rooms = { ...(done.rooms || {}), [room.id]: true };
-  writeJson(marker, { migration: "member-runtime-unified-v1", rooms: done.rooms, updatedAt: Date.now() });
+  writeJson(marker, { migration: MEMBER_RUNTIME_MIGRATION_ID, rooms: done.rooms, updatedAt: Date.now() });
   return copied;
 }
 
@@ -161,6 +165,10 @@ function migrateKeyedJson<T>(path: string, mappings: Array<{ name: string; id: s
   for (const { name, id } of mappings) {
     if (data[id] === undefined && data[name] !== undefined) {
       data[id] = data[name];
+      copied += 1;
+    }
+    if (name !== id && data[name] !== undefined) {
+      delete data[name];
       copied += 1;
     }
   }
