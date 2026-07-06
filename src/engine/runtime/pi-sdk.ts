@@ -424,8 +424,9 @@ export class PiSdkRuntime implements AgentRuntime {
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
     try {
-      if (opts.resumeSession?.sessionFile) {
-        const resumed = SessionManager.open(opts.resumeSession.sessionFile, sessionDir, opts.cwd);
+      const resumeFile = opts.resumeSession?.sessionFile;
+      if (resumeFile && existsSync(resumeFile)) {
+        const resumed = SessionManager.open(resumeFile, sessionDir, opts.cwd);
         const errorLeaf = recoverableErrorLeaf(resumed);
         if (errorLeaf) {
           // The last assistant turn ended with a provider error (rate limit,
@@ -455,6 +456,9 @@ export class PiSdkRuntime implements AgentRuntime {
         }
         sessionManager = resumed;
       } else {
+        if (resumeFile) {
+          logger.warn("runtime:pi-sdk", "saved session file missing, starting fresh", { agent: opts.member.name, sessionFile: resumeFile });
+        }
         sessionManager = SessionManager.create(opts.cwd, sessionDir);
       }
     } catch (err) {

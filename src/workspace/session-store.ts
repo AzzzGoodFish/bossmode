@@ -13,14 +13,22 @@ export function getSessions(roomId: string): Record<string, AgentSession> {
   try { return JSON.parse(readFileSync(path, "utf-8")); } catch { return {}; }
 }
 
-export function saveSession(roomId: string, agentName: string, session: AgentSession): void {
+export function saveSession(roomId: string, memberId: string, session: AgentSession): void {
   const dir = roomDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const sessions = getSessions(roomId);
-  sessions[agentName] = session;
+  sessions[memberId] = session;
   writeFileSync(sessionsPath(roomId), JSON.stringify(sessions, null, 2), "utf-8");
 }
 
-export function clearSession(roomId: string, agentName: string, runtime: string): void {
-  saveSession(roomId, agentName, { runtime });
+export function clearSession(roomId: string, memberId: string, runtime: string): void {
+  saveSession(roomId, memberId, { runtime });
+}
+
+export function deleteSessionEntry(roomId: string, memberId: string): void {
+  const path = sessionsPath(roomId);
+  const sessions = getSessions(roomId);
+  if (sessions[memberId] === undefined) return;
+  delete sessions[memberId];
+  writeFileSync(path, JSON.stringify(sessions, null, 2), "utf-8");
 }

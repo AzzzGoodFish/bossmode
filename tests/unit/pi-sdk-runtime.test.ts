@@ -121,6 +121,12 @@ function baseOpts(overrides: Record<string, any> = {}) {
   };
 }
 
+function savedSessionFile(): string {
+  const path = join(dir, "old-session.jsonl");
+  writeFileSync(path, "{}\n");
+  return path;
+}
+
 describe("PiSdkRuntime", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-"));
@@ -344,7 +350,7 @@ describe("PiSdkRuntime", () => {
 
     await new PiSdkRuntime().createAgent(baseOpts({
       member: { ...baseOpts().member, model: "anthropic/claude-fable-5" },
-      resumeSession: { sessionId: "old-session", sessionFile: join(dir, "old-session.jsonl") },
+      resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
     }));
 
     expect(sessionManagerOpen).toHaveBeenCalledWith(join(dir, "old-session.jsonl"), expect.any(String), dir);
@@ -365,7 +371,7 @@ describe("PiSdkRuntime", () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
-      resumeSession: { sessionId: "old-session", sessionFile: join(dir, "old-session.jsonl") },
+      resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
     }));
 
     expect(sessionManagerOpen).toHaveBeenCalledWith(join(dir, "old-session.jsonl"), expect.any(String), dir);
@@ -386,7 +392,7 @@ describe("PiSdkRuntime", () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
-      resumeSession: { sessionId: "old-session", sessionFile: join(dir, "old-session.jsonl") },
+      resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
     }));
 
     expect(sessionResetLeaf).toHaveBeenCalled();
@@ -401,12 +407,27 @@ describe("PiSdkRuntime", () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
-      resumeSession: { sessionId: "old-session", sessionFile: join(dir, "old-session.jsonl") },
+      resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
     }));
 
     expect(sessionManagerOpen).toHaveBeenCalledWith(join(dir, "old-session.jsonl"), expect.any(String), dir);
     expect(sessionManagerCreate).not.toHaveBeenCalled();
     expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("opened-session");
+  });
+
+  it("starts fresh when the saved session file was deleted", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const missing = join(dir, "missing-session.jsonl");
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts({
+      resumeSession: { sessionId: "old-session", sessionFile: missing },
+    }));
+
+    expect(sessionManagerOpen).not.toHaveBeenCalled();
+    expect(sessionManagerCreate).toHaveBeenCalledWith(dir, expect.any(String));
+    expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("created-session");
+    expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "saved session file missing, starting fresh", expect.objectContaining({ sessionFile: missing }));
   });
 
   it("refreshes registry and awaits SDK model switch", async () => {

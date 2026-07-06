@@ -503,6 +503,13 @@ export function setCursor(roomId: string, agentName: string, cursor: string | nu
   writeFileSync(cursorsPath(roomId), JSON.stringify(cursors, null, 2), "utf-8");
 }
 
+export function deleteCursor(roomId: string, agentName: string): void {
+  const cursors = getCursors(roomId);
+  if (cursors[agentName] === undefined) return;
+  delete cursors[agentName];
+  writeFileSync(cursorsPath(roomId), JSON.stringify(cursors, null, 2), "utf-8");
+}
+
 // -- Member management --
 
 export function updateRoomMember(roomId: string, memberRef: string, patch: { config?: Partial<RoomMemberConfig> }): RoomMemberRecord | null {

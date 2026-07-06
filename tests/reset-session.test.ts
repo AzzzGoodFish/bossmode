@@ -12,6 +12,7 @@ const mockHandle = {
 };
 
 let sessionResumeEnabled = true;
+let mockRoom: any;
 
 const mockRuntime = {
   name: "pi-cli",
@@ -73,15 +74,18 @@ vi.mock("../src/shared/config.js", () => ({
 }));
 
 vi.mock("../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room1", name: "Room 1", cwd: "/tmp", members: ["pm"], createdAt: Date.now() })),
+  getRoom: vi.fn(() => mockRoom),
+  resolveRoomMemberRef: vi.fn((roomId: string, ref: string) => (mockRoom?.roomMembers || []).find((member: any) => member.id === ref || member.name === ref) || null),
   getCursors: vi.fn(() => ({ pm: "msg-1" })),
   setCursor: vi.fn(),
+  deleteCursor: vi.fn(),
 }));
 
 vi.mock("../src/workspace/session-store.js", () => ({
   getSessions: vi.fn(() => ({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } })),
   saveSession: vi.fn(),
   clearSession: vi.fn(),
+  deleteSessionEntry: vi.fn(),
 }));
 
 vi.mock("../src/knowledge/store.js", () => ({
@@ -123,6 +127,8 @@ describe("resetAgentSession", () => {
     await shutdownAll();
     vi.clearAllMocks();
     sessionResumeEnabled = true;
+    mockRoom = { id: "room1", name: "Room 1", cwd: "/tmp", members: ["pm"], createdAt: Date.now() };
+    vi.mocked(sessionStore.getSessions).mockReturnValue({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } });
     mockHandle.destroy.mockClear();
     mockHandle.abort.mockClear();
     mockHandle.subscribe.mockReturnValue(() => {});
@@ -150,6 +156,25 @@ describe("resetAgentSession", () => {
 
     const createOpts = mockRuntime.createAgent.mock.calls[0][0];
     expect(createOpts.resumeSession).toBeUndefined();
+  });
+
+  it("does not resume from legacy name-key sessions for migrated room members", async () => {
+    mockRoom = {
+      id: "room1",
+      name: "Room 1",
+      cwd: "/tmp",
+      members: ["architect"],
+      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
+      createdAt: Date.now(),
+    };
+    vi.mocked(sessionStore.getSessions).mockReturnValue({ architect: { runtime: "pi-cli", sessionId: "legacy", sessionFile: "/tmp/legacy.json" } });
+
+    await activateAgent("room1", "architect");
+
+    const createOpts = mockRuntime.createAgent.mock.calls[0][0];
+    expect(createOpts.member.id).toBe("rm_architect");
+    expect(createOpts.resumeSession).toBeUndefined();
+    expect(sessionStore.saveSession).toHaveBeenCalledWith("room1", "rm_architect", expect.objectContaining({ sessionId: "session-123" }));
   });
 
   it("destroys instance, clears session, resets cursor to null, and emits system event", async () => {
@@ -182,5 +207,29 @@ describe("resetAgentSession", () => {
       agent: "pm",
       status: "inactive",
     });
+  });
+
+  it("deletes legacy name-key session and cursor entries when resetting a migrated member", () => {
+    mockRoom = {
+      id: "room1",
+      name: "Room 1",
+      cwd: "/tmp",
+      members: ["architect"],
+      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
+      createdAt: Date.now(),
+    };
+    vi.mocked(sessionStore.getSessions).mockReturnValue({
+      rm_architect: { runtime: "pi-cli", sessionId: "current", sessionFile: "/tmp/current.json" },
+      architect: { runtime: "pi-cli", sessionId: "legacy", sessionFile: "/tmp/legacy.json" },
+    });
+
+    resetAgentSession("room1", "architect");
+
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "rm_architect", "pi-cli");
+    expect(sessionStore.clearSession).not.toHaveBeenCalledWith("room1", "architect", expect.any(String));
+    expect(sessionStore.deleteSessionEntry).toHaveBeenCalledWith("room1", "architect");
+    expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "rm_architect", null);
+    expect(roomStore.setCursor).not.toHaveBeenCalledWith("room1", "architect", null);
+    expect(roomStore.deleteCursor).toHaveBeenCalledWith("room1", "architect");
   });
 });

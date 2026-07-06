@@ -37,4 +37,15 @@ describe("session-store", () => {
 
     expect(sessionStore.getSessions(room.id).pm).toEqual({ runtime: "pi-cli" });
   });
+
+  it("deleteSessionEntry removes a legacy session key", () => {
+    const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+
+    sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "current" });
+    sessionStore.saveSession(room.id, "pm", { runtime: "pi-cli", sessionId: "legacy" });
+
+    sessionStore.deleteSessionEntry(room.id, "pm");
+
+    expect(sessionStore.getSessions(room.id)).toEqual({ rm_pm: { runtime: "pi-cli", sessionId: "current" } });
+  });
 });

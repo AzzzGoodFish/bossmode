@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "./room-store.js";
@@ -36,10 +36,28 @@ function piRuntimeRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
 }
 
-const MEMBER_RUNTIME_MIGRATION_ID = "member-runtime-unified-v2";
+function safeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function runtimeMemberDir(roomId: string, memberRef: string): string {
+  return join(piRuntimeRoot(), roomId, safeSegment(memberRef));
+}
+
+const MEMBER_RUNTIME_MIGRATION_ID = "member-runtime-unified-v3";
 
 function migrationMarkerPath(): string {
   return join(piRuntimeRoot(), ".migrations", `${MEMBER_RUNTIME_MIGRATION_ID}.json`);
+}
+
+function readMigrationMarker(): { rooms: Record<string, boolean> } {
+  const marker = readJson<{ rooms?: Record<string, boolean> }>(migrationMarkerPath(), { rooms: {} });
+  return { rooms: marker.rooms || {} };
+}
+
+function writeMigrationMarkerRoom(roomId: string, marker: { rooms: Record<string, boolean> }): void {
+  marker.rooms = { ...marker.rooms, [roomId]: true };
+  writeJson(migrationMarkerPath(), { migration: MEMBER_RUNTIME_MIGRATION_ID, rooms: marker.rooms, updatedAt: Date.now() });
 }
 
 function snapshotRuntimeRoom(roomId: string): string | null {
@@ -72,17 +90,14 @@ function copyRuntimeTreeMissing(source: string, target: string): number {
 }
 
 function migrateRuntimeMemberDirs(room: Room): number {
-  const marker = migrationMarkerPath();
-  const done = readJson<{ rooms?: Record<string, boolean> }>(marker, { rooms: {} });
-  if (done.rooms?.[room.id]) return 0;
   const members = room.roomMembers || [];
   let copied = 0;
   let snapshotted = false;
   for (const member of members) {
     const legacyName = member.migratedFrom?.memberName || member.name;
     if (legacyName === member.id) continue;
-    const source = join(piRuntimeRoot(), room.id, legacyName.replace(/[^a-zA-Z0-9._-]/g, "_"));
-    const target = join(piRuntimeRoot(), room.id, member.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const source = runtimeMemberDir(room.id, legacyName);
+    const target = runtimeMemberDir(room.id, member.id);
     if (existsSync(source)) {
       if (!snapshotted) {
         snapshotRuntimeRoom(room.id);
@@ -93,8 +108,6 @@ function migrateRuntimeMemberDirs(room: Room): number {
       copied += 1;
     }
   }
-  done.rooms = { ...(done.rooms || {}), [room.id]: true };
-  writeJson(marker, { migration: MEMBER_RUNTIME_MIGRATION_ID, rooms: done.rooms, updatedAt: Date.now() });
   return copied;
 }
 
@@ -176,6 +189,49 @@ function migrateKeyedJson<T>(path: string, mappings: Array<{ name: string; id: s
   return copied;
 }
 
+function remapLegacyRuntimePath(path: string, roomId: string, legacyName: string, memberId: string): string | null {
+  if (!isAbsolute(path)) return null;
+  const rel = relative(runtimeMemberDir(roomId, legacyName), path);
+  if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  return join(runtimeMemberDir(roomId, memberId), rel);
+}
+
+function repairMigratedSessionFile(roomId: string, mapping: { name: string; id: string }, session: AgentSession): AgentSession {
+  if (!session.sessionFile) return session;
+  const remapped = remapLegacyRuntimePath(session.sessionFile, roomId, mapping.name, mapping.id);
+  if (remapped && remapped !== session.sessionFile && existsSync(remapped)) {
+    return { ...session, sessionFile: remapped };
+  }
+  if (!existsSync(session.sessionFile)) {
+    const { sessionFile: _missingSessionFile, ...withoutMissingSessionFile } = session;
+    return withoutMissingSessionFile;
+  }
+  return session;
+}
+
+function migrateSessions(roomId: string, mappings: Array<{ name: string; id: string }>): number {
+  const path = sessionsPath(roomId);
+  const data = readJson<Record<string, AgentSession>>(path, {});
+  let changed = 0;
+  for (const mapping of mappings) {
+    const { name, id } = mapping;
+    const current = data[id] ?? data[name];
+    if (current !== undefined) {
+      const next = repairMigratedSessionFile(roomId, mapping, current);
+      if (data[id] === undefined || JSON.stringify(data[id]) !== JSON.stringify(next)) {
+        data[id] = next;
+        changed += 1;
+      }
+    }
+    if (name !== id && data[name] !== undefined) {
+      delete data[name];
+      changed += 1;
+    }
+  }
+  if (changed > 0) writeJson(path, data);
+  return changed;
+}
+
 function migrateAgentEvents(roomId: string, mappings: Array<{ name: string; id: string }>): number {
   const dir = eventsDir(roomId);
   if (!existsSync(dir)) return 0;
@@ -196,7 +252,7 @@ function ensurePersistenceKeys(room: Room): { cursors: number; sessions: number;
   const mappings = members.map((member) => ({ name: member.migratedFrom?.memberName || member.name, id: member.id }));
   return {
     cursors: migrateKeyedJson<string | null>(cursorsPath(room.id), mappings),
-    sessions: migrateKeyedJson<AgentSession>(sessionsPath(room.id), mappings),
+    sessions: migrateSessions(room.id, mappings),
     events: migrateAgentEvents(room.id, mappings),
   };
 }
@@ -228,8 +284,11 @@ export function runRoomMemberMigration(): void {
         }
       }
 
-      const persistence = ensurePersistenceKeys(room);
-      const runtimeDirs = migrateRuntimeMemberDirs(room);
+      const marker = readMigrationMarker();
+      const migrationDone = marker.rooms[room.id] === true;
+      const runtimeDirs = migrationDone ? 0 : migrateRuntimeMemberDirs(room);
+      const persistence = migrationDone ? { cursors: 0, sessions: 0, events: 0 } : ensurePersistenceKeys(room);
+      if (!migrationDone) writeMigrationMarkerRoom(room.id, marker);
       if (created > 0 || persistence.cursors > 0 || persistence.sessions > 0 || persistence.events > 0 || runtimeDirs > 0) {
         logger.info("room-member-migration", "room migrated", { roomId: room.id, created, ...persistence, runtimeDirs });
       }

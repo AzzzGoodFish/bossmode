@@ -545,7 +545,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     }
 
     const sessions = sessionStore.getSessions(roomId);
-    const savedSession = sessions[memberId] || sessions[memberName];
+    const savedSession = sessions[memberId];
     const resumeSession = (sessionResumeEnabled && savedSession)
       ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
       : undefined;
@@ -1021,15 +1021,15 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const sessions = sessionStore.getSessions(roomId);
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
-  const runtime = sessions[memberId]?.runtime || sessions[agentName]?.runtime || instance?.handle.runtimeName || "pi-cli";
+  const runtime = sessions[memberId]?.runtime || instance?.handle.runtimeName || "pi-cli";
 
   destroyInstance(roomId, memberId);
   clearActivationSource(roomId, memberId);
   sessionStore.clearSession(roomId, memberId, runtime);
   roomStore.setCursor(roomId, memberId, null);
   if (memberId !== agentName) {
-    sessionStore.clearSession(roomId, agentName, runtime);
-    roomStore.setCursor(roomId, agentName, null);
+    sessionStore.deleteSessionEntry(roomId, agentName);
+    roomStore.deleteCursor(roomId, agentName);
   }
 
   const message = "Session reset. Next activation will start fresh.";

@@ -43,9 +43,14 @@ describe("room-member v0.14 migration", () => {
     ], null, 2));
     writeLegacyRoom("room-a", ["qa", "developer"], { qa: { thinkingLevel: "high", mcpServers: ["playwright"] } });
     writeLegacyRoom("room-b", ["qa"], { qa: { thinkingLevel: "low" } });
+    const legacyQaSessionFile = join(tempDir, "pi-agent", "runtime", "room-a", "qa", "sessions", "session.json");
     mkdirSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "sessions"), { recursive: true });
     writeFileSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "sk-old" } }));
-    writeFileSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa", "sessions", "session.json"), JSON.stringify({ messages: ["keep"] }));
+    writeFileSync(legacyQaSessionFile, JSON.stringify({ messages: ["keep"] }));
+    const roomASessionsPath = join(tempDir, "rooms", "room-a", "sessions.json");
+    const roomASessions = JSON.parse(readFileSync(roomASessionsPath, "utf-8"));
+    roomASessions.qa.sessionFile = legacyQaSessionFile;
+    writeFileSync(roomASessionsPath, JSON.stringify(roomASessions, null, 2));
 
     const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
     runRoomMemberMigration();
@@ -67,12 +72,13 @@ describe("room-member v0.14 migration", () => {
     expect(cursorsA[qaA.id]).toBe("cursor-room-a-qa");
     expect(cursorsA.qa).toBeUndefined();
     expect(sessionsA[qaA.id].sessionId).toBe("s-room-a-qa");
+    expect(sessionsA[qaA.id].sessionFile).toBe(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"));
     expect(sessionsA.qa).toBeUndefined();
     expect(existsSync(join(tempDir, "rooms", "room-a", "agent-events", `${qaA.id}.jsonl`))).toBe(true);
     expect(readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "auth.json"), "utf-8")).toContain("sk-old");
     expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"))).toBe(true);
     expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa"))).toBe(false);
-    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v2.json"))).toBe(true);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v3.json"))).toBe(true);
     expect(readdirSync(join(tempDir, "pi-agent", "runtime", ".migration-snapshots")).length).toBeGreaterThan(0);
 
     const beforeIds = roomA.roomMembers.map((m: any) => m.id);
@@ -82,5 +88,45 @@ describe("room-member v0.14 migration", () => {
     expect(rerunA.roomMembers.map((m: any) => m.id)).toEqual(beforeIds);
     expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-a", "qa"))).toBe(false);
     expect(readFileSync(join(tempDir, "pi-agent", "runtime", "room-a", qaA.id, "sessions", "session.json"), "utf-8")).toBe(beforeRuntimeFiles);
+  });
+
+  it("repairs rc2 sessions that already point at deleted legacy runtime dirs", async () => {
+    const memberId = "rm_architect";
+    const designerId = "rm_designer";
+    const roomDir = join(tempDir, "rooms", "room-rc2");
+    const oldSessionFile = join(tempDir, "pi-agent", "runtime", "room-rc2", "architect", "sessions", "session.jsonl");
+    const newSessionFile = join(tempDir, "pi-agent", "runtime", "room-rc2", memberId, "sessions", "session.jsonl");
+    const missingGlobalSessionFile = join(tempDir, ".pi", "agent", "sessions", "global.jsonl");
+    mkdirSync(roomDir, { recursive: true });
+    mkdirSync(join(tempDir, "pi-agent", "runtime", "room-rc2", memberId, "sessions"), { recursive: true });
+    mkdirSync(join(tempDir, "pi-agent", "runtime", ".migrations"), { recursive: true });
+    writeFileSync(newSessionFile, "{}\n");
+    writeFileSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v2.json"), JSON.stringify({ rooms: { "room-rc2": true } }));
+    writeFileSync(join(roomDir, "room.json"), JSON.stringify({
+      id: "room-rc2",
+      name: "room-rc2",
+      cwd: "/tmp",
+      members: ["architect", "designer"],
+      roomMembers: [
+        { id: memberId, roomId: "room-rc2", name: "architect", sourceAgent: "architect", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "architect" } },
+        { id: designerId, roomId: "room-rc2", name: "designer", sourceAgent: "designer", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "designer" } },
+      ],
+      createdAt: 1,
+    }, null, 2));
+    writeFileSync(join(roomDir, "sessions.json"), JSON.stringify({
+      [memberId]: { runtime: "pi-cli", sessionId: "old", sessionFile: oldSessionFile },
+      [designerId]: { runtime: "pi-cli", sessionId: "global", sessionFile: missingGlobalSessionFile },
+      architect: { runtime: "pi-cli" },
+    }, null, 2));
+
+    const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
+    runRoomMemberMigration();
+
+    const sessions = JSON.parse(readFileSync(join(roomDir, "sessions.json"), "utf-8"));
+    expect(sessions[memberId].sessionFile).toBe(newSessionFile);
+    expect(sessions[designerId]).toEqual({ runtime: "pi-cli", sessionId: "global" });
+    expect(sessions.architect).toBeUndefined();
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", "room-rc2", "architect"))).toBe(false);
+    expect(existsSync(join(tempDir, "pi-agent", "runtime", ".migrations", "member-runtime-unified-v3.json"))).toBe(true);
   });
 });

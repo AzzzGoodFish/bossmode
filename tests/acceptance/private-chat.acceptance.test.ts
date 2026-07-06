@@ -245,19 +245,23 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       const room = await createRoom("reset-session-test", ["pm"]);
       const roomDir = join(getTestBossmodeDir(), "rooms", room.id);
       mkdirSync(roomDir, { recursive: true });
+      const pmMemberId = room.roomMembers?.find((member) => member.name === "pm")?.id || "pm";
       writeFileSync(join(roomDir, "sessions.json"), JSON.stringify({
-        pm: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
+        [pmMemberId]: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
+        pm: { runtime: "mock", sessionId: "legacy-session", sessionFile: "/tmp/legacy.json" },
       }, null, 2));
-      writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ pm: "msg-123" }, null, 2));
+      writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ [pmMemberId]: "msg-123", pm: "legacy-msg" }, null, 2));
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });
       expect(res.status).toBe(200);
       expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
 
       const sessions = JSON.parse(readFileSync(join(roomDir, "sessions.json"), "utf-8"));
-      expect(sessions.pm).toEqual({ runtime: "mock" });
+      expect(sessions[pmMemberId]).toEqual({ runtime: "mock" });
+      expect(sessions.pm).toBeUndefined();
 
       const cursors = JSON.parse(readFileSync(join(roomDir, "cursors.json"), "utf-8"));
-      expect(cursors.pm).toBeNull();
+      expect(cursors[pmMemberId]).toBeNull();
+      expect(cursors.pm).toBeUndefined();
 
       const eventsRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/agents/pm/events`, { token });
       expect(eventsRes.status).toBe(200);
