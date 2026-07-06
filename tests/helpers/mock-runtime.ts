@@ -66,7 +66,7 @@ export class MockAgentHandle implements AgentHandle {
 }
 
 export class MockRuntime implements AgentRuntime {
-  readonly name = "mock";
+  readonly name: string;
   readonly capabilities: RuntimeCapabilities = {
     streaming: true,
     toolEvents: true,
@@ -79,6 +79,10 @@ export class MockRuntime implements AgentRuntime {
   };
 
   private handles: MockAgentHandle[] = [];
+
+  constructor(name = "mock") {
+    this.name = name;
+  }
 
   async detect(): Promise<RuntimeDetectResult> {
     return { available: true, version: "mock-1.0", path: "/mock" };

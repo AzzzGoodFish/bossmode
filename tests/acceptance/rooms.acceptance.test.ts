@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
+import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
 
@@ -29,6 +30,8 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   let token: string;
 
   beforeAll(async () => {
+    mkdirSync(join(getTestBossmodeDir(), "agents"), { recursive: true });
+    writeFileSync(join(getTestBossmodeDir(), "agents", "pm.md"), "---\nname: pm\n---\nTest PM agent\n", "utf-8");
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
   });
@@ -323,6 +326,51 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(messages.some((m) => m.id === msg.id)).toBe(true);
 
       await wsClient.close();
+    });
+  });
+
+  describe("T3.2: Manual compact room command", () => {
+    it("routes @member /compact as a slash command without normal mention activation", async () => {
+      resetMocks();
+      const prompts: string[] = [];
+      setMockPromptFn(vi.fn(async (message: string) => { prompts.push(message); }));
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "compact-command-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+      });
+      expect(createRes.status).toBe(200);
+      const room: Room = JSON.parse(createRes.body);
+
+      const msgRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
+        token,
+        body: { content: "@pm /compact" },
+      });
+      expect(msgRes.status).toBe(200);
+      const msg: RoomMessage = JSON.parse(msgRes.body);
+      expect(msg.content).toBe("@pm /compact");
+
+      await vi.waitFor(() => expect(prompts).toEqual(["/compact"]));
+      resetMocks();
+    });
+
+    it("routes /compact to the sole room member", async () => {
+      resetMocks();
+      const prompts: string[] = [];
+      setMockPromptFn(vi.fn(async (message: string) => { prompts.push(message); }));
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "compact-command-single-member", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+      });
+      expect(createRes.status).toBe(200);
+      const room: Room = JSON.parse(createRes.body);
+
+      const msgRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
+        token,
+        body: { content: "/compact" },
+      });
+      expect(msgRes.status).toBe(200);
+      await vi.waitFor(() => expect(prompts).toEqual(["/compact"]));
+      resetMocks();
     });
   });
 

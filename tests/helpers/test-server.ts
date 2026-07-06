@@ -124,6 +124,7 @@ export async function createTestServer(): Promise<TestServer> {
   // Initialize mock runtime for tests
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime());
+  registry.register(new MockRuntime("pi-cli"));
   initAgentManager(registry);
 
   // Initialize message router — wire @mentions to engine

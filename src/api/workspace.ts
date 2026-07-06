@@ -9,7 +9,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
@@ -18,6 +18,7 @@ import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, reso
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
+import type { RoomMemberRecord } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
 // ── Rooms ──
@@ -205,6 +206,41 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/prompt-supplement", async (_r
 
 // ── Messages ──
 
+type ManualCompactCommand =
+  | { ok: true; member: RoomMemberRecord }
+  | { ok: false; status: number; error: string };
+
+function parseManualCompactCommand(roomId: string, content: string): ManualCompactCommand | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  const tokens = trimmed.split(/\s+/);
+  let targetRef: string | undefined;
+  let isCommand = false;
+
+  if (tokens[0] === "/compact") {
+    isCommand = true;
+    if (tokens.length > 2) return { ok: false, status: 400, error: "Usage: /compact [member] or @member /compact" };
+    targetRef = tokens[1];
+  } else if (tokens[1] === "/compact" && tokens[0]?.startsWith("@")) {
+    isCommand = true;
+    if (tokens.length > 2) return { ok: false, status: 400, error: "Usage: /compact [member] or @member /compact" };
+    targetRef = tokens[0];
+  }
+
+  if (!isCommand) return null;
+
+  const members = roomStore.getRoomMembers(roomId);
+  if (!targetRef) {
+    if (members.length === 1) return { ok: true, member: members[0] };
+    return { ok: false, status: 400, error: "Manual compact requires a target member: /compact @member" };
+  }
+
+  const normalizedRef = targetRef.startsWith("@") ? targetRef.slice(1) : targetRef;
+  const member = roomStore.resolveRoomMemberRef(roomId, normalizedRef);
+  if (!member) return { ok: false, status: 400, error: `Member "${normalizedRef}" is not in this room` };
+  return { ok: true, member };
+}
+
 addRoute("GET", "/api/rooms/:id/messages", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
@@ -251,6 +287,31 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
   }
   if (!content.trim() && attachments.length === 0 && artifacts.length === 0) {
     sendJson(res, 400, { error: "content, attachments, or artifacts is required" });
+    return;
+  }
+
+  const compactCommand = parseManualCompactCommand(params.id, content);
+  if (compactCommand) {
+    if (attachments.length > 0 || artifacts.length > 0) {
+      sendJson(res, 400, { error: "Manual compact commands do not support attachments or artifacts" });
+      return;
+    }
+    if (!compactCommand.ok) {
+      sendJson(res, compactCommand.status, { error: compactCommand.error });
+      return;
+    }
+
+    // Store the user's command for transparency, but do not route its textual @mention
+    // as a normal model turn. The command itself drives the member event lifecycle.
+    postMessage(params.id, "user", content, [], { mentionMemberIds: [] });
+    steerAgent(params.id, compactCommand.member.id, "/compact").catch((err) => {
+      logger.error("api", "manual compact command failed", { roomId: params.id, memberId: compactCommand.member.id, member: compactCommand.member.name, error: String(err) });
+    });
+
+    const messages = messageStore.getMessages(params.id, { limit: 1 });
+    const message = messages[messages.length - 1];
+    logger.info("api", `POST /api/rooms/:id/messages compact`, { sender: "user", member: compactCommand.member.name, memberId: compactCommand.member.id, roomId: params.id, msgId: message?.id });
+    sendJson(res, 200, message);
     return;
   }
 
@@ -446,8 +507,6 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
 });
 
 // ── Agent Events & Steer ──
-
-import { getAgentEventHistory, steerAgent, abortAgent, resetAgentSession } from "../engine/agent-manager.js";
 
 addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
