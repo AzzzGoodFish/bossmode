@@ -24,6 +24,8 @@ import type {
 } from "../shared/types.js";
 
 const STORE_FILE = "model-credentials.json";
+// SDK/provider adapters currently require an apiKey-shaped value even for keyless endpoints.
+// This sentinel is not a credential; it marks authType=none until upstream supports true no-auth providers.
 const DUMMY_API_KEY = "__bossmode_no_auth__";
 
 export const MODEL_PROTOCOLS: ModelProtocol[] = [

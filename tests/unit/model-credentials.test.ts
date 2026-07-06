@@ -265,6 +265,25 @@ describe("model credential profiles", () => {
     expect(statSync(join(exported!.agentDir, "auth.json")).mode & 0o777).toBe(0o600);
   });
 
+  it("projects authType none with only the non-secret no-auth sentinel", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile({
+      ...baseProfile,
+      providerSlug: "keyless-proxy",
+      authType: "none",
+      apiKey: undefined,
+      models: [{ id: "claude-keyless", contextWindow: 18000, input: ["text"] }],
+    });
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "keyless-proxy/claude-keyless", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
+
+    expect(modelsJson.providers["keyless-proxy"].apiKey).toBe("__bossmode_no_auth__");
+    expect(authJson["keyless-proxy"]).toEqual({ type: "api_key", key: "__bossmode_no_auth__" });
+    expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).not.toContain("sk-secret");
+  });
+
   it("preserves an existing API key when editing a profile with blank apiKey", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);

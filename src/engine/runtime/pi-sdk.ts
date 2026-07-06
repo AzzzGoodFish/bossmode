@@ -179,12 +179,21 @@ function sessionModelDiffers(sessionManager: SessionManager, provider: string, m
   return sessionModel.provider !== provider || sessionModel.modelId !== modelId ? sessionModel : null;
 }
 
+interface CompactionWatchdogRun {
+  maxTokens: number;
+  threshold: number;
+  contextWindow: number;
+  model: string;
+  compactionEventSeen: boolean;
+}
+
 class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
+  private compactionWatchdogRun: CompactionWatchdogRun | null = null;
   private destroyed = false;
 
   constructor(
@@ -194,6 +203,7 @@ class PiSdkAgentHandle implements AgentHandle {
   ) {
     this.runtimeParams = runtimeParams;
     this.unsubscribeSession = session.subscribe((raw) => {
+      this.observeCompactionWatchdog(raw);
       const mapped = mapPiAgentEvent(raw);
       if (mapped) this.emit(mapped);
     });
@@ -203,6 +213,51 @@ class PiSdkAgentHandle implements AgentHandle {
     for (const listener of this.listeners) listener(event);
   }
 
+  private startCompactionWatchdogRun(): void {
+    const settings = this.session.settingsManager.getCompactionSettings();
+    const model = this.session.model as any;
+    const contextWindow = typeof model?.contextWindow === "number" ? model.contextWindow : 0;
+    const reserveTokens = settings.reserveTokens ?? 16384;
+    if (settings.enabled === false || contextWindow <= 0) {
+      this.compactionWatchdogRun = null;
+      return;
+    }
+    this.compactionWatchdogRun = {
+      maxTokens: 0,
+      threshold: contextWindow - reserveTokens,
+      contextWindow,
+      model: model?.provider && model?.id ? `${model.provider}/${model.id}` : (this.runtimeParams.model || "unknown"),
+      compactionEventSeen: false,
+    };
+  }
+
+  private observeCompactionWatchdog(raw: any): void {
+    const run = this.compactionWatchdogRun;
+    if (!run) return;
+    if (raw?.type === "compaction_start" || raw?.type === "compaction_end") {
+      run.compactionEventSeen = true;
+      return;
+    }
+    if (raw?.type !== "message_end" || raw.message?.role !== "assistant") return;
+    if (raw.message.stopReason === "error" || raw.message.stopReason === "aborted") return;
+    const usage = raw.message.usage;
+    if (!usage) return;
+    const tokens = Number(usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)));
+    if (Number.isFinite(tokens) && tokens > run.maxTokens) run.maxTokens = tokens;
+  }
+
+  private finishCompactionWatchdogRun(): void {
+    const run = this.compactionWatchdogRun;
+    this.compactionWatchdogRun = null;
+    if (!run || run.compactionEventSeen || run.maxTokens <= 0 || run.maxTokens <= run.threshold) return;
+    logger.warn("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", {
+      model: run.model,
+      maxTokens: run.maxTokens,
+      contextWindow: run.contextWindow,
+      threshold: run.threshold,
+    });
+  }
+
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -210,10 +265,12 @@ class PiSdkAgentHandle implements AgentHandle {
 
   async prompt(message: string): Promise<void> {
     if (message === "/compact") return this.compact();
+    this.startCompactionWatchdogRun();
     const run = this.session.prompt(message, { source: "external" as any }).catch((err) => {
       this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
       throw err;
     }).finally(() => {
+      this.finishCompactionWatchdogRun();
       if (this.currentRun === run) this.currentRun = null;
     });
     this.currentRun = run;

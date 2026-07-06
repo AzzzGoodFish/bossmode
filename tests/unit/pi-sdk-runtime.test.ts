@@ -20,6 +20,10 @@ const settingsApplyOverrides = vi.fn();
 const settingsGetTransport = vi.fn(() => "auto");
 const settingsGetWebSocketConnectTimeoutMs = vi.fn(() => 60000);
 const settingsGetHttpIdleTimeoutMs = vi.fn(() => 600000);
+const settingsGetCompactionSettings = vi.fn(() => ({ enabled: true, reserveTokens: 1000, keepRecentTokens: 20000 }));
+const loggerInfo = vi.fn();
+const loggerWarn = vi.fn();
+const loggerError = vi.fn();
 const sessionExtensionSetFlagValue = vi.fn();
 const sessionExtensionEmit = vi.fn(async () => {});
 const sessionExtensionHasHandlers = vi.fn(() => false);
@@ -30,7 +34,7 @@ const sessionBranch = vi.fn();
 const sessionResetLeaf = vi.fn();
 
 vi.mock("../../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: loggerInfo, warn: loggerWarn, error: loggerError },
 }));
 
 vi.mock("../../src/shared/config.js", () => ({
@@ -77,6 +81,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
           getTransport: settingsGetTransport,
           getWebSocketConnectTimeoutMs: settingsGetWebSocketConnectTimeoutMs,
           getHttpIdleTimeoutMs: settingsGetHttpIdleTimeoutMs,
+          getCompactionSettings: settingsGetCompactionSettings,
         };
       },
     },
@@ -128,6 +133,7 @@ describe("PiSdkRuntime", () => {
     settingsGetWebSocketConnectTimeoutMs.mockReturnValue(60000);
     modelRegistryGetApiKeyAndHeaders.mockResolvedValue({ ok: true, apiKey: "sk-test" });
     settingsGetHttpIdleTimeoutMs.mockReturnValue(600000);
+    settingsGetCompactionSettings.mockReturnValue({ enabled: true, reserveTokens: 1000, keepRecentTokens: 20000 });
     createAgentSession.mockResolvedValue({
       session: {
         subscribe: vi.fn(() => vi.fn()),
@@ -149,6 +155,8 @@ describe("PiSdkRuntime", () => {
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
       },
     });
   });
@@ -175,6 +183,78 @@ describe("PiSdkRuntime", () => {
 
     expect(authCreate).toHaveBeenCalledWith(join(agentDir, "auth.json"));
     expect(modelRegistryCreate).toHaveBeenCalledWith(expect.anything(), join(agentDir, "models.json"));
+  });
+
+  it("warns when a run crosses compaction threshold but SDK emits no compaction event", async () => {
+    let listener: ((event: any) => void) | undefined;
+    const prompt = vi.fn(async () => {
+      listener?.({
+        type: "message_end",
+        message: { role: "assistant", stopReason: "stop", usage: { input: 17000, output: 1500, cacheRead: 0, cacheWrite: 0, totalTokens: 18500 } },
+      });
+      listener?.({
+        type: "message_end",
+        message: { role: "assistant", stopReason: "stop", usage: { input: 10, output: 14, cacheRead: 0, cacheWrite: 0, totalTokens: 24 } },
+      });
+    });
+    createAgentSession.mockResolvedValueOnce({
+      session: {
+        subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
+        prompt,
+        steer: vi.fn(),
+        abort: vi.fn(),
+        abortCompaction: vi.fn(),
+        abortBranchSummary: vi.fn(),
+        dispose: vi.fn(),
+        compact: vi.fn(),
+        setModel: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+        sessionId: "session-a",
+        sessionFile: join(dir, "session.json"),
+        thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    await handle.prompt("hello");
+
+    expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", expect.objectContaining({
+      maxTokens: 18500,
+      contextWindow: 18000,
+      threshold: 17000,
+      model: "anthropic/claude-sonnet-4-6",
+    }));
+  });
+
+  it("does not warn when SDK emits a compaction event for the threshold-crossing run", async () => {
+    let listener: ((event: any) => void) | undefined;
+    const prompt = vi.fn(async () => {
+      listener?.({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: { input: 17000, output: 1500, cacheRead: 0, cacheWrite: 0, totalTokens: 18500 } } });
+      listener?.({ type: "compaction_start", reason: "threshold" });
+    });
+    createAgentSession.mockResolvedValueOnce({
+      session: {
+        subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
+        prompt,
+        steer: vi.fn(), abort: vi.fn(), abortCompaction: vi.fn(), abortBranchSummary: vi.fn(), dispose: vi.fn(), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(), bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+        sessionId: "session-a", sessionFile: join(dir, "session.json"), thinkingLevel: "off", settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    await handle.prompt("hello");
+
+    expect(loggerWarn).not.toHaveBeenCalledWith("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", expect.anything());
   });
 
   it("applies Bossmode default pi transport overrides without persisting settings", async () => {
@@ -257,6 +337,7 @@ describe("PiSdkRuntime", () => {
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
       },
     });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -346,6 +427,7 @@ describe("PiSdkRuntime", () => {
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
       },
     });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
