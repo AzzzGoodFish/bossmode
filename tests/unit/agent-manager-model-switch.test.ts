@@ -7,6 +7,9 @@ let availableModels: Array<{ ref: string }>;
 let exportedCalls: any[];
 let exportReturnsNull: boolean;
 const handles: TestHandle[] = [];
+const loggerError = vi.fn();
+const loggerWarn = vi.fn();
+const loggerInfo = vi.fn();
 
 class TestHandle implements AgentHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
@@ -50,6 +53,10 @@ class TestHandle implements AgentHandle {
     this.refreshCalls += 1;
   }
 }
+
+vi.mock("../../src/foundation/logger.js", () => ({
+  logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
+}));
 
 vi.mock("../../src/workforce/member-store.js", () => ({
   getMemberByName: vi.fn(() => member),
@@ -325,6 +332,7 @@ describe("agent-manager model hot switch", () => {
 
     first.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "502 upstream_error" });
 
+    expect(loggerError).toHaveBeenCalledWith("agent", "member request failed", expect.objectContaining({ roomId: "room", member: "pm", memberId: "pm", error: "502 upstream_error" }));
     expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" request failed. Error: 502 upstream_error');
     expect(first.destroyed).toBe(false);
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");

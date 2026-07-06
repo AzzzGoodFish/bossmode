@@ -642,6 +642,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           const detail = formattedError
             ? ` Error: ${formattedError}`
             : " An unrecoverable provider error occurred.";
+          logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
           postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
         }
 
