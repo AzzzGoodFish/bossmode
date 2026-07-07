@@ -27,6 +27,7 @@ import { WorkstationDetail } from "../components/WorkstationDetail";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
 import { useDialog } from "../components/dialogs";
+import { clampPreviewPct, formatPreviewPct, PREVIEW_PCT_STORAGE_KEY, readPreviewPct } from "../utils/preview-pane-sizing";
 
 interface MainProps {
   selectedRoomId: string | null;
@@ -50,10 +51,6 @@ interface MainProps {
 
 type RoomView = "chat" | "tasks";
 
-const PREVIEW_WIDTH_STORAGE_KEY = "bossmode.artifactPreviewWidth";
-const PREVIEW_MIN_WIDTH = 320;
-const PREVIEW_MAX_WIDTH = 760;
-
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
   externalShowCreateRoom, onCreateRoomShown,
@@ -76,11 +73,7 @@ export function Main({
     localStorage.setItem("bossmode_preview_surface", v ? "expanded" : "panel");
   };
   const [taskPreviewId, setTaskPreviewId] = useState<string | null>(null);
-  const [previewWidth, setPreviewWidth] = useState<number>(() => {
-    const raw = localStorage.getItem(PREVIEW_WIDTH_STORAGE_KEY);
-    const n = raw ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) ? Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, n)) : 420;
-  });
+  const [previewPct, setPreviewPct] = useState<number>(() => readPreviewPct(localStorage, window.innerWidth));
   const isPreviewDragging = useRef(false);
   const isMobile = useIsMobile();
 
@@ -171,14 +164,15 @@ export function Main({
   const handlePreviewResizeStart = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
     isPreviewDragging.current = true;
+    const container = (e.currentTarget as HTMLElement).parentElement;
+    const containerWidth = container ? container.getBoundingClientRect().width : window.innerWidth;
     const startX = e.clientX;
-    const startWidth = previewWidth;
+    const startPct = previewPct;
     const onMove = (move: MouseEvent) => {
       if (!isPreviewDragging.current) return;
       const delta = startX - move.clientX;
-      const viewportMax = Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_MAX_WIDTH, window.innerWidth - 440));
-      const next = Math.min(viewportMax, Math.max(PREVIEW_MIN_WIDTH, startWidth + delta));
-      setPreviewWidth(next);
+      const next = clampPreviewPct(startPct + (delta / containerWidth) * 100);
+      setPreviewPct(next);
     };
     const onUp = () => {
       isPreviewDragging.current = false;
@@ -191,11 +185,11 @@ export function Main({
     document.body.style.userSelect = "none";
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [previewWidth]);
+  }, [previewPct]);
 
   useEffect(() => {
-    localStorage.setItem(PREVIEW_WIDTH_STORAGE_KEY, String(previewWidth));
-  }, [previewWidth]);
+    localStorage.setItem(PREVIEW_PCT_STORAGE_KEY, formatPreviewPct(previewPct));
+  }, [previewPct]);
 
   const handleSteer = useCallback(
     async (agentName: string, content: string) => {
@@ -439,7 +433,7 @@ export function Main({
             >
               <div className="h-10 w-0.5 rounded-full bg-line-strong group-hover:bg-accent" />
             </div>
-            <div className="hidden md:block shrink-0 min-h-0" style={{ width: previewWidth }}>
+            <div className="hidden md:block shrink-0 min-h-0" style={{ width: `${previewPct}%` }}>
               {artifactPreview ? (
                 <ArtifactPreviewPanel
                   roomId={selectedRoomId}

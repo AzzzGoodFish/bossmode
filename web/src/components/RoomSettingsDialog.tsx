@@ -4,6 +4,7 @@ import { Sheet } from "./Sheet";
 import type { MemberInfo, PromptSupplement, Room } from "../api/client";
 import { getRoomMembers, getRoomPromptSupplement, updateRoomSettings, deleteRoom } from "../api/client";
 import { useDialog } from "./dialogs";
+import { Markdown } from "./Markdown";
 
 interface RoomSettingsDialogProps {
   room: Room;
@@ -21,9 +22,9 @@ function normalizeDocsPathInput(value: string): string {
 function PromptPreview({ supplement }: { supplement: PromptSupplement | null }) {
   const content = supplement?.content?.trim() || "";
   return (
-    <div className="rounded-lg border border-line bg-inset p-3 min-h-36 max-h-64 overflow-auto">
+    <div className="rounded-lg border border-line bg-inset p-3 min-h-36 max-h-[46vh] overflow-auto">
       {content ? (
-        <pre className="whitespace-pre-wrap text-xs leading-relaxed text-ink-2 font-mono">{content}</pre>
+        <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={content} /></div>
       ) : (
         <div className="text-xs text-ink-4 leading-relaxed">
           Room Supplemental Prompt is empty. The room leader can maintain concise rules, knowledge summaries, and document links through prompt supplement tools.
@@ -131,8 +132,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
           <button onClick={onClose} className="text-ink-4 hover:text-ink-1 text-lg transition-colors cursor-pointer" aria-label="Close">×</button>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4 items-start" data-testid="room-settings-grid">
-          <div className="space-y-4">
+        <div className="space-y-4" data-testid="room-settings-grid">
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <h3 className="text-sm font-semibold text-ink-1">General</h3>
               <div>
@@ -165,9 +165,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
               {currentLeader && <p className="text-xs text-ink-3">Current leader: <span className="font-mono text-ink-2">@{currentLeader.name}</span></p>}
               {missingLeader && <p className="text-xs text-blocked">Saved leader is no longer a current room member. Select a new leader or clear it.</p>}
             </section>
-          </div>
 
-          <div className="space-y-4">
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold text-ink-1">Prompt supplement preview</h3>
@@ -186,7 +184,6 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
                 </button>
               </div>
             </section>
-          </div>
         </div>
 
         <div className="flex items-center gap-2 justify-end pt-3 border-t border-line-soft/50 mt-4">

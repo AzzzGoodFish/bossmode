@@ -7,6 +7,7 @@ import {
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type PromptSupplement,
 } from "../api/client";
 import { Sheet } from "./Sheet";
+import { Markdown } from "./Markdown";
 import { compactionEndDetail, compactionReasonLabel, formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
@@ -379,7 +380,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           );
         })}
       </div>
-      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl">
+      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="2xl">
         {selectedMember && memberInfos[selectedMember] && (
           <MemberConfigPanel
             roomId={roomId}
@@ -418,11 +419,11 @@ function PromptSupplementPreview({ title, supplement, empty }: { title: string; 
   return (
     <div>
       <div className="text-[11px] text-ink-4 uppercase tracking-wide mb-1.5">{title}</div>
-      <div className="rounded-lg border border-line-soft bg-surface-1 p-3 min-h-32 max-h-56 overflow-auto">
+      <div className="rounded-lg border border-line-soft bg-surface-1 p-3 min-h-24 max-h-[38vh] overflow-auto">
         {supplement === null ? (
           <div className="text-xs text-ink-4">Loading…</div>
         ) : content ? (
-          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-ink-2 font-mono">{content}</pre>
+          <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={content} /></div>
         ) : (
           <div className="text-xs text-ink-4 leading-relaxed">{empty}</div>
         )}
@@ -589,7 +590,7 @@ function MemberConfigPanel({
           <div className="text-sm font-semibold text-ink-1">Prompt supplements</div>
           <div className="text-xs text-ink-4 mt-0.5">Preview only. This member uses the shared room prompt plus its own member prompt on next runtime create/restart.</div>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="space-y-3">
           <PromptSupplementPreview title="Current Room Supplemental Prompt" supplement={roomSupplement} empty="Room supplement is empty." />
           <PromptSupplementPreview title={`${member.name} Member Supplemental Prompt`} supplement={memberSupplement} empty="Member supplement is empty." />
         </div>
