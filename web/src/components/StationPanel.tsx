@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPromptSupplement, getMemberPromptSupplement,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type PromptSupplement,
 } from "../api/client";
@@ -31,6 +31,25 @@ export function formatTokens(n: number): string {
   return Math.round(n / 1000) + "k";
 }
 
+/** Keep the discriminating model id visible in the compact workstation card. */
+export function compactModelId(modelRef: string, models: Pick<AvailableModelOption, "ref" | "modelId">[]): string {
+  const catalogModelId = models.find((model) => model.ref === modelRef)?.modelId;
+  if (catalogModelId) return catalogModelId;
+  const slash = modelRef.indexOf("/");
+  return slash >= 0 && modelRef.slice(slash + 1) ? modelRef.slice(slash + 1) : modelRef;
+}
+
+export function memberModelAvailabilityLabel(
+  modelRef: string | null | undefined,
+  credentialId: string | null | undefined,
+  models: Pick<AvailableModelOption, "ref" | "profileId" | "modelId">[],
+): string | null {
+  if (models.length === 0) return "No model connected";
+  if (!modelRef) return null;
+  const available = models.some((model) => model.ref === modelRef && (!credentialId || model.profileId === credentialId));
+  return available ? null : `${compactModelId(modelRef, models)} · unavailable`;
+}
+
 function statusLabel(status: string): string {
   switch (status) {
     case "working": return "WORKING";
@@ -41,6 +60,22 @@ function statusLabel(status: string): string {
   }
 }
 
+function displayAgentLabel(agentName: string): string {
+  if (!agentName) return "Agent";
+  const normalized = agentName.trim();
+  const upper = normalized.toUpperCase();
+  if (["QA", "PM"].includes(upper)) return upper;
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => {
+      const acronym = part.toUpperCase();
+      if (["QA", "PM"].includes(acronym)) return acronym;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
+
 export function thinkLevelTextClass(level?: string | null): string {
   switch (level || "default") {
     case "minimal": return "think-level-minimal";
@@ -48,6 +83,7 @@ export function thinkLevelTextClass(level?: string | null): string {
     case "medium": return "think-level-medium";
     case "high": return "think-level-high";
     case "xhigh": return "think-level-xhigh";
+    case "max": return "think-level-max";
     case "off":
     case "default":
     default:
@@ -59,9 +95,9 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
   return server.transport !== "invalid" && server.availability?.status !== "invalid-config";
 }
 
-/** 工位墙 — 每个 agent 一张工位卡：工牌 + 状态 + 模型热切换 + context 油量 + 快捷操作 */
+/** Room member stations with status, model controls, context usage, and actions. */
 export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
-  const { toast } = useDialog();
+  const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [openChip, setOpenChip] = useState<string | null>(null);
@@ -73,6 +109,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(false);
+  const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     getRoomMembers(roomId)
@@ -89,18 +126,21 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   }, []);
 
   const refreshMcpSettings = useCallback(async () => {
+    setMcpLoadStatus("loading");
     try {
       const settings = await getMcpSettings();
       setMcpEnabled(settings.enabled);
       setMcpServers(settings.servers || []);
+      setMcpLoadStatus("ready");
     } catch (err) {
       console.error("Failed to load MCP settings:", err);
+      setMcpLoadStatus("error");
     }
   }, []);
 
   useEffect(() => { void refreshMcpSettings(); }, [refreshMcpSettings]);
 
-  // 点击外部关闭模型弹层
+  // Close the model picker when clicking outside it.
   useEffect(() => {
     if (!openChip) return;
     const close = () => { setOpenChip(null); setChipAnchor(null); };
@@ -114,9 +154,10 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
       try {
         const updated = await updateRoomMember(roomId, member.id, { model, credentialId });
         setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
-        toast(`${member.name} → ${model}（下一回合生效）`, "success");
-      } catch (err: any) {
-        toast(`切换失败: ${err.message}`, "error");
+        toast(`${member.name} model updated. It applies on the next turn.`, "success");
+      } catch (err) {
+        console.error("Failed to update member model", err);
+        toast("Couldn’t update the model. Check the connection in Settings → Models, then try again.", "error");
       }
     },
     [roomId, toast],
@@ -127,8 +168,9 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
       const updated = await updateRoomMember(roomId, member.id, { thinkingLevel });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
       toast(`${member.name} thinking → ${thinkingLevel ?? "default"}`, "success");
-    } catch (err: any) {
-      toast(`切换失败: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to update thinking level", err);
+      toast("Couldn’t update the thinking level. Try again.", "error");
     }
   }, [roomId, toast]);
 
@@ -136,19 +178,45 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
     try {
       await restartMember(member.id || member.name, roomId);
       toast(`${member.name} restarted`, "success");
-    } catch (err: any) {
-      toast(`Restart failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to restart member", err);
+      toast("Couldn’t restart this member. Try again, or check Runtime settings.", "error");
+    }
+  }, [roomId, toast]);
+
+  const handleCompactMember = useCallback(async (member: MemberInfo) => {
+    try {
+      await steerAgent(roomId, member.id || member.name, "/compact");
+      toast(`Compact started for ${member.name}`, "success");
+    } catch (err) {
+      console.error("Failed to compact member context", err);
+      toast("Couldn’t compact this conversation. Try again.", "error");
+    }
+  }, [roomId, toast]);
+
+  const handleReloadMember = useCallback(async (member: MemberInfo) => {
+    try {
+      const result = await reloadMemberResources(roomId, member.id || member.name);
+      toast(result.message || `${member.name} reloaded`, result.reloaded ? "success" : "info");
+    } catch (err) {
+      console.error("Failed to reload member", err);
+      toast("Couldn’t apply the latest changes. Try again; restart the member if the problem continues.", "error");
     }
   }, [roomId, toast]);
 
   const handleResetSession = useCallback(async (member: MemberInfo) => {
+    const ok = await confirm(`Reset session for @${member.name}?
+
+This clears the member's working session memory and starts fresh. Room messages and activity history stay visible.`);
+    if (!ok) return;
     try {
       await resetAgentSession(roomId, member.id);
       toast(`${member.name} session reset`, "success");
-    } catch (err: any) {
-      toast(`Reset failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to reset member session", err);
+      toast("Couldn’t reset this session. Try again.", "error");
     }
-  }, [roomId, toast]);
+  }, [confirm, roomId, toast]);
 
   const handleRenameMember = useCallback(async (member: MemberInfo, name: string) => {
     try {
@@ -162,8 +230,9 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
       setSelectedMember(updated.name);
       await onMembersChanged?.();
       toast(`Member renamed: ${member.name} → ${updated.name}`, "success");
-    } catch (err: any) {
-      toast(`Rename failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to rename member", err);
+      toast("Couldn’t rename this member. Check that the name is unique, then try again.", "error");
       throw err;
     }
   }, [onMembersChanged, roomId, toast]);
@@ -212,9 +281,10 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
       const updated = await updateRoomMember(roomId, member.id, { mcpServers: nextServers });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
       await refreshMcpSettings();
-      toast(`${member.name} MCP access saved（重启该 member 后生效）`, "success");
-    } catch (err: any) {
-      toast(`MCP access 保存失败: ${err.message}`, "error");
+      toast(`${member.name} tool access saved. Restart the member to apply it.`, "success");
+    } catch (err) {
+      console.error("Failed to save member MCP access", err);
+      toast("Couldn’t save tool access. Check the server in Settings → Integrations, then try again.", "error");
     }
   }, [mcpServers, refreshMcpSettings, roomId, toast]);
 
@@ -236,10 +306,14 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
           const usage = contextUsage[name];
           const hasUsage = usage?.supported && usage.percentage !== undefined;
           const pct = hasUsage ? Math.round(usage.percentage!) : 0;
-          const compacted = !!usage?.compacted;
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
-          const modelLabel = info?.model || "agent default";
+          const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
+          const modelRef = info?.model || "agent default";
+          const modelLabel = compactModelId(modelRef, models);
+          const hasModelOverride = !!info?.model;
+          const modelWarning = memberModelAvailabilityLabel(info?.model, info?.credentialId, models);
+          const modelAvailable = modelWarning === null;
 
           return (
             <div key={name} className="relative border-b border-line-soft px-3.5 py-3">
@@ -248,7 +322,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => setSelectedMember(name)}
                   className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`配置 ${name} · ${statusLabel(status)}`}
+                  title={`Configure ${name} · ${statusLabel(status)}`}
                 >
                   <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
                 </button>
@@ -256,33 +330,39 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   <button
                     onClick={() => setSelectedMember(name)}
                     className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors max-w-full"
-                    title={`配置 ${name}`}
+                    title={`Configure ${name}`}
                   >
                     <span className="truncate">{name}</span>
                     {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                   </button>
-                  {/* 当前 room 的模型 + thinking 配置 chips */}
+                  {/* member name is primary; Agent identity is a weak hint, then room-local runtime chips */}
                   <div className="relative flex items-center gap-1 min-w-0 max-w-full">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!info) return;
-                        setOpenThinkingChip(null);
-                        setThinkingAnchor(null);
-                        if (openChip === name) {
-                          setOpenChip(null);
-                          setChipAnchor(null);
-                        } else {
-                          setOpenChip(name);
-                          setChipAnchor(e.currentTarget.getBoundingClientRect());
-                        }
-                      }}
-                      title={`${modelLabel} · This room only`}
-                      className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 -mx-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left"
-                    >
-                      {modelLabel}
-                    </button>
+                    <span className="text-[10px] text-ink-4 truncate shrink-0 max-w-[92px]" title={`Agent: ${agentLabel}`}>{agentLabel}</span>
                     {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
+                    {!modelAvailable ? (
+                      <span className="font-mono text-[10px] text-think shrink-0" title={models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`}>{modelWarning}</span>
+                    ) : hasModelOverride && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!info) return;
+                          setOpenThinkingChip(null);
+                          setThinkingAnchor(null);
+                          if (openChip === name) {
+                            setOpenChip(null);
+                            setChipAnchor(null);
+                          } else {
+                            setOpenChip(name);
+                            setChipAnchor(e.currentTarget.getBoundingClientRect());
+                          }
+                        }}
+                        title={`${modelRef} · This room only`}
+                        className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left"
+                      >
+                        {modelLabel}
+                      </button>
+                    )}
+                    {info && modelAvailable && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
                     {info && (
                       <button
                         onClick={(e) => {
@@ -358,13 +438,13 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                 </div>
               )}
 
-              {/* context 油量表 */}
+              {/* Context usage gauge */}
               <div className="flex items-center gap-2 mt-2.5">
                 <div className="flex-1 h-[3px] rounded-full bg-surface-3 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-700 ease-out ${
                       pct >= 95 ? "bg-blocked" : pct >= 85 ? "bg-think" : "bg-ink-3"
-                    }`}
+                    } ${isBusy ? "animate-pulse motion-reduce:animate-none" : ""}`}
                     style={{ width: `${Math.max(pct, hasUsage ? 2 : 0)}%` }}
                     role="progressbar"
                     aria-valuenow={pct}
@@ -373,7 +453,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
                   />
                 </div>
                 <span className="font-mono text-[10px] text-ink-4 whitespace-nowrap shrink-0">
-                  {hasUsage ? `${pct}% · ${formatTokens(usage.totalTokens!)}${compacted ? " · compacted" : ""}` : "—"}
+                  {hasUsage ? `${pct}% · ${formatTokens(usage.totalTokens!)}` : "—"}
                 </span>
               </div>
             </div>
@@ -387,14 +467,19 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
             member={memberInfos[selectedMember]}
             status={agentStatus[selectedMember] || "inactive"}
             contextUsage={contextUsage[selectedMember]}
+            existingMemberNames={members}
             models={models}
             mcpEnabled={mcpEnabled}
             mcpServers={mcpServers}
+            mcpLoadStatus={mcpLoadStatus}
+            onRetryMcp={refreshMcpSettings}
             onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
             onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
             onRename={(name) => handleRenameMember(memberInfos[selectedMember], name)}
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
             onSwitchThinking={(thinkingLevel) => handleSwitchThinking(memberInfos[selectedMember], thinkingLevel)}
+            onCompact={() => handleCompactMember(memberInfos[selectedMember])}
+            onReload={() => handleReloadMember(memberInfos[selectedMember])}
             onRestart={() => handleRestartMember(memberInfos[selectedMember])}
             onResetSession={() => handleResetSession(memberInfos[selectedMember])}
             onToggleMcp={(server) => toggleMemberMcpServer(memberInfos[selectedMember], server)}
@@ -405,7 +490,28 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   );
 }
 
-const THINKING_LEVEL_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVEL_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+export function memberMcpDisplayState(
+  loadStatus: "loading" | "ready" | "error",
+  enabled: boolean,
+  serverCount: number,
+): "loading" | "error" | "disabled" | "empty" | "items" {
+  if (loadStatus !== "ready") return loadStatus;
+  if (!enabled) return "disabled";
+  return serverCount === 0 ? "empty" : "items";
+}
+
+export function memberMcpStatusLabel(status?: string): string {
+  switch (status) {
+    case "available": return "Available";
+    case "auth-required": return "Sign-in required";
+    case "unavailable":
+    case "invalid-config":
+    case "invalid": return "Needs attention";
+    default: return "Not checked";
+  }
+}
 
 function availabilityTone(status?: string): string {
   if (status === "available") return "text-onair border-onair/30 bg-onair/10";
@@ -437,14 +543,19 @@ function MemberConfigPanel({
   member,
   status,
   contextUsage,
+  existingMemberNames,
   models,
   mcpEnabled,
   mcpServers,
+  mcpLoadStatus,
+  onRetryMcp,
   onOpenWorkstation,
   onOpenMcpSettings,
   onRename,
   onSwitchModel,
   onSwitchThinking,
+  onCompact,
+  onReload,
   onRestart,
   onResetSession,
   onToggleMcp,
@@ -453,22 +564,27 @@ function MemberConfigPanel({
   member: MemberInfo;
   status: string;
   contextUsage?: ContextUsageData;
+  existingMemberNames: string[];
   models: AvailableModelOption[];
   mcpEnabled: boolean;
   mcpServers: McpServerSummary[];
+  mcpLoadStatus: "loading" | "ready" | "error";
+  onRetryMcp: () => void;
   onOpenWorkstation: () => void;
   onOpenMcpSettings: () => void;
   onRename: (name: string) => Promise<void>;
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
   onSwitchThinking: (thinkingLevel: string | null) => void;
+  onCompact: () => void;
+  onReload: () => void;
   onRestart: () => void;
   onResetSession: () => void;
   onToggleMcp: (server: string) => void;
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
-  const compacted = !!contextUsage?.compacted;
   const statusText = statusLabel(status).toLowerCase();
+  const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
   const [roomSupplement, setRoomSupplement] = useState<PromptSupplement | null>(null);
@@ -495,7 +611,9 @@ function MemberConfigPanel({
     return () => { cancelled = true; };
   }, [roomId, member.id, member.name]);
 
-  const canSaveName = draftName.trim() && draftName.trim() !== member.name && !savingName;
+  const draftNameTrimmed = draftName.trim();
+  const nameConflict = !!draftNameTrimmed && draftNameTrimmed.toLowerCase() !== member.name.toLowerCase() && existingMemberNames.some((name) => name.toLowerCase() === draftNameTrimmed.toLowerCase());
+  const canSaveName = draftNameTrimmed && draftNameTrimmed !== member.name && !nameConflict && !savingName;
   const saveName = async () => {
     if (!canSaveName) return;
     setSavingName(true);
@@ -516,16 +634,16 @@ function MemberConfigPanel({
               <div className="text-lg font-semibold text-ink-1 truncate">{member.name}</div>
               <span className={`text-[10px] border rounded-full px-2 py-0.5 uppercase ${status === "working" ? "text-onair border-onair/30 bg-onair/10" : "text-ink-4 border-line bg-surface-2"}`}>{statusText}</span>
             </div>
-            <div className="text-xs text-ink-4 font-mono mt-1">@{member.name} · source {member.agent || member.name}</div>
+            <div className="text-xs text-ink-4 font-mono mt-1">@{member.name} · {displayAgentLabel(member.agent || member.sourceAgent || member.name)}</div>
           </div>
         </div>
-        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 shrink-0">Open workstation</button>
+        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 shrink-0">View session detail</button>
       </header>
 
       <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
         <div>
           <div className="text-sm font-semibold text-ink-1">Profile</div>
-          <div className="text-xs text-ink-4 mt-0.5">Member name is room-local and used for @ mentions. Source agent is read-only.</div>
+          <div className="text-xs text-ink-4 mt-0.5">Member name is used for @ mentions in this Room.</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
@@ -548,24 +666,31 @@ function MemberConfigPanel({
                 {savingName ? "Saving…" : "Save"}
               </button>
             </div>
-            <div className="text-[11px] text-ink-4">Mention as <span className="font-mono">@{member.name}</span>{status === "working" ? " · rename disabled while working" : ""}</div>
+            {nameConflict ? (
+              <div className="text-[11px] text-blocked">This room already has a member named {draftNameTrimmed}. Pick another name.</div>
+            ) : (
+              <div className="text-[11px] text-ink-4">Mention as <span className="font-mono">@{member.name}</span>{status === "working" ? " · rename disabled while working" : ""}</div>
+            )}
           </label>
           <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Source agent</div>
-            <div className="font-mono text-sm text-ink-1 mt-1">{member.agent || member.sourceAgent || member.name}</div>
-            <div className="text-[11px] text-ink-4 mt-2">Read-only role/template this room member was created from.</div>
+            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Agent</div>
+            <div className="font-mono text-sm text-ink-1 mt-1">{displayAgentLabel(member.agent || member.sourceAgent || member.name)}</div>
+
           </div>
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div>
-          <div className="text-sm font-semibold text-ink-1">How this member works</div>
-          <div className="text-xs text-ink-4 mt-0.5">Overrides apply to this room member.</div>
+      <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-ink-1">Model config</div>
+            <div className="text-xs text-ink-4 mt-0.5">Choose this member’s model and thinking level for this Room. Changes apply on the next turn.</div>
+          </div>
+          <span className="text-[10px] text-ink-4 border border-line-soft rounded-full px-2 py-0.5 shrink-0">room only</span>
         </div>
-        <div className="space-y-3">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-ink-3">Model / credential</span>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start">
+          <label className="block space-y-1.5 min-w-0">
+            <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
             <ModelPicker
               value={{ model: member.model ?? null, credentialId: member.credentialId ?? null }}
               models={models}
@@ -573,11 +698,11 @@ function MemberConfigPanel({
             />
           </label>
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-ink-3">Think level</span>
+            <span className="text-[11px] font-medium text-ink-3">Think level</span>
             <select
               value={member.thinkingLevel || "off"}
               onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
-              className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
+              className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
             >
               {THINKING_LEVEL_OPTIONS.map((level) => <option key={level} value={level}>{level}</option>)}
             </select>
@@ -586,27 +711,25 @@ function MemberConfigPanel({
       </section>
 
       <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div>
-          <div className="text-sm font-semibold text-ink-1">Prompt supplements</div>
-          <div className="text-xs text-ink-4 mt-0.5">Preview only. This member uses the shared room prompt plus its own member prompt on next runtime create/restart.</div>
-        </div>
-        <div className="space-y-3">
-          <PromptSupplementPreview title="Current Room Supplemental Prompt" supplement={roomSupplement} empty="Room supplement is empty." />
-          <PromptSupplementPreview title={`${member.name} Member Supplemental Prompt`} supplement={memberSupplement} empty="Member supplement is empty." />
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-ink-1">Tools</div>
-            <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Restart to apply tool changes.</div>
+            <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Use Reload after changing tools.</div>
           </div>
           <button onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">Manage servers</button>
         </div>
-        {!mcpEnabled && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP registry is globally disabled.</div>}
-        {mcpServers.length === 0 && <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured in Settings.</div>}
-        <div className="space-y-2">
+        {mcpDisplayState === "loading" ? (
+          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading MCP servers…</div>
+        ) : mcpDisplayState === "error" ? (
+          <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
+            <span>Couldn’t load MCP servers.</span>
+            <button type="button" onClick={onRetryMcp} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10">Retry</button>
+          </div>
+        ) : mcpDisplayState === "disabled" ? (
+          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP servers are turned off. Turn them on in Settings → Integrations.</div>
+        ) : mcpDisplayState === "empty" ? (
+          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured. Add one in Settings → Integrations.</div>
+        ) : <div className="space-y-2">
           {mcpServers.map((server) => {
             const checked = (member.mcpServers || []).includes(server.name);
             const availability = server.availability;
@@ -620,41 +743,107 @@ function MemberConfigPanel({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
-                    <span className="text-[10px] text-ink-4 border border-line rounded px-1.5 py-0.5 uppercase">{server.transport}</span>
-                    <span className={`text-[10px] border rounded px-1.5 py-0.5 uppercase ${availabilityTone(statusValue)}`}>{statusValue}</span>
+                    <span className={`text-[10px] border rounded px-1.5 py-0.5 ${availabilityTone(statusValue)}`}>{memberMcpStatusLabel(statusValue)}</span>
                   </div>
                   <div className="text-[11px] text-ink-4 mt-1 truncate">
                     {availability?.toolCount !== undefined ? `${availability.toolCount} tools` : "Tool count unknown"}{checked ? " · enabled for this member" : " · off for this member"}
                   </div>
-                  {availability?.error && <div className="text-[11px] text-blocked mt-1 truncate" title={availability.error}>{availability.error}</div>}
+                  {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server in Settings → Integrations.</div>}
                 </div>
                 <button
                   type="button"
                   onClick={() => onToggleMcp(server.name)}
                   disabled={disabled}
                   className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50 ${checked ? "bg-accent" : "bg-surface-3"}`}
-                  title={invalid ? "Invalid MCP server config" : unavailable ? "MCP server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
+                  title={invalid ? "This server needs attention in Settings" : unavailable ? "This server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
                 >
                   <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
                 </button>
               </div>
             );
           })}
-        </div>
+        </div>}
       </section>
 
       <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div className="text-sm font-semibold text-ink-1">Context & session</div>
-        {hasUsage && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}{compacted ? " · compacted" : ""}</span></div>
-            <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-ink-1">Context & Session</div>
+            <div className="text-xs text-ink-4 mt-0.5">Manage this member’s conversation context and apply recent changes.</div>
           </div>
+          <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">View session detail</button>
+        </div>
+        {hasUsage ? (
+          <div className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
+            <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
+            <div className="text-[11px] text-ink-4">Compact shortens conversation history. Reload applies recent prompt, skill, and tool changes.</div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Context usage is unavailable for this member.</div>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <button onClick={onOpenWorkstation} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Open workstation</button>
-          <button onClick={onRestart} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Restart member</button>
-          <button onClick={onResetSession} className="px-3 py-2 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2">Reset session</button>
+
+        <div className="space-y-2">
+          <div className="rounded-xl border border-line-soft bg-surface-1 px-3 py-2.5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-ink-1 leading-5">Compact</div>
+              <div className="text-[11px] text-ink-4 leading-relaxed">Compress conversation history without changing this member’s setup.</div>
+            </div>
+            <button
+              type="button"
+              onClick={onCompact}
+              className="shrink-0 min-w-20 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-sm cursor-pointer transition-colors hover:bg-surface-3 hover:text-ink-1 hover:border-line-strong active:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              Run
+            </button>
+          </div>
+          <div className="rounded-xl border border-accent/30 bg-accent-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
+              <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, skills, and tools without clearing the conversation.</div>
+            </div>
+            <button
+              type="button"
+              onClick={onReload}
+              className="shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            >
+              Reload
+            </button>
+          </div>
+          <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-blocked leading-5">Reset session</div>
+              <div className="text-[11px] text-ink-3 leading-relaxed">Start fresh and clear working memory. Room messages stay visible. Requires confirm.</div>
+            </div>
+            <button
+              type="button"
+              onClick={onResetSession}
+              className="shrink-0 min-w-20 rounded-lg border border-blocked/40 bg-blocked/10 px-3 py-1.5 text-xs font-semibold text-blocked shadow-sm cursor-pointer transition-colors hover:bg-blocked/15 hover:border-blocked/60 active:bg-blocked/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blocked/50"
+            >
+              Reset…
+            </button>
+          </div>
+        </div>
+
+        <details className="rounded-lg border border-line-soft bg-surface-1 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-ink-3 hover:text-ink-1">Troubleshooting</summary>
+          <div className="mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line-soft pt-2">
+            <div className="text-[11px] text-ink-4 leading-relaxed">
+              If Reload does not resolve a stuck member, restart it.
+            </div>
+            <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">Restart member</button>
+          </div>
+        </details>
+      </section>
+
+      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+        <div>
+          <div className="text-sm font-semibold text-ink-1">Prompt supplements</div>
+          <div className="text-xs text-ink-4 mt-0.5">Preview only. Ask the Room leader or this member to update these in chat.</div>
+        </div>
+        <div className="space-y-3">
+          <PromptSupplementPreview title="Current Room Supplemental Prompt" supplement={roomSupplement} empty="Room supplement is empty." />
+          <PromptSupplementPreview title={`${member.name} Member Supplemental Prompt`} supplement={memberSupplement} empty="Member supplement is empty." />
         </div>
       </section>
     </div>
@@ -883,15 +1072,15 @@ export function ModelPop({
                 }`}
               >
                 <span className="truncate flex-1" title={m.displayName || m.modelId}>{m.displayName || m.modelId}</span>
-                {isCurrent && <span className="text-[9px] text-ink-4 shrink-0">当前</span>}
+                {isCurrent && <span className="text-[9px] text-ink-4 shrink-0">Current</span>}
               </button>
             );
           })}
         </div>
       ))}
-      {models.length === 0 && <p className="text-[11px] text-ink-4 px-2 py-2">无可用模型 — 先在 System → Models 配置凭证。</p>}
+      {models.length === 0 && <p className="text-[11px] text-think px-2 py-2">No models available. Connect a provider in Settings → Models.</p>}
       <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">
-        模型配置仅作用于当前房间工位；不中断当前回合，下一 turn 生效。
+        Model changes apply to this member in this Room on the next turn.
       </p>
     </>
   );
@@ -943,6 +1132,7 @@ export function ThinkingPop({
     { label: "medium", value: "medium" },
     { label: "high", value: "high" },
     { label: "xhigh", value: "xhigh" },
+    { label: "max", value: "max" },
   ];
 
   useEffect(() => {
@@ -978,7 +1168,7 @@ export function ThinkingPop({
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">仅当前房间工位生效。</p>
+      <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">Applies to this member in this Room.</p>
     </>
   );
 

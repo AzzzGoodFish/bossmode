@@ -496,6 +496,45 @@ describe("model credential profiles", () => {
     expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
   });
 
+  it("includes GPT-5.6 models and max thinking in the upgraded OpenAI SDK catalog", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+
+    const openai = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-openai" });
+    for (const id of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
+      const model = openai.models.find((m) => m.id === id);
+      expect(model).toMatchObject({ id, thinkingLevelMap: expect.objectContaining({ max: "max" }) });
+    }
+
+    const codex = mod.saveModelCredentialProfile({
+      profileKind: "builtin_provider",
+      name: "OpenAI Codex",
+      providerSlug: "openai-codex",
+      protocol: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      authType: "oauth",
+      oauthProviderId: "openai-codex",
+      oauthCredentials: { access: "access", refresh: "refresh", expires: 9999999999 },
+      requestProfile: "standard",
+      enabled: true,
+      isDefault: true,
+      models: undefined as any,
+    });
+    const codexPublic = mod.listPublicModelCredentialProfiles().find((p) => p.id === codex.id)!;
+    for (const id of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
+      expect(codexPublic.models.find((m) => m.id === id)).toMatchObject({ id, thinkingLevelMap: expect.objectContaining({ max: "max" }) });
+    }
+
+    const refs = mod.listAvailableModels().map((m) => m.ref);
+    expect(refs).toEqual(expect.arrayContaining([
+      "openai/gpt-5.6-luna",
+      "openai/gpt-5.6-sol",
+      "openai/gpt-5.6-terra",
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-5.6-terra",
+    ]));
+  });
+
   it("migrates legacy official Anthropic profiles to built-in provider and refreshes catalog models", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     mod.setPiCatalogModelsForTests([

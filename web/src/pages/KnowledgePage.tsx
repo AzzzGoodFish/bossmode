@@ -3,21 +3,26 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useLongPress } from "../hooks/useLongPress";
 import { MobileTopBar } from "../components/MobileTopBar";
 import {
-  Plus, Trash2, Pencil, FolderPlus, File as FileIcon, Download,
+  Plus, Trash2, Pencil, FolderPlus, File as FileIcon, FileCode, Image as ImageIcon, Upload,
   Folder, FolderOpen, ChevronRight, ChevronDown,
   FolderInput, CheckSquare, X,
 } from "lucide-react";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../api/client";
 import {
-  getKnowledgeTree, getKnowledgeEntry,
-  addKnowledgeEntry, updateKnowledgeEntry,
+  getKnowledgeTree, getKnowledgeEntry, getKnowledgeRawBlob,
+  addKnowledgeEntry, updateKnowledgeEntry, uploadKnowledgePng,
   deleteKnowledgeEntry as apiDeleteEntry,
   moveKnowledgeEntry, batchMoveKnowledge, batchDeleteKnowledge,
+  getRooms,
 } from "../api/client";
-import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MoveToDialog } from "../components/MoveToDialog";
+import { LibraryDocView, type LibraryDocKind } from "../components/LibraryDocView";
+import { buildLibraryTreeGroups, visibleLibraryTreePaths } from "../utils/library-room-tree";
 import { normalizeKnowledgeMarkdownRef } from "../utils/knowledge-path";
+import { downloadFilename, triggerBlobDownload } from "../utils/download-file";
+import { getLibraryFileFormat, type LibraryFileFormatInfo } from "../utils/library-file-format";
+import { userActionError } from "../utils/user-error";
 
 const inputCls = "w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors";
 
@@ -27,19 +32,21 @@ const DEFAULT_WIDTH = 260;
 const MIN_WIDTH = 160;
 const MAX_WIDTH_RATIO = 0.5;
 
-/** Trigger client-side download of a knowledge document as .md file */
-function downloadDoc(doc: KnowledgeEntry) {
-  const filename = doc.id.split("/").pop() || `${(doc.title || "document").replace(/[^\w\-.\u4e00-\u9fff]/gu, "_")}.md`;
-  const blob = new Blob([doc.content || ""], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Defer revoke to allow Safari to start the download
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+function getLibraryDocKind(path: string): LibraryDocKind {
+  return getLibraryFileFormat(path).kind;
+}
+
+function canOpenLibraryFile(path: string): boolean {
+  return /\.(md|markdown|html?|txt|json|png)$/i.test(path);
+}
+
+function basenameFromPath(path: string): string {
+  return path.split("/").pop() || path;
+}
+
+function titleFromPath(path: string): string {
+  const base = basenameFromPath(path);
+  return base.replace(/\.[^.]+$/i, "").replace(/[-_]/g, " ");
 }
 
 interface KnowledgePageProps {
@@ -50,6 +57,7 @@ interface KnowledgePageProps {
 export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePageProps = {}) {
   const { toast, confirm, prompt } = useDialog();
   const [tree, setTree] = useState<KnowledgeTreeNode | null>(null);
+  const [rooms, setRooms] = useState<Awaited<ReturnType<typeof getRooms>>>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedPathOriginal, setSelectedPathOriginal] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -60,6 +68,8 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const [isDocLoading, setIsDocLoading] = useState(false);
   const [markdownDirty, setMarkdownDirty] = useState(false);
   const loadDocSeqRef = useRef(0);
+  const rawObjectUrlRef = useRef<string | null>(null);
+  const pngUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: KnowledgeTreeNode } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -100,7 +110,15 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     getKnowledgeTree().then(setTree).catch(console.error);
   }, []);
 
+  const refreshRooms = useCallback(() => {
+    getRooms().then(setRooms).catch(console.error);
+  }, []);
+
   useEffect(() => { refreshTree(); }, [refreshTree]);
+  useEffect(() => { refreshRooms(); }, [refreshRooms]);
+  useEffect(() => () => {
+    if (rawObjectUrlRef.current) URL.revokeObjectURL(rawObjectUrlRef.current);
+  }, []);
 
   useEffect(() => {
     if (!initialPath || initialPath === "__new__") return;
@@ -112,7 +130,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       next.add(topLevel);
       return next;
     });
-    if (normalizedPath.endsWith(".md")) {
+    if (canOpenLibraryFile(normalizedPath)) {
       setSelectedPath(normalizedPath);
       setSelectedPathOriginal(normalized.changed ? normalized.originalPath : null);
       setSelectedPaths(new Set());
@@ -143,9 +161,31 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     setCurrentDoc(null);
     setDraftTitle("");
     setMarkdownDirty(false);
+    if (rawObjectUrlRef.current) {
+      URL.revokeObjectURL(rawObjectUrlRef.current);
+      rawObjectUrlRef.current = null;
+    }
+
     setIsDocLoading(true);
-    getKnowledgeEntry(selectedPath).then((doc) => {
-      if (seq !== loadDocSeqRef.current) return;
+    const load = getLibraryDocKind(selectedPath) === "png"
+      ? getKnowledgeRawBlob(selectedPath).then((blob) => {
+          const url = URL.createObjectURL(blob);
+          rawObjectUrlRef.current = url;
+          return {
+            id: selectedPath,
+            title: titleFromPath(selectedPath),
+            content: url,
+            source: "user",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+        })
+      : getKnowledgeEntry(selectedPath);
+    load.then((doc) => {
+      if (seq !== loadDocSeqRef.current) {
+        if (getLibraryDocKind(doc.id) === "png" && doc.content) URL.revokeObjectURL(doc.content);
+        return;
+      }
       setCurrentDoc(doc);
       setDraftTitle(doc.title);
       setIsDocLoading(false);
@@ -164,7 +204,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   const folderNode = useMemo(() => {
     if (!tree || !initialPath || initialPath === "__new__") return null;
     const normalizedPath = normalizeKnowledgeMarkdownRef(initialPath).path;
-    if (normalizedPath.endsWith(".md")) return null;
+    if (canOpenLibraryFile(normalizedPath)) return null;
     if (selectedPath) return null;
     return findNodeByPath(tree, normalizedPath);
   }, [tree, initialPath, selectedPath]);
@@ -212,17 +252,9 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     });
   }, []);
 
-  const visiblePaths = useMemo(() => {
-    const out: string[] = [];
-    const walk = (nodes: KnowledgeTreeNode[]) => {
-      for (const n of nodes) {
-        out.push(n.path);
-        if (n.kind === "folder" && expanded.has(n.path) && n.children) walk(n.children);
-      }
-    };
-    if (tree?.children) walk(tree.children);
-    return out;
-  }, [tree, expanded]);
+  const libraryGroups = useMemo(() => buildLibraryTreeGroups(rooms, tree), [rooms, tree]);
+
+  const visiblePaths = useMemo(() => visibleLibraryTreePaths(libraryGroups, expanded), [expanded, libraryGroups]);
 
   const handleCreateDoc = async (parentPath: string) => {
     const title = await prompt("New document title", "");
@@ -236,7 +268,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       setSelectedPathOriginal(null);
       setSelectedPath(path);
       setSelectedPaths(new Set());
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to create Library document", err); toast(userActionError("create this document", "Check the title and folder, then try again."), "error"); }
   };
 
   const handleCreateFolder = async (parentPath: string) => {
@@ -254,7 +286,32 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
         if (parentPath) next.add(parentPath);
         return next;
       });
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to create Library folder", err); toast(userActionError("create this folder", "Check the name, then try again."), "error"); }
+  };
+
+  const handleUploadPng = async (file: File | null, parentPath = "") => {
+    if (!file) return;
+    const safeName = file.name.toLowerCase().replace(/\s+/g, "-").replace(/[^\w\-.\u4e00-\u9fff]/gu, "");
+    const fallback = safeName.endsWith(".png") ? safeName : `${safeName || "image"}.png`;
+    const path = await prompt("PNG path", parentPath ? `${parentPath}/${fallback}` : fallback);
+    if (!path) return;
+    try {
+      const entry = await uploadKnowledgePng(path, file);
+      refreshTree();
+      setSelectedPathOriginal(null);
+      setSelectedPath(entry.id);
+      setSelectedPaths(new Set());
+    } catch (err) { console.error("Failed to upload Library image", err); toast(userActionError("upload this image", "Check the file and path, then try again."), "error"); }
+  };
+
+  const handleDownloadDoc = async (doc: KnowledgeEntry) => {
+    try {
+      const blob = await getKnowledgeRawBlob(doc.id);
+      triggerBlobDownload(blob, downloadFilename(doc.id, doc.title || "document"));
+    } catch (err) {
+      console.error("Failed to download Library document", err);
+      toast(userActionError("download this document"), "error");
+    }
   };
 
   const confirmDanger = (message: string): Promise<boolean> => new Promise((resolve) => {
@@ -265,6 +322,16 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     if (!markdownDirty) return true;
     return confirm("Discard unsaved markdown changes?");
   }, [confirm, markdownDirty]);
+
+  useEffect(() => {
+    if (!markdownDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [markdownDirty]);
 
   const selectDocument = useCallback(async (path: string) => {
     if (!(await confirmDiscardMarkdown())) return;
@@ -288,7 +355,7 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       refreshTree();
       setSelectedPath(null);
       setSelectedPathOriginal(null);
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to delete Library document", err); toast(userActionError("delete this document"), "error"); }
   };
 
   const handleDeletePath = async (path: string) => {
@@ -398,8 +465,9 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
     const parts = oldPath.split("/");
     const oldBase = parts.pop() || "";
     const parent = parts.join("/");
+    const oldExt = oldBase.includes(".") ? oldBase.slice(oldBase.lastIndexOf(".")) : ".md";
     const finalBase = node.kind === "file"
-      ? (newName.toLowerCase().endsWith(".md") ? newName : `${newName}.md`)
+      ? (newName.includes(".") ? newName : `${newName}${oldExt}`)
       : newName;
 
     if (finalBase === oldBase) {
@@ -552,9 +620,9 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
       <MobileTopBar title="Knowledge" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-line-soft">
         <div>
-          <h1 className="text-lg font-bold text-ink-1">Knowledge</h1>
+          <h1 className="text-lg font-bold text-ink-1">Library</h1>
           <p className="text-xs text-ink-3 mt-0.5">
-            Markdown documents organized by folders. Use top-level folders to separate projects.
+            Markdown documents organized by room. Edit source, save explicitly, and preview rendered output.
           </p>
         </div>
       </div>
@@ -567,6 +635,21 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
           <div className="px-3 pt-3 pb-2 flex items-center justify-between sticky top-0 bg-surface-1/90 backdrop-blur-sm z-10">
             <span className="text-xs font-semibold text-ink-3 uppercase tracking-wider">Documents</span>
             <div className="flex items-center gap-1">
+              <input
+                ref={pngUploadInputRef}
+                type="file"
+                accept="image/png"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0] || null;
+                  e.currentTarget.value = "";
+                  void handleUploadPng(file);
+                }}
+              />
+              <button title="Upload PNG at root" onClick={() => pngUploadInputRef.current?.click()}
+                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
+                <Upload size={14} />
+              </button>
               <button title="New folder at root" onClick={() => handleCreateFolder("")}
                 className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
                 <FolderPlus size={14} />
@@ -597,48 +680,61 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
             </div>
           )}
 
-          {tree && tree.children && tree.children.length > 0 ? (
-            <TreeView
-              nodes={tree.children}
-              selectedPath={selectedPath}
-              selectedPaths={selectedPaths}
-              expanded={expanded}
-              renamingPath={renamingPath}
-              draggingPaths={draggingPaths}
-              dragOverPath={dragOverPath}
-              isMobile={isMobile}
-              onToggle={toggleExpanded}
-              onNodeClick={handleNodeClick}
-              onCreateDoc={handleCreateDoc}
-              onCreateFolder={handleCreateFolder}
-              onContextMenu={handleContextMenu}
-              onStartRename={handleStartRename}
-              onConfirmRename={handleConfirmRename}
-              onDeletePath={handleDeletePath}
-              onDragStart={handleDragStart}
-              onDragOver={(e, node) => {
+          {tree ? (() => {
+            const sharedTreeProps = {
+              selectedPath, selectedPaths, expanded, renamingPath, draggingPaths, dragOverPath, isMobile,
+              onToggle: toggleExpanded,
+              onNodeClick: handleNodeClick,
+              onCreateDoc: handleCreateDoc,
+              onCreateFolder: handleCreateFolder,
+              onContextMenu: handleContextMenu,
+              onStartRename: handleStartRename,
+              onConfirmRename: handleConfirmRename,
+              onDeletePath: handleDeletePath,
+              onDragStart: handleDragStart,
+              onDragOver: (e: React.DragEvent, node: KnowledgeTreeNode) => {
                 if (node.kind !== "folder") return;
-                e.preventDefault();
-                e.stopPropagation();
+                e.preventDefault(); e.stopPropagation();
                 setDragOverPath(node.path);
-              }}
-              onDragLeave={(e, node) => {
+              },
+              onDragLeave: (e: React.DragEvent, node: KnowledgeTreeNode) => {
                 if (node.kind !== "folder") return;
                 e.stopPropagation();
                 if (dragOverPath === node.path) setDragOverPath(null);
-              }}
-              onDrop={handleDrop}
-              onDragEnd={() => {
-                setDraggingPaths(new Set());
-                setDragOverPath(null);
-              }}
-              cancelRenameRef={cancelRenameRef}
-            />
-          ) : (
+              },
+              onDrop: handleDrop,
+              onDragEnd: () => { setDraggingPaths(new Set()); setDragOverPath(null); },
+              cancelRenameRef,
+            };
+            return (
+              <div className="pb-4">
+                {libraryGroups.map((group) => (
+                  <div key={group.id}>
+                    <div className="group/room flex items-center justify-between gap-1.5 px-3 pt-3 pb-1">
+                      <span className="text-[10px] font-semibold tracking-[0.06em] text-ink-4 uppercase truncate" title={group.rootPath || "docs root"}>{group.label}</span>
+                      <span className="opacity-0 group-hover/room:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
+                        <button title={`New folder in ${group.label}`} onClick={() => handleCreateFolder(group.rootPath)}
+                          className="p-0.5 text-ink-3 hover:text-ink-1 cursor-pointer">
+                          <FolderPlus size={12} />
+                        </button>
+                        <button title={`New document in ${group.label}`} onClick={() => handleCreateDoc(group.rootPath)}
+                          className="p-0.5 text-ink-3 hover:text-ink-1 cursor-pointer">
+                          <Plus size={12} />
+                        </button>
+                      </span>
+                    </div>
+                    {group.nodes.length > 0 ? (
+                      <TreeView nodes={group.nodes} {...sharedTreeProps} />
+                    ) : (
+                      <div className="pl-3 pr-3 py-1 text-[11px] text-ink-4">{group.isGlobal ? "no unfiled documents" : "no documents"}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })() : (
             <div className="px-3 py-8 text-center text-xs text-ink-4">
-              Knowledge is empty.
-              <br />
-              Click + to add your first document.
+              Loading documents…
             </div>
           )}
         </aside>
@@ -661,48 +757,25 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
             </button>
           )}
           {currentDoc ? (
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="min-w-0">
-                    <input
-                      value={draftTitle}
-                      onChange={(e) => setDraftTitle(e.target.value)}
-                      onBlur={() => {
-                        if (draftTitle && draftTitle !== currentDoc.title) {
-                          updateKnowledgeEntry(currentDoc.id, draftTitle, currentDoc.content)
-                            .then((updated) => { setCurrentDoc(updated); refreshTree(); })
-                            .catch((err: any) => toast(err.message, "error"));
-                        }
-                      }}
-                      placeholder="Untitled"
-                      className="w-full text-lg font-bold text-ink-1 bg-transparent focus:outline-none placeholder-ink-4 leading-tight"
-                    />
-                    <div className="text-xs text-ink-3 mt-0.5 font-mono truncate">{currentDoc.id} · by {currentDoc.source}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => downloadDoc(currentDoc)}
-                      title="Download as .md file"
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm border border-line rounded text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer">
-                      <Download size={14} /> Download
-                    </button>
-                    <button onClick={handleDeleteDoc}
-                      className="flex items-center gap-1 px-3 py-1.5 text-blocked hover:opacity-80 text-sm cursor-pointer">
-                      <Trash2 size={14} /> Delete
-                    </button>
-                  </div>
-                </div>
-                <MarkdownField
-                  key={currentDoc.id}
-                  value={currentDoc.content}
-                  onChange={(v) => {
-                    updateKnowledgeEntry(currentDoc.id, draftTitle || currentDoc.title, v)
-                      .then((updated) => { setCurrentDoc(updated); setDraftTitle(updated.title); refreshTree(); })
-                      .catch((err: any) => toast(err.message, "error"));
-                  }}
-                  placeholder="Start writing… (markdown supported)"
-                  onDirtyChange={setMarkdownDirty}
-                />
-              </div>
+            <LibraryDocView
+              key={currentDoc.id}
+              doc={{ path: selectedPath || currentDoc.id, title: basenameFromPath(currentDoc.id), kind: getLibraryDocKind(currentDoc.id), content: currentDoc.content, meta: `${currentDoc.id} · by ${currentDoc.source}`, readOnly: getLibraryDocKind(currentDoc.id) === "png" }}
+              onSave={async (content) => {
+                try {
+                  const updated = await updateKnowledgeEntry(currentDoc.id, draftTitle || currentDoc.title, content);
+                  setCurrentDoc(updated); setDraftTitle(updated.title); refreshTree();
+                } catch (err) { console.error("Failed to save Library document", err); toast(userActionError("save this document"), "error"); }
+              }}
+              onRenameTitle={(t) => {
+                setDraftTitle(t);
+                updateKnowledgeEntry(currentDoc.id, t, currentDoc.content)
+                  .then((updated) => { setCurrentDoc(updated); refreshTree(); })
+                  .catch((err) => { console.error("Failed to rename Library document", err); toast(userActionError("rename this document"), "error"); });
+              }}
+              onDownload={() => { void handleDownloadDoc(currentDoc); }}
+              onDelete={handleDeleteDoc}
+              onDirtyChange={setMarkdownDirty}
+            />
           ) : isDocLoading ? (
             <div className="h-full flex items-center justify-center text-sm text-ink-4">
               Loading document…
@@ -870,6 +943,12 @@ function TreeView({
   );
 }
 
+function LibraryFileIcon({ format, size = 12 }: { format: LibraryFileFormatInfo; size?: number }) {
+  if (format.kind === "html") return <FileCode size={size} className="text-think shrink-0" />;
+  if (format.kind === "png") return <ImageIcon size={size} className="text-onair shrink-0" />;
+  return <FileIcon size={size} className="text-ink-4 shrink-0" />;
+}
+
 function TreeNode({
   node,
   depth,
@@ -919,7 +998,8 @@ function TreeNode({
   onDragEnd: () => void;
   cancelRenameRef: React.MutableRefObject<boolean>;
 }) {
-  const indent = { paddingLeft: `${depth * 12 + 8}px` };
+  // depth 0 aligns with the room-group header (px-3 = 12px); each level steps 12px.
+  const indent = { paddingLeft: `${depth * 12 + 12}px` };
   const openedSelected = selectedPath === node.path;
   const multiSelected = selectedPaths.has(node.path);
   const isDragging = draggingPaths.has(node.path);
@@ -1040,6 +1120,8 @@ function TreeNode({
     );
   }
 
+  const fileFormat = getLibraryFileFormat(node.path);
+
   return (
     <li>
       <div style={indent}
@@ -1053,7 +1135,7 @@ function TreeNode({
       >
         <span className="flex items-center gap-1.5 min-w-0">
           <span className="w-3 shrink-0" />
-          <FileIcon size={12} className="text-ink-4 shrink-0" />
+          <LibraryFileIcon format={fileFormat} size={12} />
           {renamingPath === node.path ? (
             <input
               autoFocus
@@ -1081,9 +1163,11 @@ function TreeNode({
               className="text-xs bg-transparent border border-accent rounded px-1 py-0.5 outline-none w-full min-w-0"
             />
           ) : (
-            <span className="text-xs truncate" title={node.title || node.name} onDoubleClick={() => onStartRename(node.path)}>
-              {node.title || node.name}
-            </span>
+            <>
+              <span className="text-xs truncate font-mono" title={`${node.path} · ${fileFormat.description}`} onDoubleClick={() => onStartRename(node.path)}>
+                {node.name}
+              </span>
+            </>
           )}
         </span>
       </div>
@@ -1219,14 +1303,16 @@ function FolderGroup({ node, onSelectDoc }: { node: KnowledgeTreeNode; onSelectD
 }
 
 function DocRow({ node, onClick }: { node: KnowledgeTreeNode; onClick: () => void }) {
+  const format = getLibraryFileFormat(node.path);
   return (
     <button
       onClick={onClick}
       className="w-full text-left flex items-center gap-2 px-3 py-2 rounded border border-transparent hover:border-line-soft hover:bg-surface-2/50 transition-colors cursor-pointer group"
+      title={`${node.path} · ${format.description}`}
     >
-      <FileIcon size={14} className="text-ink-4 shrink-0" />
-      <span className="text-sm text-ink-2 group-hover:text-ink-1 truncate">
-        {node.title || node.name.replace(/\.md$/i, "")}
+      <LibraryFileIcon format={format} size={14} />
+      <span className="text-sm text-ink-2 group-hover:text-ink-1 truncate min-w-0 flex-1 font-mono">
+        {node.name}
       </span>
     </button>
   );

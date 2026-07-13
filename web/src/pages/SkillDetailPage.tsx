@@ -4,6 +4,7 @@ import { MobileTopBar } from "../components/MobileTopBar";
 import { getSkill, updateSkill, deleteSkill, createSkill } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { useDialog } from "../components/dialogs";
+import { userActionError } from "../utils/user-error";
 
 interface SkillDetailPageProps {
   name: string;
@@ -34,7 +35,7 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
         setContent(raw);
         setOriginalContent(raw);
       })
-      .catch((err) => toast(`Failed to load: ${err.message}`, "error"))
+      .catch((err) => { console.error("Failed to load Skill", err); toast(userActionError("load this Skill"), "error"); })
       .finally(() => setLoading(false));
   };
 
@@ -57,8 +58,9 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
       }
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
-    } catch (err: any) {
-      toast(`Save failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to save Skill", err);
+      toast(userActionError("save this Skill", "Check the required fields, then try again."), "error");
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
     }
@@ -67,7 +69,7 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   const handleDelete = async () => {
     if (!(await confirm(`Delete skill "${name}"? This cannot be undone.`))) return;
     try { await deleteSkill(name); onBack(); }
-    catch (err: any) { toast(`Delete failed: ${err.message}`, "error"); }
+    catch (err) { console.error("Failed to delete Skill", err); toast(userActionError("delete this Skill"), "error"); }
   };
 
   const handleCancel = () => {

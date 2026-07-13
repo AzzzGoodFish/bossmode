@@ -89,6 +89,7 @@ export function SummaryCard({ message, roomId }: SummaryCardProps) {
                       content={msg.content}
                       time={new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
+                      mentions={msg.mentions}
                     />
                   ))}
                 </div>

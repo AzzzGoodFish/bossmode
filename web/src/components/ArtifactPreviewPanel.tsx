@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Code2, FileCode, FileText, Loader2, Maximize2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Code2, Download, FileCode, FileText, Loader2, Maximize2, X } from "lucide-react";
 import type { ArtifactPreviewData, RoomMessageAttachment } from "../api/client";
-import { getArtifactPreview, getAttachmentPreview } from "../api/client";
+import { getArtifactPreview, getArtifactRawBlob, getAttachmentPreview, getAttachmentRawBlob } from "../api/client";
 import { Markdown } from "./Markdown";
+import { useDialog } from "./dialogs";
+import { downloadFilename, triggerBlobDownload } from "../utils/download-file";
 
 export interface MessageArtifactPreviewState {
   kind: "message";
@@ -48,6 +50,7 @@ function artifactName(path: string): string {
 }
 
 export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant, onExpand }: ArtifactPreviewPanelProps) {
+  const { toast } = useDialog();
   const isAttachment = state.kind === "attachment";
   const items = isAttachment ? state.attachments : state.artifacts;
   const selectedAttachment = isAttachment ? state.attachments[state.selectedIndex] || state.attachments[0] : null;
@@ -56,6 +59,7 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
   const [load, setLoad] = useState<LoadState>({ status: "idle" });
   const [htmlMode, setHtmlMode] = useState<"preview" | "source">("preview");
   const [focusOpen, setFocusOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     setHtmlMode("preview");
@@ -76,6 +80,21 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
 
   const title = isAttachment ? selectedLabel : (load.status === "ready" ? load.data.title : artifactName(selectedPath));
   const canSource = load.status === "ready" && load.data.type === "html";
+
+  const handleDownload = useCallback(async () => {
+    if (!selectedPath || downloading) return;
+    setDownloading(true);
+    try {
+      const blob = isAttachment
+        ? await getAttachmentRawBlob(roomId, selectedPath)
+        : await getArtifactRawBlob(roomId, load.status === "ready" ? load.data.originalPath : selectedPath);
+      triggerBlobDownload(blob, downloadFilename(selectedLabel || selectedPath));
+    } catch (err: any) {
+      toast(`Download failed: ${String(err?.message || err)}`, "error");
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading, isAttachment, load, roomId, selectedLabel, selectedPath, toast]);
 
   const body = useMemo(() => (
     <ArtifactPreviewBody load={load} htmlMode={htmlMode} />
@@ -105,6 +124,17 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
                 Source
               </button>
             </div>
+          )}
+          {selectedPath && (
+            <button
+              onClick={() => void handleDownload()}
+              disabled={downloading}
+              className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-default"
+              title="Download"
+              aria-label="Download"
+            >
+              {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            </button>
           )}
           <button
             onClick={() => (onExpand ? onExpand() : setFocusOpen(true))}
@@ -157,6 +187,8 @@ export function ArtifactPreviewPanel({ roomId, state, onSelect, onClose, variant
           path={selectedLabel}
           load={load}
           htmlMode={htmlMode}
+          downloading={downloading}
+          onDownload={handleDownload}
           onClose={() => setFocusOpen(false)}
         />
       )}
@@ -187,6 +219,13 @@ function ArtifactPreviewBody({ load, htmlMode }: { load: LoadState; htmlMode: "p
   }
 
   const data = load.data!;
+  if (data.type === "image") {
+    return (
+      <div className="h-full min-h-[420px] p-3 flex items-center justify-center bg-inset/40">
+        <img src={data.content} alt={data.title} className="max-w-full max-h-full rounded-lg border border-line bg-surface-1" />
+      </div>
+    );
+  }
   if (data.type === "md") {
     return (
       <div className="px-4 py-3 text-sm text-ink-1 leading-relaxed preview-markdown">
@@ -219,7 +258,7 @@ function ArtifactPreviewBody({ load, htmlMode }: { load: LoadState; htmlMode: "p
   );
 }
 
-function ArtifactPreviewLightbox({ title, path, load, htmlMode, onClose }: { title: string; path: string; load: LoadState; htmlMode: "preview" | "source"; onClose: () => void }) {
+function ArtifactPreviewLightbox({ title, path, load, htmlMode, downloading, onDownload, onClose }: { title: string; path: string; load: LoadState; htmlMode: "preview" | "source"; downloading: boolean; onDownload: () => void; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -245,6 +284,15 @@ function ArtifactPreviewLightbox({ title, path, load, htmlMode, onClose }: { tit
             <div className="text-sm font-semibold text-ink-1 truncate">{title}</div>
             <div className="font-mono text-[10px] text-ink-4 truncate" title={path}>{path}</div>
           </div>
+          <button
+            onClick={() => onDownload()}
+            disabled={downloading}
+            title="Download"
+            aria-label="Download"
+            className="w-8 h-8 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-default"
+          >
+            {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          </button>
           <button
             onClick={onClose}
             title="Close"

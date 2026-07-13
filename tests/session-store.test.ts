@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
 let tempDir: string;
 
@@ -15,6 +17,8 @@ describe("session-store", () => {
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bossmode-session-test-"));
+    mkdirSync(join(tempDir, "agents"), { recursive: true });
+    writeFileSync(join(tempDir, "agents", "pm.md"), "---\nname: pm\n---\npm", "utf8");
     vi.resetModules();
     roomStore = await import("../src/workspace/room-store.js");
     sessionStore = await import("../src/workspace/session-store.js");
@@ -25,7 +29,7 @@ describe("session-store", () => {
   });
 
   it("clearSession removes resume metadata and preserves runtime", () => {
-    const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+    const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
 
     sessionStore.saveSession(room.id, "pm", {
       runtime: "pi-cli",
@@ -39,7 +43,7 @@ describe("session-store", () => {
   });
 
   it("deleteSessionEntry removes a legacy session key", () => {
-    const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+    const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
 
     sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "current" });
     sessionStore.saveSession(room.id, "pm", { runtime: "pi-cli", sessionId: "legacy" });

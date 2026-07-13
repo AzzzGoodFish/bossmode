@@ -27,6 +27,33 @@ function mentionIdsFromNames(message: string, roomMembers: Array<{ id: string; n
     .filter((id): id is string => Boolean(id));
 }
 
+function resolveTaskAssignee(roomId: string, value: unknown): { name: string; memberId: string } | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const member = roomStore.resolveRoomMemberRef(roomId, raw);
+  if (!member) throw new Error(`Assignee is not a room member: ${raw}`);
+  return { name: member.name, memberId: member.id };
+}
+
+function resolveTaskSubscribers(roomId: string, values: unknown): { names: string[]; memberIds: string[] } | undefined {
+  if (!Array.isArray(values)) return undefined;
+  const members: Array<{ id: string; name: string }> = [];
+  for (const value of values) {
+    const raw = String(value ?? "").trim();
+    if (!raw) continue;
+    const member = roomStore.resolveRoomMemberRef(roomId, raw);
+    if (!member) throw new Error(`Subscriber is not a room member: ${raw}`);
+    if (!members.some((entry) => entry.id === member.id)) members.push(member);
+  }
+  return { names: members.map((member) => member.name), memberIds: members.map((member) => member.id) };
+}
+
+function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): boolean {
+  const member = roomStore.resolveRoomMemberRef(roomId, assigneeRef);
+  if (member) return task.assigneeMemberId === member.id || (!task.assigneeMemberId && task.assignee === member.name);
+  return task.assignee === assigneeRef;
+}
+
 function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; mentions?: string[] }) {
   const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[] } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
@@ -217,42 +244,62 @@ export async function handleToolCallback(
     case "create_task": {
       const title = params?.title ? String(params.title).trim() : "";
       if (!title) return { ok: false, error: "title is required" };
-      const task = taskStore.createTask(roomId, {
-        title,
-        createdBy: agentName,
-        status: (params?.status as TaskStatus) || "todo",
-        priority: (params?.priority as TaskPriority) || "P1",
-        assignee: params?.assignee ? String(params.assignee) : undefined,
-        description: params?.description ? String(params.description) : undefined,
-        references: Array.isArray(params?.references) ? params.references.map(String) : undefined,
-        subscribers: Array.isArray(params?.subscribers) ? params.subscribers.map(String) : undefined,
-      });
-      emitTaskEvent(roomId, "created", task, agentName);
-      return { ok: true, taskId: task.id, title: task.title, status: task.status };
+      try {
+        const assignee = resolveTaskAssignee(roomId, params?.assignee);
+        const subscribers = resolveTaskSubscribers(roomId, params?.subscribers);
+        const task = taskStore.createTask(roomId, {
+          title,
+          createdBy: agentName,
+          status: (params?.status as TaskStatus) || "todo",
+          priority: (params?.priority as TaskPriority) || "P1",
+          assignee: assignee?.name,
+          assigneeMemberId: assignee?.memberId,
+          description: params?.description ? String(params.description) : undefined,
+          references: Array.isArray(params?.references) ? params.references.map(String) : undefined,
+          subscribers: subscribers?.names,
+          subscriberMemberIds: subscribers?.memberIds,
+        });
+        emitTaskEvent(roomId, "created", task, agentName);
+        return { ok: true, taskId: task.id, title: task.title, status: task.status };
+      } catch (err: any) {
+        return { ok: false, error: err.message || String(err) };
+      }
     }
     case "update_task": {
       const taskId = params?.taskId ? String(params.taskId) : "";
       if (!taskId) return { ok: false, error: "taskId is required" };
       const before = taskStore.getTask(roomId, taskId);
       if (!before) return { ok: false, error: `Task not found: ${taskId}` };
-      const patch: Parameters<typeof taskStore.updateTask>[2] = {};
-      if (params?.title !== undefined) patch.title = String(params.title);
-      if (params?.status !== undefined) patch.status = params.status as TaskStatus;
-      if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
-      if (params?.assignee !== undefined) patch.assignee = params.assignee ? String(params.assignee) : undefined;
-      if (params?.description !== undefined) patch.description = String(params.description);
-      if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
-      if (params?.subscribers !== undefined) patch.subscribers = Array.isArray(params.subscribers) ? params.subscribers.map(String) : [];
-      const updated = taskStore.updateTask(roomId, taskId, patch);
-      if (!updated) return { ok: false, error: "Update failed" };
-      const action = before.status !== updated.status ? "status_changed" : "updated";
-      emitTaskEvent(roomId, action, updated, agentName);
-      return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
+      try {
+        const patch: Parameters<typeof taskStore.updateTask>[2] = {};
+        if (params?.title !== undefined) patch.title = String(params.title);
+        if (params?.status !== undefined) patch.status = params.status as TaskStatus;
+        if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
+        if (params?.assignee !== undefined) {
+          const assignee = resolveTaskAssignee(roomId, params.assignee);
+          patch.assignee = assignee?.name;
+          patch.assigneeMemberId = assignee?.memberId;
+        }
+        if (params?.description !== undefined) patch.description = String(params.description);
+        if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
+        if (params?.subscribers !== undefined) {
+          const subscribers = resolveTaskSubscribers(roomId, params.subscribers) || { names: [], memberIds: [] };
+          patch.subscribers = subscribers.names;
+          patch.subscriberMemberIds = subscribers.memberIds;
+        }
+        const updated = taskStore.updateTask(roomId, taskId, patch);
+        if (!updated) return { ok: false, error: "Update failed" };
+        const action = before.status !== updated.status ? "status_changed" : "updated";
+        emitTaskEvent(roomId, action, updated, agentName);
+        return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
+      } catch (err: any) {
+        return { ok: false, error: err.message || String(err) };
+      }
     }
     case "list_tasks": {
       let tasks = taskStore.listTasks(roomId);
       if (params?.status) tasks = tasks.filter((t) => t.status === params.status);
-      if (params?.assignee) tasks = tasks.filter((t) => t.assignee === String(params.assignee));
+      if (params?.assignee) tasks = tasks.filter((t) => taskAssigneeMatches(roomId, t, String(params.assignee)));
       return tasks.map((t) => ({
         id: t.id, title: t.title, status: t.status, priority: t.priority,
         assignee: t.assignee, createdBy: t.createdBy,

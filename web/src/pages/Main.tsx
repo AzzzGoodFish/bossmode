@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from "react";
-import type { Room, SummarizeStatus } from "../api/client";
+import { useState, useEffect, useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import type { Room, SummarizeStatus, MemberInfo } from "../api/client";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
@@ -28,6 +28,7 @@ import { AddMemberDialog } from "../components/AddMemberDialog";
 import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
 import { useDialog } from "../components/dialogs";
 import { clampPreviewPct, formatPreviewPct, PREVIEW_PCT_STORAGE_KEY, readPreviewPct } from "../utils/preview-pane-sizing";
+import { userActionError } from "../utils/user-error";
 
 interface MainProps {
   selectedRoomId: string | null;
@@ -50,6 +51,22 @@ interface MainProps {
 }
 
 type RoomView = "chat" | "tasks";
+
+function displayAgentHint(agentName: string): string {
+  if (!agentName) return "Agent";
+  const normalized = agentName.trim();
+  const upper = normalized.toUpperCase();
+  if (["QA", "PM"].includes(upper)) return upper;
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => {
+      const acronym = part.toUpperCase();
+      if (["QA", "PM"].includes(acronym)) return acronym;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
 
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
@@ -107,6 +124,29 @@ export function Main({
     returnToLatest,
     inHistoryView,
   } = useRoom(selectedRoomId);
+
+  const displayMemberInfos = useMemo(() => {
+    if (room?.roomMembers?.length) {
+      return room.roomMembers.map((member) => ({
+        id: member.id,
+        name: member.name,
+        agent: member.sourceAgent,
+        sourceAgent: member.sourceAgent,
+        roomId: member.roomId || room.id,
+        model: member.config?.model ?? null,
+        thinkingLevel: member.config?.thinkingLevel || "off",
+        avatar: member.avatar,
+        contextLimit: member.config?.contextLimit,
+        credentialId: member.config?.credentialId ?? null,
+        mcpServers: member.config?.mcpServers || [],
+      } as MemberInfo));
+    }
+    return (room?.members || []).map((name) => ({ id: name, name, agent: name, sourceAgent: name, thinkingLevel: "off", mcpServers: [] } as MemberInfo));
+  }, [room]);
+  const displayMembers = useMemo(() => displayMemberInfos.map((member) => member.name), [displayMemberInfos]);
+  const displayMemberAgentHints = useMemo(() => Object.fromEntries(displayMemberInfos.map((member) => [member.name, displayAgentHint(member.agent || member.sourceAgent || member.name)])), [displayMemberInfos]);
+  const displayAgentStatus = agentStatus;
+  const displayContextUsage = contextUsage;
 
   useEffect(() => {
     onRegisterWsHandler(handleWsEvent);
@@ -204,14 +244,10 @@ export function Main({
   );
 
   const handleCreateRoom = useCallback(
-    async (name: string, cwd: string, members: string[], ruleDocs?: string[], promptLeaderMemberName?: string) => {
-      try {
-        const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName);
-        onRoomCreated(newRoom);
-        setShowCreateRoom(false);
-      } catch (err: any) {
-        toast(err.message, "error");
-      }
+    async (name: string, cwd: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string) => {
+      const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName);
+      onRoomCreated(newRoom);
+      setShowCreateRoom(false);
     },
     [onRoomCreated, toast],
   );
@@ -235,8 +271,9 @@ export function Main({
       const total = status.toSummarize + status.toKeep;
       setSummarizeKeepCount(status.toKeep);
       setSummarizeDialog({ status, totalMessages: total });
-    } catch (err: any) {
-      toast(`Summarize failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to check summarization", err);
+      toast(userActionError("check summarization"), "error");
     }
   }, [selectedRoomId, toast]);
 
@@ -246,8 +283,9 @@ export function Main({
     try {
       await apiSummarizeRoom(selectedRoomId, summarizeKeepCount);
       toast("Summarization started.", "success");
-    } catch (err: any) {
-      toast(`Summarize failed: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to start summarization", err);
+      toast(userActionError("start summarization"), "error");
     }
   }, [selectedRoomId, summarizeKeepCount, toast]);
 
@@ -284,15 +322,23 @@ export function Main({
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [lensAgent, closeLens]);
 
-  const handleAddMember = useCallback(async (agentName: string) => {
+  const handleAddMember = useCallback(async (agentName: string, memberName?: string) => {
     if (!selectedRoomId) return;
-    try {
-      await apiAddMember(selectedRoomId, agentName);
-      await reloadRoom();
-    } catch (err: any) {
-      toast(`Failed to add member: ${err.message}`, "error");
+    const name = (memberName || agentName).trim();
+    if (!name) return;
+    if (displayMembers.some((m) => m.toLowerCase() === name.toLowerCase())) {
+      toast(`This room already has a member named ${name}. Pick another name.`, "error");
+      return;
     }
-  }, [selectedRoomId, reloadRoom, toast]);
+    try {
+      await apiAddMember(selectedRoomId, agentName, name);
+      await reloadRoom();
+      setShowAddMember(false);
+    } catch (err) {
+      console.error("Failed to add Room member", err);
+      toast(userActionError("add this member", "Check the Agent and member name, then try again."), "error");
+    }
+  }, [displayMembers, selectedRoomId, reloadRoom, toast]);
 
   if (!room) {
     return (
@@ -410,13 +456,13 @@ export function Main({
           )}
           {lensFull ? lensPanel : view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={room.members} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
-              <MessageInput onSend={sendMessage} members={room.members} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
+              <MessageInput onSend={sendMessage} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
             </>
           ) : selectedRoomId ? (
             <TasksTab
               roomId={selectedRoomId}
-              members={room.members}
+              members={displayMembers}
               onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId, "tasks")}
             />
           ) : null}
@@ -459,9 +505,9 @@ export function Main({
         {/* 工位墙（桌面） */}
         <div className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[280px] border-l border-line shrink-0`}>
           <StationPanel
-            members={room.members}
-            agentStatus={agentStatus}
-            contextUsage={contextUsage}
+            members={displayMembers}
+            agentStatus={displayAgentStatus}
+            contextUsage={displayContextUsage}
             roomId={room.id}
             onOpenLens={openLens}
             onOpenMcpSettings={onOpenMcpSettings}
@@ -474,9 +520,9 @@ export function Main({
         {isMobile && (
           <MobileDrawer open={mobileMembersOpen} side="right" onClose={() => setMobileMembersOpen(false)} width="w-80">
             <StationPanel
-              members={room.members}
-              agentStatus={agentStatus}
-              contextUsage={contextUsage}
+              members={displayMembers}
+              agentStatus={displayAgentStatus}
+              contextUsage={displayContextUsage}
               roomId={room.id}
               onOpenLens={openLens}
               onOpenMcpSettings={onOpenMcpSettings}
@@ -535,7 +581,7 @@ export function Main({
         />
       )}
       {showAddMember && (
-        <AddMemberDialog currentMembers={room.members} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
+        <AddMemberDialog currentMembers={displayMembers} currentMemberInfos={displayMemberInfos} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
       )}
       {summarizeDialog && (
         <Sheet open={!!summarizeDialog} onClose={() => setSummarizeDialog(null)} size="sm">

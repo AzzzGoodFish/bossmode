@@ -6,14 +6,16 @@ describe("chat date separator labels", () => {
     const now = new Date(2026, 6, 1, 18, 0).getTime();
     const today = new Date(2026, 6, 1, 9, 30).getTime();
 
-    expect(formatMessageDateSeparator(today, now)).toBe("今天");
+    expect(formatMessageDateSeparator(today, now)).toBe("Today");
   });
 
-  it("shows year/month/day for non-today messages", () => {
-    const now = new Date(2026, 6, 3, 18, 0).getTime();
-    const earlier = new Date(2026, 6, 1, 9, 30).getTime();
+  it("shows a deterministic English date for historical messages", () => {
+    const now = new Date(2026, 6, 10, 18, 0).getTime();
+    const earlier = new Date(2026, 6, 9, 9, 30).getTime();
+    const label = formatMessageDateSeparator(earlier, now);
 
-    expect(formatMessageDateSeparator(earlier, now)).toBe("2026年7月1日");
+    expect(label).toBe("July 9, 2026");
+    expect(label).not.toMatch(/[\u3400-\u9fff]/u);
   });
 
   it("compares natural local days across month and year boundaries", () => {

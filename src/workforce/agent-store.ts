@@ -49,6 +49,14 @@ export function loadAgentDefinitions(): AgentDefinition[] {
   return agents;
 }
 
+/** Authority read for user-facing lists: never return a silent partial result. */
+export function loadAgentDefinitionsStrict(): AgentDefinition[] {
+  ensureAgentsDir();
+  return readdirSync(AGENTS_DIR)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => parseAgentFile(readFileSync(join(AGENTS_DIR, file), "utf-8"), file.replace(/\.md$/, "")));
+}
+
 export function loadAgentDefinition(name: string): AgentDefinition | null {
   const filePath = join(AGENTS_DIR, `${name}.md`);
   if (!existsSync(filePath)) return null;

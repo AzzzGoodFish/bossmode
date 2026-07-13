@@ -10,6 +10,8 @@ interface MessageBubbleProps {
   fullTime?: string;
   grouped?: boolean;
   isMarkdown?: boolean;
+  /** Parsed room-member name snapshots. An empty array means no activated mentions. */
+  mentions?: string[];
   roomId?: string;
   messageId?: string;
   attachments?: RoomMessageAttachment[];
@@ -76,7 +78,7 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 }
 
 export function MessageBubble({
-  sender, content, time, fullTime, grouped = false, isMarkdown = false, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
+  sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
 }: MessageBubbleProps) {
   const isUser = sender === "user";
   const isSystem = sender === "system";
@@ -119,6 +121,7 @@ export function MessageBubble({
           <MessageWithAttachments
             content={content}
             isMarkdown={isMarkdown}
+            mentions={mentions}
             bubbleBg={bubbleBg}
             roomId={roomId}
             messageId={messageId}
@@ -128,7 +131,7 @@ export function MessageBubble({
           />
         ) : (
           <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
-            {isMarkdown ? <Markdown content={content} /> : <MentionText content={content} />}
+            {isMarkdown ? <Markdown content={content} /> : <MentionText content={content} mentions={mentions} />}
           </div>
         )}
 
@@ -157,10 +160,11 @@ function legacyToAttachment(a: { originalName: string; path: string }): RenderAt
 
 /** Render message body bubble + lightweight attachment cards. */
 function MessageWithAttachments({
-  content, isMarkdown, bubbleBg, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
+  content, isMarkdown, mentions, bubbleBg, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
 }: {
   content: string;
   isMarkdown: boolean;
+  mentions?: string[];
   bubbleBg: string;
   roomId?: string;
   messageId?: string;
@@ -183,7 +187,7 @@ function MessageWithAttachments({
     <div className="max-w-full">
       {hasBody && (
         <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
-          {isMarkdown ? <Markdown content={bodyText} /> : <MentionText content={bodyText} />}
+          {isMarkdown ? <Markdown content={bodyText} /> : <MentionText content={bodyText} mentions={mentions} />}
         </div>
       )}
 
@@ -334,16 +338,50 @@ function ImageLightbox({ url, name, onClose }: { url: string; name: string; onCl
   );
 }
 
-function MentionText({ content }: { content: string }) {
-  const parts = content.split(/(@\w+)/g);
+export interface MentionTextPart {
+  text: string;
+  highlighted: boolean;
+}
+
+const LEGAL_MEMBER_NAME_CHARS = "[\\w.-]";
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Split a message into visible mention spans. Room messages pass persisted mention
+ * snapshots, so only members the router actually activated are highlighted.
+ */
+export function mentionTextParts(content: string, mentions?: string[]): MentionTextPart[] {
+  if (!content) return [];
+
+  if (mentions === undefined) {
+    return content.split(/(@[\w.-]+)/g).filter(Boolean).map((text) => ({ text, highlighted: text.startsWith("@") }));
+  }
+
+  const names = [...new Set(mentions.map((name) => name.trim()).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+  if (names.length === 0) return [{ text: content, highlighted: false }];
+
+  const matcher = new RegExp(`@(?:${names.map(escapeRegex).join("|")})(?!${LEGAL_MEMBER_NAME_CHARS})`, "g");
+  const parts: MentionTextPart[] = [];
+  let cursor = 0;
+  for (let match = matcher.exec(content); match; match = matcher.exec(content)) {
+    if (match.index > cursor) parts.push({ text: content.slice(cursor, match.index), highlighted: false });
+    parts.push({ text: match[0], highlighted: true });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < content.length) parts.push({ text: content.slice(cursor), highlighted: false });
+  return parts.length ? parts : [{ text: content, highlighted: false }];
+}
+
+function MentionText({ content, mentions }: { content: string; mentions?: string[] }) {
   return (
     <span className="whitespace-pre-wrap">
-      {parts.map((part, i) => {
-        if (part.startsWith("@")) {
-          return <span key={i} className="text-accent-ink font-medium">{part}</span>;
-        }
-        return part;
-      })}
+      {mentionTextParts(content, mentions).map((part, i) => (
+        part.highlighted ? <span key={i} className="text-accent-ink font-medium">{part.text}</span> : part.text
+      ))}
     </span>
   );
 }

@@ -5,7 +5,7 @@ import * as roomStore from "../workspace/room-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
-import type { Task, TaskEventMeta } from "../shared/types.js";
+import type { RoomMemberRecord, Task, TaskEventMeta } from "../shared/types.js";
 
 /** Trim a body of text to a one-line-ish chat snippet. */
 function toSnippet(text: string | undefined, max = 280): string | undefined {
@@ -13,6 +13,27 @@ function toSnippet(text: string | undefined, max = 280): string | undefined {
   const collapsed = text.replace(/\s+/g, " ").trim();
   if (!collapsed) return undefined;
   return collapsed.length > max ? collapsed.slice(0, max - 1) + "…" : collapsed;
+}
+
+function resolveTaskAssignee(roomId: string, value: unknown): { name: string; memberId: string } | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const member = roomStore.resolveRoomMemberRef(roomId, raw);
+  if (!member) throw new Error(`Assignee is not a room member: ${raw}`);
+  return { name: member.name, memberId: member.id };
+}
+
+function resolveTaskSubscribers(roomId: string, values: unknown): { names: string[]; memberIds: string[] } | undefined {
+  if (!Array.isArray(values)) return undefined;
+  const members: RoomMemberRecord[] = [];
+  for (const value of values) {
+    const raw = String(value ?? "").trim();
+    if (!raw) continue;
+    const member = roomStore.resolveRoomMemberRef(roomId, raw);
+    if (!member) throw new Error(`Subscriber is not a room member: ${raw}`);
+    if (!members.some((entry) => entry.id === member.id)) members.push(member);
+  }
+  return { names: members.map((member) => member.name), memberIds: members.map((member) => member.id) };
 }
 
 /** Emit a structured task_event system message + ws broadcast. */
@@ -105,15 +126,19 @@ addRoute("POST", "/api/rooms/:id/tasks", async (req, res, params) => {
   const body = (await parseBody(req)) as any;
   if (!body?.title) { sendJson(res, 400, { error: "title is required" }); return; }
   try {
+    const assignee = resolveTaskAssignee(params.id, body.assignee);
+    const subscribers = resolveTaskSubscribers(params.id, body.subscribers);
     const task = taskStore.createTask(params.id, {
       title: String(body.title),
       createdBy: String(body.createdBy || "user"),
       status: body.status,
       priority: body.priority,
-      assignee: body.assignee ? String(body.assignee) : undefined,
+      assignee: assignee?.name,
+      assigneeMemberId: assignee?.memberId,
       description: body.description ? String(body.description) : undefined,
       references: Array.isArray(body.references) ? body.references.map(String) : undefined,
-      subscribers: Array.isArray(body.subscribers) ? body.subscribers.map(String) : undefined,
+      subscribers: subscribers?.names,
+      subscriberMemberIds: subscribers?.memberIds,
     });
     const actor = String(body.createdBy || "user");
     emitTaskEvent(params.id, "created", task, actor);
@@ -133,10 +158,18 @@ addRoute("PATCH", "/api/rooms/:id/tasks/:taskId", async (req, res, params) => {
     if (body.title !== undefined) patch.title = String(body.title);
     if (body.status !== undefined) patch.status = body.status;
     if (body.priority !== undefined) patch.priority = body.priority;
-    if (body.assignee !== undefined) patch.assignee = body.assignee || undefined;
+    if (body.assignee !== undefined) {
+      const assignee = resolveTaskAssignee(params.id, body.assignee);
+      patch.assignee = assignee?.name;
+      patch.assigneeMemberId = assignee?.memberId;
+    }
     if (body.description !== undefined) patch.description = String(body.description);
     if (body.references !== undefined) patch.references = Array.isArray(body.references) ? body.references.map(String) : [];
-    if (body.subscribers !== undefined) patch.subscribers = Array.isArray(body.subscribers) ? body.subscribers.map(String) : [];
+    if (body.subscribers !== undefined) {
+      const subscribers = resolveTaskSubscribers(params.id, body.subscribers) || { names: [], memberIds: [] };
+      patch.subscribers = subscribers.names;
+      patch.subscriberMemberIds = subscribers.memberIds;
+    }
     const updated = taskStore.updateTask(params.id, params.taskId, patch);
     if (!updated) { sendJson(res, 404, { error: "Task not found" }); return; }
 

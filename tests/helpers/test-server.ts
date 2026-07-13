@@ -19,13 +19,17 @@ function hashPassword(password: string): string {
 
 const testPasswordHash = hashPassword(TEST_PASSWORD);
 
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Per-process unique dir — a fixed "/tmp/bossmode-test" collides across users
 // on shared machines (EACCES on files owned by another user) and across runs.
 const TEST_BOSSMODE_DIR = mkdtempSync(join(tmpdir(), "bossmode-test-"));
+mkdirSync(join(TEST_BOSSMODE_DIR, "agents"), { recursive: true });
+for (const agent of ["pm", "qa", "architect", "developer"]) {
+  writeFileSync(join(TEST_BOSSMODE_DIR, "agents", `${agent}.md`), `---\nname: ${agent}\nskills: []\ntags: []\n---\n${agent}`, "utf8");
+}
 
 /** The BOSSMODE_DIR used by the mocked config — tests that build fixture paths must use this. */
 export function getTestBossmodeDir(): string {
@@ -133,7 +137,6 @@ export async function createTestServer(): Promise<TestServer> {
     (roomId) => { activateAll(roomId).catch(() => {}); },
   );
 
-  const port = 10000 + Math.floor(Math.random() * 50000);
   const server = http.createServer(async (req, res) => {
     const handled = await handleApiRequest(req, res);
     if (!handled) {
@@ -145,8 +148,10 @@ export async function createTestServer(): Promise<TestServer> {
   createWebSocketServer(server);
 
   await new Promise<void>((resolve) => {
-    server.listen(port, "127.0.0.1", resolve);
+    server.listen(0, "127.0.0.1", resolve);
   });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
 
   return {
     server,

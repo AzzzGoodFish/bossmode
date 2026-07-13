@@ -65,7 +65,7 @@ describe("Acceptance: Summarize & Message Range", () => {
   async function createRoom(name: string, members: string[]): Promise<Room> {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members, promptLeaderMemberName: members[0] },
+      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);

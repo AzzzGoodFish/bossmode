@@ -131,14 +131,14 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
   const reset = async () => {
     if (!await confirm(`Reset session for @${agentName}?`)) return;
     try { const res = await resetAgentSession(roomId, agentName); toast(res.message, "success"); }
-    catch (err: any) { toast(err.message, "error"); }
+    catch (err) { console.error("Failed to reset member session", err); toast("Couldn’t reset this session. Try again.", "error"); }
   };
 
   const restart = async () => {
     if (!member) return;
     if (!await confirm(`Restart @${agentName} in this room?`)) return;
     try { await restartMember(member.id, roomId); toast(`${agentName} restarted.`, "success"); }
-    catch (err: any) { toast(err.message, "error"); }
+    catch (err) { console.error("Failed to restart member", err); toast("Couldn’t restart this member. Try again, or check Runtime settings.", "error"); }
   };
 
   return (
@@ -149,7 +149,13 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
         <span className="font-mono text-[10px] text-ink-4 truncate">{member?.model || "agent default"}</span>
         <span className="flex-1" />
         {isWorking && <button onClick={() => abortAgent(roomId, agentName).catch(console.error)} className="px-2.5 py-1 text-[11px] font-semibold bg-blocked text-white rounded cursor-pointer">Abort</button>}
-        <button onClick={restart} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2"><RefreshCw size={12} />Restart</button>
+        <details className="relative">
+          <summary className="list-none inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2">Troubleshooting</summary>
+          <div className="absolute right-0 top-8 z-20 w-56 rounded-lg border border-line bg-surface-1 p-3 shadow-lg">
+            <p className="mb-2 text-[11px] text-ink-4">Restart only if this member is stuck and Reload did not help.</p>
+            <button onClick={restart} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2"><RefreshCw size={12} />Restart member</button>
+          </div>
+        </details>
         <button onClick={reset} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-ink-2 border border-line rounded cursor-pointer hover:bg-surface-2"><RotateCcw size={12} />Reset session</button>
         <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:bg-surface-2 cursor-pointer"><X size={14} /></button>
       </div>
@@ -182,7 +188,7 @@ export function WorkstationDetail({ roomId, agentName, status, contextUsage, onC
 
         <aside className="hidden lg:block w-[260px] border-l border-line bg-surface-0 p-4 space-y-4 overflow-y-auto">
           <SideMetric title="CONTEXT" value={contextUsage?.supported && contextUsage.percentage !== undefined ? `${Math.round(contextUsage.percentage)}%` : "—"} detail={contextUsage?.totalTokens ? `${formatTokens(contextUsage.totalTokens)} tokens` : "unavailable"} />
-          <SideMetric title="SESSION" value={member?.runtime || "pi-sdk"} detail={<span>think · <span className={`font-semibold ${thinkLevelTextClass(member?.thinkingLevel || "default")}`}>{member?.thinkingLevel || "default"}</span></span>} />
+          <SideMetric title="SESSION" value={member ? "Active" : "Not started"} detail={<span>think · <span className={`font-semibold ${thinkLevelTextClass(member?.thinkingLevel || "default")}`}>{member?.thinkingLevel || "default"}</span></span>} />
           <SideMetric title="TOKENS · TOTAL" value={tokenTotal !== null ? formatTokens(tokenTotal) : "—"} detail="cumulative member usage" />
         </aside>
       </div>

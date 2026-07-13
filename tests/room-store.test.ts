@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -10,12 +10,18 @@ vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
 }));
 
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
+
 describe("room-store", () => {
   let roomStore: typeof import("../src/workspace/room-store.js");
   let messageStore: typeof import("../src/workspace/message-store.js");
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bossmode-room-test-"));
+    mkdirSync(join(tempDir, "agents"), { recursive: true });
+    for (const agent of ["pm", "dev", "qa", "developer", "architect"]) {
+      writeFileSync(join(tempDir, "agents", `${agent}.md`), `---\nname: ${agent}\n---\n${agent}`, "utf-8");
+    }
     // Re-import to pick up new tempDir
     vi.resetModules();
     roomStore = await import("../src/workspace/room-store.js");
@@ -28,7 +34,7 @@ describe("room-store", () => {
 
   describe("createRoom", () => {
     it("should create a room with proper structure", () => {
-      const room = roomStore.createRoom("test room", "/tmp/project", ["pm", "dev"]);
+      const room = roomStore.createRoom("test room", "/tmp/project", drafts(["pm", "dev"]));
 
       expect(room.id).toBeTruthy();
       expect(room.name).toBe("test room");
@@ -46,7 +52,7 @@ describe("room-store", () => {
     });
 
     it("should initialize cursors to null for all members", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm", "dev", "qa"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm", "dev", "qa"]));
       const roomMembers = roomStore.getRoomMembers(room.id);
       const cursors = roomStore.getCursors(room.id);
       expect(roomMembers.map((m) => m.name)).toEqual(["pm", "dev", "qa"]);
@@ -55,15 +61,15 @@ describe("room-store", () => {
     });
 
     it("rejects duplicate room-local member names", () => {
-      expect(() => roomStore.createRoom("test", "/tmp", ["pm", "pm"])).toThrow(/Duplicate member name/);
+      expect(() => roomStore.createRoom("test", "/tmp", drafts(["pm", "pm"]))).toThrow(/Duplicate member name/);
     });
 
     it("rejects invalid room-local member names", () => {
-      expect(() => roomStore.createRoom("test", "/tmp", ["pm", "bad name"])).toThrow(/member name may contain/);
+      expect(() => roomStore.createRoom("test", "/tmp", drafts(["pm", "bad name"]))).toThrow(/member name may contain/);
     });
 
     it("accepts an explicit normalized docsPath and can clear legacy bindings", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"], undefined, { docsPath: "bossmode" });
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]), undefined, { docsPath: "bossmode" });
       expect(room.docsPath).toBe("bossmode/");
       expect(existsSync(join(tempDir, "knowledge", "docs", "bossmode"))).toBe(true);
       const cleared = roomStore.updateRoomDocsPath(room.id, null);
@@ -73,7 +79,7 @@ describe("room-store", () => {
 
   describe("getRoom", () => {
     it("should return room by id", () => {
-      const created = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const created = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const fetched = roomStore.getRoom(created.id);
       expect(fetched).toEqual(created);
     });
@@ -85,9 +91,9 @@ describe("room-store", () => {
 
   describe("listRooms", () => {
     it("should list all rooms", () => {
-      roomStore.createRoom("room 1", "/tmp/a", ["pm"]);
-      roomStore.createRoom("room 2", "/tmp/b", ["dev"]);
-      roomStore.createRoom("room 3", "/tmp/c", ["qa"]);
+      roomStore.createRoom("room 1", "/tmp/a", drafts(["pm"]));
+      roomStore.createRoom("room 2", "/tmp/b", drafts(["dev"]));
+      roomStore.createRoom("room 3", "/tmp/c", drafts(["qa"]));
 
       const rooms = roomStore.listRooms();
       expect(rooms).toHaveLength(3);
@@ -102,7 +108,7 @@ describe("room-store", () => {
 
   describe("messages", () => {
     it("should add and retrieve messages", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
 
       const msg1 = messageStore.addMessage(room.id, {
         sender: "user",
@@ -127,7 +133,7 @@ describe("room-store", () => {
     });
 
     it("should respect limit parameter", () => {
-      const room = roomStore.createRoom("test", "/tmp", []);
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
 
       for (let i = 0; i < 10; i++) {
         messageStore.addMessage(room.id, { sender: "user", content: `msg ${i}`, mentions: [] });
@@ -140,7 +146,7 @@ describe("room-store", () => {
     });
 
     it("should return messages before a given ID", () => {
-      const room = roomStore.createRoom("test", "/tmp", []);
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
 
       const msgs = [];
       for (let i = 0; i < 5; i++) {
@@ -159,7 +165,7 @@ describe("room-store", () => {
 
   describe("getMessagesSince", () => {
     it("should return messages after cursor", () => {
-      const room = roomStore.createRoom("test", "/tmp", []);
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
 
       const msgs = [];
       for (let i = 0; i < 5; i++) {
@@ -173,7 +179,7 @@ describe("room-store", () => {
     });
 
     it("should return all messages when cursor is null", () => {
-      const room = roomStore.createRoom("test", "/tmp", []);
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
       messageStore.addMessage(room.id, { sender: "user", content: "msg", mentions: [] });
 
       const all = messageStore.getMessagesSince(room.id, null);
@@ -183,7 +189,7 @@ describe("room-store", () => {
 
   describe("cursors", () => {
     it("should set and read cursor", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
       roomStore.setCursor(room.id, "pm", msg.id);
@@ -193,7 +199,7 @@ describe("room-store", () => {
     });
 
     it("should allow resetting cursor to null", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
       roomStore.setCursor(room.id, "pm", msg.id);
@@ -206,7 +212,7 @@ describe("room-store", () => {
 
   describe("roomMembers", () => {
     it("renames a room-local member without changing member id", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["qa", "developer"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["qa", "developer"]));
       const before = roomStore.findRoomMemberByName(room.id, "qa")!;
       const result = roomStore.renameRoomMember(room.id, before.id, "qa-browser");
       expect(result.ok).toBe(true);
@@ -217,7 +223,7 @@ describe("room-store", () => {
     });
 
     it("rejects duplicate member name inside one room", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["qa", "developer"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["qa", "developer"]));
       const dev = roomStore.findRoomMemberByName(room.id, "developer")!;
       const result = roomStore.renameRoomMember(room.id, dev.id, "qa");
       expect(result.ok).toBe(false);
@@ -225,9 +231,54 @@ describe("room-store", () => {
     });
   });
 
+  describe("addRoomMemberFromAgent", () => {
+    function writeAgent(name: string): void {
+      mkdirSync(join(tempDir, "agents"), { recursive: true });
+      writeFileSync(join(tempDir, "agents", `${name}.md`), `---\nname: ${name}\n---\n${name} prompt\n`, "utf-8");
+    }
+
+    it("adds multiple differently named members from the same Agent", () => {
+      writeAgent("developer");
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
+      const first = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
+      const second = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-b" });
+
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      const members = roomStore.getRoomMembers(room.id).filter((member) => member.sourceAgent === "developer");
+      expect(members.map((member) => member.name)).toEqual(["dev-a", "dev-b"]);
+      expect(new Set(members.map((member) => member.id)).size).toBe(2);
+      expect(roomStore.getRoom(room.id)!.members).toEqual(["pm", "dev-a", "dev-b"]);
+    });
+
+    it("rejects duplicate member names but allows duplicate sourceAgent", () => {
+      writeAgent("developer");
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
+      expect(roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" }).ok).toBe(true);
+      const duplicate = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
+      expect(duplicate.ok).toBe(false);
+      if (!duplicate.ok) expect(duplicate.code).toBe("duplicate");
+    });
+
+    it("does not inherit legacy global member config by new member name", async () => {
+      writeAgent("developer");
+      const memberStore = await import("../src/workforce/member-store.js");
+      memberStore.saveMember({ name: "dev-a", agent: "qa", runtime: "pi-cli", model: "legacy-model", thinkingLevel: "high" });
+      const room = roomStore.createRoom("test", "/tmp", drafts([]));
+      const added = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
+      expect(added.ok).toBe(true);
+      const member = roomStore.findRoomMemberByName(room.id, "dev-a")!;
+      expect(member.sourceAgent).toBe("developer");
+      expect(member.sourceMemberId).toBeUndefined();
+      expect(member.migratedFrom).toBeUndefined();
+      expect(member.config?.model).toBeUndefined();
+      expect(member.config?.thinkingLevel).toBeUndefined();
+    });
+  });
+
   describe("addMember", () => {
     it("should add new member to room", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const result = roomStore.addMember(room.id, "qa");
       expect(result).toBe(true);
 
@@ -236,12 +287,12 @@ describe("room-store", () => {
     });
 
     it("should reject duplicate member", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       expect(roomStore.addMember(room.id, "pm")).toBe(false);
     });
 
     it("should initialize new member cursor to latest message", () => {
-      const room = roomStore.createRoom("test", "/tmp", ["pm"]);
+      const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const msg = messageStore.addMessage(room.id, { sender: "user", content: "hi", mentions: [] });
 
       roomStore.addMember(room.id, "qa");

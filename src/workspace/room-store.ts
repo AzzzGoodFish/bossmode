@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
-import type { Room, CursorMap, RoomLinearIntegration, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
+import type { CreateRoomMemberInput, Room, CursorMap, RoomLinearIntegration, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
 import { getMemberByName } from "../workforce/member-store.js";
+import { loadAgentDefinition } from "../workforce/agent-store.js";
 
 function roomsDir(): string {
   return join(getBossmodeDir(), "rooms");
@@ -92,6 +93,22 @@ function buildRoomMemberRecord(roomId: string, memberName: string, override?: Ro
   };
 }
 
+function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: string; memberName: string; config?: Partial<RoomMemberConfig> }): RoomMemberRecord {
+  const agent = loadAgentDefinition(input.agentName);
+  const now = Date.now();
+  const config = cleanMemberConfig(input.config || {});
+  return {
+    id: createRoomMemberId(),
+    roomId,
+    name: input.memberName,
+    sourceAgent: input.agentName,
+    avatar: agent?.avatar,
+    ...(Object.keys(config).length > 0 ? { config } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
   if (Array.isArray(room.roomMembers) && room.roomMembers.length > 0) {
     return room.roomMembers.map((member) => ({ ...member, roomId: member.roomId || room.id }));
@@ -156,18 +173,28 @@ export function normalizeRoomDocsPath(input: string | null | undefined): string 
 
 // -- Room CRUD --
 
-export function createRoom(name: string, cwd: string, members: string[], ruleDocs?: string[], opts?: { promptLeaderMemberName?: string; promptLeaderMemberId?: string; docsPath?: string | null }): Room {
-  ensureRoomsDir();
-
-  const normalizedMembers = members.map((memberName) => normalizeMemberName(String(memberName || "")));
-  const validation = validateRoomMemberNameList(normalizedMembers);
+export function createRoom(name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], opts?: { promptLeaderMemberName?: string; promptLeaderMemberId?: string; docsPath?: string | null }): Room {
+  const drafts = members.map((member) => {
+    if (!member || typeof member.agent !== "string" || typeof member.name !== "string") {
+      throw new Error("members must contain { agent, name } objects");
+    }
+    const agent = member.agent.trim();
+    const memberName = normalizeMemberName(member.name);
+    if (!agent || !memberName) throw new Error("agent and member name are required");
+    return { agent, name: memberName };
+  });
+  const validation = validateRoomMemberNameList(drafts.map((draft) => draft.name));
   if (validation) throw new Error(validation);
+  for (const draft of drafts) {
+    if (!loadAgentDefinition(draft.agent)) throw new Error(`Agent not found: ${draft.agent}`);
+  }
+
+  const leaderName = opts?.promptLeaderMemberName ? normalizeMemberName(opts.promptLeaderMemberName) : undefined;
+  if (leaderName && !drafts.some((draft) => draft.name === leaderName)) throw new Error("promptLeaderMemberName must be one of the room members");
 
   const roomId = randomUUID();
-  const roomMembers = normalizedMembers.map((memberName) => buildRoomMemberRecord(roomId, memberName));
-  const leaderName = opts?.promptLeaderMemberName ? normalizeMemberName(opts.promptLeaderMemberName) : undefined;
+  const roomMembers = drafts.map((draft) => buildDirectRoomMemberFromAgent(roomId, { agentName: draft.agent, memberName: draft.name }));
   const promptLeaderMemberId = opts?.promptLeaderMemberId || (leaderName ? roomMembers.find((member) => member.name === leaderName)?.id : undefined);
-  if (leaderName && !promptLeaderMemberId) throw new Error("promptLeaderMemberName must be one of the room members");
   if (opts?.promptLeaderMemberId && !roomMembers.some((member) => member.id === opts.promptLeaderMemberId)) throw new Error("promptLeaderMemberId must be one of the room members");
   const room: Room = {
     id: roomId,
@@ -181,20 +208,22 @@ export function createRoom(name: string, cwd: string, members: string[], ruleDoc
     ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
 
+  ensureRoomsDir();
   const dir = roomDir(room.id);
-  mkdirSync(dir, { recursive: true });
-  if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
-  writeRoom(room);
+  try {
+    mkdirSync(dir, { recursive: true });
+    if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
+    writeRoom(room);
 
-  // Initialize empty cursors for all members by stable memberId.
-  const cursors: CursorMap = {};
-  for (const m of roomMembers) cursors[m.id] = null;
-  writeFileSync(cursorsPath(room.id), JSON.stringify(cursors, null, 2), "utf-8");
-
-  // Initialize empty messages file
-  writeFileSync(messagesPath(room.id), "", "utf-8");
-
-  return room;
+    const cursors: CursorMap = {};
+    for (const member of roomMembers) cursors[member.id] = null;
+    writeFileSync(cursorsPath(room.id), JSON.stringify(cursors, null, 2), "utf-8");
+    writeFileSync(messagesPath(room.id), "", "utf-8");
+    return room;
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
 }
 
 export function getRoom(roomId: string): Room | null {
@@ -489,6 +518,17 @@ export function listRooms(): Room[] {
   return rooms;
 }
 
+/** Authority read for user-facing lists: directory and room JSON errors are fatal. */
+export function listRoomsStrict(): Room[] {
+  ensureRoomsDir();
+  const rooms = readdirSync(roomsDir())
+    .map((entry) => roomJsonPath(entry))
+    .filter(existsSync)
+    .map((path) => JSON.parse(readFileSync(path, "utf-8")) as Room);
+  rooms.sort((a, b) => b.createdAt - a.createdAt);
+  return rooms;
+}
+
 // -- Cursors --
 
 export function getCursors(roomId: string): CursorMap {
@@ -544,6 +584,40 @@ export function renameRoomMember(roomId: string, memberRef: string, nextNameRaw:
   return { ok: true, member: nextMember };
 }
 
+function initializeMemberCursor(roomId: string, memberId: string): void {
+  // Initialize cursor at latest message under stable memberId.
+  const latestId = getLatestMessageIdInline(roomId);
+  const cursors = getCursors(roomId);
+  cursors[memberId] = latestId;
+  writeFileSync(cursorsPath(roomId), JSON.stringify(cursors, null, 2), "utf-8");
+}
+
+export function addRoomMemberFromAgent(
+  roomId: string,
+  input: { agentName: string; memberName: string; config?: Partial<RoomMemberConfig> },
+): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "invalid" | "duplicate" } {
+  const room = getRoom(roomId);
+  if (!room) return { ok: false, code: "not_found", error: "Room not found" };
+
+  const agentName = normalizeMemberName(String(input.agentName || ""));
+  if (!agentName) return { ok: false, code: "invalid", error: "agent name is required" };
+  const agent = loadAgentDefinition(agentName);
+  if (!agent) return { ok: false, code: "not_found", error: `Agent not found: ${agentName}` };
+
+  const memberName = normalizeMemberName(String(input.memberName || ""));
+  const validation = validateRoomMemberName(memberName);
+  if (validation) return { ok: false, code: "invalid", error: validation };
+  if (getRoomMembersFromRoom(room).some((member) => member.name === memberName)) {
+    return { ok: false, code: "duplicate", error: "Member name already exists in this room" };
+  }
+
+  const member = buildDirectRoomMemberFromAgent(roomId, { agentName, memberName, config: input.config });
+  room.roomMembers = [...getRoomMembersFromRoom(room), member];
+  writeRoom(room);
+  initializeMemberCursor(roomId, member.id);
+  return { ok: true, member };
+}
+
 export function addMember(roomId: string, agentName: string): boolean {
   const room = getRoom(roomId);
   if (!room) return false;
@@ -554,12 +628,7 @@ export function addMember(roomId: string, agentName: string): boolean {
   const member = buildRoomMemberRecord(roomId, nextName);
   room.roomMembers = [...getRoomMembersFromRoom(room), member];
   writeRoom(room);
-
-  // Initialize cursor at latest message under stable memberId.
-  const latestId = getLatestMessageIdInline(roomId);
-  const cursors = getCursors(roomId);
-  cursors[member.id] = latestId;
-  writeFileSync(cursorsPath(roomId), JSON.stringify(cursors, null, 2), "utf-8");
+  initializeMemberCursor(roomId, member.id);
 
   return true;
 }

@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import {
-  loadAgentDefinitions, loadAgentDefinition, saveAgentDefinition,
+  loadAgentDefinitions, loadAgentDefinitionsStrict, loadAgentDefinition, saveAgentDefinition,
   deleteAgentDefinition, loadAgentTemplates, getAgentsDir,
 } from "../workforce/agent-store.js";
 import {
-  loadSkillDefinitions, loadSkillDefinition, saveSkillDefinition,
+  loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
@@ -40,13 +40,14 @@ function optionalModel(value: unknown): string | undefined {
 
 addRoute("GET", "/api/agents", async (_req, res) => {
   try {
-    const agents = loadAgentDefinitions();
+    const agents = loadAgentDefinitionsStrict();
     const result = agents.map(({ name, model, description, skills, tags, avatar }) => ({
       name, model, description, skills, tags, avatar,
     }));
     sendJson(res, 200, result);
-  } catch {
-    sendJson(res, 200, []);
+  } catch (err) {
+    logger.error("workforce-api", "failed to load Agent list", { error: String(err) });
+    sendJson(res, 500, { error: "Couldn’t load Agent templates" });
   }
 });
 
@@ -116,11 +117,12 @@ addRoute("DELETE", "/api/agents/:name", async (_req, res, params) => {
 
 addRoute("GET", "/api/skills", async (_req, res) => {
   try {
-    const skills = loadSkillDefinitions();
+    const skills = loadSkillDefinitionsStrict();
     const result = skills.map(({ name, description, tags }) => ({ name, description, tags }));
     sendJson(res, 200, result);
-  } catch {
-    sendJson(res, 200, []);
+  } catch (err) {
+    logger.error("workforce-api", "failed to load Skill list", { error: String(err) });
+    sendJson(res, 500, { error: "Couldn’t load Skills" });
   }
 });
 

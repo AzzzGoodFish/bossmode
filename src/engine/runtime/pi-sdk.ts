@@ -19,7 +19,7 @@ import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.j
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams } from "./types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts } from "./types.js";
 
 function safeSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -200,6 +200,9 @@ class PiSdkAgentHandle implements AgentHandle {
   constructor(
     private session: AgentSession,
     private modelRegistry: ModelRegistry,
+    private resourceLoader: DefaultResourceLoader,
+    private baseExtensionPaths: string[],
+    private baseToolNames: string[],
     runtimeParams: AgentRuntimeParams,
   ) {
     this.runtimeParams = runtimeParams;
@@ -367,6 +370,32 @@ class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
+  async reloadResources(opts: ReloadAgentResourcesOpts): Promise<void> {
+    if (this.destroyed) throw new Error("Runtime instance is destroyed");
+    await this.waitForIdle();
+    const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
+    const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
+      ? [...this.baseExtensionPaths, mcpSettings.adapterPath]
+      : this.baseExtensionPaths;
+    const activeTools = [...this.baseToolNames, ...(mcpSettings.enabled ? ["mcp"] : [])];
+
+    const loader = this.resourceLoader as any;
+    loader.systemPromptSource = opts.agentPrompt.trim() || undefined;
+    loader.appendSystemPromptSource = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
+    loader.additionalSkillPaths = opts.skillPaths;
+    loader.additionalExtensionPaths = activeExtensionPaths;
+
+    if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
+    else await this.resourceLoader.reload();
+    if (mcpSettings.enabled) await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
+    if (typeof (this.session as any).setActiveToolsByName === "function") (this.session as any).setActiveToolsByName(activeTools);
+
+    this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
+    this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
+    this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths];
+    logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
+  }
+
   private async compact(): Promise<void> {
     this.emit({ type: "agent_start" });
     const bridge = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
@@ -523,7 +552,8 @@ export class PiSdkRuntime implements AgentRuntime {
     await resourceLoader.reload();
 
     const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
-    const activeTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name), ...(mcpSettings.enabled ? ["mcp"] : [])];
+    const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
+    const activeTools = [...baseTools, ...(mcpSettings.enabled ? ["mcp"] : [])];
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -557,7 +587,7 @@ export class PiSdkRuntime implements AgentRuntime {
       credentialId: piConfig.profile?.id,
       credentialName: piConfig.profile?.name,
     };
-    const handle = new PiSdkAgentHandle(session, modelRegistry, runtimeParams);
+    const handle = new PiSdkAgentHandle(session, modelRegistry, resourceLoader, extensionPaths, baseTools, runtimeParams);
     this.handles.add(handle);
     logger.info("runtime:pi-sdk", "createAgent", {
       agent: opts.member.name,

@@ -68,6 +68,27 @@ export function loadSkillDefinitions(): SkillDefinition[] {
   return all;
 }
 
+/** Authority read for user-facing lists: never return a silent partial result. */
+export function loadSkillDefinitionsStrict(): SkillDefinition[] {
+  ensureSkillsDir();
+  const seen = new Set<string>();
+  const all: SkillDefinition[] = [];
+  for (const dir of SKILL_DIRS) {
+    if (!existsSync(dir)) continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillFile = join(dir, entry.name, "SKILL.md");
+      if (!existsSync(skillFile)) continue;
+      const skill = parseSkillFile(readFileSync(skillFile, "utf-8"), entry.name, dir);
+      if (!seen.has(skill.name)) {
+        seen.add(skill.name);
+        all.push(skill);
+      }
+    }
+  }
+  return all;
+}
+
 export function loadSkillDefinition(name: string): SkillDefinition | null {
   for (const dir of SKILL_DIRS) {
     const skillFile = join(dir, name, "SKILL.md");

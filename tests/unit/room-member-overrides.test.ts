@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
 let dir: string;
 
@@ -16,15 +18,21 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+function writeAgent(name: string): void {
+  mkdirSync(join(dir, "agents"), { recursive: true });
+  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\nmodel: anthropic/${name}\n---\n${name} prompt\n`, "utf-8");
+}
+
 describe("room member overrides", () => {
   it("keeps model and thinking overrides scoped to one room", async () => {
+    writeAgent("pm");
     const roomStore = await import("../../src/workspace/room-store.js");
     const { saveMember, getMemberByName } = await import("../../src/workforce/member-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
 
     saveMember({ name: "pm", agent: "pm", runtime: "pi-cli", model: "anthropic/global", thinkingLevel: "off" });
-    const roomA = roomStore.createRoom("A", dir, ["pm"]);
-    const roomB = roomStore.createRoom("B", dir, ["pm"]);
+    const roomA = roomStore.createRoom("A", dir, drafts(["pm"]));
+    const roomB = roomStore.createRoom("B", dir, drafts(["pm"]));
 
     roomStore.updateRoomMemberOverride(roomA.id, "pm", {
       model: "anthropic/room-a",
@@ -33,11 +41,31 @@ describe("room member overrides", () => {
     });
 
     expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: "anthropic/room-a", credentialId: "cred-a", thinkingLevel: "high" });
-    expect(resolveRoomMember(roomB.id, "pm")).toMatchObject({ model: "anthropic/global", thinkingLevel: "off" });
+    expect(resolveRoomMember(roomB.id, "pm")).toMatchObject({ model: "anthropic/pm", thinkingLevel: "off" });
     expect(getMemberByName("pm")).toMatchObject({ model: "anthropic/global", thinkingLevel: "off" });
 
     roomStore.updateRoomMemberOverride(roomA.id, "pm", { model: null, thinkingLevel: null });
-    expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: "anthropic/global", thinkingLevel: "off" });
+    expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: "anthropic/pm", thinkingLevel: "off" });
     expect(roomStore.hasRoomMemberModelOverride(roomA.id, "pm")).toBe(false);
+  });
+
+  it("does not fallback to a legacy global member for direct Agent-created members", async () => {
+    writeAgent("developer");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const { saveMember } = await import("../../src/workforce/member-store.js");
+    const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
+
+    saveMember({ name: "dev-a", agent: "qa", runtime: "pi-cli", model: "anthropic/legacy", thinkingLevel: "high" });
+    const room = roomStore.createRoom("A", dir, drafts([]));
+    const added = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
+    expect(added.ok).toBe(true);
+
+    expect(resolveRoomMember(room.id, "dev-a")).toMatchObject({
+      id: expect.stringMatching(/^rm_/),
+      name: "dev-a",
+      agent: "developer",
+      model: "anthropic/developer",
+      thinkingLevel: "off",
+    });
   });
 });

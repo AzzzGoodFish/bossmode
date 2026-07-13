@@ -187,6 +187,26 @@ describe("task-store", () => {
     expect(getTask("r16", task.id)!.comments).toHaveLength(1);
   });
 
+  it("stores member identity for assignees and subscribers and updates display names on rename", async () => {
+    const { createTask, getTask, renameParticipant } = await import("../../src/workspace/task-store.js");
+    ensureRoom("r17-member-ids");
+    const task = createTask("r17-member-ids", {
+      title: "Member ids",
+      createdBy: "pm",
+      assignee: "dev-a",
+      assigneeMemberId: "rm_dev_a",
+      subscribers: ["qa-a"],
+      subscriberMemberIds: ["rm_qa_a"],
+    });
+    expect(task.assigneeMemberId).toBe("rm_dev_a");
+    expect(task.subscriberMemberIds).toEqual(["rm_qa_a"]);
+
+    expect(renameParticipant("r17-member-ids", { memberId: "rm_dev_a", oldName: "dev-a", newName: "dev-ui" })).toBe(1);
+    expect(getTask("r17-member-ids", task.id)!.assignee).toBe("dev-ui");
+    expect(renameParticipant("r17-member-ids", { memberId: "rm_qa_a", oldName: "qa-a", newName: "qa-browser" })).toBe(1);
+    expect(getTask("r17-member-ids", task.id)!.subscribers).toEqual(["pm", "qa-browser"]);
+  });
+
   it("normalizes old task json without comments and subscribers", async () => {
     const { getTask, listTaskSummaries } = await import("../../src/workspace/task-store.js");
     ensureRoom("r17");

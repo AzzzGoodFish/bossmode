@@ -52,7 +52,7 @@ describe("knowledge-activity", () => {
     vi.resetModules();
   });
 
-  it("emits a knowledge_event card for write tool inside docs root", async () => {
+  it("emits a knowledge_event card for write tool inside docs root without parsing frontmatter", async () => {
     const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
     ensureRoom("k1");
     const abs = writeDoc("proj/arch.md", "---\ntitle: 架构总览\n---\n\n# 架构\n内容");
@@ -62,7 +62,7 @@ describe("knowledge-activity", () => {
     const card = messages.find((m) => m.type === "knowledge_event");
     expect(card).toBeTruthy();
     expect(card!.knowledge_event_meta?.path).toBe("proj/arch.md");
-    expect(card!.knowledge_event_meta?.title).toBe("架构总览");
+    expect(card!.knowledge_event_meta?.title).toBe("架构");
     expect(card!.knowledge_event_meta?.actor).toBe("architect");
   });
 

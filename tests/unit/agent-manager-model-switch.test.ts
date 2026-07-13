@@ -16,6 +16,7 @@ class TestHandle implements AgentHandle {
   promptCalls: string[] = [];
   setModelCalls: string[] = [];
   refreshCalls = 0;
+  reloadCalls: any[] = [];
   destroyed = false;
   failRefresh = false;
   failSetModel = false;
@@ -51,6 +52,11 @@ class TestHandle implements AgentHandle {
   async refreshModelRegistry(): Promise<void> {
     if (this.failRefresh) throw new Error("refresh failed");
     this.refreshCalls += 1;
+  }
+  async reloadResources(opts: any): Promise<void> {
+    this.reloadCalls.push(opts);
+    this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
+    this.runtimeParams.skills = opts.skillNames;
   }
 }
 
@@ -304,23 +310,42 @@ describe("agent-manager model hot switch", () => {
     expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
   });
 
-  it("filters same-member runtime failure system messages from activation prompts", async () => {
+  it("filters all member runtime failure system messages from activation prompts", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     messages = [
       { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: Date.now() },
       { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: Date.now() },
       { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: Date.now() },
-      { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: keep visible to pm', mentions: [], ts: Date.now() },
+      { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: hidden from pm too', mentions: [], ts: Date.now() },
+      { id: "task", type: "system", sender: "system", content: "[Task] qa moved task to review: **Check this**", mentions: [], ts: Date.now() },
+      { id: "knowledge", type: "system", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: Date.now() },
       { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: Date.now() },
     ];
 
     await manager.activateAgent("room", "pm");
 
     expect(handles[0].promptCalls[0]).toContain("@pm continue");
-    expect(handles[0].promptCalls[0]).toContain("keep visible to pm");
+    expect(handles[0].promptCalls[0]).toContain("[Task] qa moved task to review");
+    expect(handles[0].promptCalls[0]).toContain("[Knowledge] qa updated document");
+    expect(handles[0].promptCalls[0]).not.toContain("hidden from pm too");
     expect(handles[0].promptCalls[0]).not.toContain("context_length_exceeded");
     expect(handles[0].promptCalls[0]).not.toContain("model credential is no longer available");
     expect(handles[0].promptCalls[0]).not.toContain("setModel failed");
+  });
+
+  it("reloads active member resources in place without destroying the instance", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    member = { ...member, skills: ["review"] };
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+
+    const result = await manager.reloadMemberResources("room", "pm");
+
+    expect(result).toEqual({ ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." });
+    expect(handles).toHaveLength(1);
+    expect(first.destroyed).toBe(false);
+    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), agentPrompt: "test", skillNames: ["review"] });
+    expect(first.reloadCalls[0].skillPaths[0]).toContain("/tmp/bossmode-test/skills/review");
   });
 
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {

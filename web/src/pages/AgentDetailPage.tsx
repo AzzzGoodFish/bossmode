@@ -63,7 +63,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
         setContent(raw);
         setOriginalContent(raw);
       })
-      .catch((err) => toast(`Failed to load: ${err.message}`, "error"))
+      .catch((err) => { console.error("Failed to load Agent", err); toast("Couldn’t load this Agent. Try again.", "error"); })
       .finally(() => setLoading(false));
   };
 
@@ -123,10 +123,11 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     setChipAnchor(null);
     try {
       await updateRoomMember(roomId, member.name, { model, credentialId });
-      toast(`${member.name} → ${model}（仅当前房间，下一回合生效）`, "success");
+      toast(`${member.name} model updated for this Room. It applies on the next turn.`, "success");
       loadDuty();
-    } catch (err: any) {
-      toast(`切换失败: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to update member model", err);
+      toast("Couldn’t update the model. Check the connection in Settings → Models, then try again.", "error");
     }
   };
 
@@ -135,10 +136,11 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     setThinkingAnchor(null);
     try {
       await updateRoomMember(roomId, member.name, { thinkingLevel });
-      toast(`${member.name} thinking → ${thinkingLevel ?? "default"}（仅当前房间）`, "success");
+      toast(`${member.name} thinking level updated for this Room.`, "success");
       loadDuty();
-    } catch (err: any) {
-      toast(`切换失败: ${err.message}`, "error");
+    } catch (err) {
+      console.error("Failed to update thinking level", err);
+      toast("Couldn’t update the thinking level. Try again.", "error");
     }
   };
 
@@ -158,7 +160,8 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`, "error");
+      console.error("Failed to save Agent", err);
+      toast("Couldn’t save this Agent. Check the required fields, then try again.", "error");
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
     }
@@ -167,7 +170,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
   const handleDelete = async () => {
     if (!(await confirm(`Delete agent "${name}"? This cannot be undone.`))) return;
     try { await deleteAgent(name); onBack(); }
-    catch (err: any) { toast(`Delete failed: ${err.message}`, "error"); }
+    catch (err) { console.error("Failed to delete Agent", err); toast("Couldn’t delete this Agent. Try again.", "error"); }
   };
 
   const handleCancel = () => {
@@ -268,17 +271,17 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
           <div className="flex flex-wrap gap-x-6 gap-y-3 py-3.5 mt-4.5 mb-5 border-y border-line-soft">
             <Meta k="DEFAULT MODEL" v={agentData?.model || "—"} mono />
             <Meta k="SKILLS" v={skills.length ? skills.join(" · ") : "—"} />
-            <Meta k="ON DUTY" v={duty.length ? `${duty.length} 个房间` : "未上岗"} />
+            <Meta k="IN ROOMS" v={duty.length ? `${duty.length} Room${duty.length === 1 ? "" : "s"}` : "Not in a Room"} />
             <Meta k="TOKENS" v={tokens30d != null ? formatTokens(tokens30d) : "—"} mono />
           </div>
 
           {/* On-duty table */}
           <h3 className="text-[11px] font-semibold tracking-[0.06em] text-ink-3 mb-2.5">
-            ON DUTY — 跨房间在岗（含模型热切换）
+            ROOM MEMBERS
           </h3>
           {duty.length === 0 ? (
             <p className="text-xs text-ink-4 border border-line rounded-lg px-4 py-5 bg-surface-0/40">
-              该员工还没有被加入任何房间 — 在房间里 Add member 时选择此 agent 即可上岗。
+              This Agent is not used in any Room yet. Add a member in a Room and choose this Agent.
             </p>
           ) : (
             <div className="border border-line rounded-lg bg-surface-1 overflow-x-auto">
@@ -392,7 +395,7 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
           <h3 className="text-[11px] font-semibold tracking-[0.06em] text-ink-3 mt-7 mb-2.5">PROMPT</h3>
           {isBuiltin && !agentData?.systemPrompt ? (
             <p className="text-xs text-ink-4 border border-line rounded-lg px-4 py-4 bg-inset">
-              内置通用 agent：不注入自定义 system prompt，保留 runtime 默认提示词；角色在对话中动态定义。此 agent 不可编辑或删除。
+              This built-in general Agent uses the standard prompt and takes its role from the conversation. It cannot be edited or deleted.
             </p>
           ) : (
             <div className={`relative border border-line rounded-lg bg-inset px-4 py-3.5 ${promptExpanded ? "" : "max-h-[180px] overflow-hidden"}`}>
@@ -401,11 +404,11 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
               </div>
               {!promptExpanded && (
                 <div className="absolute inset-x-0 bottom-0 h-16 rounded-b-lg bg-gradient-to-t from-[var(--inset)] to-transparent flex items-end justify-center pb-2">
-                  <button onClick={() => setPromptExpanded(true)} className="text-[11px] text-accent-ink cursor-pointer">展开全文</button>
+                  <button onClick={() => setPromptExpanded(true)} className="text-[11px] text-accent-ink cursor-pointer">Show full prompt</button>
                 </div>
               )}
               {promptExpanded && (
-                <button onClick={() => setPromptExpanded(false)} className="block mx-auto mt-2 text-[11px] text-accent-ink cursor-pointer">收起</button>
+                <button onClick={() => setPromptExpanded(false)} className="block mx-auto mt-2 text-[11px] text-accent-ink cursor-pointer">Collapse</button>
               )}
             </div>
           )}

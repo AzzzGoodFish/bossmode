@@ -245,7 +245,7 @@ export interface ModelDefinitionConfig {
   maxTokens?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
-  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh", string | null>>;
+  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
   compat?: Record<string, unknown>;
   metadataSource?: ModelMetadataSource;
 }
@@ -487,8 +487,28 @@ export async function getKnowledgeEntry(path: string): Promise<KnowledgeEntry> {
   return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`);
 }
 
+async function apiFetchBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  if (res.status === 401) {
+    clearToken();
+    onUnauthorized?.();
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
+export async function getKnowledgeRawBlob(path: string): Promise<Blob> {
+  return apiFetchBlob(`/api/knowledge/raw?path=${encodeURIComponent(path)}`);
+}
+
 export interface ArtifactPreviewData {
-  type: "md" | "html";
+  type: "md" | "html" | "image";
   originalPath: string;
   path: string;
   title: string;
@@ -501,6 +521,14 @@ export async function getArtifactPreview(roomId: string, path: string): Promise<
 
 export async function getAttachmentPreview(roomId: string, filename: string): Promise<ArtifactPreviewData> {
   return apiFetch(`/api/rooms/${roomId}/attachments/${encodeURIComponent(filename)}/preview`);
+}
+
+export async function getArtifactRawBlob(roomId: string, path: string): Promise<Blob> {
+  return apiFetchBlob(`/api/rooms/${roomId}/artifact-raw?path=${encodeURIComponent(path)}`);
+}
+
+export async function getAttachmentRawBlob(roomId: string, filename: string): Promise<Blob> {
+  return apiFetchBlob(`/api/rooms/${roomId}/attachments/${encodeURIComponent(filename)}`);
 }
 
 export async function addKnowledgeEntry(
@@ -518,6 +546,17 @@ export async function updateKnowledgeEntry(
   return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, {
     method: "PUT",
     body: JSON.stringify({ title, content }),
+  });
+}
+
+export async function uploadKnowledgePng(path: string, file: File): Promise<KnowledgeEntry> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return apiFetch(`/api/knowledge/upload`, {
+    method: "POST",
+    body: JSON.stringify({ path, contentType: file.type || "image/png", dataBase64: btoa(binary) }),
   });
 }
 
@@ -558,6 +597,11 @@ export async function batchDeleteKnowledge(paths: string[]): Promise<{ deleted: 
 }
 
 // -- Rooms --
+
+export interface CreateRoomMemberInput {
+  agent: string;
+  name: string;
+}
 
 export interface RoomMemberRecord {
   id: string;
@@ -613,7 +657,7 @@ export async function getRooms(): Promise<Room[]> {
 export async function createRoom(
   name: string,
   cwd: string,
-  members: string[],
+  members: CreateRoomMemberInput[],
   ruleDocs?: string[],
   promptLeaderMemberName?: string,
 ): Promise<Room> {
@@ -768,10 +812,10 @@ export async function sendMessage(
   });
 }
 
-export async function addMember(roomId: string, agent: string): Promise<Room> {
+export async function addMember(roomId: string, agent: string, name?: string): Promise<Room> {
   return apiFetch(`/api/rooms/${roomId}/members`, {
     method: "POST",
-    body: JSON.stringify({ agent }),
+    body: JSON.stringify({ agent, ...(name ? { name } : {}) }),
   });
 }
 
@@ -785,6 +829,15 @@ export async function steerAgent(
   await apiFetch(`/api/rooms/${roomId}/agents/${agentName}/steer`, {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+}
+
+export async function reloadMemberResources(
+  roomId: string,
+  agentName: string,
+): Promise<{ ok: true; reloaded: boolean; message: string }> {
+  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/reload`, {
+    method: "POST",
   });
 }
 
@@ -1034,9 +1087,11 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   assignee?: string;
+  assigneeMemberId?: string;
   description?: string;
   references?: string[];
   subscribers?: string[];
+  subscriberMemberIds?: string[];
   comments?: TaskComment[];
   commentCount?: number;
   linearIssueId?: string;

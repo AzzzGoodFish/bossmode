@@ -7,9 +7,10 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
+import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
 import { readConfig, writeConfig } from "../shared/config.js";
@@ -18,22 +19,27 @@ import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, reso
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
-import type { RoomMemberRecord } from "../shared/types.js";
+import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
 // ── Rooms ──
 
 addRoute("GET", "/api/rooms", async (_req, res) => {
-  const rooms = roomStore.listRooms().map((room) => ({
-    ...room,
-    agentStatuses: getRoomAgentStatuses(room.id),
-  }));
-  sendJson(res, 200, rooms);
+  try {
+    const rooms = roomStore.listRoomsStrict().map((room) => ({
+      ...room,
+      agentStatuses: getRoomAgentStatuses(room.id),
+    }));
+    sendJson(res, 200, rooms);
+  } catch (err) {
+    logger.error("workspace-api", "failed to load Room list", { error: String(err) });
+    sendJson(res, 500, { error: "Couldn’t load Rooms" });
+  }
 });
 
 addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
-    name?: string; cwd?: string; members?: string[];
+    name?: string; cwd?: string; members?: unknown;
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
     docsPath?: string | null;
@@ -49,36 +55,44 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     return;
   }
 
-  const members = body.members || [];
-  if (!Array.isArray(members)) {
+  if (!Array.isArray(body.members)) {
     sendJson(res, 400, { error: "members must be an array" });
     return;
   }
-  const validation = roomStore.validateRoomMemberNameList(members.map(String));
+  if (!body.members.every((member) => member && typeof member === "object" && !Array.isArray(member))) {
+    sendJson(res, 400, { error: "members must contain { agent, name } objects" });
+    return;
+  }
+  const members = body.members as CreateRoomMemberInput[];
+  if (!members.every((member) => typeof member.agent === "string" && typeof member.name === "string" && member.agent.trim() && member.name.trim())) {
+    sendJson(res, 400, { error: "agent and member name are required" });
+    return;
+  }
+  const validation = roomStore.validateRoomMemberNameList(members.map((member) => member.name));
   if (validation) {
-    sendJson(res, 400, { error: validation });
+    sendJson(res, validation.startsWith("Duplicate") ? 409 : 400, { error: validation });
+    return;
+  }
+  const promptLeaderMemberName = typeof body.promptLeaderMemberName === "string"
+    ? roomStore.normalizeMemberName(body.promptLeaderMemberName)
+    : "";
+  if (!promptLeaderMemberName) {
+    sendJson(res, 400, { error: "promptLeaderMemberName is required" });
+    return;
+  }
+  if (!members.some((member) => roomStore.normalizeMemberName(member.name) === promptLeaderMemberName)) {
+    sendJson(res, 400, { error: "promptLeaderMemberName must be one of the room members" });
     return;
   }
   try {
-    const promptLeaderMemberName = typeof body.promptLeaderMemberName === "string"
-      ? roomStore.normalizeMemberName(body.promptLeaderMemberName)
-      : "";
-    if (!promptLeaderMemberName) {
-      sendJson(res, 400, { error: "promptLeaderMemberName is required" });
-      return;
-    }
-    const normalizedMembers = members.map((member) => roomStore.normalizeMemberName(String(member || "")));
-    if (!normalizedMembers.includes(promptLeaderMemberName)) {
-      sendJson(res, 400, { error: "promptLeaderMemberName must be one of the room members" });
-      return;
-    }
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
       promptLeaderMemberName,
       docsPath: body.docsPath,
     });
     sendJson(res, 200, room);
   } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
+    const message = String(err?.message || err);
+    sendJson(res, message.startsWith("Agent not found:") ? 404 : 400, { error: message });
   }
 });
 
@@ -335,7 +349,7 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
 
 // ── Room Members ──
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function normalizeRoomModelInput(value: unknown): string | null | undefined {
   if (value === null) return null;
@@ -411,7 +425,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     if (body.thinkingLevel === null || body.thinkingLevel === "") patch.thinkingLevel = null;
     else if (typeof body.thinkingLevel === "string" && THINKING_LEVELS.has(body.thinkingLevel)) patch.thinkingLevel = body.thinkingLevel;
     else {
-      sendJson(res, 400, { error: "thinkingLevel must be one of off|minimal|low|medium|high|xhigh" });
+      sendJson(res, 400, { error: "thinkingLevel must be one of off|minimal|low|medium|high|xhigh|max" });
       return;
     }
   }
@@ -458,6 +472,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
       sendJson(res, 409, { error: `Cannot rename a busy member (${busy.reason || "busy"}). Stop or wait for it to become idle first.` });
       return;
     }
+    const oldName = roomMember.name;
     const renamed = roomStore.renameRoomMember(params.id, roomMember.id, body.name);
     if (!renamed.ok) {
       sendJson(res, renamed.code === "duplicate" ? 409 : 400, { error: renamed.error });
@@ -466,6 +481,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     currentMemberRef = renamed.member.id;
     destroyInstance(params.id, renamed.member.id);
     result.renamed = true;
+    result.taskReferencesUpdated = taskStore.renameParticipant(params.id, { memberId: renamed.member.id, oldName, newName: renamed.member.name });
   }
 
   if (hasModel || hasCredential || hasThinking || hasMcpServers) {
@@ -490,15 +506,19 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { agent?: string };
+  const body = (await parseBody(req)) as { agent?: string; name?: string; config?: Partial<RoomMemberConfig> };
   if (!body.agent) {
     sendJson(res, 400, { error: "agent name is required" });
     return;
   }
+  if (typeof body.name !== "string" || !body.name.trim()) {
+    sendJson(res, 400, { error: "member name is required" });
+    return;
+  }
 
-  const added = roomStore.addMember(params.id, body.agent);
-  if (!added) {
-    sendJson(res, 409, { error: "Agent is already a member" });
+  const added = roomStore.addRoomMemberFromAgent(params.id, { agentName: body.agent, memberName: body.name, config: body.config });
+  if (!added.ok) {
+    sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, { error: added.error });
     return;
   }
 
@@ -557,7 +577,32 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
   }
 });
 
-// ── Agent Abort ──
+// ── Agent Reload ──
+
+addRoute("POST", "/api/rooms/:id/agents/:agent/reload", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+
+  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
+  if (!member) {
+    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
+    return;
+  }
+
+  try {
+    const result = await reloadMemberResources(params.id, member.id);
+    logger.info("api", "POST /api/rooms/:id/agents/:agent/reload", { agent: params.agent, roomId: params.id, reloaded: result.reloaded });
+    sendJson(res, 200, result);
+  } catch (err: any) {
+    logger.warn("api", "member reload failed", { agent: params.agent, roomId: params.id, error: err.message || String(err) });
+    sendJson(res, 409, { error: err.message || String(err) });
+  }
+});
+
+// ── Agent Reset ──
 
 addRoute("POST", "/api/rooms/:id/agents/:agent/reset-session", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);

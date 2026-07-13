@@ -1,33 +1,58 @@
-# Build outputs
+# Dependencies and build outputs
 node_modules/
 dist/
 web/dist/
+coverage/
 
-# Local runtime data (created when running bossmode from this directory)
+# Local Bossmode runtime and generated data
 .bossmode-attachments/
+**/.bossmode-attachments/
 .bossmode-prototypes/
-memory/
-
-# Tooling caches
+**/.bossmode-prototypes/
 .playwright-mcp/
-
-# Secrets
-.env
-.env.*
-
-# Local archive — packed releases, screenshots, session logs (not for git)
+**/.playwright-mcp/
+memory/
 archive/
 
-# Stray artifacts at repo root (keep the tree clean)
-/*.png
-/*.txt
-/*.tgz
-/*.jsonl
-
-# Legacy exploration artifacts — do not commit
+# Internal knowledge and prototype material (canonical location: Bossmode Library)
+docs/bossmode/
+design-prototype/
 spikes/
 prototype/
 web/prototype-*.html
 
-# Design prototype screenshots (keep the .html sources only)
-design-prototype/*.png
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+credentials.json
+credential.json
+secrets.json
+secret.json
+
+# Generated packages, logs, databases, and session artifacts
+*.tgz
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+
+# Tool, editor, and OS caches
+.cache/
+.tmp/
+tmp/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Stray root screenshots and scratch output
+/*.png
+/*.jpg
+/*.jpeg
+/*.txt

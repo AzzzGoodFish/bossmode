@@ -9,7 +9,11 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
   const sourceAgent = roomMember.sourceAgent;
   const getMember = "getMember" in memberStore ? (memberStore as any).getMember as (id: string) => AgentMemberConfig | undefined : undefined;
   const getMemberByName = "getMemberByName" in memberStore ? (memberStore as any).getMemberByName as (name: string) => AgentMemberConfig | undefined : undefined;
-  const sourceMember = roomMember.sourceMemberId && getMember ? getMember(roomMember.sourceMemberId) : getMemberByName?.(roomMember.name);
+  const sourceMember = roomMember.sourceMemberId && getMember
+    ? getMember(roomMember.sourceMemberId)
+    : roomMember.migratedFrom
+      ? getMemberByName?.(roomMember.migratedFrom.memberName || roomMember.name)
+      : undefined;
   const agentDef = loadAgentDefinition(sourceAgent || sourceMember?.agent || roomMember.name);
   if (!sourceMember && !agentDef) return null;
 

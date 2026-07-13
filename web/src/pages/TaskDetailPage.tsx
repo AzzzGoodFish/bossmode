@@ -6,6 +6,7 @@ import { Markdown } from "../components/Markdown";
 import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
 import { MobileTopBar } from "../components/MobileTopBar";
+import { userActionError } from "../utils/user-error";
 
 interface TaskDetailPageProps {
   roomId: string;
@@ -91,7 +92,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
         setSubscribers(found.subscribers || []);
         setComments(found.comments || []);
       })
-      .catch((err: any) => toast(err.message, "error"))
+      .catch((err) => { console.error("Failed to load task", err); toast(userActionError("load this task"), "error"); })
       .finally(() => setLoading(false));
   }, [roomId, taskId, isCreate, toast]);
 
@@ -125,8 +126,9 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
         setDirty(false);
         toast("Task saved", "success");
       }
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to save task", err);
+      toast(userActionError("save this task", "Check the required fields, then try again."), "error");
     } finally {
       setSaving(false);
     }
@@ -142,8 +144,9 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
       setComments(updated.comments || []);
       setNewComment("");
       toast("Comment added", "success");
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to add task comment", err);
+      toast(userActionError("add this comment"), "error");
     } finally {
       setCommenting(false);
     }
@@ -154,8 +157,9 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
     try {
       await deleteTaskApi(roomId, taskId, "user");
       onBack();
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to delete task", err);
+      toast(userActionError("delete this task"), "error");
     }
   };
 

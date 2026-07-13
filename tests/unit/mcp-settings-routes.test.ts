@@ -47,7 +47,7 @@ describe("MCP settings routes", () => {
   it("saves valid MCP JSON and enable state", async () => {
     parseBodyMock.mockResolvedValue({
       enabled: true,
-      configText: JSON.stringify({ mcpServers: { playwright: { url: "http://10.8.0.24:8931/mcp" } } }),
+      configText: JSON.stringify({ mcpServers: { playwright: { url: "http://192.0.2.24:8931/mcp" } } }),
     });
 
     const handler = routes.get("PUT /api/settings/mcp");
@@ -56,7 +56,7 @@ describe("MCP settings routes", () => {
     expect(writeConfigMock).toHaveBeenCalledWith(expect.objectContaining({ mcp: { enabled: true } }));
     const savedPath = join(dir, "mcp", "mcp.json");
     expect(existsSync(savedPath)).toBe(true);
-    expect(JSON.parse(readFileSync(savedPath, "utf-8"))).toEqual({ mcpServers: { playwright: { url: "http://10.8.0.24:8931/mcp" } } });
+    expect(JSON.parse(readFileSync(savedPath, "utf-8"))).toEqual({ mcpServers: { playwright: { url: "http://192.0.2.24:8931/mcp" } } });
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({ enabled: true, serverCount: 1, savedServerCount: 1 }));
   });
 

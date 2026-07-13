@@ -84,7 +84,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   async function createRoom(name: string, members: string[]): Promise<Room> {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members, promptLeaderMemberName: members[0] },
+      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);
@@ -374,6 +374,66 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   // ── T2.6: Dynamic member addition + cursor ──
 
   describe("T2.6: Add member — cursor initialized to latest (F16)", () => {
+    it("adds multiple named room members from the same Agent", async () => {
+      const room = await createRoom("t26-same-agent", ["pm"]);
+
+      const addA = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
+        token,
+        body: { agent: "developer", name: "dev-a" },
+      });
+      const addB = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
+        token,
+        body: { agent: "developer", name: "dev-b" },
+      });
+      expect(addA.status).toBe(200);
+      expect(addB.status).toBe(200);
+
+      const updatedRoom = JSON.parse(addB.body);
+      expect(updatedRoom.members).toEqual(["pm", "dev-a", "dev-b"]);
+      const developers = updatedRoom.roomMembers.filter((member: any) => member.sourceAgent === "developer");
+      expect(developers.map((member: any) => member.name)).toEqual(["dev-a", "dev-b"]);
+      expect(new Set(developers.map((member: any) => member.id)).size).toBe(2);
+
+      const duplicate = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
+        token,
+        body: { agent: "developer", name: "dev-a" },
+      });
+      expect(duplicate.status).toBe(409);
+    });
+
+    it("tasks bind to room member id and display name follows rename", async () => {
+      const room = await createRoom("t26-task-member-id", ["pm"]);
+      await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
+        token,
+        body: { agent: "developer", name: "dev-a" },
+      });
+      const roomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
+      const member = JSON.parse(roomRes.body).roomMembers.find((entry: any) => entry.name === "dev-a");
+
+      const createTaskRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/tasks`, {
+        token,
+        body: { title: "Implement UI", createdBy: "pm", assignee: "dev-a", subscribers: ["dev-a"] },
+      });
+      expect(createTaskRes.status).toBe(200);
+      const createdTask = JSON.parse(createTaskRes.body);
+      expect(createdTask.assignee).toBe("dev-a");
+      expect(createdTask.assigneeMemberId).toBe(member.id);
+      expect(createdTask.subscriberMemberIds).toEqual([member.id]);
+
+      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/dev-a`, {
+        token,
+        body: { name: "dev-ui" },
+      });
+      expect(renameRes.status).toBe(200);
+
+      const taskRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/tasks/${createdTask.id}`, { token });
+      expect(taskRes.status).toBe(200);
+      const renamedTask = JSON.parse(taskRes.body);
+      expect(renamedTask.assignee).toBe("dev-ui");
+      expect(renamedTask.assigneeMemberId).toBe(member.id);
+      expect(renamedTask.subscribers).toEqual(["pm", "dev-ui"]);
+    });
+
     it("new member cursor set to latest message ID", async () => {
       const room = await createRoom("t26-test", ["pm"]);
 
@@ -385,7 +445,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       // Add qa as new member
       const addRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
         token,
-        body: { agent: "qa" },
+        body: { agent: "qa", name: "qa" },
       });
       expect(addRes.status).toBe(200);
       const updatedRoom = JSON.parse(addRes.body);

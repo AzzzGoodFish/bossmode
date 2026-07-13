@@ -19,8 +19,9 @@ export function Login({ onLogin }: LoginProps) {
     try {
       await login(username, password);
       onLogin(username);
-    } catch (err: any) {
-      setError(err.message || "Login failed");
+    } catch (err) {
+      console.error("Failed to sign in", err);
+      setError("Couldn’t sign in. Check your username and password, then try again.");
     } finally {
       setLoading(false);
     }

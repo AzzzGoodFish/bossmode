@@ -13,7 +13,9 @@
  * - T2.8: Skill delete with agent references
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 
 // Mock pi-mono (required by imports but not exercised in CRUD tests)
@@ -74,6 +76,36 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
   // ══════════════════════════════════════════
 
   describe("T1.1: Agent list", () => {
+    it("returns 500 instead of fake empty when the Agent authority is unreadable, then recovers", async () => {
+      const agentsDir = join(getTestBossmodeDir(), "agents");
+      const backup = `${agentsDir}-backup`;
+      renameSync(agentsDir, backup);
+      writeFileSync(agentsDir, "not a directory", "utf8");
+      try {
+        const failed = await jsonRequest(ts.port, "GET", "/api/agents", { token });
+        expect(failed.status).toBe(500);
+        expect(JSON.parse(failed.body).error).toBe("Couldn’t load Agent templates");
+      } finally {
+        unlinkSync(agentsDir);
+        renameSync(backup, agentsDir);
+      }
+      const recovered = await jsonRequest(ts.port, "GET", "/api/agents", { token });
+      expect(recovered.status).toBe(200);
+      expect(Array.isArray(JSON.parse(recovered.body))).toBe(true);
+    });
+
+    it("returns 500 rather than a partial list when one Agent file is invalid", async () => {
+      const invalidPath = join(getTestBossmodeDir(), "agents", "invalid-authority.md");
+      writeFileSync(invalidPath, "---\nname: [unterminated\n---\nbad", "utf8");
+      try {
+        const failed = await jsonRequest(ts.port, "GET", "/api/agents", { token });
+        expect(failed.status).toBe(500);
+      } finally {
+        unlinkSync(invalidPath);
+      }
+      expect((await jsonRequest(ts.port, "GET", "/api/agents", { token })).status).toBe(200);
+    });
+
     it("GET /api/agents returns agents with skills/tags", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/agents", { token });
       expect(res.status).toBe(200);

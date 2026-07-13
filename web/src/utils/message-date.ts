@@ -5,8 +5,8 @@ export function isSameLocalDate(a: number | Date, b: number | Date): boolean {
 }
 
 export function formatMessageDateSeparator(ts: number, now: number = Date.now()): string {
-  if (isSameLocalDate(ts, now)) return "今天";
-  return new Date(ts).toLocaleDateString("zh-CN", {
+  if (isSameLocalDate(ts, now)) return "Today";
+  return new Date(ts).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",

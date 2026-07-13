@@ -66,11 +66,11 @@ function parseAttachmentLine(line: string): { originalName: string; path: string
 
 describe("parseAttachmentLine", () => {
   it("parses standard attachment line", () => {
-    const line = "Attachment: [original filename: screenshot.png](/home/user/.bossmode/rooms/abc/attachments/a1b2c3d4e5f6.png)";
+    const line = "Attachment: [original filename: screenshot.png](/workspace/user/.bossmode/rooms/abc/attachments/a1b2c3d4e5f6.png)";
     const result = parseAttachmentLine(line);
     expect(result).toEqual({
       originalName: "screenshot.png",
-      path: "/home/user/.bossmode/rooms/abc/attachments/a1b2c3d4e5f6.png",
+      path: "/workspace/user/.bossmode/rooms/abc/attachments/a1b2c3d4e5f6.png",
     });
   });
 

@@ -40,11 +40,11 @@ vi.mock("../../src/workforce/member-store.js", () => ({
 }));
 
 vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: 1, roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1 }] })),
+  getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: 1, roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }] })),
   getCursors: vi.fn(() => ({ rm_dev: null })),
   setCursor: state.setCursor,
-  resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) => ref === "developer" || ref === "rm_dev" ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1 } : null),
-  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1 }]),
+  resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) => ref === "developer" || ref === "rm_dev" ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } } : null),
+  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }]),
 }));
 
 vi.mock("../../src/workspace/session-store.js", () => ({
@@ -141,5 +141,90 @@ describe("chat enforcement pending reply", () => {
     await activateAgent("room1", "developer");
 
     expect(handle.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues once after length truncation even when SDK emits no compaction event", async () => {
+    state.promptImpl = vi.fn(async () => {
+      const call = handle.prompt.mock.calls.length;
+      if (call === 1) {
+        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+        handle.emit({ type: "message_end", text: "", stopReason: "max_output_tokens" });
+        handle.emit({ type: "agent_end" });
+      } else if (call === 2) {
+        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-2", result: { ok: true }, isError: false });
+      }
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(2);
+    expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
+    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `chat` call");
+  });
+
+  it("continues once after length-truncated threshold compaction with no SDK retry", async () => {
+    state.promptImpl = vi.fn(async () => {
+      const call = handle.prompt.mock.calls.length;
+      if (call === 1) {
+        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+        handle.emit({ type: "message_end", text: "", stopReason: "length" });
+        handle.emit({ type: "agent_end" });
+        handle.emit({ type: "compaction_start", reason: "threshold" });
+        handle.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+      } else if (call === 2) {
+        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-2", result: { ok: true }, isError: false });
+      }
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(2);
+    expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
+    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `chat` call");
+  });
+
+  it("does not continue after normal threshold compaction", async () => {
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+      handle.emit({ type: "message_end", text: "done", stopReason: "stop" });
+      handle.emit({ type: "agent_end" });
+      handle.emit({ type: "compaction_start", reason: "threshold" });
+      handle.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not duplicate SDK retry when runtime starts again after length truncation", async () => {
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+      handle.emit({ type: "message_end", text: "", stopReason: "length" });
+      handle.emit({ type: "agent_end" });
+      handle.emit({ type: "compaction_start", reason: "overflow" });
+      handle.emit({ type: "compaction_end", reason: "overflow", aborted: false, willRetry: true });
+      handle.emit({ type: "agent_start" });
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after one automatic length continuation to avoid loops", async () => {
+    state.promptImpl = vi.fn(async () => {
+      const call = handle.prompt.mock.calls.length;
+      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: `call-${call}`, result: { ok: true }, isError: false });
+      handle.emit({ type: "message_end", text: "", stopReason: "length" });
+      handle.emit({ type: "agent_end" });
+      handle.emit({ type: "compaction_start", reason: "threshold" });
+      handle.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(2);
+    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", expect.stringContaining("Automatic continuation stopped to avoid a loop"));
   });
 });

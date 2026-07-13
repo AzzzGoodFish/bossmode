@@ -179,6 +179,22 @@ describe("agent-manager context usage cache", () => {
     }));
   });
 
+  it("accepts compacted snapshots for explicit post-compaction refresh instead of showing stale pre-compact usage", async () => {
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    mocks.broadcastToRoom.mockReset();
+    mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 0, rawMaxTokens: 200000, percentage: 0, model: "sonnet", compacted: true });
+
+    refreshContextUsage("room1", "developer", { acceptCompactedSnapshot: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getAgentContextUsage("room1", "developer")).toEqual({ totalTokens: 0, rawMaxTokens: 200000, percentage: 0, model: "sonnet", compacted: true });
+    expect(mocks.broadcastToRoom).toHaveBeenCalledWith("room1", expect.objectContaining({
+      type: "agent:context_usage",
+      usage: { totalTokens: 0, rawMaxTokens: 200000, percentage: 0, model: "sonnet", compacted: true },
+    }));
+  });
+
   it("marks compacted on a same-session significant context drop and keeps the marker across immediate fallback refresh", async () => {
     mockHandle.getContextUsage.mockResolvedValueOnce({ totalTokens: 18017, rawMaxTokens: 1200, percentage: 1501.4, model: "sonnet" });
     refreshContextUsage("room1", "developer");

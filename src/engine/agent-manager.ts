@@ -60,29 +60,26 @@ function formatRuntimeErrorMessage(error: unknown): string {
   return message;
 }
 
-function quoteMember(memberName: string): string {
-  return `"${memberName}"`;
-}
+const MEMBER_RUNTIME_FAILURE_PATTERNS = [
+  /^Member "[^"]+" request failed\./,
+  /^Member "[^"]+" error:/,
+  /^Member "[^"]+" runtime ended unexpectedly/,
+  /^Member "[^"]+" model credential is no longer available\./,
+  /^Failed to create member "[^"]+":/,
+  /^Failed to activate member "[^"]+":/,
+  /^Failed to switch model for "[^"]+":/,
+  /^Failed to switch thinking level for "[^"]+":/,
+  /^Failed to refresh model credential for "[^"]+":/,
+];
 
-function isSelfRuntimeFailureMessage(message: RoomMessage, memberName: string): boolean {
+function isMemberRuntimeFailureMessage(message: RoomMessage): boolean {
   if (message.sender !== "system") return false;
   const content = message.content || "";
-  const quoted = quoteMember(memberName);
-  return (
-    content.startsWith(`Member ${quoted} request failed.`) ||
-    content.startsWith(`Member ${quoted} error:`) ||
-    content.startsWith(`Member ${quoted} runtime ended unexpectedly`) ||
-    content.startsWith(`Member ${quoted} model credential is no longer available.`) ||
-    content.startsWith(`Failed to create member ${quoted}:`) ||
-    content.startsWith(`Failed to activate member ${quoted}:`) ||
-    content.startsWith(`Failed to switch model for ${quoted}:`) ||
-    content.startsWith(`Failed to switch thinking level for ${quoted}:`) ||
-    content.startsWith(`Failed to refresh model credential for ${quoted}:`)
-  );
+  return MEMBER_RUNTIME_FAILURE_PATTERNS.some((pattern) => pattern.test(content));
 }
 
-function filterAgentVisibleMessages(messages: RoomMessage[], memberName: string): RoomMessage[] {
-  return messages.filter((message) => !isSelfRuntimeFailureMessage(message, memberName));
+function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
+  return messages.filter((message) => !isMemberRuntimeFailureMessage(message));
 }
 
 interface PendingModelSwitch {
@@ -115,6 +112,9 @@ interface AgentInstance {
   pendingCredentialRefresh?: PendingCredentialRefresh;
   pendingChatReply: boolean;
   hadErrorInTurn: boolean;
+  lastMessageEndWasLength: boolean;
+  lengthContinuationPending: boolean;
+  lengthContinuationAttempted: boolean;
   currentPromptTrigger?: string;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
@@ -194,6 +194,14 @@ function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
 }
 
 const CHAT_REPLY_WARNING = "⚠ You were activated by a room message but ended your turn without calling the `chat` tool — your reply was not delivered to anyone. Please respond now with a single `chat` call. If you have nothing substantial to add, send a one-line status.";
+const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result with a `chat` call.";
+const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
+
+function isLengthStopReason(stopReason: unknown): boolean {
+  if (typeof stopReason !== "string") return false;
+  const normalized = stopReason.toLowerCase();
+  return normalized === "length" || normalized.includes("max_tokens") || normalized.includes("max_output");
+}
 
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
   if (instance.queuedInputs.length === 0) return;
@@ -207,6 +215,26 @@ function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): vo
   });
 }
 
+async function maybeRunLengthContinuation(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<boolean> {
+  if (!instance.lengthContinuationPending || opts.skipChatWarning || isSummarizerInstance(instance)) return false;
+  instance.lengthContinuationPending = false;
+  if (instance.lengthContinuationAttempted) {
+    instance.lastMessageEndWasLength = false;
+    clearPendingChatReply(instance, "length_continuation_loop_guard");
+    logger.warn("agent", "lengthContinuationLoopGuard", { member: instance.agentName, roomId: instance.roomId, trigger });
+    postMessage(instance.roomId, "system", `Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
+    return true;
+  }
+  instance.lengthContinuationAttempted = true;
+  instance.lastMessageEndWasLength = false;
+  markPendingChatReply(instance, "length_continuation");
+  logger.warn("agent", "lengthContinuationPrompt", { member: instance.agentName, roomId: instance.roomId, trigger });
+  await runPrompt(instance, `${LENGTH_CONTINUATION_PROMPT}\n\n${ROOM_REPLY_FOOTER}`, "length_continuation", (err) => {
+    logger.error("agent", "length continuation prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
+  });
+  return true;
+}
+
 async function finalizePromptSettlement(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<void> {
   updateDispatchState(instance, "idle", trigger);
   applyPendingAfterPromptSettlement(instance, trigger);
@@ -214,6 +242,7 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
     drainQueuedInputsAsPrompt(instance, trigger);
     return;
   }
+  if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
   if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn && !isSummarizerInstance(instance)) {
     clearPendingChatReply(instance, "chat_warning");
     logger.warn("agent", "pendingChatReplyWarning", { member: instance.agentName, roomId: instance.roomId, trigger });
@@ -232,6 +261,9 @@ async function runPrompt(
   updateDispatchState(instance, "promptSubmitted", trigger);
   instance.promptInFlight = true;
   instance.hadErrorInTurn = false;
+  instance.lastMessageEndWasLength = false;
+  instance.lengthContinuationPending = false;
+  if (trigger !== "length_continuation" && trigger !== "chat_warning") instance.lengthContinuationAttempted = false;
   instance.currentPromptTrigger = trigger;
   try {
     await instance.handle.prompt(message);
@@ -603,6 +635,9 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         queuedInputs: [],
         pendingChatReply: false,
         hadErrorInTurn: false,
+        lastMessageEndWasLength: false,
+        lengthContinuationPending: false,
+        lengthContinuationAttempted: false,
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: normalizeSwitchModelRef(member.model || "claude-sonnet-4-6"),
@@ -618,6 +653,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         }
         if (suppressRoomState) return;
         if (event.type === "agent_start") {
+          if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
           updateDispatchState(instance, "running", event.type);
           flushQueuedInputs(instance, event.type);
         } else if (event.type === "agent_end") {
@@ -635,6 +671,14 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           instance.queuedInputs = [];
         }
         if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
+
+        if (event.type === "message_end") {
+          instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
+          if (instance.lastMessageEndWasLength) {
+            instance.lengthContinuationPending = true;
+            logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+          }
+        }
 
         if (event.type === "message_end" && event.stopReason === "error") {
           instance.hadErrorInTurn = true;
@@ -857,8 +901,15 @@ export function getAgentContextUsage(roomId: string, memberRef: string): Context
   return contextUsageCache.get(key) ?? null;
 }
 
-/** Proactively refresh context usage cache (called on agent_end). Fire-and-forget, non-blocking. */
-export function refreshContextUsage(roomId: string, memberRef: string): void {
+interface RefreshContextUsageOptions {
+  /** Trust compacted/null-token usage as a real post-compact update instead of carrying forward the previous value. */
+  acceptCompactedSnapshot?: boolean;
+  /** Extra delayed refreshes for runtimes that update session stats shortly after compaction_end. */
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+function refreshContextUsageOnce(roomId: string, memberRef: string, options: RefreshContextUsageOptions = {}): void {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const agentName = member?.name || memberRef;
@@ -869,9 +920,9 @@ export function refreshContextUsage(roomId: string, memberRef: string): void {
   instance.handle.getContextUsage().then((usage) => {
     if (!usage) return;
     const previous = contextUsageCache.get(key);
-    if (usage.compacted && previous) usage = { ...previous, compacted: true };
+    if (usage.compacted && previous && !options.acceptCompactedSnapshot) usage = { ...previous, compacted: true };
     else if (isCompactUsageDrop(previous, usage) || shouldKeepCompactedMarker(previous, usage)) usage = { ...usage, compacted: true };
-    if (usage.compacted && !previous) return;
+    if (usage.compacted && !previous && !options.acceptCompactedSnapshot) return;
     const crossedCompactionThreshold = !usage.compacted && usage.percentage >= 80 && (!previous || previous.percentage < 80);
     if (crossedCompactionThreshold && !contextCompactionWarningCache.has(key)) {
       contextCompactionWarningCache.add(key);
@@ -895,6 +946,16 @@ export function refreshContextUsage(roomId: string, memberRef: string): void {
       usage,
     });
   }).catch(() => {});
+}
+
+/** Proactively refresh context usage cache (called on agent_end / compaction_end). Fire-and-forget, non-blocking. */
+export function refreshContextUsage(roomId: string, memberRef: string, options: RefreshContextUsageOptions = {}): void {
+  refreshContextUsageOnce(roomId, memberRef, options);
+  const retries = Math.max(0, options.retries || 0);
+  const delay = Math.max(0, options.retryDelayMs || 0);
+  for (let i = 1; i <= retries; i += 1) {
+    setTimeout(() => refreshContextUsageOnce(roomId, memberRef, options), delay * i);
+  }
 }
 
 export const refreshContextUsageOnIdle = refreshContextUsage;
@@ -1012,6 +1073,42 @@ export function getMemberInstances(memberName: string): Array<{
     }
   }
   return result;
+}
+
+export async function reloadMemberResources(roomId: string, memberRef: string): Promise<{ ok: true; reloaded: boolean; message: string }> {
+  const room = roomStore.getRoom(roomId);
+  if (!room) throw new Error("Room not found");
+  const member = resolveRoomMember(roomId, memberRef);
+  if (!member) throw new Error(`Member not found: ${memberRef}`);
+  const memberId = member.id;
+  const key = instanceKey(roomId, memberId);
+  const instance = instances.get(key);
+  if (!instance) {
+    return { ok: true, reloaded: false, message: "Member is not running. Latest configuration will apply on next activation." };
+  }
+  if (instance.status === "working" || instance.dispatchState !== "idle" || instance.promptInFlight) {
+    throw new Error("Member is busy. Reload when the current turn is idle.");
+  }
+  if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
+
+  const agentDef = loadAgentDefinition(member.agent);
+  if (!agentDef) throw new Error(`Agent definition not found: ${member.agent}`);
+  const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+  const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
+  const skills = resolveSkills(member, agentDef);
+  const skillPaths = skills.map((s) => join(getBossmodeDir(), "skills", s));
+
+  await instance.handle.reloadResources({
+    roomId,
+    member,
+    agentPrompt: compiled.agentPrompt,
+    appendSystemPrompt: compiled.appendSystemPrompt,
+    skillPaths,
+    skillNames: skills,
+  });
+  emitAgentLocalEvent(roomId, memberId, { type: "system", text: "Reloaded member resources in place." });
+  logger.info("agent", "member resources reloaded", { roomId, member: member.name, memberId, skills: skills.length });
+  return { ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." };
 }
 
 export function resetAgentSession(roomId: string, memberRef: string): { ok: true; message: string } {

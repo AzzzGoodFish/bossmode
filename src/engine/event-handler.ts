@@ -184,8 +184,12 @@ export function handleAgentEvent(
     return "working";
   }
 
-  if (processedEvent.type === "message_end" || processedEvent.type === "compaction_end") {
+  if (processedEvent.type === "message_end") {
     refreshContextUsage(roomId, memberId || agentName);
+  }
+
+  if (processedEvent.type === "compaction_end") {
+    refreshContextUsage(roomId, memberId || agentName, { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
   }
 
   if (processedEvent.type === "agent_end") {

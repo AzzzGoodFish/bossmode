@@ -7,10 +7,10 @@
 //
 // Response:
 //   {
-//     "path": "/home/fish/dev",
-//     "parent": "/home/fish",
-//     "segments": [{ "name": "fish", "path": "/home/fish" }, ...],
-//     "dirs": [{ "name": "bossmode", "path": "/home/fish/dev/bossmode" }, ...]
+//     "path": "~/dev",
+//     "parent": "~",
+//     "segments": [{ "name": "user", "path": "~" }, ...],
+//     "dirs": [{ "name": "bossmode", "path": "~/dev/bossmode" }, ...]
 //   }
 
 import { readdirSync, statSync, existsSync } from "node:fs";

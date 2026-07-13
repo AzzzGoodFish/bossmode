@@ -25,22 +25,21 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("addEntry writes markdown with frontmatter at chosen path", async () => {
+  it("addEntry writes plain markdown without injecting frontmatter", async () => {
     const { addEntry, getEntry } = await import("../../src/knowledge/store.js");
     const entry = addEntry("Architecture Overview", "# Overview\n\nSome content.", "architect", "bossmode/architecture/overview.md");
     expect(entry.id).toBe("bossmode/architecture/overview.md");
-    expect(entry.title).toBe("Architecture Overview");
+    expect(entry.title).toBe("Overview");
 
     const abs = join(tmpDir, "knowledge", "docs", "bossmode", "architecture", "overview.md");
     expect(existsSync(abs)).toBe(true);
     const raw = readFileSync(abs, "utf-8");
-    expect(raw).toMatch(/^---\n/);
-    expect(raw).toMatch(/title: Architecture Overview/);
-    expect(raw).toMatch(/# Overview/);
+    expect(raw).toBe("# Overview\n\nSome content.");
+    expect(raw).not.toMatch(/^---\n/);
 
     const got = getEntry("bossmode/architecture/overview.md");
     expect(got).not.toBeNull();
-    expect(got!.title).toBe("Architecture Overview");
+    expect(got!.title).toBe("Overview");
     expect(got!.content).toContain("# Overview");
   });
 
@@ -62,7 +61,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     const before = getEntry("notes/doc.md")!;
     const updated = updateEntry("notes/doc.md", "New", "new content");
     expect(updated).not.toBeNull();
-    expect(updated!.title).toBe("New");
+    expect(updated!.title).toBe("doc");
     expect(updated!.content).toBe("new content");
     expect(updated!.updatedAt).toBeGreaterThanOrEqual(before.updatedAt);
   });
@@ -108,7 +107,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
 
     expect(searchEntries("react").length).toBe(1);
     expect(searchEntries("HOOKS").length).toBe(1);
-    expect(searchEntries("guide").length).toBe(2); // finds both across project folders
+    expect(searchEntries("guide").length).toBe(0); // no frontmatter title; heading/filename/content only
     expect(searchEntries("nothing").length).toBe(0);
   });
 
@@ -154,7 +153,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     expect(getEntry("bossmode/rules/sub/b.md")).toBeNull();
   });
 
-  it("listEntries parses pre-existing markdown files with frontmatter", async () => {
+  it("listEntries treats pre-existing frontmatter as plain markdown content", async () => {
     const { listEntries } = await import("../../src/knowledge/store.js");
     const docsRoot = join(tmpDir, "knowledge", "docs", "manual");
     mkdirSync(docsRoot, { recursive: true });
@@ -167,9 +166,35 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     const entries = listEntries();
     const found = entries.find((e) => e.id === "manual/hand-written.md");
     expect(found).toBeDefined();
-    expect(found!.title).toBe("Hand-Written Doc");
-    expect(found!.source).toBe("fish");
-    expect(found!.content.trim()).toBe("Body content.");
+    expect(found!.title).toBe("hand written");
+    expect(found!.source).toBe("user");
+    expect(found!.content.trim()).toContain("title: Hand-Written Doc");
+    expect(found!.content.trim()).toContain("Body content.");
+  });
+
+  it("rejects traversal, unsupported, invalid, and oversize png uploads", async () => {
+    const { writePngEntry, _internal } = await import("../../src/knowledge/store.js");
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+    expect(() => writePngEntry("../swatch.png", png)).toThrow();
+    expect(() => writePngEntry("swatch.jpg", png)).toThrow(/Only \.png/);
+    expect(() => writePngEntry("swatch.png", Buffer.from("not png"))).toThrow(/Invalid PNG/);
+    expect(() => writePngEntry("huge.png", Buffer.concat([png, Buffer.alloc(_internal.MAX_PNG_BYTES)]))).toThrow(/too large/);
+  });
+
+  it("shows html and png allowlisted files and reads png through raw endpoint helper", async () => {
+    const { addEntry, getDocumentTree, getEntry, getRawEntry, writePngEntry } = await import("../../src/knowledge/store.js");
+    addEntry("Hero", "<!doctype html><h1>Hero</h1>", "user", "site/hero.html");
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    writePngEntry("site/swatch.png", png);
+
+    const tree = getDocumentTree();
+    const site = tree.children!.find((node) => node.path === "site")!;
+    expect(site.children!.map((node) => node.path)).toEqual(["site/hero.html", "site/swatch.png"]);
+    expect(getEntry("site/hero.html")!.content).toContain("<h1>Hero</h1>");
+    expect(getEntry("site/swatch.png")).toBeNull();
+    expect(getRawEntry("site/swatch.png")!.contentType).toBe("image/png");
+    expect(getRawEntry("site/swatch.png")!.data.equals(png)).toBe(true);
   });
 
   it("listEntries / getDocumentTree handle an empty docs root", async () => {

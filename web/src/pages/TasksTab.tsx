@@ -5,6 +5,7 @@ import { listRoomTasks, createTask, updateTask } from "../api/client";
 import { useDialog } from "../components/dialogs";
 import { TaskBoard } from "../components/TaskBoard";
 import { TaskList } from "../components/TaskList";
+import { userActionError } from "../utils/user-error";
 
 const VIEW_KEY = "bossmode_task_view";
 
@@ -34,8 +35,9 @@ export function TasksTab({ roomId, members, onOpenTaskDetail }: TasksTabProps) {
     try {
       const task = await createTask(roomId, { title: input.title, createdBy: "user", status: input.status });
       setTasks((prev) => [...prev, task]);
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to create task", err);
+      toast(userActionError("create this task"), "error");
     }
   };
 
@@ -44,8 +46,9 @@ export function TasksTab({ roomId, members, onOpenTaskDetail }: TasksTabProps) {
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: newStatus, updatedAt: Date.now() } : t));
     try {
       await updateTask(roomId, taskId, { status: newStatus, updatedBy: "user" });
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to update task", err);
+      toast(userActionError("update this task"), "error");
       refresh(); // rollback
     }
   };

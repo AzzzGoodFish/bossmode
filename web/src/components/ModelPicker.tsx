@@ -63,7 +63,7 @@ export function ModelPicker({ value, models, onChange, disabled }: {
         className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
       >
         <option value="">Follow agent default</option>
-        {value.model && !matched && <option value={`legacy::${value.model}`}>{value.model} (not in available models)</option>}
+        {value.model && !matched && <option value={`legacy::${value.model}`}>{value.model} · unavailable</option>}
         {Object.entries(grouped).map(([group, items]) => (
           <optgroup key={group} label={group}>
             {items.map((model) => <option key={optionValue(model)} value={optionValue(model)}>{optionLabel(model)}</option>)}
@@ -71,8 +71,8 @@ export function ModelPicker({ value, models, onChange, disabled }: {
         ))}
         {models.length === 0 && <option disabled value="__none">No models available</option>}
       </select>
-      {models.length === 0 && <p className="text-xs text-think">No models available. Import credentials in Settings → Model Credentials.</p>}
-      {value.model && !matched && <p className="text-xs text-think">Model not found in available list. Saving will keep the existing value unless you choose another model.</p>}
+      {models.length === 0 && <p className="text-xs text-think">Connect a model provider before this member can work. Go to Settings → Models.</p>}
+      {models.length > 0 && value.model && !matched && <p className="text-xs text-think">This model is not available from your connected providers. Choose another model or connect its provider in Settings → Models.</p>}
     </div>
   );
 }

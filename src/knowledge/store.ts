@@ -3,38 +3,20 @@
 // All documents live under a single global root:
 //
 //     ~/.bossmode/knowledge/docs/
-//         ├── rules/dev-team-protocol.md      (seeded default)
-//         ├── bossmode/
-//         │   ├── rules/...
-//         │   ├── architecture/...
-//         │   └── ...
-//         ├── freeu/
-//         │   └── ...
-//         └── ...
-//
-// The previous per-KB container (0.7.0) has been removed. Users organize
-// projects by top-level folders. Rooms reference documents by path via
-// `ruleDocs: string[]` to control which are injected as rules.
-//
-// Each document is a Markdown file with optional YAML frontmatter:
-//
-//     ---
-//     title: Nice Display Title
-//     author: architect
-//     created: 2026-04-20T10:00:00Z
-//     ---
-//
-//     # Markdown body...
 //
 // Document ID = path relative to docs/, e.g. "bossmode/architecture/overview.md".
 // Hierarchy is expressed by directory structure — no type field, no flat list.
+//
+// Library v0.17 stores files as plain files. Markdown is no longer parsed for
+// frontmatter and writes no longer inject frontmatter; title is derived from the
+// first Markdown heading or filename.
 
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
   rmdirSync, unlinkSync, renameSync, statSync, rmSync,
   type Dirent,
 } from "node:fs";
-import { join, dirname, sep, posix } from "node:path";
+import { join, dirname, sep, posix, extname, basename } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
@@ -42,6 +24,12 @@ import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
 /** Resolved at call time so tests can override BOSSMODE_DIR. */
 function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
 function docsRoot(): string { return join(knowledgeDir(), "docs"); }
+
+export type KnowledgeFileKind = "markdown" | "text" | "png";
+
+const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".html", ".htm", ".txt", ".json"]);
+const BINARY_EXTENSIONS = new Set([".png"]);
+const MAX_PNG_BYTES = 512 * 1024;
 
 // -- Path helpers --
 
@@ -79,53 +67,45 @@ function absDocPath(relativeDocPath: string): string {
   return join(docsRoot(), ...relativeDocPath.split("/"));
 }
 
-// -- Frontmatter --
-
-interface ParsedDoc {
-  frontmatter: Record<string, string | number>;
-  body: string;
+function extensionOf(pathRel: string): string {
+  return extname(pathRel).toLowerCase();
 }
 
-function parseFrontmatter(raw: string): ParsedDoc {
-  if (!raw.startsWith("---\n") && !raw.startsWith("---\r\n")) {
-    return { frontmatter: {}, body: raw };
-  }
-  const endIdx = raw.indexOf("\n---", 4);
-  if (endIdx < 0) return { frontmatter: {}, body: raw };
-  const fmBlock = raw.slice(4, endIdx);
-  const rest = raw.slice(endIdx + 4);
-  const body = rest.startsWith("\n") ? rest.slice(1) : rest;
-
-  const fm: Record<string, string | number> = {};
-  for (const line of fmBlock.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1];
-    let val: string | number = m[2].trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    const asNum = Number(val);
-    if (val !== "" && !Number.isNaN(asNum) && /^[0-9]+$/.test(val)) val = asNum;
-    fm[key] = val;
-  }
-  return { frontmatter: fm, body };
+function kindForPath(pathRel: string): KnowledgeFileKind | null {
+  const ext = extensionOf(pathRel);
+  if (ext === ".md" || ext === ".markdown") return "markdown";
+  if (ext === ".png") return "png";
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
+  return null;
 }
 
-function serializeFrontmatter(fm: Record<string, string | number>, body: string): string {
-  const lines: string[] = ["---"];
-  for (const [k, v] of Object.entries(fm)) {
-    const val = typeof v === "string" && /[:#]/.test(v) ? JSON.stringify(v) : String(v);
-    lines.push(`${k}: ${val}`);
-  }
-  lines.push("---", "", body.trimStart());
-  return lines.join("\n");
+function isAllowedFile(pathRel: string): boolean {
+  const ext = extensionOf(pathRel);
+  return TEXT_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext);
 }
 
-function deriveTitle(fmTitle: string | number | undefined, pathRel: string): string {
-  if (fmTitle !== undefined && String(fmTitle).length > 0) return String(fmTitle);
-  const base = pathRel.split("/").pop() || pathRel;
-  return base.replace(/\.md$/i, "").replace(/[-_]/g, " ");
+function isTextFile(pathRel: string): boolean {
+  const ext = extensionOf(pathRel);
+  return TEXT_EXTENSIONS.has(ext);
+}
+
+function contentTypeForPath(pathRel: string): string {
+  const ext = extensionOf(pathRel);
+  if (ext === ".png") return "image/png";
+  if (ext === ".html" || ext === ".htm") return "text/html; charset=utf-8";
+  if (ext === ".json") return "application/json; charset=utf-8";
+  if (ext === ".md" || ext === ".markdown") return "text/markdown; charset=utf-8";
+  return "text/plain; charset=utf-8";
+}
+
+function filenameTitle(pathRel: string): string {
+  const base = basename(pathRel);
+  return base.replace(/\.[^.]+$/i, "").replace(/[-_]/g, " ");
+}
+
+function deriveTitleFromContent(content: string, pathRel: string): string {
+  const heading = content.match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
+  return heading || filenameTitle(pathRel);
 }
 
 // -- Document tree --
@@ -151,12 +131,10 @@ function walkDir(absDir: string, relDir: string): KnowledgeTreeNode {
     const childRel = relDir === "" ? e.name : `${relDir}/${e.name}`;
     if (e.isDirectory()) {
       node.children!.push(walkDir(childAbs, toPosix(childRel)));
-    } else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
-      let title = e.name.replace(/\.md$/i, "");
+    } else if (e.isFile() && isAllowedFile(childRel)) {
+      let title = filenameTitle(childRel);
       try {
-        const raw = readFileSync(childAbs, "utf-8");
-        const { frontmatter } = parseFrontmatter(raw);
-        title = deriveTitle(frontmatter.title, childRel);
+        if (isTextFile(childRel)) title = deriveTitleFromContent(readFileSync(childAbs, "utf-8"), childRel);
       } catch { /* ignore */ }
       node.children!.push({ path: toPosix(childRel), name: e.name, kind: "file", title });
     }
@@ -177,7 +155,7 @@ export function listEntries(): KnowledgeEntry[] {
       const abs = join(dir, e.name);
       const r = rel === "" ? e.name : `${rel}/${e.name}`;
       if (e.isDirectory()) recur(abs, r);
-      else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) files.push(toPosix(r));
+      else if (e.isFile() && isAllowedFile(r)) files.push(toPosix(r));
     }
   })(root, "");
 
@@ -185,27 +163,18 @@ export function listEntries(): KnowledgeEntry[] {
   for (const rel of files) {
     const abs = absDocPath(rel);
     try {
-      const raw = readFileSync(abs, "utf-8");
-      const { frontmatter, body } = parseFrontmatter(raw);
       const st = statSync(abs);
+      const content = isTextFile(rel) ? readFileSync(abs, "utf-8") : "";
       entries.push({
         id: rel,
-        title: deriveTitle(frontmatter.title, rel),
-        content: body,
-        source: String(frontmatter.author || frontmatter.source || "user"),
-        createdAt: frontmatter.created
-          ? typeof frontmatter.created === "number"
-            ? frontmatter.created
-            : Date.parse(String(frontmatter.created)) || st.ctimeMs
-          : st.ctimeMs,
-        updatedAt: frontmatter.updated
-          ? typeof frontmatter.updated === "number"
-            ? frontmatter.updated
-            : Date.parse(String(frontmatter.updated)) || st.mtimeMs
-          : st.mtimeMs,
+        title: isTextFile(rel) ? deriveTitleFromContent(content, rel) : filenameTitle(rel),
+        content,
+        source: "user",
+        createdAt: st.ctimeMs,
+        updatedAt: st.mtimeMs,
       });
     } catch (err) {
-      logger.error("knowledge-store", "parse doc failed", { rel, error: String(err) });
+      logger.error("knowledge-store", "read doc failed", { rel, error: String(err) });
     }
   }
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -215,25 +184,30 @@ export function listEntries(): KnowledgeEntry[] {
 export function getEntry(entryId: string): KnowledgeEntry | null {
   let rel: string;
   try { rel = normalizeDocPath(entryId); } catch { return null; }
+  if (!isAllowedFile(rel) || !isTextFile(rel)) return null;
   const abs = absDocPath(rel);
   if (!existsSync(abs)) return null;
   try {
-    const raw = readFileSync(abs, "utf-8");
-    const { frontmatter, body } = parseFrontmatter(raw);
+    const content = readFileSync(abs, "utf-8");
     const st = statSync(abs);
     return {
       id: rel,
-      title: deriveTitle(frontmatter.title, rel),
-      content: body,
-      source: String(frontmatter.author || frontmatter.source || "user"),
-      createdAt: frontmatter.created
-        ? typeof frontmatter.created === "number" ? frontmatter.created : Date.parse(String(frontmatter.created)) || st.ctimeMs
-        : st.ctimeMs,
-      updatedAt: frontmatter.updated
-        ? typeof frontmatter.updated === "number" ? frontmatter.updated : Date.parse(String(frontmatter.updated)) || st.mtimeMs
-        : st.mtimeMs,
+      title: deriveTitleFromContent(content, rel),
+      content,
+      source: "user",
+      createdAt: st.ctimeMs,
+      updatedAt: st.mtimeMs,
     };
   } catch { return null; }
+}
+
+export function getRawEntry(entryId: string): { path: string; contentType: string; data: Buffer } | null {
+  let rel: string;
+  try { rel = normalizeDocPath(entryId); } catch { return null; }
+  if (!isAllowedFile(rel)) return null;
+  const abs = absDocPath(rel);
+  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
+  return { path: rel, contentType: contentTypeForPath(rel), data: readFileSync(abs) };
 }
 
 export function entryExists(docPath: string): boolean {
@@ -246,65 +220,67 @@ export function entryExists(docPath: string): boolean {
 }
 
 /**
- * Write/overwrite a document. If no extension provided, `.md` is appended.
- * Creates intermediate directories.
+ * Write/overwrite a text document. If no extension is provided, `.md` is appended.
+ * Creates intermediate directories. Frontmatter is not injected or parsed.
  */
 export function addEntry(
   title: string,
   content: string,
   source: string,
   path?: string,
-  extraFrontmatter?: Record<string, string>,
+  _extraFrontmatter?: Record<string, string>,
 ): KnowledgeEntry {
   ensureDocsRoot();
 
   const rel = path
-    ? ensureMdExtension(normalizeDocPath(path))
+    ? ensureDefaultExtension(normalizeDocPath(path))
     : `misc/${slugify(title)}.md`;
+  if (!isTextFile(rel)) throw new Error("Only text documents can be edited as entries");
   const abs = absDocPath(rel);
   mkdirSync(dirname(abs), { recursive: true });
 
-  const now = Date.now();
-  const fm: Record<string, string | number> = {
-    title,
-    author: source,
-    created: now,
-    updated: now,
-  };
-  if (extraFrontmatter) Object.assign(fm, extraFrontmatter);
-  writeFileSync(abs, serializeFrontmatter(fm, content), "utf-8");
-
-  return { id: rel, title, content, source, createdAt: now, updatedAt: now };
+  writeFileSync(abs, content, "utf-8");
+  const st = statSync(abs);
+  return { id: rel, title: deriveTitleFromContent(content, rel), content, source, createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
 }
 
 export function updateEntry(
   entryId: string,
-  title: string,
+  _title: string,
   content: string,
-  extraFrontmatter?: Record<string, string>,
+  _extraFrontmatter?: Record<string, string>,
 ): KnowledgeEntry | null {
   let rel: string;
   try { rel = normalizeDocPath(entryId); } catch { return null; }
+  if (!isTextFile(rel)) return null;
   const abs = absDocPath(rel);
   if (!existsSync(abs)) return null;
-  const raw = readFileSync(abs, "utf-8");
-  const { frontmatter } = parseFrontmatter(raw);
-  const now = Date.now();
-  frontmatter.title = title;
-  frontmatter.updated = now;
-  if (!frontmatter.created) frontmatter.created = now;
-  if (extraFrontmatter) Object.assign(frontmatter, extraFrontmatter);
-  writeFileSync(abs, serializeFrontmatter(frontmatter, content), "utf-8");
+  writeFileSync(abs, content, "utf-8");
+  const st = statSync(abs);
   return {
     id: rel,
-    title,
+    title: deriveTitleFromContent(content, rel),
     content,
-    source: String(frontmatter.author || frontmatter.source || "user"),
-    createdAt: typeof frontmatter.created === "number"
-      ? frontmatter.created
-      : Date.parse(String(frontmatter.created)) || now,
-    updatedAt: now,
+    source: "user",
+    createdAt: st.ctimeMs,
+    updatedAt: st.mtimeMs,
   };
+}
+
+export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
+  ensureDocsRoot();
+  const rel = normalizeDocPath(docPath);
+  if (extensionOf(rel) !== ".png") throw new Error("Only .png uploads are supported");
+  if (data.length === 0) throw new Error("PNG upload is empty");
+  if (data.length > MAX_PNG_BYTES) throw new Error(`PNG upload too large (max ${MAX_PNG_BYTES} bytes)`);
+  if (!data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    throw new Error("Invalid PNG file");
+  }
+  const abs = absDocPath(rel);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, data);
+  const st = statSync(abs);
+  return { id: rel, title: filenameTitle(rel), content: "", source: "user", createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
 }
 
 export function deleteEntry(entryId: string): boolean {
@@ -322,8 +298,9 @@ export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
   let fromRel: string, toRel: string;
   try {
     fromRel = normalizeDocPath(fromId);
-    toRel = ensureMdExtension(normalizeDocPath(toId));
+    toRel = ensureMoveExtension(fromRel, normalizeDocPath(toId));
   } catch { return null; }
+  if (!isAllowedFile(fromRel) || !isAllowedFile(toRel)) return null;
   const fromAbs = absDocPath(fromRel);
   const toAbs = absDocPath(toRel);
   if (!existsSync(fromAbs)) return null;
@@ -331,7 +308,9 @@ export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
   mkdirSync(dirname(toAbs), { recursive: true });
   renameSync(fromAbs, toAbs);
   cleanupEmptyParentDirs(dirname(fromAbs));
-  return getEntry(toRel);
+  if (isTextFile(toRel)) return getEntry(toRel);
+  const st = statSync(toAbs);
+  return { id: toRel, title: filenameTitle(toRel), content: "", source: "user", createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
 }
 
 export function moveFolder(
@@ -397,7 +376,7 @@ export function deleteFolder(
 
 /**
  * Search documents by substring (case-insensitive) in title or content.
- * Returns matches with full content.
+ * Returns matches with full content. Binary files are searchable by filename only.
  */
 export function searchEntries(query: string): KnowledgeEntry[] {
   const q = query.toLowerCase();
@@ -408,9 +387,15 @@ export function searchEntries(query: string): KnowledgeEntry[] {
 
 // -- Helpers --
 
-function ensureMdExtension(path: string): string {
-  if (path.toLowerCase().endsWith(".md")) return path;
+function ensureDefaultExtension(path: string): string {
+  if (extensionOf(path)) return path;
   return `${path}.md`;
+}
+
+function ensureMoveExtension(fromPath: string, toPath: string): string {
+  if (extensionOf(toPath)) return toPath;
+  const ext = extensionOf(fromPath) || ".md";
+  return `${toPath}${ext}`;
 }
 
 function cleanupEmptyParentDirs(startDir: string): void {
@@ -444,7 +429,7 @@ function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[]
       const childRel = relDir ? `${relDir}/${e.name}` : e.name;
       if (e.isDirectory()) {
         walk(childAbs, childRel);
-      } else if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
+      } else if (e.isFile() && isAllowedFile(childRel)) {
         out.push(toPosix(childRel));
       }
     }
@@ -466,4 +451,4 @@ export function slugify(input: string): string {
 }
 
 /** Re-export path helpers for migration / external callers. */
-export const _internal = { normalizeDocPath, docsRoot, absDocPath };
+export const _internal = { normalizeDocPath, docsRoot, absDocPath, isAllowedFile, isTextFile, kindForPath, contentTypeForPath, MAX_PNG_BYTES };

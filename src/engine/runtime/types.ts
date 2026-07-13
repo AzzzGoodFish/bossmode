@@ -68,6 +68,15 @@ export interface AgentCallbacks {
 
 // -- Agent handle --
 
+export interface ReloadAgentResourcesOpts {
+  roomId: string;
+  member: AgentMemberConfig;
+  agentPrompt: string;
+  appendSystemPrompt?: string[];
+  skillPaths: string[];
+  skillNames?: string[];
+}
+
 export interface AgentRuntimeParams {
   model?: string;
   thinkingLevel?: string;
@@ -97,6 +106,7 @@ export interface AgentHandle {
   refreshModelRegistry?(): void | Promise<void>;
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
+  reloadResources?(opts: ReloadAgentResourcesOpts): Promise<void>;
 }
 
 // -- Unified event model --

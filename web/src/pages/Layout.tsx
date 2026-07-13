@@ -15,7 +15,7 @@ import {
 } from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { Main } from "./Main";
-import { AgentDetailPage } from "./AgentDetailPage";
+import { AgentProfilePage } from "./AgentProfilePage";
 import { AgentsPage } from "./AgentsPage";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsPage } from "./SkillsPage";
@@ -287,32 +287,23 @@ export function Layout({ onLogout, username }: LayoutProps) {
           />
         )}
 
-        {/* Agent list / detail / create */}
-        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "list" && (
+        {/* Team prototype v2 (GOO-138): two-section Team page (Agents + Skills); create = dialog over roster */}
+        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) !== "detail" && (
           <AgentsPage
             onSelectAgent={(name) => setActivePage({ type: "agent", name })}
             onRefresh={refreshSidebar}
-            onCreateAgent={() => setActivePage({ type: "agent", name: "__new__" })}
-          />
-        )}
-        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "create" && (
-          <AgentDetailPage
-            name=""
-            isCreate
-            onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
-            onCreated={(name) => { setActivePage({ type: "agent", name }); refreshSidebar(); }}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+            autoCreate={workspaceResourceRouteMode(activePage.name) === "create"}
+            onCloseCreate={() => setActivePage({ type: "agent", name: null })}
+            onSelectSkill={(name) => setActivePage({ type: "skill", name })}
+            onCreateSkill={() => setActivePage({ type: "skill", name: "__new__" })}
           />
         )}
         {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "detail" && (
-          <AgentDetailPage
+          <AgentProfilePage
             name={activePage.name || ""}
             onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
+            onDeleted={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            onOpenRoom={(roomId, lensAgent) => {
-              if (lensAgent) sessionStorage.setItem("bossmode_main_open_lens", lensAgent);
-              setActivePage({ type: "room", id: roomId });
-            }}
           />
         )}
 

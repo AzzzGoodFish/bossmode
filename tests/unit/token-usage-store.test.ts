@@ -3,12 +3,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
+
 let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "bossmode-token-usage-"));
   vi.resetModules();
   vi.stubEnv("BOSSMODE_DIR", dir);
+  mkdirSync(join(dir, "agents"), { recursive: true });
+  writeFileSync(join(dir, "agents", "developer.md"), "---\nname: developer\n---\ndeveloper", "utf8");
 });
 
 afterEach(() => {
@@ -21,8 +25,8 @@ describe("token usage store", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const { getMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
 
-    const roomA = roomStore.createRoom("A", dir, ["developer"]);
-    const roomB = roomStore.createRoom("B", dir, ["developer"]);
+    const roomA = roomStore.createRoom("A", dir, drafts(["developer"]));
+    const roomB = roomStore.createRoom("B", dir, drafts(["developer"]));
 
     const eventsA = join(roomStore.roomDir(roomA.id), "agent-events");
     const eventsB = join(roomStore.roomDir(roomB.id), "agent-events");
@@ -45,7 +49,7 @@ describe("token usage store", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const { getRoomMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
 
-    const room = roomStore.createRoom("A", dir, ["developer"]);
+    const room = roomStore.createRoom("A", dir, drafts(["developer"]));
     const [member] = roomStore.getRoomMembers(room.id);
     const events = join(roomStore.roomDir(room.id), "agent-events");
     mkdirSync(events, { recursive: true });

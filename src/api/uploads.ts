@@ -85,7 +85,7 @@ addRoute("GET", "/api/rooms/:id/attachments/:filename", async (_req, res, params
   createReadStream(absPath).pipe(res);
 });
 
-// GET /api/rooms/:id/attachments/:filename/preview — md/html read-only preview payload.
+// GET /api/rooms/:id/attachments/:filename/preview — md/html/image read-only preview payload.
 // Images use the raw attachment URL; all other types are download-only in v1.
 addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
@@ -105,7 +105,7 @@ addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_req, res
   }
 
   const ext = extname(params.filename).toLowerCase();
-  const type = ext === ".md" || ext === ".markdown" ? "md" : ext === ".html" || ext === ".htm" ? "html" : null;
+  const type = ext === ".md" || ext === ".markdown" ? "md" : ext === ".html" || ext === ".htm" ? "html" : [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext) ? "image" : null;
   if (!type) {
     sendJson(res, 400, { error: "Attachment is download-only" });
     return;
@@ -122,6 +122,6 @@ addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_req, res
     originalPath: params.filename,
     path: params.filename,
     title: params.filename,
-    content: readFileSync(absPath, "utf8"),
+    content: type === "image" ? `/api/rooms/${params.id}/attachments/${params.filename}` : readFileSync(absPath, "utf8"),
   });
 });

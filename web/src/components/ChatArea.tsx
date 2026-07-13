@@ -228,6 +228,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       fullTime={fullTime}
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
+                      mentions={msg.mentions}
                       roomId={roomId}
                       messageId={msg.id}
                       attachments={msg.attachments}
@@ -309,7 +310,7 @@ function KnowledgeEventCard({
   onPreview?: () => void;
   onOpenInLibrary?: () => void;
 }) {
-  const verb = meta.tool === "write" ? "更新了文档" : "修改了文档";
+  const verb = meta.tool === "write" ? "updated the document" : "edited the document";
   return (
     <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
       <div className="flex items-center gap-2 text-xs text-ink-3">

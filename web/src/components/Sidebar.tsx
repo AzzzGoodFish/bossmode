@@ -50,11 +50,11 @@ interface SidebarProps {
 }
 
 const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string }> = [
-  { id: "models", title: "Models", desc: "凭证 · provider · per-model 定制" },
-  { id: "runtime", title: "Runtime", desc: "pi SDK · session resume" },
-  { id: "summary", title: "Summarization", desc: "自动摘要阈值与保留数" },
-  { id: "integrations", title: "Integrations", desc: "Linear 同步" },
-  { id: "team-updates", title: "Team Updates", desc: "内置团队版本" },
+  { id: "models", title: "Models", desc: "Connect providers and choose available models." },
+  { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
+  { id: "summary", title: "Summarization", desc: "Choose when long conversations are summarized." },
+  { id: "integrations", title: "Integrations", desc: "Connect external tools and services." },
+  { id: "team-updates", title: "Built-in Updates", desc: "Updates for built-in Agents and Skills." },
 ];
 
 type RoomPresence = "working" | "idle" | "offline";
@@ -91,7 +91,7 @@ export function Sidebar({
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
 
-  // 当前域：由 activePage 推导，但允许用户点 rail 切换浏览域（不改变页面，直到点选具体条目）
+  // Derive the active domain from the page while allowing rail-only browsing.
   const pageDomain = domainOf(activePage);
   const [browseDomain, setBrowseDomain] = useState<Domain | null>(null);
   const domain: Domain = browseDomain ?? pageDomain;
@@ -154,7 +154,7 @@ export function Sidebar({
         <MessageSquare size={18} />
         {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
       </button>
-      <button onClick={() => setBrowseDomain("team")} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
+      <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "agent", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
         {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Users size={18} />
       </button>
@@ -169,8 +169,8 @@ export function Sidebar({
       </button>
       <button
         onClick={() => setBrowseDomain("system")}
-        title="System"
-        aria-label="System"
+        title="Settings"
+        aria-label="Settings"
         className={railBtn(domain === "system")}
       >
         {domain === "system" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
@@ -189,7 +189,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { rooms: "Rooms", team: "Team", library: "Library", system: "System" }[domain];
+  const panelTitle = { rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -248,7 +248,7 @@ export function Sidebar({
               );
             })}
             {rooms.length === 0 && (
-              <p className="text-xs text-ink-4 px-2.5 py-2">还没有房间 — 点上方 + 创建。</p>
+              <p className="text-xs text-ink-4 px-2.5 py-2">No Rooms yet. Click + to create one.</p>
             )}
           </>
         )}
@@ -256,6 +256,9 @@ export function Sidebar({
         {domain === "team" && (
           <>
             <SectionHead label={`AGENTS · ${agents.length}`} onCreate={() => onNavigate({ type: "agent", name: "__new__" })} />
+            <button onClick={() => onNavigate({ type: "agent", name: null })} className={itemCls(activePage?.type === "agent" && activePage.name === null)}>
+              <span className="text-[12.5px] font-medium text-ink-2">All agents</span>
+            </button>
             {agents.map((a) => (
               <button key={a.name} onClick={() => onNavigate({ type: "agent", name: a.name })} className={itemCls(selectedAgentName === a.name)}>
                 <div className="flex items-center gap-2.5">

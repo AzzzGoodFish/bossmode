@@ -35,6 +35,7 @@ import {
 import { Sheet } from "../components/Sheet";
 import { useDialog } from "../components/dialogs";
 import type { SettingsSection } from "../components/Sidebar";
+import { userActionError } from "../utils/user-error";
 
 interface SettingsPageProps {
   section?: SettingsSection;
@@ -42,11 +43,11 @@ interface SettingsPageProps {
 }
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
-  models: { title: "Models", desc: "模型凭证与可用模型。per-model 定制在 catalog 刷新后保留。" },
-  runtime: { title: "Runtime", desc: "pi SDK 运行时、会话与网络传输。" },
-  summary: { title: "Summarization", desc: "智能消息摘要的自动触发与保留策略。" },
-  integrations: { title: "Integrations", desc: "外部系统连接。" },
-  "team-updates": { title: "Team Updates", desc: "内置 agents / skills / rules 的版本更新。" },
+  models: { title: "Models", desc: "Connect providers and choose available models." },
+  runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
+  summary: { title: "Summarization", desc: "Choose when long conversations are summarized." },
+  integrations: { title: "Integrations", desc: "Connect external tools and services." },
+  "team-updates": { title: "Built-in Updates", desc: "Updates for built-in Agents and Skills." },
 };
 
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
@@ -60,6 +61,18 @@ function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
 
 function secondsFromMs(ms: number | undefined, fallbackSeconds: number): number {
   return Math.round((ms ?? fallbackSeconds * 1000) / 1000);
+}
+
+export function oauthStatusLabel(status: OAuthLoginJob["status"]): string {
+  switch (status) {
+    case "starting": return "Waiting for sign-in";
+    case "awaiting_device": return "Waiting for sign-in";
+    case "awaiting_input": return "Waiting for code";
+    case "completed": return "Connected";
+    case "failed": return "Failed";
+    case "cancelled": return "Cancelled";
+    default: return "Connecting";
+  }
 }
 
 export function SettingsPage({ section = "models", onOpenMobileSidebar }: SettingsPageProps = {}) {
@@ -123,7 +136,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       setTimeout(() => setRuntimeSaved(false), 2000);
     } catch (err: any) {
       console.error("Failed to save runtime settings:", err);
-      toast(err.message || "Failed to save runtime settings", "error");
+      toast(userActionError("save Runtime settings"), "error");
       setRuntimeSettings(previous);
     } finally {
       setRuntimeSaving(false);
@@ -163,7 +176,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const handleDeleteProfile = async (profile: PublicModelCredentialProfile) => {
     if (!(await confirm(`Delete model credential "${profile.name}"?`))) return;
     try { await deleteModelCredentialProfile(profile.id); await refreshProfiles(); }
-    catch (err: any) { toast(err.message, "error"); }
+    catch (err) { console.error("Failed to delete model connection", err); toast(userActionError("delete this model connection"), "error"); }
   };
 
   const handleRefreshProfileModels = async (profile: PublicModelCredentialProfile) => {
@@ -171,8 +184,9 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       const refreshed = await refreshModelCredentialProfileModels(profile.id);
       await refreshProfiles();
       toast(`Refreshed ${refreshed.models.length} model${refreshed.models.length === 1 ? "" : "s"}.`, "success");
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to refresh models", err);
+      toast(userActionError("refresh models", "Check the provider connection, then try again."), "error");
     }
   };
 
@@ -224,8 +238,8 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-medium text-ink-1">Session Resume</div>
-              <div className="text-xs text-ink-3 mt-0.5">When enabled, new agent sessions resume from where they left off. Turning off only affects newly started sessions.</div>
+              <div className="text-sm font-medium text-ink-1">Continue previous sessions</div>
+              <div className="text-xs text-ink-3 mt-0.5">Continue each member’s conversation after Bossmode restarts. Changes apply to sessions started afterward.</div>
             </div>
             <button
               onClick={handleSessionResumeToggle}
@@ -243,11 +257,10 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           </div>
         </div>
 
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
-          <div>
-            <div className="text-sm font-medium text-ink-1">Network Transport</div>
-            <div className="text-xs text-ink-3 mt-0.5">Applies to new or restarted pi SDK agents. Auto / WebSocket cached may fall back to SSE if WebSocket fails before streaming starts, so final errors can still mention SSE.</div>
-          </div>
+        <details className="bg-surface-1 border border-line rounded-lg p-4">
+          <summary className="cursor-pointer text-sm font-medium text-ink-1">Connection troubleshooting</summary>
+          <div className="mt-4 space-y-4">
+          <p className="text-xs text-ink-3">Automatic is recommended. Change these options only when a provider connection repeatedly fails.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="space-y-1">
               <span className="text-xs font-medium text-ink-2">Transport mode</span>
@@ -256,15 +269,15 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 value={runtimeSettings.codexTransport || "auto"}
                 onChange={(e) => setRuntimeSettings({ ...runtimeSettings, codexTransport: e.target.value as PiTransportSetting })}
               >
-                <option value="auto">Auto (recommended)</option>
+                <option value="auto">Automatic (recommended)</option>
                 <option value="websocket-cached">WebSocket cached</option>
                 <option value="websocket">WebSocket</option>
                 <option value="sse">SSE</option>
               </select>
-              <span className="block text-[11px] text-ink-4">If Codex SSE header timeouts are frequent, try WebSocket cached. SSE mode uses SSE directly.</span>
+              <span className="block text-[11px] text-ink-4">Choose a specific mode only when Automatic cannot maintain a connection.</span>
             </label>
             <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">WebSocket connect timeout</span>
+              <span className="text-xs font-medium text-ink-2">Connection timeout</span>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -278,7 +291,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 />
                 <span className="text-xs text-ink-3">sec</span>
               </div>
-              <span className="block text-[11px] text-ink-4">{(runtimeSettings.codexTransport || "auto") === "sse" ? "SSE mode does not use WebSocket connect timeout." : "Only affects WebSocket connection setup for Auto / WebSocket cached / WebSocket. It does not change the SSE response-header timeout."}</span>
+              <span className="block text-[11px] text-ink-4">How long Bossmode waits while establishing a provider connection.</span>
             </label>
           </div>
           <details className="rounded-md border border-line-soft bg-inset/40 p-3">
@@ -297,21 +310,22 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 />
                 <span className="text-xs text-ink-3">sec</span>
               </div>
-              <span className="block text-[11px] text-ink-4">Leave empty to use the SDK default. This controls idle time after response/data begins; it does not control the Codex SSE response-header timeout. SSE header timeout is currently fixed at 20s by the pi SDK/provider.</span>
+              <span className="block text-[11px] text-ink-4">Leave empty to use the recommended default.</span>
             </label>
           </details>
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-ink-4">Changes affect newly started/recreated agents, not requests already in flight.</p>
+            <p className="text-[11px] text-ink-4">Changes apply when a member starts or restarts.</p>
             <button
               onClick={handleRuntimeNetworkSave}
               disabled={runtimeSaving}
               className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
             >
-              {runtimeSaving ? "Saving..." : "Save Runtime Network"}
+              {runtimeSaving ? "Saving..." : "Save connection settings"}
             </button>
           </div>
           {runtimeSaved && <div className="text-xs text-onair">Saved!</div>}
-        </div>
+          </div>
+        </details>
       </div>
       )}
 
@@ -443,8 +457,9 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
       setEnabled(next.enabled);
       setConfigText(next.configText);
       toast("MCP settings saved", "success");
-    } catch (err: any) {
-      toast(err.message || "Failed to save MCP settings", "error");
+    } catch (err) {
+      console.error("Failed to save MCP settings", err);
+      toast(userActionError("save MCP server settings", "Check the configuration, then try again."), "error");
     } finally {
       setSaving(false);
     }
@@ -456,8 +471,9 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
       const next = await checkMcpServers(server, 10000);
       onSettings(next);
       toast(server ? `Checked ${server}` : "Checked MCP servers", "success");
-    } catch (err: any) {
-      toast(err.message || "MCP check failed", "error");
+    } catch (err) {
+      console.error("Failed to check MCP servers", err);
+      toast(userActionError("check MCP servers", "Check the server configuration, then try again."), "error");
     } finally {
       setChecking(null);
     }
@@ -472,53 +488,59 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">MCP</h2>
+      <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">MCP servers</h2>
       <div className="space-y-4">
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-sm font-medium text-ink-1">Registry</div>
-              <div className="text-xs text-ink-3 mt-0.5">MCP servers are a global registry. Assign servers from the member panel opened via Station avatar/name.</div>
-              {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} · {settings.configPath}</div>}
+              <div className="text-sm font-medium text-ink-1">MCP servers</div>
+              <div className="text-xs text-ink-3 mt-0.5">Add the servers you use here, then assign them from each member profile.</div>
+              {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} configured</div>}
             </div>
             <button
               onClick={() => setEnabled(!enabled)}
               disabled={!settings || saving}
               className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
+              aria-label={enabled ? "Disable MCP servers" : "Enable MCP servers"}
             >
               <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
             </button>
           </div>
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-ink-2">MCP JSON config</span>
-            <textarea
-              className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
-              value={configText}
-              onChange={(e) => setConfigText(e.target.value)}
-              spellCheck={false}
-              placeholder={'{\n  "mcpServers": {\n    "playwright": {\n      "url": "http://10.8.0.24:8931/mcp"\n    }\n  }\n}'}
-            />
-            <span className="block text-[11px] text-ink-4">Uses native MCP config format. Direct MCP tools are disabled in v1; eligible members receive one <code>mcp</code> proxy tool.</span>
-          </label>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-ink-4">Secret-like fields are redacted when read back and preserved on save.</p>
-            <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
-              {saving ? "Saving..." : "Save MCP"}
-            </button>
-          </div>
+          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
+          <details className="rounded border border-line-soft bg-inset/50 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-ink-2">Advanced configuration</summary>
+            <div className="mt-3 space-y-3">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-ink-2">Server configuration</span>
+                <textarea
+                  className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
+                  value={configText}
+                  onChange={(e) => setConfigText(e.target.value)}
+                  spellCheck={false}
+                  placeholder={'{\n  "mcpServers": {}\n}'}
+                />
+              </label>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] text-ink-4">Secrets stay on this device and are hidden after saving.</p>
+                <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
+                  {saving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </div>
+          </details>
         </div>
 
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-ink-1">Availability</div>
-              <div className="text-xs text-ink-3 mt-0.5">Check configured HTTP/stdio MCP servers. Errors are sanitized.</div>
+              <div className="text-xs text-ink-3 mt-0.5">Check whether your configured servers can connect.</div>
             </div>
             <button onClick={() => check()} disabled={!settings || servers.length === 0 || checking !== null} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 disabled:opacity-50">
               {checking === "__all__" ? "Checking..." : "Check all"}
             </button>
           </div>
-          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">Add MCP servers in JSON first.</div>}
+          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
           {servers.map((server: McpServerSummary) => {
             const availability = server.availability;
             const status = availability?.status || "unchecked";
@@ -527,13 +549,12 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
-                    <span className="text-[10px] text-ink-4 border border-line rounded px-1.5 py-0.5 uppercase">{server.transport}</span>
                     <span className={`text-[10px] border rounded px-1.5 py-0.5 uppercase ${statusClass(status)}`}>{status}</span>
                   </div>
                   <div className="text-[11px] text-ink-4 mt-1">
                     {availability?.toolCount !== undefined ? `${availability.toolCount} tools · ` : ""}{server.assignedCount || 0} assignment{server.assignedCount === 1 ? "" : "s"}{availability?.checkedAt ? ` · ${new Date(availability.checkedAt).toLocaleTimeString()}` : ""}
                   </div>
-                  {availability?.error && <div className="text-[11px] text-blocked mt-1 truncate" title={availability.error}>{availability.error}</div>}
+                  {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server’s configuration.</div>}
                 </div>
                 <button onClick={() => check(server.name)} disabled={checking !== null} className="px-2 py-1 border border-line rounded text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50">
                   {checking === server.name ? "Checking..." : "Check"}
@@ -559,7 +580,7 @@ function LinearIntegrationSection({ status, onStatus }: { status: LinearIntegrat
       onStatus(next);
       setApiKey("");
       toast("Linear connected", "success");
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to connect Linear", err); toast(userActionError("connect Linear", "Check the API key, then try again."), "error"); }
     finally { setSaving(false); }
   };
 
@@ -569,8 +590,8 @@ function LinearIntegrationSection({ status, onStatus }: { status: LinearIntegrat
     try {
       const result = await disconnectLinearIntegration();
       onStatus({ connected: false });
-      toast(`Linear disconnected. Cleared ${result.clearedRooms} room bindings.`, "success");
-    } catch (err: any) { toast(err.message, "error"); }
+      toast(`Linear disconnected. Cleared ${result.clearedRooms} Room bindings.`, "success");
+    } catch (err) { console.error("Failed to disconnect Linear", err); toast(userActionError("disconnect Linear"), "error"); }
     finally { setSaving(false); }
   };
 
@@ -634,8 +655,8 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
     <section className="mb-8">
       <div className="flex items-center justify-between mb-4 gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider">Model Credentials</h2>
-          <p className="text-xs text-ink-3 mt-1">Configure provider access once, then choose available models for each member.</p>
+          <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider">Model providers</h2>
+          <p className="text-xs text-ink-3 mt-1">Connect a provider, then choose its available models for each member.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onCustom} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">
@@ -649,7 +670,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
       {profiles.length === 0 ? (
         <div className="bg-surface-1 border border-dashed border-line rounded-lg p-8 text-center">
           <KeyRound size={22} className="mx-auto text-ink-4 mb-3" />
-          <div className="text-sm font-medium text-ink-1">No model credentials yet</div>
+          <div className="text-sm font-medium text-ink-1">No model providers connected</div>
           <p className="text-xs text-ink-3 mt-1 max-w-md mx-auto">Connect an official provider, or add a custom endpoint for proxy/local models.</p>
           <button onClick={onAdd} className="mt-4 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer">Connect Provider</button>
           <button onClick={onCustom} className="ml-2 mt-4 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">Custom Endpoint</button>
@@ -675,8 +696,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                       {!profile.enabled && <Badge tone="neutral">Disabled</Badge>}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3">
-                      <code className="px-1.5 py-0.5 rounded bg-surface-2">{profile.providerSlug}</code>
-                      <span>{profile.models.length} models</span><span>·</span><span>{profile.protocol}</span><span>·</span><span>{profile.authType}</span>
+                      <span>{profile.models.length} models</span><span>·</span><span>{profile.hasSecret ? "Connected" : "Connection needs attention"}</span>
                     </div>
                   </button>
                   <div className="flex gap-2 shrink-0">
@@ -692,7 +712,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                     <div className="rounded-md bg-inset/60 border border-line-soft p-3 mt-3">
                       <div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-ink-2">Models</span><span className="text-[11px] text-ink-4">{profile.hasSecret ? "Secret configured" : profile.authType}</span></div>
                       <div className="space-y-1">
-                        {visibleModels.map((m) => <div key={m.id} className="flex items-center justify-between gap-2 text-xs"><code className="text-ink-2 truncate">{profile.providerSlug}/{m.id}</code>{m.contextWindow ? <span className="text-ink-4 shrink-0">{Math.round(m.contextWindow / 1000)}k ctx · {m.metadataSource === "pi_catalog" ? "pi catalog" : "endpoint"}</span> : <span className="text-ink-4 shrink-0">metadata unknown</span>}</div>)}
+                        {visibleModels.map((m) => <div key={m.id} className="flex items-center justify-between gap-2 text-xs"><code className="text-ink-2 truncate">{profile.providerSlug}/{m.id}</code>{m.contextWindow ? <span className="text-ink-4 shrink-0">{Math.round(m.contextWindow / 1000)}k context</span> : null}</div>)}
                         {profile.models.length > 3 && (
                           <button type="button" onClick={() => toggleModels(profile.id)} className="text-[11px] text-accent-ink hover:opacity-80 cursor-pointer">
                             {modelsExpanded ? "Show less" : `+${profile.models.length - 3} more`}
@@ -742,7 +762,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
   useEffect(() => {
     getModelProviderCatalog()
       .then((items) => setProviders(items))
-      .catch((err) => toast(err.message, "error"))
+      .catch((err) => { console.error("Failed to load model providers", err); toast(userActionError("load model providers"), "error"); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -767,9 +787,10 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
           window.clearInterval(timer);
           onSaved();
         }
-      } catch (err: any) {
+      } catch (err) {
         window.clearInterval(timer);
-        toast(err.message, "error");
+        console.error("Failed to continue provider sign-in", err);
+        toast(userActionError("continue provider sign-in", "Start sign-in again."), "error");
       }
     }, 1800);
     return () => window.clearInterval(timer);
@@ -788,7 +809,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
       });
       toast("Provider connected", "success");
       onSaved();
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to connect model provider", err); toast(userActionError("connect this provider", "Check the key, then try again."), "error"); }
     finally { setBusy(false); }
   };
 
@@ -800,7 +821,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
         providerId: selected.providerSlug,
         name: name.trim() || nextProviderProfileName(profiles, selected.providerSlug, selected.displayName),
       }));
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to start provider sign-in", err); toast(userActionError("start provider sign-in"), "error"); }
     finally { setBusy(false); }
   };
 
@@ -814,7 +835,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
         toast("Provider connected", "success");
         onSaved();
       }
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to submit provider sign-in code", err); toast(userActionError("submit the sign-in code", "Check the code, then try again."), "error"); }
     finally { setBusy(false); }
   };
 
@@ -822,7 +843,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     if (!oauthJob) { onClose(); return; }
     setBusy(true);
     try { setOauthJob(await cancelOAuthConnection(oauthJob.id)); }
-    catch (err: any) { toast(err.message, "error"); }
+    catch (err) { console.error("Failed to cancel provider sign-in", err); toast(userActionError("cancel provider sign-in"), "error"); }
     finally { setBusy(false); }
   };
 
@@ -831,7 +852,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
       <div className="p-5 space-y-5">
         <div>
           <h3 className="text-base font-semibold text-ink-1">Connect Provider</h3>
-          <p className="text-xs text-ink-3 mt-1">Choose an official provider. New connections create a separate credential profile; edit an existing profile to overwrite it.</p>
+          <p className="text-xs text-ink-3 mt-1">Choose a provider to connect. Edit an existing connection if you need to replace it.</p>
         </div>
 
         {loading ? <div className="text-sm text-ink-3">Loading providers...</div> : (
@@ -874,10 +895,10 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
 
                   {profiles.some((p) => p.providerSlug === selected.providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider") && (
                     <div className="rounded border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
-                      This will create a new {selected.displayName} credential. To overwrite an existing one, use Edit on that profile.
+                      This creates another {selected.displayName} connection. To replace an existing one, choose Edit on that connection.
                     </div>
                   )}
-                  <Field label="Credential name"><input className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+                  <Field label="Connection name"><input className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={name} onChange={(e) => setName(e.target.value)} /></Field>
 
                   {selected.authModes.length > 1 && (
                     <Field label="Authentication"><select className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={authMode} onChange={(e) => setAuthMode(e.target.value as "api_key" | "oauth")}>{selected.authModes.map((mode) => <option key={mode} value={mode}>{mode === "api_key" ? "API Key" : "OAuth login"}</option>)}</select></Field>
@@ -893,13 +914,13 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
                     <div className="space-y-3">
                       {!oauthJob && <button type="button" onClick={startOAuth} disabled={busy} className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Starting..." : "Start login"}</button>}
                       {oauthJob && <div className="rounded border border-line-soft bg-inset p-3 space-y-2 text-xs text-ink-3">
-                        <div>Status: <span className="font-medium">{oauthJob.status}</span></div>
+                        <div>Status: <span className="font-medium">{oauthStatusLabel(oauthJob.status)}</span></div>
                         {oauthJob.prompt && <div>{oauthJob.prompt}</div>}
                         {oauthJob.authUrl && <a className="text-accent-ink hover:underline break-all" href={oauthJob.authUrl} target="_blank" rel="noreferrer">Open login page</a>}
                         {oauthJob.deviceCode && <div className="space-y-1"><div>Code: <code>{oauthJob.deviceCode.userCode}</code></div><a className="text-accent-ink hover:underline break-all" href={oauthJob.deviceCode.verificationUri} target="_blank" rel="noreferrer">{oauthJob.deviceCode.verificationUri}</a></div>}
                         {oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}
                         {oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">Submit</button></div>}
-                        {oauthJob.error && <div className="text-blocked">{oauthJob.error}</div>}
+                        {oauthJob.error && <div className="text-blocked">Sign-in failed. Try again or choose another connection method.</div>}
                         {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-ink-3 hover:text-ink-1">Cancel login</button>}
                       </div>}
                     </div>
@@ -1008,9 +1029,11 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
         toast(`Fetched ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`, "success");
         if (result.warnings.length > 0) setFetchError(result.warnings.join(" "));
       }
-    } catch (err: any) {
-      setFetchError(err.message || String(err));
-      toast(err.message || String(err), "error");
+    } catch (err) {
+      console.error("Failed to fetch models", err);
+      const message = userActionError("fetch models", "Check the endpoint and connection, or add models manually.");
+      setFetchError(message);
+      toast(message, "error");
     } finally {
       setFetchingModels(false);
     }
@@ -1020,7 +1043,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     try {
       const job = await startOAuthLoginJob({ profileId: profile?.id, providerId: form.oauthProviderId, profile: form });
       setOauthJob(job);
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to start OAuth sign-in", err); toast(userActionError("start sign-in"), "error"); }
     finally { setOauthBusy(false); }
   };
   const submitOAuth = async () => {
@@ -1032,15 +1055,15 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
       if (job.status === "completed") {
         toast("OAuth connected.", "success");
         onSaved();
-      } else if (job.error) toast(job.error, "error");
-    } catch (err: any) { toast(err.message, "error"); }
+      } else if (job.error) toast("Sign-in failed. Check the response and try again.", "error");
+    } catch (err) { console.error("Failed to submit OAuth input", err); toast(userActionError("submit the sign-in response", "Check the response, then try again."), "error"); }
     finally { setOauthBusy(false); }
   };
   const cancelOAuth = async () => {
     if (!oauthJob) return;
     setOauthBusy(true);
     try { setOauthJob(await cancelOAuthLoginJob(oauthJob.id)); }
-    catch (err: any) { toast(err.message, "error"); }
+    catch (err) { console.error("Failed to cancel OAuth sign-in", err); toast(userActionError("cancel sign-in"), "error"); }
     finally { setOauthBusy(false); }
   };
   const save = async () => {
@@ -1050,13 +1073,13 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
       if (profile) await updateModelCredentialProfile(profile.id, payload);
       else await createModelCredentialProfile(payload);
       onSaved();
-    } catch (err: any) { toast(err.message, "error"); }
+    } catch (err) { console.error("Failed to save model connection", err); toast(userActionError("save this model connection", "Check the required fields, then try again."), "error"); }
     finally { setSaving(false); }
   };
   return (
     <Sheet open onClose={onClose} size="2xl" closeOnOverlayClick={false}>
       <div className="p-5 space-y-5">
-        <div><h3 className="text-base font-semibold text-ink-1">{profile ? "Edit" : "Add"} credential profile</h3><p className="text-xs text-ink-3 mt-1">Provider connection + model catalog. Raw secrets are never shown after save.</p></div>
+        <div><h3 className="text-base font-semibold text-ink-1">{profile ? "Edit" : "Add"} connection</h3><p className="text-xs text-ink-3 mt-1">Configure the provider and models available through this connection. Secrets are hidden after saving.</p></div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="space-y-3">
             <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="OpenRouter main" /></Field>
@@ -1068,10 +1091,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
             {form.authType === "oauth" && <div className="rounded border border-line-soft p-3 space-y-2">
               <Field label="OAuth provider"><select className={inputCls} value={form.oauthProviderId || ""} onChange={(e) => setForm({ ...form, oauthProviderId: e.target.value })}><option value="">Select provider...</option>{["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"].map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
               <div className="flex items-center gap-2 text-xs"><span className={profile?.hasSecret ? "text-onair" : "text-ink-3"}>{profile?.hasSecret ? "OAuth connected" : "OAuth not connected"}</span><button type="button" disabled={oauthBusy || !form.oauthProviderId} onClick={startOAuth} className="text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">Start login</button>{oauthJob && oauthJob.status === "awaiting_input" && <button type="button" disabled={oauthBusy} onClick={cancelOAuth} className="text-ink-3 hover:text-ink-4">Cancel</button>}</div>
-              {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthJob.status}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked">{oauthJob.error}</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}</div>}
+              {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthStatusLabel(oauthJob.status)}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked">Sign-in failed. Try again or choose another connection method.</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}</div>}
               <p className="text-xs text-ink-3">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
-            <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-3">Secrets are stored locally in plaintext with 0600 file permissions. Use a scoped key when possible.</div>
+            <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-3">Keys are stored unencrypted on this device and hidden after saving. Use a scoped key.</div>
           </div>
           <div className="space-y-3">
             {builtinProvider ? (
@@ -1104,7 +1127,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                     <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 1000000" /></Field>
                     <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 128000" /></Field>
                   </div>
-                  <div className="text-[11px] text-ink-3">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max` : ""} · ${m.metadataSource === "pi_catalog" ? "from pi catalog" : "custom"}` : "metadata unknown"}</div>
+                  {m.contextWindow ? <div className="text-[11px] text-ink-3">{`${Math.round(m.contextWindow / 1000)}k context${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max output` : ""}`}</div> : null}
                   <button type="button" className="text-xs text-blocked" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
                 </div>)}
               </>

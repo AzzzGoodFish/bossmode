@@ -1,5 +1,5 @@
-import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
+import { logger } from "../foundation/logger.js";
 import * as taskStore from "../workspace/task-store.js";
 import { updateRoomLinearIntegration } from "../workspace/room-store.js";
 import type { Task, TaskEventMeta } from "../shared/types.js";
@@ -77,11 +77,11 @@ export async function syncTaskEventToLinear(args: {
     });
     updateRoomLinearIntegration(args.roomId, { ...roomConfig, lastSyncAt: syncedAt, lastSyncError: undefined, syncCount: (roomConfig.syncCount || 0) + 1 });
     if (updated) broadcastToRoom(args.roomId, { type: "task:updated", roomId: args.roomId, task: updated });
-    postMessage(args.roomId, "system", `Synced to Linear: ${issue.identifier}`, []);
+    logger.info("linear", "task synced", { roomId: args.roomId, taskId: task.id, issue: issue.identifier });
   } catch (err) {
     const error = sanitize(err);
     taskStore.updateTaskLinearMetadata(args.roomId, args.task.id, { linearSyncError: error });
     updateRoomLinearIntegration(args.roomId, { ...roomConfig, lastSyncError: error });
-    postMessage(args.roomId, "system", `Linear sync failed: ${error}`, []);
+    logger.warn("linear", "task sync failed", { roomId: args.roomId, taskId: args.task.id, error });
   }
 }

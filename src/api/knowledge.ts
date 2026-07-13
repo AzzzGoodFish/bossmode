@@ -128,6 +128,40 @@ addRoute("POST", "/api/knowledge/entries", async (req, res) => {
 
 // -- Single-doc read / update / delete (path via query string) --
 
+addRoute("GET", "/api/knowledge/raw", async (req, res) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const path = url.searchParams.get("path");
+  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const raw = knowledgeStore.getRawEntry(path);
+  if (!raw) { sendJson(res, 404, { error: "Document not found" }); return; }
+  res.writeHead(200, {
+    "Content-Type": raw.contentType,
+    "Content-Length": raw.data.length,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+  });
+  res.end(raw.data);
+});
+
+addRoute("POST", "/api/knowledge/upload", async (req, res) => {
+  const body = (await parseBody(req)) as { path?: string; dataBase64?: string; contentType?: string };
+  if (!body.path || !body.dataBase64) {
+    sendJson(res, 400, { error: "path and dataBase64 are required" });
+    return;
+  }
+  if (body.contentType && body.contentType !== "image/png") {
+    sendJson(res, 400, { error: "Only image/png uploads are supported" });
+    return;
+  }
+  try {
+    const data = Buffer.from(body.dataBase64, "base64");
+    const entry = knowledgeStore.writePngEntry(body.path, data);
+    sendJson(res, 200, entry);
+  } catch (err: any) {
+    sendJson(res, 400, { error: String(err?.message || err) });
+  }
+});
+
 addRoute("GET", "/api/knowledge/entry", async (req, res) => {
   const url = new URL(req.url || "", "http://localhost");
   const path = url.searchParams.get("path");

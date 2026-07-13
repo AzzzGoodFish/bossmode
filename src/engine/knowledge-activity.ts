@@ -37,23 +37,17 @@ function shouldEmit(key: string): boolean {
   return true;
 }
 
-/** Extract a display title: frontmatter title > first markdown heading > filename. */
+/** Extract a display title: first markdown heading > filename. Frontmatter is plain content. */
 function extractTitle(absPath: string, relPath: string): string {
   try {
     const raw = readFileSync(absPath, "utf-8").slice(0, 4000);
-    const fmMatch = raw.match(/^---\r?\n[\s\S]*?^title\s*:\s*(.+)$/m);
-    if (fmMatch) {
-      let t = fmMatch[1].trim();
-      if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1);
-      if (t) return t;
-    }
     const headingMatch = raw.match(/^#\s+(.+)$/m);
     if (headingMatch) return headingMatch[1].trim();
   } catch {
     /* file may have been deleted right after */
   }
   const base = relPath.split("/").pop() || relPath;
-  return base.replace(/\.md$/i, "");
+  return base.replace(/\.[^.]+$/i, "").replace(/[-_]/g, " ");
 }
 
 /**

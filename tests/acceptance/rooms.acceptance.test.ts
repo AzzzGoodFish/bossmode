@@ -15,7 +15,7 @@
  * From test plan: docs/test-plan.md §2, §3
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
@@ -25,13 +25,17 @@ import type { Room, RoomMessage } from "../../src/shared/types.js";
 
 setupConfigMock();
 
+const roomMembers = (...names: string[]) => names.map((name) => ({ agent: name, name }));
+
 describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   let ts: TestServer;
   let token: string;
 
   beforeAll(async () => {
     mkdirSync(join(getTestBossmodeDir(), "agents"), { recursive: true });
-    writeFileSync(join(getTestBossmodeDir(), "agents", "pm.md"), "---\nname: pm\n---\nTest PM agent\n", "utf-8");
+    for (const agent of ["pm", "architect", "qa", "developer"]) {
+      writeFileSync(join(getTestBossmodeDir(), "agents", `${agent}.md`), `---\nname: ${agent}\n---\nTest ${agent} agent\n`, "utf-8");
+    }
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
   });
@@ -59,7 +63,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("POST /api/rooms creates a room with a required leader stored by memberId", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "test-room", cwd: "/tmp", members: ["pm", "architect"], promptLeaderMemberName: "architect" },
+        body: { name: "test-room", cwd: "/tmp", members: roomMembers("pm", "architect"), promptLeaderMemberName: "architect" },
       });
       // Should succeed once Phase 2 is implemented (currently 501)
       if (res.status === 501) {
@@ -80,10 +84,58 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(room.promptLeaderMemberId).toBe(leader?.id);
     });
 
+    it("creates same-Agent room members atomically from Agent drafts", async () => {
+      const before = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
+      const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: {
+          name: "direct-agent-drafts",
+          cwd: "/tmp",
+          members: [
+            { agent: "developer", name: "dev-a" },
+            { agent: "developer", name: "dev-b" },
+            { agent: "qa", name: "qa" },
+          ],
+          promptLeaderMemberName: "dev-a",
+        },
+      });
+      expect(res.status).toBe(200);
+      const room: Room = JSON.parse(res.body);
+      expect(room.roomMembers?.map((member) => member.name)).toEqual(["dev-a", "dev-b", "qa"]);
+      expect(room.roomMembers?.map((member) => member.sourceAgent)).toEqual(["developer", "developer", "qa"]);
+      expect(new Set(room.roomMembers?.map((member) => member.id)).size).toBe(3);
+      expect(room.roomMembers?.every((member) => !member.sourceMemberId && !member.migratedFrom && !member.config)).toBe(true);
+      expect(room.promptLeaderMemberId).toBe(room.roomMembers?.[0].id);
+      expect(JSON.parse(before.body).every((item: Room) => item.id !== room.id)).toBe(true);
+    });
+
+    it("rejects old string members and leaves no partial room after a bad draft", async () => {
+      const oldContract = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "old-contract", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+      });
+      expect(oldContract.status).toBe(400);
+      expect(JSON.parse(oldContract.body).error).toContain("members must contain { agent, name } objects");
+
+      const before = JSON.parse((await jsonRequest(ts.port, "GET", "/api/rooms", { token })).body) as Room[];
+      const badDraft = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: {
+          name: "bad-draft-no-room",
+          cwd: "/tmp",
+          members: [{ agent: "developer", name: "dev" }, { agent: "missing-agent", name: "ghost" }],
+          promptLeaderMemberName: "dev",
+        },
+      });
+      expect(badDraft.status).toBe(404);
+      const after = JSON.parse((await jsonRequest(ts.port, "GET", "/api/rooms", { token })).body) as Room[];
+      expect(after.map((room) => room.id)).toEqual(before.map((room) => room.id));
+    });
+
     it("POST /api/rooms without promptLeaderMemberName returns error", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "missing-leader-room", cwd: "/tmp", members: ["pm"] },
+        body: { name: "missing-leader-room", cwd: "/tmp", members: roomMembers("pm") },
       });
       if (res.status === 501) return;
       expect(res.status).toBe(400);
@@ -93,7 +145,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("POST /api/rooms rejects leader outside selected members", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "bad-leader-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "architect" },
+        body: { name: "bad-leader-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "architect" },
       });
       if (res.status === 501) return;
       expect(res.status).toBe(400);
@@ -103,7 +155,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("keeps prompt leader stable when the leader member is renamed", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "rename-leader-room", cwd: "/tmp", members: ["pm", "qa"], promptLeaderMemberName: "pm" },
+        body: { name: "rename-leader-room", cwd: "/tmp", members: roomMembers("pm", "qa"), promptLeaderMemberName: "pm" },
       });
       if (res.status === 501) return;
       expect(res.status).toBe(200);
@@ -128,7 +180,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("POST /api/rooms with nonexistent cwd returns error", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "bad-room", cwd: "/nonexistent/path/xxx", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "bad-room", cwd: "/nonexistent/path/xxx", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (res.status === 501) return; // skip until implemented
       expect(res.status).toBeGreaterThanOrEqual(400);
@@ -139,7 +191,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("POST /api/rooms with empty members returns error", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "empty-room", cwd: "/tmp", members: [] },
+        body: { name: "empty-room", cwd: "/tmp", members: roomMembers() },
       });
       if (res.status === 501) return;
       expect(res.status).toBe(400);
@@ -153,7 +205,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("PATCH /api/rooms/:id updates name, cwd, and ruleDocs", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "settings-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "settings-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -177,7 +229,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("PATCH /api/rooms/:id updates docsPath", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "docs-path-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "docs-path-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -193,7 +245,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("PATCH /api/rooms/:id rejects nonexistent cwd", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "settings-room-2", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "settings-room-2", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -209,6 +261,25 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   });
 
   describe("Room member MCP access PATCH", () => {
+    it("accepts the max thinking level override", async () => {
+      const { saveMember } = await import("../../src/workforce/member-store.js");
+      saveMember({ name: "pm", agent: "pm", runtime: "test" });
+
+      const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+        token,
+        body: { name: "thinking-max-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
+      });
+      if (createRes.status === 501) return;
+      const room: Room = JSON.parse(createRes.body);
+
+      const res = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+        token,
+        body: { thinkingLevel: "max" },
+      });
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).member.thinkingLevel).toBe("max");
+    });
+
     it("rejects invalid-config MCP servers", async () => {
       const mcpDir = join(getTestBossmodeDir(), "mcp");
       mkdirSync(mcpDir, { recursive: true });
@@ -224,7 +295,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
 
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "mcp-access-room", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "mcp-access-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -254,6 +325,23 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   // ── T2.7: Room list ──
 
   describe("T2.7: Room list (F17)", () => {
+    it("returns 500 instead of fake empty when the Room authority is unreadable, then recovers", async () => {
+      const roomsDir = join(getTestBossmodeDir(), "rooms");
+      const backup = `${roomsDir}-backup`;
+      renameSync(roomsDir, backup);
+      writeFileSync(roomsDir, "not a directory", "utf8");
+      try {
+        const failed = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
+        expect(failed.status).toBe(500);
+        expect(JSON.parse(failed.body).error).toBe("Couldn’t load Rooms");
+      } finally {
+        unlinkSync(roomsDir);
+        renameSync(backup, roomsDir);
+      }
+      const recovered = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
+      expect(recovered.status).toBe(200);
+    });
+
     it("GET /api/rooms returns all rooms", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
       expect(res.status).toBe(200);
@@ -268,11 +356,11 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("two rooms with same cwd are independent", async () => {
       const res1 = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "room-a", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "room-a", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       const res2 = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "room-b", cwd: "/tmp", members: ["architect"], promptLeaderMemberName: "architect" },
+        body: { name: "room-b", cwd: "/tmp", members: roomMembers("architect"), promptLeaderMemberName: "architect" },
       });
       if (res1.status === 501 || res2.status === 501) return;
 
@@ -290,7 +378,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       // First create a room
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "msg-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "msg-test", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -336,7 +424,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       setMockPromptFn(vi.fn(async (message: string) => { prompts.push(message); }));
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "compact-command-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "compact-command-test", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       expect(createRes.status).toBe(200);
       const room: Room = JSON.parse(createRes.body);
@@ -359,7 +447,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       setMockPromptFn(vi.fn(async (message: string) => { prompts.push(message); }));
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "compact-command-single-member", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "compact-command-single-member", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       expect(createRes.status).toBe(200);
       const room: Room = JSON.parse(createRes.body);
@@ -380,7 +468,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("mentioning non-member returns error", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "mention-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "mention-test", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -407,7 +495,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("message appears on all subscribed WS clients simultaneously", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "realtime-test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: "realtime-test", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -444,7 +532,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     it("GET /api/rooms/:id returns members with status", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "status-test", cwd: "/tmp", members: ["pm", "architect"], promptLeaderMemberName: "pm" },
+        body: { name: "status-test", cwd: "/tmp", members: roomMembers("pm", "architect"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);

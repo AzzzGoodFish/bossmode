@@ -45,4 +45,12 @@ describe("event-handler status authority", () => {
     expect(status).toBeUndefined();
     expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "rm_dev");
   });
+
+  it("forces and retries context usage refresh on compaction_end", () => {
+    const buffer: AgentHistoryEvent[] = [];
+    const status = handleAgentEvent("room1", "developer", "room1:developer", { type: "compaction_end", reason: "manual", aborted: false, willRetry: false }, buffer, "rm_dev");
+
+    expect(status).toBeUndefined();
+    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "rm_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
+  });
 });

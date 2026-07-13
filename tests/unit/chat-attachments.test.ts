@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeTestServer, createTestServer, getTestBossmodeDir, httpRequest, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
 
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
+
 setupConfigMock();
 
 async function login(port: number): Promise<string> {
@@ -39,7 +41,7 @@ describe("chat attachment artifacts", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-chat-attach-"));
-    const room = roomStore.createRoom("Attachments", cwd, ["pm"]);
+    const room = roomStore.createRoom("Attachments", cwd, drafts(["pm"]));
 
     const uploaded = await uploadText(ts.port, room.id, token, "note.md", "# Note\n\nBody");
     expect(uploaded.previewType).toBe("markdown");
@@ -88,7 +90,7 @@ describe("chat attachment artifacts", () => {
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
     const missingPath = join(cwd, "missing.md");
-    const room = roomStore.createRoom("Agent Missing Attach", cwd, ["developer"]);
+    const room = roomStore.createRoom("Agent Missing Attach", cwd, drafts(["developer"]));
 
     const result = await handleToolCallback("chat", room.id, "developer", {
       message: "should not send",
@@ -116,7 +118,7 @@ describe("chat attachment artifacts", () => {
     const { handleToolCallback } = await import("../../src/engine/tools.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-artifacts-"));
-    const room = roomStore.createRoom("Agent Artifacts", cwd, ["developer"]);
+    const room = roomStore.createRoom("Agent Artifacts", cwd, drafts(["developer"]));
     knowledgeStore.addEntry("Artifact Doc", "# Artifact Doc\n\nBody", "developer", "agent-artifacts/doc.md");
 
     const result = await handleToolCallback("chat", room.id, "developer", {
@@ -140,7 +142,7 @@ describe("chat attachment artifacts", () => {
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-"));
     const sourcePath = join(cwd, "agent-note.html");
     writeFileSync(sourcePath, "<h1>Agent Note</h1>", "utf8");
-    const room = roomStore.createRoom("Agent Attach", cwd, ["developer"]);
+    const room = roomStore.createRoom("Agent Attach", cwd, drafts(["developer"]));
 
     const result = await handleToolCallback("chat", room.id, "developer", {
       message: "attached",

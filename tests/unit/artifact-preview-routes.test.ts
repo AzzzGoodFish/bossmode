@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeTestServer, createTestServer, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
 
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
+
 setupConfigMock();
 
 async function login(port: number): Promise<string> {
@@ -30,8 +32,10 @@ describe("artifact preview API", () => {
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-artifact-preview-"));
     mkdirSync(join(cwd, "design-prototype"), { recursive: true });
     writeFileSync(join(cwd, "design-prototype/demo.html"), "<h1>Demo</h1>", "utf8");
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    writeFileSync(join(cwd, "design-prototype/demo.png"), png);
 
-    const room = roomStore.createRoom("Preview", cwd, ["pm"]);
+    const room = roomStore.createRoom("Preview", cwd, drafts(["pm"]));
     knowledgeStore.addEntry("Plan", "# Plan\n\nBody", "test", "vulnhunt-srv/plan.md");
 
     const md = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/vulnhunt-srv/plan.md")}`, { token });
@@ -53,6 +57,19 @@ describe("artifact preview API", () => {
       originalPath: "design-prototype/demo.html",
       content: "<h1>Demo</h1>",
     }));
+
+    const pngPreview = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("design-prototype/demo.png")}`, { token });
+    expect(pngPreview.status).toBe(200);
+    const pngPreviewBody = JSON.parse(pngPreview.body);
+    expect(pngPreviewBody.type).toBe("image");
+    expect(pngPreviewBody.content).toMatch(/^data:image\/png;base64,/);
+
+    const raw = await fetch(`http://127.0.0.1:${ts.port}/api/rooms/${room.id}/artifact-raw?path=${encodeURIComponent("design-prototype/demo.png")}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(raw.status).toBe(200);
+    expect(raw.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await raw.arrayBuffer()).equals(png)).toBe(true);
   });
 
   it("returns a non-technical missing artifact message", async () => {
@@ -61,7 +78,7 @@ describe("artifact preview API", () => {
     const token = await login(ts.port);
     const roomStore = await import("../../src/workspace/room-store.js");
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-artifact-preview-"));
-    const room = roomStore.createRoom("Preview", cwd, ["pm"]);
+    const room = roomStore.createRoom("Preview", cwd, drafts(["pm"]));
 
     const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/missing.md")}`, { token });
     expect(res.status).toBe(404);

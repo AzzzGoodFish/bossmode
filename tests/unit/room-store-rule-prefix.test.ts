@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
 let tmpDir = "";
 
@@ -17,6 +19,9 @@ vi.mock("../../src/shared/config.js", () => ({
 describe("room-store updateRuleDocPathsByPrefix", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "bossmode-room-prefix-"));
+    vi.resetModules();
+    mkdirSync(join(tmpDir, "agents"), { recursive: true });
+    writeFileSync(join(tmpDir, "agents", "pm.md"), "---\nname: pm\n---\npm", "utf8");
   });
 
   afterEach(() => {
@@ -26,7 +31,7 @@ describe("room-store updateRuleDocPathsByPrefix", () => {
   it("updates matching ruleDocs prefix and deduplicates", async () => {
     const { createRoom, getRoom, updateRuleDocPathsByPrefix } = await import("../../src/workspace/room-store.js");
 
-    const room = createRoom("r1", "/tmp", ["pm"], [
+    const room = createRoom("r1", "/tmp", drafts(["pm"]), [
       "bossmode/rules/a.md",
       "bossmode/rules/sub/b.md",
       "other/rules/x.md",
@@ -46,7 +51,7 @@ describe("room-store updateRuleDocPathsByPrefix", () => {
 
   it("does not affect rooms without matching prefix", async () => {
     const { createRoom, updateRuleDocPathsByPrefix } = await import("../../src/workspace/room-store.js");
-    createRoom("r1", "/tmp", ["pm"], ["foo/bar.md"]);
+    createRoom("r1", "/tmp", drafts(["pm"]), ["foo/bar.md"]);
     expect(updateRuleDocPathsByPrefix("bossmode/rules", "bossmode2/rules")).toBe(0);
   });
 });

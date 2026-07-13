@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { Code2, ExternalLink, FileText, Loader2, Minimize2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Code2, Download, ExternalLink, FileText, Loader2, Minimize2 } from "lucide-react";
 import type { ArtifactPreviewData, RoomMessageAttachment } from "../api/client";
-import { getArtifactPreview, getAttachmentPreview } from "../api/client";
+import { getArtifactPreview, getArtifactRawBlob, getAttachmentPreview, getAttachmentRawBlob } from "../api/client";
 import { Markdown } from "./Markdown";
 import { SurfaceShell } from "./SurfaceShell";
+import { useDialog } from "./dialogs";
+import { downloadFilename, triggerBlobDownload } from "../utils/download-file";
 
 /**
  * Preview Surface — the near-fullscreen in-place preview (GOO-113).
@@ -68,7 +70,9 @@ export function PreviewSurface({
   onClose: () => void;
 }) {
   const item = state.items[state.selectedIndex] || state.items[0];
+  const { toast } = useDialog();
   const [load, setLoad] = useState<LoadState>({ status: "idle" });
+  const [downloading, setDownloading] = useState(false);
   const [htmlMode, setHtmlMode] = useState<"preview" | "source">("preview");
 
   useEffect(() => { setHtmlMode("preview"); }, [item?.path]);
@@ -85,14 +89,33 @@ export function PreviewSurface({
 
   const title = load.status === "ready" ? load.data.title : (item?.label || state.title);
   const canSource = load.status === "ready" && load.data.type === "html";
-  const canOpenTab = load.status === "ready" && (load.data.type === "html" || load.data.type === "md");
+  const canOpenTab = load.status === "ready" && (load.data.type === "html" || load.data.type === "md" || load.data.type === "image");
 
   const openInTab = useMemo(() => () => {
     if (load.status !== "ready") return;
+    if (load.data.type === "image") {
+      window.open(load.data.content, "_blank", "noopener");
+      return;
+    }
     const isHtml = load.data.type === "html";
     const blob = new Blob([load.data.content], { type: isHtml ? "text/html" : "text/plain" });
     window.open(URL.createObjectURL(blob), "_blank", "noopener");
   }, [load]);
+
+  const handleDownload = useCallback(async () => {
+    if (!item?.path || downloading) return;
+    setDownloading(true);
+    try {
+      const blob = state.kind === "attachment"
+        ? await getAttachmentRawBlob(roomId, item.path)
+        : await getArtifactRawBlob(roomId, load.status === "ready" ? load.data.originalPath : item.path);
+      triggerBlobDownload(blob, downloadFilename(item.label || item.path));
+    } catch (err: any) {
+      toast(`Download failed: ${String(err?.message || err)}`, "error");
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading, item?.label, item?.path, load, roomId, state.kind, toast]);
 
   return (
     <SurfaceShell
@@ -120,6 +143,11 @@ export function PreviewSurface({
             <button onClick={() => setHtmlMode("preview")} className={`px-2 py-1 text-[10px] rounded cursor-pointer ${htmlMode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>Preview</button>
             <button onClick={() => setHtmlMode("source")} className={`px-2 py-1 text-[10px] rounded cursor-pointer ${htmlMode === "source" ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>Source</button>
           </div>
+        )}
+        {item?.path && (
+          <button onClick={() => void handleDownload()} disabled={downloading} title="Download" aria-label="Download" className="w-8 h-8 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-default">
+            {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          </button>
         )}
         {canOpenTab && (
           <button onClick={openInTab} title="Open in browser tab" aria-label="Open in browser tab" className="w-8 h-8 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
@@ -157,6 +185,13 @@ function SurfaceBody({ load, htmlMode }: { load: LoadState; htmlMode: "preview" 
     );
   }
   const data = load.data!;
+  if (data.type === "image") {
+    return (
+      <div className="h-full overflow-auto p-6 flex items-center justify-center bg-inset/40">
+        <img src={data.content} alt={data.title} className="max-w-full max-h-full rounded-lg border border-line bg-surface-1" />
+      </div>
+    );
+  }
   if (data.type === "md") {
     return (
       <div className="h-full overflow-y-auto">

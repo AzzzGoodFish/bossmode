@@ -113,7 +113,7 @@ export interface ModelDefinitionConfig {
   maxTokens?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
-  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh", string | null>>;
+  thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
   compat?: Record<string, unknown>;
   metadataSource?: ModelMetadataSource;
 }
@@ -354,6 +354,13 @@ export interface RoomMemberConfig {
   contextLimit?: number;
   skills?: string[];
   mcpServers?: string[];
+}
+
+export interface CreateRoomMemberInput {
+  /** Exact Agent template name. */
+  agent: string;
+  /** Room-local member identity / @mention name. */
+  name: string;
 }
 
 export interface RoomMemberRecord {

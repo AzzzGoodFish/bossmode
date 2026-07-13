@@ -57,7 +57,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
       expect(res.status).toBe(200);
       const entry = JSON.parse(res.body);
       expect(entry.id).toBe(docPath);
-      expect(entry.title).toBe("Architecture");
+      expect(entry.title).toBe("architecture");
       expect(entry.content).toContain("5 modules");
     });
 
@@ -73,7 +73,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
         `/api/knowledge/entry?path=${encodeURIComponent(docPath)}`, { token });
       expect(res.status).toBe(200);
       const entry = JSON.parse(res.body);
-      expect(entry.title).toBe("Architecture");
+      expect(entry.title).toBe("architecture");
       expect(entry.content).toContain("5 modules");
     });
 
@@ -88,7 +88,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
       const getRes = await jsonRequest(ts.port, "GET",
         `/api/knowledge/entry?path=${encodeURIComponent(docPath)}`, { token });
       const entry = JSON.parse(getRes.body);
-      expect(entry.title).toBe("Architecture v2");
+      expect(entry.title).toBe("architecture");
       expect(entry.content).toContain("Updated architecture");
     });
 
@@ -98,6 +98,25 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
       const tree = JSON.parse(res.body);
       expect(tree.kind).toBe("folder");
       expect(Array.isArray(tree.children)).toBe(true);
+    });
+
+    it("POST /api/knowledge/upload stores png and raw returns image bytes", async () => {
+      const pngPath = `test-${Date.now()}/swatch.png`;
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+      const res = await jsonRequest(ts.port, "POST", "/api/knowledge/upload", {
+        token,
+        body: { path: pngPath, contentType: "image/png", dataBase64: png.toString("base64") },
+      });
+      expect(res.status).toBe(200);
+      const entry = JSON.parse(res.body);
+      expect(entry.id).toBe(pngPath);
+
+      const rawRes = await fetch(`http://127.0.0.1:${ts.port}/api/knowledge/raw?path=${encodeURIComponent(pngPath)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(rawRes.status).toBe(200);
+      expect(rawRes.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await rawRes.arrayBuffer()).equals(png)).toBe(true);
     });
 
     it("DELETE /api/knowledge/entry?path=... deletes doc", async () => {
@@ -137,7 +156,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("rulesroom"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
+        body: { name: uid("rulesroom"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -148,7 +167,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
     it("POST /api/rooms without ruleDocs creates a plain room", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("plainroom"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+        body: { name: uid("plainroom"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -166,7 +185,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-move"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [oldPath] },
+        body: { name: uid("room-move"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [oldPath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string; ruleDocs?: string[] };
@@ -193,7 +212,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-delete"), cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
+        body: { name: uid("room-delete"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string };

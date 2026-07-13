@@ -7,6 +7,7 @@ import { AttachmentUploader } from "./AttachmentUploader";
 interface MessageInputProps {
   onSend: (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => void;
   members: string[];
+  memberHints?: Record<string, string>;
   disabled?: boolean;
   roomId?: string;
   onError?: (message: string) => void;
@@ -19,7 +20,7 @@ function clipboardFilename(): string {
   return `clipboard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
 }
 
-export function MessageInput({ onSend, members, disabled, roomId, onError }: MessageInputProps) {
+export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError }: MessageInputProps) {
   const [value, setValue, clearDraft] = useDraft(roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
@@ -187,10 +188,12 @@ export function MessageInput({ onSend, members, disabled, roomId, onError }: Mes
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
-                @{name}
-                {name === "all" && (
-                  <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>activate all agents</span>
-                )}
+                <span className="font-mono">@{name}</span>
+                {name === "all" ? (
+                  <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>activate all members</span>
+                ) : memberHints[name] ? (
+                  <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>{memberHints[name]}</span>
+                ) : null}
               </button>
             );
           })}

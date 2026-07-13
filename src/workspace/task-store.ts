@@ -43,6 +43,7 @@ function normalizeTask(raw: any): Task {
     ...raw,
     comments,
     subscribers: uniqueStrings(raw?.subscribers),
+    subscriberMemberIds: uniqueStrings(raw?.subscriberMemberIds),
   } as Task;
 }
 
@@ -84,7 +85,7 @@ export function getTask(roomId: string, taskId: string): Task | null {
 
 export function createTask(
   roomId: string,
-  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[]; subscribers?: string[] },
+  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; assigneeMemberId?: string; description?: string; references?: string[]; subscribers?: string[]; subscriberMemberIds?: string[] },
 ): Task {
   const now = Date.now();
   const task: Task = {
@@ -94,9 +95,11 @@ export function createTask(
     status: input.status ?? "todo",
     priority: input.priority ?? "P1",
     assignee: input.assignee,
+    assigneeMemberId: input.assigneeMemberId,
     description: input.description,
     references: input.references,
     subscribers: uniqueStrings([input.createdBy, ...(input.subscribers ?? [])]),
+    subscriberMemberIds: uniqueStrings(input.subscriberMemberIds),
     comments: [],
     createdBy: input.createdBy,
     createdAt: now,
@@ -111,7 +114,7 @@ export function createTask(
 export function updateTask(
   roomId: string,
   taskId: string,
-  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "description" | "references" | "subscribers">>,
+  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "assigneeMemberId" | "description" | "references" | "subscribers" | "subscriberMemberIds">>,
 ): Task | null {
   const tasks = readTasks(roomId);
   const idx = tasks.findIndex((t) => t.id === taskId);
@@ -119,7 +122,7 @@ export function updateTask(
   // Only apply defined fields from patch (don't overwrite with undefined)
   const cleanPatch: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (v !== undefined) cleanPatch[k] = k === "subscribers" ? uniqueStrings(v as unknown[]) : v;
+    if (v !== undefined) cleanPatch[k] = k === "subscribers" || k === "subscriberMemberIds" ? uniqueStrings(v as unknown[]) : v;
   }
   const updated: Task = normalizeTask({ ...tasks[idx], ...cleanPatch, updatedAt: Date.now() });
   tasks[idx] = updated;
@@ -181,6 +184,33 @@ export function deleteTask(roomId: string, taskId: string): boolean {
   if (next.length === tasks.length) return false;
   writeTasks(roomId, next);
   return true;
+}
+
+export function renameParticipant(roomId: string, input: { memberId: string; oldName: string; newName: string }): number {
+  const tasks = readTasks(roomId);
+  let changed = 0;
+  const next = tasks.map((raw) => {
+    const task = normalizeTask(raw);
+    let didChange = false;
+    const assigneeMatches = task.assigneeMemberId === input.memberId || (!task.assigneeMemberId && task.assignee === input.oldName);
+    let updated: Task = task;
+    if (assigneeMatches && task.assignee !== input.newName) {
+      updated = { ...updated, assignee: input.newName };
+      didChange = true;
+    }
+    const subscribers = task.subscribers || [];
+    if (subscribers.includes(input.oldName)) {
+      updated = { ...updated, subscribers: subscribers.map((name) => name === input.oldName ? input.newName : name) };
+      didChange = true;
+    }
+    if (didChange) {
+      changed += 1;
+      updated = { ...updated, updatedAt: Date.now() };
+    }
+    return updated;
+  });
+  if (changed > 0) writeTasks(roomId, next);
+  return changed;
 }
 
 export interface TaskWithRoomName extends TaskListItem {

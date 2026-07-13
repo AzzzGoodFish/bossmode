@@ -4,6 +4,7 @@ import type { SkillInfo } from "../api/client";
 import { getSkills, createSkill } from "../api/client";
 import { useDialog } from "../components/dialogs";
 import { matchesWorkspaceResourceSearch } from "./resource-list-filter";
+import { userActionError } from "../utils/user-error";
 
 interface SkillsPageProps {
   onSelectSkill: (name: string) => void;
@@ -26,8 +27,9 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
       await createSkill(name, content);
       setShowCreate(false);
       getSkills().then(setSkills);
-    } catch (err: any) {
-      toast(err.message, "error");
+    } catch (err) {
+      console.error("Failed to create Skill", err);
+      toast(userActionError("create this Skill", "Check the name and content, then try again."), "error");
     }
   };
 

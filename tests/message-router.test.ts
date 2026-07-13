@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { parseMentions } from "../src/communication/router.js";
+import { parseMentionMemberIds, parseMentions } from "../src/communication/router.js";
 
 describe("parseMentions", () => {
   const members = ["pm", "dev", "qa", "dev-opus", "arch-sonnet"];
@@ -38,6 +38,13 @@ describe("parseMentions", () => {
 
   it("should match mix of hyphenated and simple names", () => {
     expect(parseMentions("@pm and @dev-opus work together", members)).toEqual(["pm", "dev-opus"]);
+  });
+
+  it("keeps @dev-a bound to its exact stable member id", () => {
+    expect(parseMentionMemberIds("@dev-a please review", [
+      { id: "member-dev", name: "dev", agent: "developer" },
+      { id: "member-dev-a", name: "dev-a", agent: "developer" },
+    ])).toEqual(["member-dev-a"]);
   });
 });
 

@@ -692,8 +692,9 @@ function AgentChat({
         const result = await resetAgentSession(roomId, agentName);
         onResetSessionSuccess(result.message);
         clearInput();
-      } catch (err: any) {
-        onResetSessionError(`Reset session failed: ${err.message}`);
+      } catch (err) {
+        console.error("Failed to reset member session", err);
+        onResetSessionError("Couldn’t reset this session. Try again.");
       }
       return;
     }
