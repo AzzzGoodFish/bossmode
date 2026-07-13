@@ -8,7 +8,7 @@ const forbiddenPaths = [
   /(^|\/)\.bossmode-attachments\//,
   /(^|\/)\.bossmode-prototypes\//,
   /(^|\/)\.playwright-mcp\//,
-  /^docs\/bossmode\//,
+  /^docs\//,
   /^design-prototype\//,
   /(^|\/)(node_modules|dist|coverage|archive|memory)\//,
   /(^|\/)(team-mock|library-mock|room-member-management-mock)\.[cm]?[jt]sx?$/,
@@ -22,6 +22,18 @@ const forbiddenNames = [
 const textExtensions = /\.(?:[cm]?[jt]sx?|json|md|html|css|ya?ml|toml|txt|sh)$/i;
 const privatePath = /(?:^|[^\w])(?:\/home\/[^/\s]+|\/Users\/[^/\s]+)/;
 const lanAddress = /\b(?:192\.168\.|10\.(?:\d{1,3}\.){2}|172\.(?:1[6-9]|2\d|3[01])\.)\d{1,3}\b/;
+const ownerName = "AzzzGoodFish";
+const ownerEmail = "91132952+AzzzGoodFish@users.noreply.github.com";
+
+for (const line of execFileSync("git", ["log", "--format=%H%x1f%an%x1f%ae%x1f%cn%x1f%ce", "HEAD"], { encoding: "utf8" }).trim().split("\n")) {
+  if (!line) continue;
+  const [commit, authorName, authorEmail, committerName, committerEmail] = line.split("\x1f");
+  for (const [role, name, email] of [["author", authorName, authorEmail], ["committer", committerName, committerEmail]]) {
+    if (/@example\.com$/i.test(email)) violations.push(`${commit}: ${role} uses a placeholder email`);
+    if (name === ownerName && email !== ownerEmail) violations.push(`${commit}: ${role} owner email is not the canonical GitHub noreply address`);
+    if (email === ownerEmail && name !== ownerName) violations.push(`${commit}: ${role} canonical owner email has the wrong name`);
+  }
+}
 
 for (const path of tracked) {
   if (forbiddenPaths.some((pattern) => pattern.test(path))) violations.push(`${path}: forbidden repository path`);

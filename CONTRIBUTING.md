@@ -4,6 +4,15 @@ Thanks for contributing.
 
 ## Before opening a pull request
 
+Repository maintainers should configure the canonical public identity in each clone:
+
+```bash
+git config --local user.name AzzzGoodFish
+git config --local user.email 91132952+AzzzGoodFish@users.noreply.github.com
+```
+
+Contributors may use their own GitHub-verified identity. Placeholder emails such as `example.com` are rejected by the hygiene check.
+
 1. Open an issue or discussion for substantial behavior or architecture changes.
 2. Keep changes focused and do not include local runtime data, credentials, internal working documents, generated packages, screenshots, logs, or `.bossmode-attachments`.
 3. Install both dependency sets:
