@@ -244,4 +244,6 @@ npm run dev
 
 ## License
 
-ISC
+Bossmode is licensed under the [Apache License 2.0](LICENSE).
+
+The `vendor/pi-mcp-adapter` submodule is maintained separately and remains available under its upstream MIT license.

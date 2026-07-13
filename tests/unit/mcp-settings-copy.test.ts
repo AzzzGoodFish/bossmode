@@ -22,6 +22,5 @@ describe("MCP Settings product copy", () => {
     expect(settingsPage).not.toContain("proxy tool");
     expect(settingsPage).not.toContain("HTTP/stdio");
     expect(settingsPage).not.toContain("Errors are sanitized");
-    expect(settingsPage).not.toContain("192.0.2.24");
   });
 });

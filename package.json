@@ -3,7 +3,7 @@
   "version": "0.18.0",
   "description": "Discord-style AI team chat room",
   "type": "module",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AzzzGoodFish/bossmode.git"
