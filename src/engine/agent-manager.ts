@@ -9,6 +9,7 @@ import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
+import { isRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
@@ -60,22 +61,8 @@ function formatRuntimeErrorMessage(error: unknown): string {
   return message;
 }
 
-const MEMBER_RUNTIME_FAILURE_PATTERNS = [
-  /^Member "[^"]+" request failed\./,
-  /^Member "[^"]+" error:/,
-  /^Member "[^"]+" runtime ended unexpectedly/,
-  /^Member "[^"]+" model credential is no longer available\./,
-  /^Failed to create member "[^"]+":/,
-  /^Failed to activate member "[^"]+":/,
-  /^Failed to switch model for "[^"]+":/,
-  /^Failed to switch thinking level for "[^"]+":/,
-  /^Failed to refresh model credential for "[^"]+":/,
-];
-
 function isMemberRuntimeFailureMessage(message: RoomMessage): boolean {
-  if (message.sender !== "system") return false;
-  const content = message.content || "";
-  return MEMBER_RUNTIME_FAILURE_PATTERNS.some((pattern) => pattern.test(content));
+  return isRuntimeFailureRoomMessage(message);
 }
 
 function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {

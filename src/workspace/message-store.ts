@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { roomDir } from "./room-store.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
+import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 
 function messagesPath(roomId: string): string {
   return join(roomDir(roomId), "messages.jsonl");
@@ -11,8 +12,9 @@ function messagesPath(roomId: string): string {
 
 // 2a: spread to propagate all fields (type, summary_meta, etc.)
 export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">): RoomMessage {
+  const bounded = limitRuntimeFailureRoomMessage(msg);
   const message: RoomMessage = {
-    ...msg,
+    ...bounded,
     id: `msg-${randomUUID().slice(0, 8)}`,
     ts: Date.now(),
   };
@@ -80,7 +82,7 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
 
-  let messages: RoomMessage[] = content.split("\n").map((line) => JSON.parse(line));
+  let messages: RoomMessage[] = content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
 
   // Merge summaries before pagination
   messages = mergeWithSummaries(messages);
@@ -121,7 +123,7 @@ export function getMessagesSince(roomId: string, cursorId: string | null): RoomM
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
 
-  const raw: RoomMessage[] = content.split("\n").map((line) => JSON.parse(line));
+  const raw: RoomMessage[] = content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
   const messages = mergeWithSummaries(raw);
 
   if (!cursorId) return messages;
@@ -153,7 +155,7 @@ export function getLatestMessageId(roomId: string): string | null {
 // Used by archive-store: overwrite messages file with kept messages
 export function overwriteMessages(roomId: string, messages: RoomMessage[]): void {
   const path = messagesPath(roomId);
-  writeFileSync(path, messages.map((m) => JSON.stringify(m)).join("\n") + "\n", "utf-8");
+  writeFileSync(path, messages.map((m) => JSON.stringify(limitRuntimeFailureRoomMessage(m))).join("\n") + "\n", "utf-8");
 }
 
 // Read all raw messages (no merge)
@@ -162,7 +164,7 @@ export function readAllMessages(roomId: string): RoomMessage[] {
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
-  return content.split("\n").map((line) => JSON.parse(line));
+  return content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
 }
 
 // 2d: Get raw messages in a range (for expanding summaries — no merge)

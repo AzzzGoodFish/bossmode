@@ -9,6 +9,7 @@ import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
+import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -29,7 +30,7 @@ function agentEventsPath(roomId: string, agentName: string): string {
 export function appendEventToDisk(roomId: string, agentRef: string, event: AgentHistoryEvent): void {
   const dir = agentEventsDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const withTs = { ...event, ts: Date.now() };
+  const withTs = { ...limitRuntimeErrorEvent(event), ts: Date.now() };
   appendFileSync(agentEventsPath(roomId, agentRef), JSON.stringify(withTs) + "\n", "utf-8");
 }
 
@@ -38,7 +39,7 @@ export function loadEventsFromDisk(roomId: string, agentRef: string): AgentHisto
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf-8").trim();
   if (!content) return [];
-  return content.split("\n").map((line) => JSON.parse(line));
+  return content.split("\n").map((line) => limitRuntimeErrorEvent(JSON.parse(line)));
 }
 
 /** Load events with tail-based pagination. Returns { events, total, hasMore }. */
@@ -75,6 +76,8 @@ export function handleAgentEvent(
   eventBuffer: AgentHistoryEvent[],
   memberId?: string,
 ): AgentStatus | undefined {
+  event = limitRuntimeErrorEvent(event);
+
   // Log significant events
   if (event.type === "agent_start" || event.type === "agent_end") {
     logger.info("runtime", "event", { agent: agentName, type: event.type });
