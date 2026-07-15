@@ -4,7 +4,7 @@ All notable changes to Bossmode are documented here.
 
 ---
 
-## [0.18.1-rc.1] — 2026-07-15
+## [0.18.1] — 2026-07-15
 
 ### Fixed
 - User-visible runtime/provider errors are capped at 300 characters across new and existing Room and Activity records, while user messages and normal member replies remain unchanged.
