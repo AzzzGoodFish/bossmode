@@ -234,7 +234,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <div className="h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
+    <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
 
