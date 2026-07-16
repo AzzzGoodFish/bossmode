@@ -102,6 +102,27 @@ describe("member-credential-binding-v1 migration", () => {
     expect(pm.credentialId).toBe("cred-a");
   });
 
+  it("clears real historical legacy global data injected after an earlier clean-state run (does not trust a stale done flag)", async () => {
+    mkdirSync(tempDir, { recursive: true });
+
+    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    // First run happens before any legacy data exists (a fresh install boot).
+    runMemberCredentialBindingMigration();
+
+    // Real historical data is restored/imported afterward, exactly like a fresh
+    // install followed by importing an existing user's legacy members.json.
+    writeGlobalMembers([
+      { name: "harnessbot", agent: "general", model: "goo73/fake", runtime: "pi-cli", thinkingLevel: "off", id: "ffb62b3a", type: "agent" },
+    ]);
+
+    runMemberCredentialBindingMigration();
+
+    const members = JSON.parse(readFileSync(join(tempDir, "members.json"), "utf-8"));
+    expect(members[0].model).toBeUndefined();
+    expect(members[0].credentialId).toBeUndefined();
+    expect(members[0].name).toBe("harnessbot");
+  });
+
   it("is idempotent — a second run makes no further changes and does not duplicate snapshots", async () => {
     mkdirSync(tempDir, { recursive: true });
     writeRoom("room-d", [

@@ -30,7 +30,6 @@ function snapshotDir(): string {
 
 interface MigrationMarker {
   rooms: Record<string, boolean>;
-  globalMembersDone?: boolean;
 }
 
 function readJson<T>(path: string, fallback: T): T {
@@ -45,7 +44,7 @@ function writeJson(path: string, value: unknown): void {
 
 function readMarker(): MigrationMarker {
   const marker = readJson<Partial<MigrationMarker>>(markerPath(), {});
-  return { rooms: marker.rooms || {}, globalMembersDone: marker.globalMembersDone === true };
+  return { rooms: marker.rooms || {} };
 }
 
 function writeMarker(marker: MigrationMarker): void {
@@ -110,15 +109,16 @@ function migrateGlobalMembers(): number {
 export function runMemberCredentialBindingMigration(): void {
   const marker = readMarker();
 
-  if (!marker.globalMembersDone) {
-    try {
-      const changed = migrateGlobalMembers();
-      if (changed > 0) logger.info("member-credential-binding-migration", "cleared unconfigured global members", { changed });
-    } catch (err) {
-      logger.error("member-credential-binding-migration", "failed to migrate global members", { error: String(err) });
-    }
-    marker.globalMembersDone = true;
-    writeMarker(marker);
+  // Global members.json has no reliable "already migrated" signal: a fresh install
+  // can mark this done before any legacy data exists, and real legacy data can be
+  // restored/imported afterward. Re-derive correctness from the file's actual
+  // content every run instead of trusting a boolean flag; this is safe because
+  // clearing is idempotent (a clean file produces zero changes and no write).
+  try {
+    const changed = migrateGlobalMembers();
+    if (changed > 0) logger.info("member-credential-binding-migration", "cleared unconfigured global members", { changed });
+  } catch (err) {
+    logger.error("member-credential-binding-migration", "failed to migrate global members", { error: String(err) });
   }
 
   const roomsDir = getRoomsDir();
