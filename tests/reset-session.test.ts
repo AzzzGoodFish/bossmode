@@ -57,6 +57,7 @@ vi.mock("../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "pm",
     model: "mock-model",
+    credentialId: "cred-a",
     runtime: "pi-cli",
     skills: [],
     thinkingLevel: "off",
@@ -164,7 +165,7 @@ describe("resetAgentSession", () => {
       name: "Room 1",
       cwd: "/tmp",
       members: ["architect"],
-      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
+      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1 }],
       createdAt: Date.now(),
     };
     vi.mocked(sessionStore.getSessions).mockReturnValue({ architect: { runtime: "pi-cli", sessionId: "legacy", sessionFile: "/tmp/legacy.json" } });

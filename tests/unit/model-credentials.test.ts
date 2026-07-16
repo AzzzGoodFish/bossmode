@@ -302,12 +302,46 @@ describe("model credential profiles", () => {
     expect(JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8")).providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
   });
 
-  it("rejects credential/model provider mismatch", async () => {
+  it("rejects a credential that does not include the requested model", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
     expect(() => mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic/claude-sonnet-4-6", credentialId: saved.id }))
-      .toThrow("does not match model provider");
+      .toThrow("does not include model");
+  });
+
+  it("resolves strictly by credentialId and never guesses a default/first-match provider credential", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.saveModelCredentialProfile(baseProfile);
+    mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "openrouter-2", isDefault: false, apiKey: "sk-secret-2" });
+
+    expect(mod.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet" })).toBeNull();
+  });
+
+  it("routes by the member's bound credential id even when multiple profiles share the same model", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.saveModelCredentialProfile(baseProfile);
+    const second = mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "openrouter-2", isDefault: false, apiKey: "sk-secret-2" });
+
+    const resolved = mod.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet", credentialId: second.id });
+    expect(resolved?.id).toBe(second.id);
+    expect(resolved?.providerSlug).toBe("openrouter-2");
+  });
+
+  it("keeps routing to the same bound credential after its providerSlug is renamed", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    const saved = mod.saveModelCredentialProfile(baseProfile);
+
+    const renamed = mod.saveModelCredentialProfile({ ...baseProfile, id: saved.id, providerSlug: "openrouter-renamed" });
+    expect(renamed.id).toBe(saved.id);
+
+    const resolved = mod.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
+    expect(resolved?.id).toBe(saved.id);
+    expect(resolved?.providerSlug).toBe("openrouter-renamed");
+
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    expect(modelsJson.providers["openrouter-renamed"].models[0].id).toBe("anthropic/claude-sonnet");
   });
 
   it("preserves SDK adaptive-thinking metadata for anthropic-proxy Claude Fable 5 export", async () => {

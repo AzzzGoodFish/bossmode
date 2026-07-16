@@ -44,9 +44,11 @@ export function memberModelAvailabilityLabel(
   credentialId: string | null | undefined,
   models: Pick<AvailableModelOption, "ref" | "profileId" | "modelId">[],
 ): string | null {
+  if (!modelRef || !credentialId) return null;
   if (models.length === 0) return "No model connected";
-  if (!modelRef) return null;
-  const available = models.some((model) => model.ref === modelRef && (!credentialId || model.profileId === credentialId));
+  const slash = modelRef.indexOf("/");
+  const modelId = slash >= 0 ? modelRef.slice(slash + 1) : modelRef;
+  const available = models.some((model) => model.profileId === credentialId && model.modelId === modelId);
   return available ? null : `${compactModelId(modelRef, models)} · unavailable`;
 }
 
@@ -309,11 +311,17 @@ This clears the member's working session memory and starts fresh. Room messages 
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
           const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
-          const modelRef = info?.model || "agent default";
+          const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
-          const hasModelOverride = !!info?.model;
-          const modelWarning = memberModelAvailabilityLabel(info?.model, info?.credentialId, models);
-          const modelAvailable = modelWarning === null;
+          const isConfigured = !!info?.model && !!info?.credentialId;
+          const modelWarning = isConfigured ? memberModelAvailabilityLabel(info?.model, info?.credentialId, models) : null;
+          const modelAvailable = isConfigured && modelWarning === null;
+          const modelChipLabel = !isConfigured ? (models.length === 0 ? "No model connected" : "Select model") : modelAvailable ? modelLabel : modelWarning!;
+          const modelChipTitle = !isConfigured
+            ? "Choose a model and credential for this member"
+            : modelAvailable
+              ? `${modelRef} · This room only`
+              : (models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`);
 
           return (
             <div key={name} className="relative border-b border-line-soft px-3.5 py-3">
@@ -339,13 +347,10 @@ This clears the member's working session memory and starts fresh. Room messages 
                   <div className="relative flex items-center gap-1 min-w-0 max-w-full">
                     <span className="text-[10px] text-ink-4 truncate shrink-0 max-w-[92px]" title={`Agent: ${agentLabel}`}>{agentLabel}</span>
                     {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
-                    {!modelAvailable ? (
-                      <span className="font-mono text-[10px] text-think shrink-0" title={models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`}>{modelWarning}</span>
-                    ) : hasModelOverride && (
+                    {info && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (!info) return;
                           setOpenThinkingChip(null);
                           setThinkingAnchor(null);
                           if (openChip === name) {
@@ -356,13 +361,15 @@ This clears the member's working session memory and starts fresh. Room messages 
                             setChipAnchor(e.currentTarget.getBoundingClientRect());
                           }
                         }}
-                        title={`${modelRef} · This room only`}
-                        className="font-mono text-[10px] text-ink-4 hover:text-accent-ink hover:bg-accent-dim rounded px-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left"
+                        title={modelChipTitle}
+                        className={`font-mono text-[10px] rounded px-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left hover:bg-accent-dim ${
+                          !isConfigured || !modelAvailable ? "text-think" : "text-ink-4 hover:text-accent-ink"
+                        }`}
                       >
-                        {modelLabel}
+                        {modelChipLabel}
                       </button>
                     )}
-                    {info && modelAvailable && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
+                    {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
                     {info && (
                       <button
                         onClick={(e) => {

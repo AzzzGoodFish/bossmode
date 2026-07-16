@@ -178,3 +178,21 @@ export async function loginAndGetToken(port: number): Promise<string> {
 }
 
 export { TEST_USERNAME, TEST_PASSWORD };
+
+// ── Test-only member configuration ──
+// The activation gate now requires every member to have an explicit
+// {model, credentialId} pair before it can be activated. Acceptance tests use
+// the mock runtime, which never talks to the real model-credentials engine, so
+// tests configure members directly through the room store (bypassing the HTTP
+// route's real-credential availability check) with a stable test-only pair.
+export const MOCK_MEMBER_MODEL = "mock-provider/mock-model";
+export const MOCK_MEMBER_CREDENTIAL_ID = "test-credential";
+
+export async function configureMockMemberModel(roomId: string, memberRef: string): Promise<void> {
+  const roomStore = await import("../../src/workspace/room-store.js");
+  roomStore.updateRoomMemberOverride(roomId, memberRef, { model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID });
+}
+
+export async function configureMockMembersForRoom(roomId: string, memberRefs: string[]): Promise<void> {
+  for (const ref of memberRefs) await configureMockMemberModel(roomId, ref);
+}

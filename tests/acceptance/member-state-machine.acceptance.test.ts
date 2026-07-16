@@ -18,6 +18,7 @@ import {
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
+  configureMockMembersForRoom,
 } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
@@ -82,7 +83,9 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
       body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
-    return JSON.parse(res.body);
+    const room = JSON.parse(res.body);
+    await configureMockMembersForRoom(room.id, members);
+    return room;
   }
 
   async function sendMessage(roomId: string, content: string): Promise<RoomMessage> {

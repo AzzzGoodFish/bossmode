@@ -461,17 +461,23 @@ export class PiSdkRuntime implements AgentRuntime {
   }
 
   async createAgent(opts: CreateAgentOpts): Promise<AgentHandle> {
-    const resolvedModel = resolveModelLabel(opts.member.model || "claude-sonnet-4-6");
-    const { provider, modelId } = splitModelRef(resolvedModel);
+    if (!opts.member.model || !opts.member.credentialId) {
+      throw new Error(`Member "${opts.member.name}" hasn't selected a model yet. Open the member card to choose a model and credential.`);
+    }
+    const modelRef = opts.member.model;
     const piConfig = exportPiConfigForMember({
       roomId: opts.roomId,
       memberName: opts.member.id,
-      modelRef: resolvedModel,
+      modelRef,
       credentialId: opts.member.credentialId,
     });
-    if (!piConfig) {
-      throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
+    if (!piConfig || !piConfig.profile) {
+      throw new Error(`No model credentials configured for ${modelRef}. Go to Settings → Model Credentials to add or import credentials.`);
     }
+    const provider = piConfig.profile.providerSlug;
+    const modelIdSlash = modelRef.indexOf("/");
+    const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
+    const resolvedModel = `${provider}/${modelId}`;
 
     const safeRoom = safeSegment(opts.roomId);
     const safeMember = safeSegment(opts.member.id);

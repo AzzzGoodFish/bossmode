@@ -1230,12 +1230,6 @@ export async function discoverModelCredentialModels(input: Partial<ModelCredenti
   };
 }
 
-function parseProviderFromModelRef(modelRef: string): string {
-  const ref = normalizeModelRef(modelRef);
-  const idx = ref.indexOf("/");
-  return idx > 0 ? ref.slice(0, idx) : "anthropic";
-}
-
 export function normalizeModelRef(modelRef: string): string {
   const aliases: Record<string, string> = {
     sonnet: "anthropic/claude-sonnet-4-6",
@@ -1396,19 +1390,13 @@ export interface PiCredentialExport {
 }
 
 export function resolveCredentialProfileForModel(args: { modelRef: string; credentialId?: string }): ModelCredentialProfile | null {
+  if (!args.credentialId) return null;
   const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
-  if (profiles.length === 0) return null;
-  const provider = parseProviderFromModelRef(args.modelRef);
-  const modelId = args.modelRef.includes("/") ? args.modelRef.split("/").slice(1).join("/") : args.modelRef;
-  const profile = args.credentialId
-    ? profiles.find((p) => p.id === args.credentialId)
-    : profiles.find((p) => p.providerSlug === provider && p.isDefault) ?? profiles.find((p) => p.providerSlug === provider);
+  const profile = profiles.find((p) => p.id === args.credentialId);
   if (!profile) return null;
-  if (profile.providerSlug !== provider) {
-    throw new Error(`Credential provider ${profile.providerSlug} does not match model provider ${provider}`);
-  }
+  const modelId = args.modelRef.includes("/") ? args.modelRef.split("/").slice(1).join("/") : args.modelRef;
   if (!profile.models.some((m) => m.id === modelId)) {
-    throw new Error(`Credential profile ${profile.name} does not include model ${args.modelRef}`);
+    throw new Error(`Credential profile ${profile.name} does not include model ${modelId}`);
   }
   return profile;
 }

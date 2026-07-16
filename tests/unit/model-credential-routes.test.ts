@@ -218,7 +218,7 @@ describe("model credential profile API routes", () => {
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 
-  it("validates member credential provider against selected model", async () => {
+  it("validates member credential includes the selected model", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
     const providerSlug = `openrouter-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -251,7 +251,7 @@ describe("model credential profile API routes", () => {
       body: { name: "bad", agent: "developer", model: "anthropic/claude-sonnet-4-6", runtime: "pi-cli", credentialId: created.id, thinkingLevel: "off" },
     });
     expect(mismatch.status).toBe(400);
-    expect(JSON.parse(mismatch.body).error).toContain("does not match model provider");
+    expect(JSON.parse(mismatch.body).error).toContain("does not include model");
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${member.id}`, { token });
     await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${created.id}`, { token });
@@ -583,7 +583,7 @@ describe("model credential profile API routes", () => {
       body: { model: "other-provider/model-y" },
     });
     expect(noClear.status).toBe(400);
-    expect(JSON.parse(noClear.body).error).toContain("does not match model provider");
+    expect(JSON.parse(noClear.body).error).toContain("does not include model");
 
     const cleared = await jsonRequest(ts.port, "PUT", `/api/members/${member.id}`, {
       token,

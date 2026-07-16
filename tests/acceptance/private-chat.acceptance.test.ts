@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
@@ -68,7 +68,9 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
-    return JSON.parse(res.body);
+    const room = JSON.parse(res.body);
+    await configureMockMembersForRoom(room.id, members);
+    return room;
   }
 
   async function sendMessage(roomId: string, content: string): Promise<RoomMessage> {

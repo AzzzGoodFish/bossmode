@@ -10,7 +10,7 @@
  * Replaces old Archive tests (archive endpoints removed per Smart Summary PRD)
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, configureMockMembersForRoom } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
 
@@ -68,7 +68,9 @@ describe("Acceptance: Summarize & Message Range", () => {
       body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
-    return JSON.parse(res.body);
+    const room = JSON.parse(res.body);
+    await configureMockMembersForRoom(room.id, members);
+    return room;
   }
 
   async function sendMessage(roomId: string, content: string): Promise<RoomMessage> {

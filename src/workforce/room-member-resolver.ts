@@ -3,8 +3,6 @@ import * as memberStore from "./member-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../shared/types.js";
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
-
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
   const sourceAgent = roomMember.sourceAgent;
   const getMember = "getMember" in memberStore ? (memberStore as any).getMember as (id: string) => AgentMemberConfig | undefined : undefined;
@@ -25,7 +23,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     agent: sourceAgent || sourceMember?.agent || roomMember.name,
     runtime: sourceMember?.runtime || "pi-cli",
     avatar: roomMember.avatar || sourceMember?.avatar || agentDef?.avatar,
-    model: config.model || sourceMember?.model || agentDef?.model || DEFAULT_MODEL,
+    model: config.model || sourceMember?.model,
     credentialId: config.credentialId ?? sourceMember?.credentialId,
     thinkingLevel: config.thinkingLevel || sourceMember?.thinkingLevel || "off",
     contextLimit: config.contextLimit ?? sourceMember?.contextLimit,
@@ -53,7 +51,7 @@ function legacyResolve(roomId: string, memberName: string): AgentMemberConfig | 
         avatar: agentDef?.avatar,
       };
 
-  member.model = override.model || member.model || agentDef?.model || DEFAULT_MODEL;
+  member.model = override.model || member.model;
   member.credentialId = override.credentialId ?? member.credentialId;
   member.thinkingLevel = override.thinkingLevel || member.thinkingLevel || "off";
   member.mcpServers = Array.isArray(override.mcpServers) ? override.mcpServers : [];

@@ -65,6 +65,14 @@ function isMemberRuntimeFailureMessage(message: RoomMessage): boolean {
   return isRuntimeFailureRoomMessage(message);
 }
 
+function isMemberConfigured(member: AgentMemberConfig): boolean {
+  return Boolean(member.model && member.credentialId);
+}
+
+function memberUnconfiguredMessage(memberName: string): string {
+  return `Member "${memberName}" hasn't selected a model yet. Open the member card to choose a model and credential, then try again.`;
+}
+
 function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
   return messages.filter((message) => !isMemberRuntimeFailureMessage(message));
 }
@@ -106,7 +114,6 @@ interface AgentInstance {
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
-  appliedProvider: string;
   appliedCredentialId?: string;
 }
 
@@ -267,19 +274,11 @@ async function runPrompt(
 }
 
 function normalizeSwitchModelRef(model: string): string {
-  const ref = normalizeModelRef(model.trim());
-  const idx = ref.indexOf("/");
-  return idx > 0 ? ref : `anthropic/${ref}`;
+  return normalizeModelRef(model.trim());
 }
 
-function providerFromModelRef(model: string): string {
-  const ref = normalizeSwitchModelRef(model);
-  const idx = ref.indexOf("/");
-  return idx > 0 ? ref.slice(0, idx) : "anthropic";
-}
-
-function shouldRecreateForModelSwitch(instance: AgentInstance, model: string, credentialId?: string): boolean {
-  return instance.appliedProvider !== providerFromModelRef(model) || instance.appliedCredentialId !== credentialId;
+function shouldRecreateForModelSwitch(instance: AgentInstance, credentialId?: string): boolean {
+  return instance.appliedCredentialId !== credentialId;
 }
 
 async function recreateInstanceForModelSwitch(instance: AgentInstance, model: string, credentialId: string | undefined, trigger: string): Promise<void> {
@@ -296,7 +295,6 @@ async function recreateInstanceForModelSwitch(instance: AgentInstance, model: st
   if (!next) throw new Error(`Failed to recreate member "${instance.agentName}" for model switch`);
   next.queuedInputs.push(...queuedInputs);
   next.appliedModel = model;
-  next.appliedProvider = providerFromModelRef(model);
   next.appliedCredentialId = credentialId;
   logger.info("agent", "modelSwitchRecreated", { member: instance.agentName, roomId: instance.roomId, model, trigger });
   broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: next.status });
@@ -314,7 +312,7 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
   if (!exported) throw new Error(`No model credentials configured for ${model}`);
   const resolvedCredentialId = exported.profile?.id || credentialId;
 
-  if (shouldRecreateForModelSwitch(instance, model, resolvedCredentialId)) {
+  if (shouldRecreateForModelSwitch(instance, resolvedCredentialId)) {
     await recreateInstanceForModelSwitch(instance, model, resolvedCredentialId, trigger);
     return;
   }
@@ -328,7 +326,6 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
     instance.handle.runtimeParams.credentialName = exported.profile?.name;
   }
   instance.appliedModel = model;
-  instance.appliedProvider = providerFromModelRef(model);
   instance.appliedCredentialId = resolvedCredentialId;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
   broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
@@ -362,8 +359,8 @@ function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): v
   });
 }
 
-function instanceUsesCredentialProfile(instance: AgentInstance, profileId: string, providerSlug: string): boolean {
-  return instance.appliedCredentialId === profileId || (!instance.appliedCredentialId && instance.appliedProvider === providerSlug);
+function instanceUsesCredentialProfile(instance: AgentInstance, profileId: string): boolean {
+  return instance.appliedCredentialId === profileId;
 }
 
 function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason: string): void {
@@ -426,7 +423,7 @@ export async function invalidateModelCredentialProfile(profileId: string, provid
   const pending = { profileId, providerSlug, changeType };
   const results: Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }> = [];
   for (const instance of Array.from(instances.values())) {
-    if (!instanceUsesCredentialProfile(instance, profileId, providerSlug)) continue;
+    if (!instanceUsesCredentialProfile(instance, profileId)) continue;
     if (instance.status === "working" || instance.dispatchState !== "idle") {
       instance.pendingCredentialRefresh = pending;
       logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: instance.roomId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
@@ -515,6 +512,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
   const member = resolveRoomMember(roomId, memberRef);
   if (!member) {
     logger.error("agent", "no member or agent definition found", { name: memberRef });
+    return null;
+  }
+  if (!isMemberConfigured(member)) {
+    logger.error("agent", "member unconfigured", { member: member.name, memberId: member.id });
     return null;
   }
   const memberId = member.id;
@@ -627,9 +628,8 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         lengthContinuationAttempted: false,
         unsubscribe: () => {},
         eventBuffer: [],
-        appliedModel: normalizeSwitchModelRef(member.model || "claude-sonnet-4-6"),
-        appliedProvider: providerFromModelRef(member.model || "claude-sonnet-4-6"),
-        appliedCredentialId: member.credentialId || handle.runtimeParams?.credentialId,
+        appliedModel: member.model!,
+        appliedCredentialId: member.credentialId,
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
@@ -716,6 +716,11 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
   const memberName = member?.name || memberRef;
   const memberId = member?.id || memberRef;
   logger.info("agent", "activateAgent", { roomId, member: memberName, memberId });
+
+  if (member && !isMemberConfigured(member)) {
+    postMessage(roomId, "system", memberUnconfiguredMessage(memberName));
+    return;
+  }
 
   const instance = await getOrCreate(roomId, memberId);
   if (!instance) {
@@ -980,6 +985,10 @@ export function emitAgentReply(roomId: string, agentName: string, text: string):
 // -- Steer --
 
 export async function steerAgent(roomId: string, memberRef: string, instruction: string): Promise<void> {
+  const preResolved = resolveRoomMember(roomId, memberRef);
+  if (preResolved && !isMemberConfigured(preResolved)) {
+    throw new Error(memberUnconfiguredMessage(preResolved.name));
+  }
   const instance = await getOrCreate(roomId, memberRef);
   const agentName = instance?.agentName || memberRef;
   if (!instance) throw new Error(`Cannot steer agent "${agentName}": not found`);

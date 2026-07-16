@@ -36,7 +36,7 @@ vi.mock("../../src/workforce/agent-store.js", () => ({
 }));
 
 vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn((name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, runtime: "test", thinkingLevel: "off" })),
+  getMemberByName: vi.fn((name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off" })),
 }));
 
 vi.mock("../../src/workspace/room-store.js", () => ({

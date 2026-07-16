@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 import type { TestServer } from "../helpers/test-server.js";
@@ -428,6 +428,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       });
       expect(createRes.status).toBe(200);
       const room: Room = JSON.parse(createRes.body);
+      await configureMockMembersForRoom(room.id, ["pm"]);
 
       const msgRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
         token,
@@ -451,6 +452,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       });
       expect(createRes.status).toBe(200);
       const room: Room = JSON.parse(createRes.body);
+      await configureMockMembersForRoom(room.id, ["pm"]);
 
       const msgRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
         token,

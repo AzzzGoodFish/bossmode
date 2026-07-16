@@ -45,6 +45,7 @@ vi.mock("../../src/workforce/member-store.js", () => ({
     type: "agent",
     agent: "developer",
     model: "sonnet",
+    credentialId: "cred-a",
     runtime: "pi-cli",
     thinkingLevel: "off",
     skills: [],

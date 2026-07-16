@@ -44,11 +44,13 @@ describe("room member presentation", () => {
     expect(compactModelId("standalone-model", [])).toBe("standalone-model");
   });
 
-  it("marks missing provider connections and unavailable configured models honestly", () => {
-    expect(memberModelAvailabilityLabel("anthropic/claude-sonnet-4-6", null, [])).toBe("No model connected");
+  it("marks unconfigured, missing provider connections, and unavailable configured models honestly", () => {
+    expect(memberModelAvailabilityLabel("anthropic/claude-sonnet-4-6", null, [])).toBeNull();
+    expect(memberModelAvailabilityLabel("anthropic/claude-sonnet-4-6", "profile-1", [])).toBe("No model connected");
     const models = [{ ref: "openai/gpt-5.6-luna", profileId: "profile-1", modelId: "gpt-5.6-luna" }];
     expect(memberModelAvailabilityLabel("openai/gpt-5.6-luna", "profile-1", models)).toBeNull();
-    expect(memberModelAvailabilityLabel("anthropic/claude-sonnet-4-6", null, models)).toBe("claude-sonnet-4-6 · unavailable");
+    expect(memberModelAvailabilityLabel("anthropic/claude-sonnet-4-6", "profile-1", models)).toBe("claude-sonnet-4-6 · unavailable");
+    expect(memberModelAvailabilityLabel("openai/gpt-5.6-luna", "profile-2", models)).toBe("gpt-5.6-luna · unavailable");
   });
 
   it("keeps MCP loading, error, disabled, empty, and item states mutually exclusive", () => {

@@ -364,6 +364,36 @@ describe("agent-manager model hot switch", () => {
     expect(first.destroyed).toBe(false);
   });
 
+  it("blocks activation for an Unconfigured member without creating a runtime or guessing a credential", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const messageBus = await import("../../src/communication/message-bus.js");
+    member = { ...member, model: undefined, credentialId: undefined };
+
+    await manager.activateAgent("room", "pm");
+
+    expect(handles).toHaveLength(0);
+    expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" hasn\'t selected a model yet. Open the member card to choose a model and credential, then try again.');
+  });
+
+  it("rejects steer for an Unconfigured member instead of creating a runtime", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    member = { ...member, model: undefined, credentialId: undefined };
+
+    await expect(manager.steerAgent("room", "pm", "hello")).rejects.toThrow("hasn't selected a model yet");
+    expect(handles).toHaveLength(0);
+  });
+
+  it("blocks activation when a member has a model but no bound credential", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const messageBus = await import("../../src/communication/message-bus.js");
+    member = { ...member, credentialId: undefined };
+
+    await manager.activateAgent("room", "pm");
+
+    expect(handles).toHaveLength(0);
+    expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", expect.stringContaining("hasn't selected a model yet"));
+  });
+
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");

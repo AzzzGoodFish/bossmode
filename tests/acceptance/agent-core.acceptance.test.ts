@@ -18,7 +18,7 @@
  * is taken, cursors are updated, and WS events are emitted.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, configureMockMembersForRoom } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage, WsServerEvent } from "../../src/shared/types.js";
@@ -87,7 +87,9 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
     });
     expect(res.status).toBe(200);
-    return JSON.parse(res.body);
+    const room = JSON.parse(res.body);
+    await configureMockMembersForRoom(room.id, members);
+    return room;
   }
 
   // Helper: send message and return it

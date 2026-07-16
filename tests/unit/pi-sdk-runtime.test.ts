@@ -48,6 +48,7 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
+  createSyncedAuthStorage: (authPath: string) => { authCreate(authPath); return { kind: "auth", args: [authPath] }; },
 }));
 
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
@@ -113,7 +114,7 @@ function baseOpts(overrides: Record<string, any> = {}) {
   return {
     cwd: dir,
     roomId: "room-a",
-    member: { id: "pm", name: "pm", agent: "pm", runtime: "pi-cli", model: "anthropic/claude-sonnet-4-6", thinkingLevel: "off" },
+    member: { id: "pm", name: "pm", agent: "pm", runtime: "pi-cli", model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", thinkingLevel: "off" },
     agentPrompt: "agent prompt",
     envPrompt: "env prompt",
     skillPaths: [],
@@ -189,7 +190,7 @@ describe("PiSdkRuntime", () => {
 
   it("uses exported Bossmode auth and model files when a credential profile exists", async () => {
     const agentDir = join(dir, "profile-agent-dir");
-    exportedConfig = { agentDir, extensionPaths: [] };
+    exportedConfig = { agentDir, extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
@@ -231,7 +232,7 @@ describe("PiSdkRuntime", () => {
         model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
       },
     });
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
@@ -261,7 +262,7 @@ describe("PiSdkRuntime", () => {
         model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
       },
     });
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
@@ -271,7 +272,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("applies Bossmode default pi transport overrides without persisting settings", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
@@ -283,7 +284,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("does not load MCP adapter or expose mcp tool when MCP is disabled", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
@@ -296,7 +297,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("does not expose mcp tool when MCP is globally enabled but member has no assigned servers", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
@@ -307,7 +308,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled for an assigned server", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
     writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } }, null, 2));
@@ -332,7 +333,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("activates newly assigned MCP on reload without replacing the session", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
     writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
@@ -356,7 +357,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("removes MCP from active tools when its assignment is removed", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
     writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
@@ -377,7 +378,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
     writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
@@ -398,7 +399,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     openedSessionModel = { provider: "anthropic", modelId: "claude-opus-4-7" };
     const setModel = vi.fn().mockResolvedValue(undefined);
     createAgentSession.mockResolvedValueOnce({
@@ -433,7 +434,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("rolls back the failed turn and resumes instead of discarding history when saved session ended with assistant provider error", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
     openedLeafEntry = {
       type: "message",
@@ -454,7 +455,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("resets the leaf and resumes when the first turn itself ended with a provider error", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
     openedLeafEntry = {
       type: "message",
@@ -475,7 +476,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("resumes saved session when saved model matches configured model", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
@@ -489,7 +490,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("starts fresh when the saved session file was deleted", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const missing = join(dir, "missing-session.jsonl");
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
@@ -504,7 +505,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("manual compact emits compaction lifecycle without synthetic assistant message", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const compact = vi.fn(async () => ({ summary: "short summary", tokensBefore: 28100 }));
     createAgentSession.mockResolvedValueOnce({
       session: {
@@ -541,7 +542,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("does not duplicate manual compaction events when SDK emits raw lifecycle events", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     let listener: ((event: any) => void) | undefined;
     const compact = vi.fn(async () => {
       listener?.({ type: "compaction_start", reason: "manual" });
@@ -582,7 +583,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("refreshes registry and awaits SDK model switch", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const setModel = vi.fn().mockResolvedValue(undefined);
     createAgentSession.mockResolvedValueOnce({
       session: {
@@ -615,7 +616,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts({

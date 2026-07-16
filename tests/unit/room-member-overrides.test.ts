@@ -41,15 +41,15 @@ describe("room member overrides", () => {
     });
 
     expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: "anthropic/room-a", credentialId: "cred-a", thinkingLevel: "high" });
-    expect(resolveRoomMember(roomB.id, "pm")).toMatchObject({ model: "anthropic/pm", thinkingLevel: "off" });
+    expect(resolveRoomMember(roomB.id, "pm")).toMatchObject({ model: undefined, credentialId: undefined, thinkingLevel: "off" });
     expect(getMemberByName("pm")).toMatchObject({ model: "anthropic/global", thinkingLevel: "off" });
 
     roomStore.updateRoomMemberOverride(roomA.id, "pm", { model: null, thinkingLevel: null });
-    expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: "anthropic/pm", thinkingLevel: "off" });
+    expect(resolveRoomMember(roomA.id, "pm")).toMatchObject({ model: undefined, thinkingLevel: "off" });
     expect(roomStore.hasRoomMemberModelOverride(roomA.id, "pm")).toBe(false);
   });
 
-  it("does not fallback to a legacy global member for direct Agent-created members", async () => {
+  it("does not fallback to a legacy global member or the Agent definition for direct Agent-created members", async () => {
     writeAgent("developer");
     const roomStore = await import("../../src/workspace/room-store.js");
     const { saveMember } = await import("../../src/workforce/member-store.js");
@@ -64,7 +64,8 @@ describe("room member overrides", () => {
       id: expect.stringMatching(/^rm_/),
       name: "dev-a",
       agent: "developer",
-      model: "anthropic/developer",
+      model: undefined,
+      credentialId: undefined,
       thinkingLevel: "off",
     });
   });
