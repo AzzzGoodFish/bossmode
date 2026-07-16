@@ -28,6 +28,8 @@ const sessionExtensionSetFlagValue = vi.fn();
 const sessionExtensionEmit = vi.fn(async () => {});
 const sessionExtensionHasHandlers = vi.fn(() => false);
 const sessionBindExtensions = vi.fn(async () => {});
+let activeToolNames: string[] = [];
+let ignoreActiveToolChanges = false;
 let openedSessionModel: { provider: string; modelId: string } | null = null;
 let openedLeafEntry: any = null;
 const sessionBranch = vi.fn();
@@ -133,6 +135,8 @@ describe("PiSdkRuntime", () => {
     exportedConfig = null;
     openedSessionModel = null;
     openedLeafEntry = null;
+    activeToolNames = [];
+    ignoreActiveToolChanges = false;
     vi.clearAllMocks();
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: false } };
     settingsGetTransport.mockReturnValue("auto");
@@ -149,9 +153,12 @@ describe("PiSdkRuntime", () => {
         abortCompaction: vi.fn(),
         abortBranchSummary: vi.fn(),
         dispose: vi.fn(),
+        reload: vi.fn(),
         compact: vi.fn(),
         setModel: vi.fn(),
         setThinkingLevel: vi.fn(),
+        setActiveToolsByName: vi.fn((names: string[]) => { if (!ignoreActiveToolChanges) activeToolNames = names; }),
+        getActiveToolNames: vi.fn(() => activeToolNames),
         bindExtensions: sessionBindExtensions,
         extensionRunner: {
           setFlagValue: sessionExtensionSetFlagValue,
@@ -284,7 +291,7 @@ describe("PiSdkRuntime", () => {
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
     expect(loaderOptions.additionalExtensionPaths).toEqual([]);
-    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("mcp");
+    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
     expect(sessionBindExtensions).not.toHaveBeenCalled();
   });
 
@@ -296,7 +303,7 @@ describe("PiSdkRuntime", () => {
     await new PiSdkRuntime().createAgent(baseOpts());
 
     expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toEqual([]);
-    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("mcp");
+    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
   });
 
   it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled for an assigned server", async () => {
@@ -322,6 +329,72 @@ describe("PiSdkRuntime", () => {
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
     expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
     expect(process.env.BOSSMODE_MCP_CONFIG_STRICT).toBe("1");
+  });
+
+  it("activates newly assigned MCP on reload without replacing the session", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
+    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
+    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const runtime = new PiSdkRuntime();
+    const handle = await runtime.createAgent(baseOpts());
+    const sessionId = (handle as any).session.sessionId;
+
+    await handle.reloadResources!({
+      roomId: "room-a",
+      member: { ...baseOpts().member, mcpServers: ["playwright"] },
+      agentPrompt: "updated prompt",
+      appendSystemPrompt: ["room supplement"],
+      skillPaths: [],
+      skillNames: [],
+    });
+
+    expect((handle as any).session.sessionId).toBe(sessionId);
+    expect(activeToolNames).toContain("mcp");
+    expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
+  });
+
+  it("removes MCP from active tools when its assignment is removed", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
+    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
+    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
+    activeToolNames = ["read", "bash", "edit", "write", "mcp"];
+
+    await handle.reloadResources!({
+      roomId: "room-a",
+      member: baseOpts().member,
+      agentPrompt: "agent prompt",
+      appendSystemPrompt: [],
+      skillPaths: [],
+      skillNames: [],
+    });
+
+    expect(activeToolNames).not.toContain("mcp");
+  });
+
+  it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [] };
+    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
+    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
+    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const previousPrompt = (handle.runtimeParams as any).systemPrompt;
+    ignoreActiveToolChanges = true;
+
+    await expect(handle.reloadResources!({
+      roomId: "room-a",
+      member: { ...baseOpts().member, mcpServers: ["playwright"] },
+      agentPrompt: "updated prompt",
+      appendSystemPrompt: [],
+      skillPaths: [],
+      skillNames: [],
+    })).rejects.toThrow("Reload could not apply MCP access");
+    expect((handle.runtimeParams as any).systemPrompt).toBe(previousPrompt);
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {

@@ -388,7 +388,15 @@ class PiSdkAgentHandle implements AgentHandle {
     if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
     else await this.resourceLoader.reload();
     if (mcpSettings.enabled) await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
-    if (typeof (this.session as any).setActiveToolsByName === "function") (this.session as any).setActiveToolsByName(activeTools);
+    if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
+      throw new Error("Runtime cannot verify active tools after reload.");
+    }
+    (this.session as any).setActiveToolsByName(activeTools);
+    const activeToolNames = await (this.session as any).getActiveToolNames();
+    const mcpIsActive = Array.isArray(activeToolNames) && activeToolNames.includes("mcp");
+    if (mcpIsActive !== mcpSettings.enabled) {
+      throw new Error("Reload could not apply MCP access.");
+    }
 
     this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
     this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
@@ -553,7 +561,10 @@ export class PiSdkRuntime implements AgentRuntime {
 
     const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
     const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
-    const activeTools = [...baseTools, ...(mcpSettings.enabled ? ["mcp"] : [])];
+    // Pi treats the creation-time tool list as a lifetime allowlist. Keep Bossmode's
+    // dynamic MCP proxy permitted even before the member receives an MCP assignment;
+    // without its adapter extension, it is not registered or active for that member.
+    const permittedTools = [...baseTools, "mcp"];
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -565,7 +576,7 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager,
       settingsManager,
       customTools,
-      tools: activeTools,
+      tools: permittedTools,
     });
 
     if (mcpSettings.enabled) {
