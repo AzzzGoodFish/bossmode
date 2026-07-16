@@ -215,7 +215,7 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2">
+      <div className="flex-1 overflow-y-auto min-h-0 p-2">
         {domain === "rooms" && (
           <>
             {displayRooms.map((r) => {

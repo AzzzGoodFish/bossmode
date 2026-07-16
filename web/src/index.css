@@ -281,12 +281,6 @@ textarea::-webkit-scrollbar {
   --mdxeditor-toolbarHoverBg: rgb(244 244 245);
   --mdxeditor-toolbarActiveBg: rgb(219 234 254);
 }
-html, body, #root {
-  height: 100%;
-  background: var(--surface-0);
-  overflow: hidden;
-}
-
 html.dark {
   --mdxeditor-color: rgb(228 228 231);
   --mdxeditor-mutedColor: rgb(161 161 170);
