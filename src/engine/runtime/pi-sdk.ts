@@ -3,10 +3,10 @@ import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   VERSION as PI_SDK_VERSION,
@@ -16,7 +16,7 @@ import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
-import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createSyncedAuthStorage } from "../model-credentials.js";
+import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createCredentialStore } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts } from "./types.js";
@@ -329,14 +329,11 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
-  refreshModelRegistry(): void {
-    this.modelRegistry.refresh();
-    // Reload auth.json so edited credentials (e.g. a rotated API key on the same
-    // profile) take effect on the fast model-switch path. ModelRegistry.refresh()
-    // only reloads models.json; the API key is resolved at request time from the
-    // in-memory AuthStorage, which otherwise keeps the stale key until recreate.
-    try { this.modelRegistry.authStorage?.reload?.(); }
-    catch (err) { logger.warn("runtime:pi-sdk", "authStorage reload failed", { error: String(err) }); }
+  async refreshModelRegistry(): Promise<void> {
+    await this.modelRegistry.refresh();
+    // Credentials are resolved live from the bossmode credential store on every read
+    // (no on-disk auth.json cache to invalidate), so edited API keys / rotated OAuth
+    // tokens take effect immediately — no separate reload step needed here.
   }
 
   async setModel(modelRef: string): Promise<void> {
@@ -486,8 +483,10 @@ export class PiSdkRuntime implements AgentRuntime {
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
-    const authStorage = piConfig.profile ? createSyncedAuthStorage(join(runtimeAgentDir, "auth.json"), piConfig.profile) : AuthStorage.create(join(runtimeAgentDir, "auth.json"));
-    const modelRegistry = ModelRegistry.create(authStorage, join(runtimeAgentDir, "models.json"));
+    if (!piConfig.profile) throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
+    const authStorageCredentials = createCredentialStore(piConfig.profile);
+    const runtime = await ModelRuntime.create({ credentials: authStorageCredentials, modelsPath: join(runtimeAgentDir, "models.json"), allowModelNetwork: false });
+    const modelRegistry = new ModelRegistry(runtime);
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
     const transportSettings = applyRuntimeTransportSettings(settingsManager);
     const model = modelRegistry.find(provider, modelId);
@@ -574,8 +573,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
-      authStorage,
-      modelRegistry,
+      modelRuntime: runtime,
       model,
       thinkingLevel: (opts.member.thinkingLevel || "off") as any,
       resourceLoader,

@@ -7,6 +7,7 @@ import { removePidFile, writePidFile, ensureBossmodeDir, readConfig } from "../s
 import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
 import { runMemberCredentialBindingMigration } from "../workspace/member-credential-binding-migration.js";
+import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
 import { initAutoSummary } from "../engine/summarizer.js";
@@ -64,6 +65,11 @@ export function startServer(opts: ServerOptions): Promise<void> {
   } catch (err) {
     logger.error("server", "member credential binding migration failed", { error: String(err) });
   }
+
+  // Warm the credential-less pi model catalog cache (provider list, model metadata) so
+  // synchronous readers (Settings → Model Credentials, provider validation) have data
+  // immediately instead of the cold-cache empty fallback on first request.
+  void ensurePiCatalogWarm();
 
   // Initialize runtime registry
   const registry = new RuntimeRegistry();

@@ -250,7 +250,7 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
-  it("exports agent-scoped pi models/auth with real auth.json and no placeholder in models.json", async () => {
+  it("exports agent-scoped pi models with a real apiKey and no placeholder", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
@@ -258,11 +258,8 @@ describe("model credential profiles", () => {
 
     expect(exported?.agentDir).toContain(join("pi-agent", "runtime"));
     const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
-    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
     expect(modelsJson).not.toContain("__bossmode_managed_key__");
     expect(JSON.parse(modelsJson).providers.openrouter.apiKey).toBe("sk-secret");
-    expect(authJson).toContain("sk-secret");
-    expect(statSync(join(exported!.agentDir, "auth.json")).mode & 0o777).toBe(0o600);
   });
 
   it("projects authType none with only the non-secret no-auth sentinel", async () => {
@@ -277,10 +274,8 @@ describe("model credential profiles", () => {
 
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "keyless-proxy/claude-keyless", credentialId: saved.id });
     const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
-    const authJson = JSON.parse(readFileSync(join(exported!.agentDir, "auth.json"), "utf-8"));
 
     expect(modelsJson.providers["keyless-proxy"].apiKey).toBe("__bossmode_no_auth__");
-    expect(authJson["keyless-proxy"]).toEqual({ type: "api_key", key: "__bossmode_no_auth__" });
     expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).not.toContain("sk-secret");
   });
 
@@ -297,9 +292,9 @@ describe("model credential profiles", () => {
     expect(updated.hasSecret).toBe(true);
 
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
-    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
-    expect(authJson).toContain("sk-secret");
-    expect(JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8")).providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
+    const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
+    expect(modelsJson).toContain("sk-secret");
+    expect(JSON.parse(modelsJson).providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
   });
 
   it("rejects a credential that does not include the requested model", async () => {
@@ -387,7 +382,7 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
-  it("keeps newer file OAuth credentials during synced auth overlay and mirrors them to the profile", async () => {
+  it("CredentialStore.modify persists a newer OAuth credential back to the Bossmode profile", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
       name: "Codex OAuth",
@@ -403,15 +398,9 @@ describe("model credential profiles", () => {
       models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
     });
 
-    const authPath = join(dir, "runtime-auth.json");
-    writeFileSync(authPath, JSON.stringify({
-      "openai-codex": { type: "oauth", access: "file-new-access", refresh: "file-new-refresh", expires: 999999 },
-    }, null, 2));
+    const store = mod.createCredentialStore(mod.getModelCredentialProfile(saved.id)!);
+    await store.modify("openai-codex", async () => ({ type: "oauth", access: "file-new-access", refresh: "file-new-refresh", expires: 999999 } as any));
 
-    const profile = mod.getModelCredentialProfile(saved.id)!;
-    const authStorage = mod.createSyncedAuthStorage(authPath, profile);
-
-    expect(authStorage.get("openai-codex")).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
     expect(mod.getModelCredentialProfile(saved.id)!.oauthCredentials).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
   });
 
@@ -433,6 +422,7 @@ describe("model credential profiles", () => {
 
   it("creates a second built-in provider profile instead of overwriting the first", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
     mod.setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
     ]);
@@ -441,7 +431,7 @@ describe("model credential profiles", () => {
     const second = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant-b", baseUrlOverride: "   " });
 
     expect(second.id).not.toBe(first.id);
-    expect(second.name).toBe("Anthropic (Claude Pro/Max) 2");
+    expect(second.name).toBe("Anthropic 2");
     expect(first.isDefault).toBe(true);
     expect(second.isDefault).toBe(false);
     expect(mod.getModelCredentialProfile(first.id)!.baseUrl).toBe("http://127.0.0.1:3456");
@@ -703,12 +693,14 @@ describe("model credential profiles", () => {
 
   it("includes Claude Fable 5 in the upgraded Anthropic SDK catalog", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
     const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
     expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
   });
 
   it("includes GPT-5.6 models and max thinking in the upgraded OpenAI SDK catalog", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
 
     const openai = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-openai" });
     for (const id of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]) {
@@ -777,6 +769,7 @@ describe("model credential profiles", () => {
 
   it("does not export simplified model overrides for SDK built-in provider profiles", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
     const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
     expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
 
@@ -832,20 +825,19 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
-  it("persists API key rotations from runtime auth storage back to the Bossmode profile", async () => {
+  it("persists API key rotations from CredentialStore.modify back to the Bossmode profile", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
     const profile = mod.getModelCredentialProfile(saved.id)!;
-    const authStorage = mod.createSyncedAuthStorage(join(exported!.agentDir, "auth.json"), profile);
+    const store = mod.createCredentialStore(profile);
 
-    authStorage.set("openrouter", { type: "api_key", key: "sk-rotated" });
+    await store.modify("openrouter", async () => ({ type: "api_key", key: "sk-rotated" }));
 
     expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toContain("sk-rotated");
     expect(mod.getModelCredentialProfile(saved.id)!.apiKey).toBe("sk-rotated");
   });
 
-  it("persists OAuth refreshes from runtime auth storage back to the Bossmode profile", async () => {
+  it("persists OAuth refreshes from CredentialStore.modify back to the Bossmode profile", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
       name: "Codex OAuth",
@@ -866,72 +858,12 @@ describe("model credential profiles", () => {
     expect(oauthModelsJson.providers["openai-codex"].apiKey).toBe("old-access");
     expect(JSON.stringify(oauthModelsJson)).not.toContain("__bossmode_managed_key__");
     const profile = mod.getModelCredentialProfile(saved.id)!;
-    const authStorage = mod.createSyncedAuthStorage(join(exported!.agentDir, "auth.json"), profile);
+    const store = mod.createCredentialStore(profile);
 
-    authStorage.set("openai-codex", { type: "oauth", access: "new-access", refresh: "new-refresh", expires: 999999 });
+    await store.modify("openai-codex", async () => ({ type: "oauth", access: "new-access", refresh: "new-refresh", expires: 999999 } as any));
 
     const stored = mod.getModelCredentialProfile(saved.id)!;
     expect(stored.oauthCredentials).toMatchObject({ access: "new-access", refresh: "new-refresh", expires: 999999 });
     expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).toContain("new-refresh");
-  });
-
-  it("overwrites stale per-member OAuth credentials when the profile has a newer reconnect token", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const saved = mod.saveModelCredentialProfile({
-      name: "Codex OAuth",
-      providerSlug: "openai-codex",
-      protocol: "openai-codex-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
-      authType: "oauth",
-      oauthProviderId: "openai-codex",
-      oauthCredentials: { access: "profile-new-access", refresh: "profile-new-refresh", expires: 999999 },
-      requestProfile: "openai_codex_subscription",
-      enabled: true,
-      isDefault: true,
-      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
-    });
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
-    writeFileSync(join(exported!.agentDir, "auth.json"), JSON.stringify({
-      "openai-codex": { type: "oauth", access: "runtime-old-access", refresh: "runtime-old-refresh", expires: 1 },
-    }, null, 2));
-
-    mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
-
-    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
-    const stored = mod.getModelCredentialProfile(saved.id)!;
-    expect(authJson).toContain("profile-new-refresh");
-    expect(authJson).not.toContain("runtime-old-refresh");
-    expect(stored.oauthCredentials).toMatchObject({ access: "profile-new-access", refresh: "profile-new-refresh", expires: 999999 });
-  });
-
-  it("does not overwrite newer per-member OAuth credentials with stale profile data on export", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
-    const saved = mod.saveModelCredentialProfile({
-      name: "Codex OAuth",
-      providerSlug: "openai-codex",
-      protocol: "openai-codex-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
-      authType: "oauth",
-      oauthProviderId: "openai-codex",
-      oauthCredentials: { access: "old-access", refresh: "old-refresh", expires: 1 },
-      requestProfile: "openai_codex_subscription",
-      enabled: true,
-      isDefault: true,
-      models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
-    });
-
-    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
-    writeFileSync(join(exported!.agentDir, "auth.json"), JSON.stringify({
-      "openai-codex": { type: "oauth", access: "runtime-access", refresh: "runtime-refresh", expires: 999999 },
-    }, null, 2));
-
-    mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
-
-    const authJson = readFileSync(join(exported!.agentDir, "auth.json"), "utf-8");
-    const stored = mod.getModelCredentialProfile(saved.id)!;
-    expect(authJson).toContain("runtime-refresh");
-    expect(authJson).not.toContain("old-refresh");
-    expect(stored.oauthCredentials).toMatchObject({ access: "runtime-access", refresh: "runtime-refresh", expires: 999999 });
   });
 });

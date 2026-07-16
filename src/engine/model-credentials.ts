@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { AuthStorage, FileAuthStorageBackend, ModelRegistry, type AuthStorageBackend } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { getBossmodeDir, ensureBossmodeDir } from "../shared/config.js";
 import type {
   ModelCredentialProfile,
@@ -94,10 +95,6 @@ function storePath(): string { return join(getBossmodeDir(), STORE_FILE); }
 
 export function getBossmodePiRuntimeRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
-}
-
-export function getBossmodePiRegistryDir(): string {
-  return join(getBossmodeDir(), "pi-agent", "model-registry");
 }
 
 function writePrivateJson(path: string, data: unknown): void {
@@ -305,32 +302,6 @@ export function persistOAuthCredentialsForProfile(profileId: string, providerSlu
   return updated;
 }
 
-function parseAuthJson(content: string | undefined): Record<string, unknown> {
-  if (!content) return {};
-  try { return JSON.parse(content) as Record<string, unknown>; } catch { return {}; }
-}
-
-function overlayProfileOAuthCredential(current: string | undefined, profileId: string, providerSlug: string): string {
-  const data = parseAuthJson(current);
-  const profile = getModelCredentialProfile(profileId);
-  if (profile?.authType !== "oauth" || profile.providerSlug !== providerSlug || !hasCompleteOAuthCredentials(profile.oauthCredentials)) {
-    return JSON.stringify(data, null, 2);
-  }
-
-  const fileCredential = data[providerSlug];
-  if (fileCredential && typeof fileCredential === "object" && (fileCredential as any).type === "oauth") {
-    const { type: _type, ...fileOAuth } = fileCredential as { type: "oauth" } & OAuthCredentials;
-    if (hasCompleteOAuthCredentials(fileOAuth) && isNewerOAuthCredential(fileOAuth, profile.oauthCredentials)) {
-      persistOAuthCredentialsForProfile(profileId, providerSlug, fileOAuth);
-      data[providerSlug] = { type: "oauth", ...fileOAuth };
-      return JSON.stringify(data, null, 2);
-    }
-  }
-
-  data[providerSlug] = { type: "oauth", ...profile.oauthCredentials };
-  return JSON.stringify(data, null, 2);
-}
-
 function persistApiKeyForProfile(profileId: string, providerSlug: string, apiKey: string): ModelCredentialProfile | null {
   const store = readStore();
   const index = store.profiles.findIndex((p) => p.id === profileId);
@@ -344,54 +315,42 @@ function persistApiKeyForProfile(profileId: string, providerSlug: string, apiKey
   return next;
 }
 
-function syncCredentialFromAuthData(profileId: string, providerSlug: string, data: Record<string, unknown>): void {
-  const credential = data[providerSlug];
-  if (!credential || typeof credential !== "object") return;
-  if ((credential as any).type === "oauth") {
-    const { type: _type, ...oauth } = credential as { type: "oauth" } & OAuthCredentials;
-    if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(profileId, providerSlug, oauth);
-  } else if ((credential as any).type === "api_key" && typeof (credential as any).key === "string" && (credential as any).key.length > 0) {
-    persistApiKeyForProfile(profileId, providerSlug, (credential as any).key);
-  }
-}
+class BossmodeCredentialStore implements CredentialStore {
+  constructor(private readonly profileId: string, private readonly providerSlug: string) {}
 
-class BossmodeSyncedAuthStorageBackend implements AuthStorageBackend {
-  private readonly fileBackend: FileAuthStorageBackend;
-
-  constructor(authPath: string, private readonly profileId: string, private readonly providerSlug: string, private readonly authType: ModelAuthType) {
-    this.fileBackend = new FileAuthStorageBackend(authPath);
-  }
-
-  private overlay(current: string | undefined): string | undefined {
-    if (this.authType === "oauth") return overlayProfileOAuthCredential(current, this.profileId, this.providerSlug);
+  async read(providerId: string): Promise<Credential | undefined> {
+    if (providerId !== this.providerSlug) return undefined;
     const profile = getModelCredentialProfile(this.profileId);
-    if (!profile) return current;
-    const auth = authEntry(profile);
-    if (!auth) return current;
-    const data = parseAuthJson(current);
-    data[this.providerSlug] = auth as any;
-    return JSON.stringify(data, null, 2);
+    if (!profile) return undefined;
+    return authEntry(profile) as Credential | undefined;
   }
 
-  withLock<T>(fn: (current: string | undefined) => { result: T; next?: string }): T {
-    return this.fileBackend.withLock((current) => {
-      const result = fn(this.overlay(current));
-      if (result.next) syncCredentialFromAuthData(this.profileId, this.providerSlug, parseAuthJson(result.next));
-      return result;
-    });
+  async list(): Promise<readonly CredentialInfo[]> {
+    const credential = await this.read(this.providerSlug);
+    return credential ? [{ providerId: this.providerSlug, type: credential.type }] : [];
   }
 
-  async withLockAsync<T>(fn: (current: string | undefined) => Promise<{ result: T; next?: string }>): Promise<T> {
-    return this.fileBackend.withLockAsync(async (current) => {
-      const result = await fn(this.overlay(current));
-      if (result.next) syncCredentialFromAuthData(this.profileId, this.providerSlug, parseAuthJson(result.next));
-      return result;
-    });
+  async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
+    if (providerId !== this.providerSlug) return fn(undefined);
+    const current = await this.read(providerId);
+    const next = await fn(current);
+    if (next?.type === "oauth") {
+      const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
+      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(this.profileId, this.providerSlug, oauth);
+    } else if (next?.type === "api_key" && typeof (next as any).key === "string" && (next as any).key.length > 0) {
+      persistApiKeyForProfile(this.profileId, this.providerSlug, (next as any).key);
+    }
+    return next;
+  }
+
+  async delete(_providerId: string): Promise<void> {
+    // No-op: credential lifecycle is owned by bossmode's profile store
+    // (deleteModelCredentialProfile), not by the SDK's credential store.
   }
 }
 
-export function createSyncedAuthStorage(authPath: string, profile: Pick<ModelCredentialProfile, "id" | "providerSlug" | "authType">): AuthStorage {
-  return AuthStorage.fromStorage(new BossmodeSyncedAuthStorageBackend(authPath, profile.id, profile.providerSlug, profile.authType));
+export function createCredentialStore(profile: Pick<ModelCredentialProfile, "id" | "providerSlug">): CredentialStore {
+  return new BossmodeCredentialStore(profile.id, profile.providerSlug);
 }
 
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
@@ -606,12 +565,34 @@ function waitForOAuthInput(job: OAuthLoginJob): Promise<string> {
 
 class PiAiOAuthLoginAdapter implements OAuthLoginAdapter {
   async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
-    const auth = AuthStorage.inMemory({});
-    const providers = auth.getOAuthProviders().map((p: any) => p.id);
-    if (!providers.includes(providerId)) throw new Error(`OAuth provider ${providerId} is not supported by installed pi-ai (${providers.join(", ") || "none"})`);
-    await auth.login(providerId, callbacks);
-    const credential = auth.get(providerId);
-    if (credential?.type !== "oauth" || !hasCompleteOAuthCredentials(credential)) throw new Error(`OAuth provider ${providerId} did not return complete credentials`);
+    const runtime = await ensureCatalogRegistryRuntime();
+    const provider = runtime.getProviders().find((p) => p.id === providerId);
+    if (!provider?.auth.oauth) {
+      const supported = runtime.getProviders().filter((p) => p.auth.oauth).map((p) => p.id);
+      throw new Error(`OAuth provider ${providerId} is not supported by installed pi-ai (${supported.join(", ") || "none"})`);
+    }
+    const interaction: AuthInteraction = {
+      signal: callbacks.signal,
+      notify: (event) => {
+        if (event.type === "auth_url") callbacks.onAuth({ url: event.url, instructions: event.instructions });
+        else if (event.type === "device_code") callbacks.onDeviceCode({ userCode: event.userCode, verificationUri: event.verificationUri, intervalSeconds: event.intervalSeconds, expiresInSeconds: event.expiresInSeconds });
+        else if (event.type === "progress") callbacks.onProgress?.(event.message);
+      },
+      prompt: async (prompt) => {
+        if (prompt.type === "select") {
+          const value = await callbacks.onSelect({ message: prompt.message, options: prompt.options.map((o) => ({ id: o.id, label: o.label })) });
+          if (value === undefined) throw new Error("OAuth login was cancelled");
+          return value;
+        }
+        if (prompt.type === "manual_code") {
+          if (callbacks.onManualCodeInput) return callbacks.onManualCodeInput();
+          return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder });
+        }
+        return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder });
+      },
+    };
+    const credential = await runtime.login(providerId, "oauth", interaction);
+    if (credential.type !== "oauth" || !hasCompleteOAuthCredentials(credential)) throw new Error(`OAuth provider ${providerId} did not return complete credentials`);
     const { type: _type, ...credentials } = credential;
     return credentials as OAuthCredentials;
   }
@@ -971,10 +952,57 @@ export function setPiCatalogModelsForTests(models: any[] | null): void {
   piCatalogModelsForTests = models;
 }
 
+class NoopCredentialStore implements CredentialStore {
+  async read(): Promise<Credential | undefined> { return undefined; }
+  async list(): Promise<readonly CredentialInfo[]> { return []; }
+  async modify(_providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> { return fn(undefined); }
+  async delete(): Promise<void> {}
+}
+
+// Credential-less registry used only for static catalog metadata (model list, provider display
+// names, OAuth-provider ids) — not for real request auth. ModelRuntime.create() is async, but the
+// many callers below (validateInput, sanitizeProfile, etc.) are synchronous; the cache is warmed
+// once (lazily, or eagerly via ensurePiCatalogWarm() at server startup) and read synchronously
+// afterward. Before the cache is warm, callers fall back to their pre-existing empty/default
+// behavior (unchanged from before this migration).
+let catalogRegistryPromise: Promise<ModelRegistry> | null = null;
+let catalogRegistrySync: ModelRegistry | null = null;
+let catalogRuntimeSync: ModelRuntime | null = null;
+
+async function ensureCatalogRegistry(): Promise<ModelRegistry> {
+  if (catalogRegistrySync) return catalogRegistrySync;
+  if (!catalogRegistryPromise) {
+    catalogRegistryPromise = ModelRuntime.create({ credentials: new NoopCredentialStore(), modelsPath: null, allowModelNetwork: false })
+      .then((runtime) => {
+        const registry = new ModelRegistry(runtime);
+        catalogRuntimeSync = runtime;
+        catalogRegistrySync = registry;
+        return registry;
+      })
+      .catch((err) => {
+        catalogRegistryPromise = null;
+        throw err;
+      });
+  }
+  return catalogRegistryPromise;
+}
+
+async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
+  await ensureCatalogRegistry();
+  if (!catalogRuntimeSync) throw new Error("pi model catalog is unavailable");
+  return catalogRuntimeSync;
+}
+
+/** Pre-warm the credential-less catalog cache so the synchronous readers below have data
+ * immediately. Call once at server startup; safe to call multiple times (memoized). */
+export async function ensurePiCatalogWarm(): Promise<void> {
+  try { await ensureCatalogRegistry(); } catch { /* leave cache cold; sync readers fall back gracefully */ }
+}
+
 async function loadPiCatalogModels(): Promise<any[]> {
   if (piCatalogModelsForTests) return piCatalogModelsForTests;
   try {
-    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
+    const registry = await ensureCatalogRegistry();
     return typeof registry.getAll === "function" ? registry.getAll() : [];
   } catch {
     return [];
@@ -983,26 +1011,27 @@ async function loadPiCatalogModels(): Promise<any[]> {
 
 function loadPiCatalogModelsSync(): any[] {
   if (piCatalogModelsForTests) return piCatalogModelsForTests;
+  if (!catalogRegistrySync) return [];
   try {
-    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
-    return typeof registry.getAll === "function" ? registry.getAll() : [];
+    return typeof catalogRegistrySync.getAll === "function" ? catalogRegistrySync.getAll() : [];
   } catch {
     return [];
   }
 }
 
 function displayNameForProvider(providerSlug: string): string {
+  if (!catalogRegistrySync) return providerSlug;
   try {
-    const registry = ModelRegistry.inMemory(AuthStorage.inMemory({}));
-    return registry.getProviderDisplayName(providerSlug) || providerSlug;
+    return catalogRegistrySync.getProviderDisplayName(providerSlug) || providerSlug;
   } catch {
     return providerSlug;
   }
 }
 
 function oauthProviderIds(): Set<string> {
+  if (!catalogRuntimeSync) return new Set(OAUTH_PROVIDERS as readonly string[]);
   try {
-    return new Set(AuthStorage.inMemory({}).getOAuthProviders().map((p: any) => p.id).filter(Boolean));
+    return new Set(catalogRuntimeSync.getProviders().filter((p) => p.auth.oauth).map((p) => p.id));
   } catch {
     return new Set(OAUTH_PROVIDERS as readonly string[]);
   }
@@ -1343,32 +1372,6 @@ export function resolveRuntimeCredential(profileId: string): RuntimeCredentialRe
   };
 }
 
-export function writePiConfigForProfiles(profiles: ModelCredentialProfile[], targetDir: string): { extensionPaths: string[] } {
-  mkdirSync(targetDir, { recursive: true });
-  const enabledProfiles = profiles.filter((p) => p.enabled);
-  const providers: Record<string, unknown> = {};
-  const authData: Record<string, unknown> = {};
-  const extensionPaths: string[] = [];
-  for (const profile of enabledProfiles) {
-    if (!shouldUseSdkBuiltinCatalog(profile)) {
-      providers[profile.providerSlug] = piProviderConfig(profile);
-    }
-    const auth = authEntry(profile);
-    if (auth) authData[profile.providerSlug] = auth;
-  }
-  writePrivateJson(join(targetDir, "models.json"), { providers });
-  writePrivateJson(join(targetDir, "auth.json"), authData);
-  return { extensionPaths };
-}
-
-export function createBossmodeModelRegistry(): { authStorage: AuthStorage; modelRegistry: ModelRegistry; registryDir: string } {
-  const registryDir = getBossmodePiRegistryDir();
-  writePiConfigForProfiles(loadModelCredentialProfiles(), registryDir);
-  const authStorage = AuthStorage.create(join(registryDir, "auth.json"));
-  const modelRegistry = ModelRegistry.create(authStorage, join(registryDir, "models.json"));
-  return { authStorage, modelRegistry, registryDir };
-}
-
 export function listAvailableModels(): AvailableModelOption[] {
   return loadModelCredentialProfiles()
     .filter((p) => p.enabled)
@@ -1451,25 +1454,11 @@ export function exportPiConfigForMember(args: {
   const agentDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
   mkdirSync(agentDir, { recursive: true });
 
-  const authPath = join(agentDir, "auth.json");
-  let runtimeProfile = profile;
-  if (profile.authType === "oauth" && existsSync(authPath)) {
-    const existingAuth = parseAuthJson(readFileSync(authPath, "utf-8"));
-    const existingCredential = existingAuth[profile.providerSlug];
-    if (existingCredential && typeof existingCredential === "object" && (existingCredential as any).type === "oauth") {
-      const { type: _type, ...oauth } = existingCredential as { type: "oauth" } & OAuthCredentials;
-      if (hasCompleteOAuthCredentials(oauth) && isNewerOAuthCredential(oauth, profile.oauthCredentials)) {
-        runtimeProfile = persistOAuthCredentialsForProfile(profile.id, profile.providerSlug, oauth) ?? profile;
-      }
-    }
-  }
-
-  const resolved = resolveRuntimeCredential(runtimeProfile.id);
-  runtimeProfile = resolved.profile;
+  const resolved = resolveRuntimeCredential(profile.id);
+  const runtimeProfile = resolved.profile;
   writePrivateJson(join(agentDir, "models.json"), {
     providers: resolved.providerConfig ? { [runtimeProfile.providerSlug]: resolved.providerConfig } : {},
   });
-  writePrivateJson(authPath, resolved.authEntry ? { [runtimeProfile.providerSlug]: resolved.authEntry } : {});
 
   return { agentDir, extensionPaths: [], profile: sanitizeProfile(runtimeProfile) };
 }
