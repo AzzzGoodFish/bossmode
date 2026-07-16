@@ -110,6 +110,8 @@ interface AgentInstance {
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
+  /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
+  compacting: boolean;
   currentPromptTrigger?: string;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
@@ -626,6 +628,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
+        compacting: false,
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: member.model!,
@@ -646,12 +649,22 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         } else if (event.type === "agent_end") {
           // Public status may become idle here, but the SDK run can still be finalizing.
           // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
+          instance.compacting = false;
           if (!instance.promptInFlight) {
             updateDispatchState(instance, "idle", event.type);
             applyPendingAfterPromptSettlement(instance, event.type);
             drainQueuedInputsAsPrompt(instance, event.type);
           } else if (instance.dispatchState === "idle") {
             applyPendingAfterPromptSettlement(instance, event.type);
+          }
+        } else if (event.type === "compaction_start") {
+          instance.compacting = true;
+          transition(instance, roomId, memberName, "working", event.type);
+        } else if (event.type === "compaction_end") {
+          instance.compacting = false;
+          if (instance.dispatchState === "idle") {
+            transition(instance, roomId, memberName, "idle", event.type);
+            drainQueuedInputsAsPrompt(instance, event.type);
           }
         } else if (event.type === "runtime_exit" && event.unexpected) {
           updateDispatchState(instance, "idle", event.type);
@@ -749,6 +762,11 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
 
   setActivationSource(roomId, memberId, "room_mention");
   markPendingChatReply(instance, "activate");
+
+  if (instance.compacting) {
+    queueInput(instance, formattedMessages, "activate");
+    return;
+  }
 
   if (instance.status === "working") {
     instance.handle.steer(formattedMessages);
@@ -1005,6 +1023,11 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
     : `${wrapPrivateMessage(instruction, USER_DISPLAY_NAME)}\n\n${PRIVATE_REPLY_FOOTER}`;
 
   setActivationSource(roomId, instance.memberId, isSlashCommand ? "system" : "private_instruction");
+
+  if (instance.compacting) {
+    queueInput(instance, userMessage, "steer");
+    return;
+  }
 
   if (instance.status === "working") {
     instance.handle.steer(userMessage);

@@ -224,6 +224,56 @@ describe("agent-manager model hot switch", () => {
     expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
   });
 
+  it("reports busy status during a threshold auto-compaction between turns and returns to idle after", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const ws = await import("../../src/communication/ws.js");
+    await manager.activateAgent("room", "pm");
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+
+    handles[0].emit({ type: "compaction_start", reason: "threshold" });
+    expect(manager.getAgentStatus("room", "pm")).toBe("working");
+    expect(manager.getMemberBusyState("room", "pm")).toMatchObject({ busy: true, reason: "working" });
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "working" });
+
+    handles[0].emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+  });
+
+  it("queues activation during a threshold auto-compaction instead of steering or prompting immediately", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    const baseline = first.promptCalls.length;
+
+    first.emit({ type: "compaction_start", reason: "threshold" });
+    messages.push({ id: "m2", type: "chat", sender: "user", content: "@pm are you there", mentions: ["pm"], createdAt: Date.now() });
+    await manager.activateAgent("room", "pm");
+
+    expect(first.promptCalls).toHaveLength(baseline);
+    expect(handles).toHaveLength(1);
+
+    first.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    expect(first.promptCalls.length).toBeGreaterThan(baseline);
+    expect(first.promptCalls[first.promptCalls.length - 1]).toContain("are you there");
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+  });
+
+  it("clears the compacting flag on the next agent_end so a missed compaction_end cannot leave status stuck working", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+
+    first.emit({ type: "compaction_start", reason: "threshold" });
+    expect(manager.getAgentStatus("room", "pm")).toBe("working");
+
+    // compaction_end never arrives; a later full turn must still correctly settle to idle.
+    first.emit({ type: "agent_start" });
+    first.emit({ type: "agent_end" });
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+  });
+
   it("queues a cross-provider switch while working and recreates after agent_end", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
