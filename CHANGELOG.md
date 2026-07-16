@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.18.3-rc.1] — 2026-07-16
+
+### Fixed
+- Reload now correctly applies newly assigned or removed MCP servers to a running member without a restart, and reports failure instead of a false success when the runtime cannot verify the change.
+- The authenticated workspace shell is anchored to the browser viewport so trailing nodes injected by browser extensions after the app root can no longer push the layout up and expose a white strip or hide the top navigation.
+- Members must now have an explicit model and bound credential; there is no implicit default model or guessed provider/credential routing. Unconfigured members show a clear, clickable "Select model" state instead of a dead label, and activating one without a model shows a clear message instead of silently routing to an unpredictable credential. Legacy members left in the unsafe "model without a bound credential" state are migrated once to Unconfigured (with a pre-change snapshot).
+
+---
+
 ## [0.18.1] — 2026-07-15
 
 ### Fixed
