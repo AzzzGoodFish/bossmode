@@ -23,6 +23,9 @@ class TestHandle implements AgentHandle {
   failSetModel = false;
   runtimeName = "test";
   runtimeParams: any;
+  /** When true, prompt() emits agent_start/agent_end but does not resolve until resolvePendingPrompt() is called — simulates the real-world window where the SDK is still finalizing (e.g. running compaction) after agent_end but before prompt() settles. */
+  holdPrompt = false;
+  private pendingPromptResolve: (() => void) | null = null;
 
   constructor(model: string) {
     this.runtimeParams = { model };
@@ -32,6 +35,14 @@ class TestHandle implements AgentHandle {
     this.promptCalls.push(message);
     this.emit({ type: "agent_start" });
     this.emit({ type: "agent_end" });
+    if (this.holdPrompt) {
+      await new Promise<void>((resolve) => { this.pendingPromptResolve = resolve; });
+    }
+  }
+
+  resolvePendingPrompt(): void {
+    this.pendingPromptResolve?.();
+    this.pendingPromptResolve = null;
   }
 
   steer(): void {}
@@ -238,6 +249,67 @@ describe("agent-manager model hot switch", () => {
     handles[0].emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
     expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+  });
+
+  it("returns to idle after a real threshold-compaction timing: compaction runs between agent_end and prompt() settling, not after settlement", async () => {
+    // Reproduces the QA-reported production regression (2122fec): the SDK runs
+    // turn-after compaction in the window where agent_end has already fired but
+    // handle.prompt() has not yet resolved (promptInFlight still true). The old
+    // guard (`dispatchState === "idle"`) never became true in this window, so
+    // compaction_end could never fall back to idle — the member stayed "working"
+    // forever. The fix gates on `turnActive` (agent_start..agent_end) instead.
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+
+    first.holdPrompt = true;
+    const pending = manager.activateAgent("room", "pm");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // agent_start/agent_end already fired inside prompt(); prompt() itself is still pending.
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+
+    first.emit({ type: "compaction_start", reason: "threshold" });
+    expect(manager.getAgentStatus("room", "pm")).toBe("working");
+
+    first.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    // dispatchState is still "running" until prompt() settles — getMemberBusyState reflects that
+    // internal in-flight state (used to gate destructive actions), distinct from the public avatar status.
+    expect(manager.getMemberBusyState("room", "pm")).toMatchObject({ busy: true, reason: "running" });
+
+    first.holdPrompt = false;
+    first.resolvePendingPrompt();
+    await pending;
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
+  });
+
+  it("queues a message that arrives while compaction_end has settled status to idle but prompt() has not yet resolved, and delivers it once settlement drains the queue", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    const baseline = first.promptCalls.length;
+
+    first.holdPrompt = true;
+    const pending = manager.activateAgent("room", "pm");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    first.emit({ type: "compaction_start", reason: "threshold" });
+    first.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+
+    messages.push({ id: "m2", type: "chat", sender: "user", content: "@pm are you there", mentions: ["pm"], createdAt: Date.now() });
+    await manager.activateAgent("room", "pm");
+    // Not delivered yet — the in-flight prompt() has not settled (dispatchState still busy).
+    expect(first.promptCalls).toHaveLength(baseline + 1);
+
+    first.resolvePendingPrompt();
+    await pending;
+    expect(first.promptCalls.length).toBeGreaterThan(baseline + 1);
+    expect(first.promptCalls[first.promptCalls.length - 1]).toContain("are you there");
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
   });
 
   it("queues activation during a threshold auto-compaction instead of steering or prompting immediately", async () => {

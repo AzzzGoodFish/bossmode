@@ -112,6 +112,8 @@ interface AgentInstance {
   lengthContinuationAttempted: boolean;
   /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
   compacting: boolean;
+  /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
+  turnActive: boolean;
   currentPromptTrigger?: string;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
@@ -629,6 +631,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
         compacting: false,
+        turnActive: false,
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: member.model!,
@@ -643,13 +646,14 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         }
         if (suppressRoomState) return;
         if (event.type === "agent_start") {
+          instance.turnActive = true;
           if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
           updateDispatchState(instance, "running", event.type);
           flushQueuedInputs(instance, event.type);
         } else if (event.type === "agent_end") {
           // Public status may become idle here, but the SDK run can still be finalizing.
           // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
-          instance.compacting = false;
+          instance.turnActive = false;
           if (!instance.promptInFlight) {
             updateDispatchState(instance, "idle", event.type);
             applyPendingAfterPromptSettlement(instance, event.type);
@@ -662,7 +666,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           transition(instance, roomId, memberName, "working", event.type);
         } else if (event.type === "compaction_end") {
           instance.compacting = false;
-          if (instance.dispatchState === "idle") {
+          if (!instance.turnActive) {
             transition(instance, roomId, memberName, "idle", event.type);
             drainQueuedInputsAsPrompt(instance, event.type);
           }
