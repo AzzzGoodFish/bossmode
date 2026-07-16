@@ -50,8 +50,9 @@ describe("prompt compiler", () => {
     expect(compiled.agentPrompt).toBe("QA ROLE");
     expect(compiled.appendSystemPrompt.join("\n")).toContain("Room rule");
     expect(compiled.appendSystemPrompt.join("\n")).toContain("QA note");
-    expect(compiled.fullPrompt).toContain("Project documents are available on demand");
-    expect(compiled.fullPrompt).toContain("This room's default docs space is `/docs/bossmode/`");
+    expect(compiled.fullPrompt).not.toContain("## Documents");
+    expect(compiled.fullPrompt).not.toContain("Project documents are available on demand");
+    expect(compiled.fullPrompt).not.toContain("Use tasks for tracked work");
     expect(compiled.fullPrompt).not.toContain("Project Documents\n```\ndocs/");
     expect(compiled.fullPrompt).not.toContain("old.md");
   });
