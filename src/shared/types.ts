@@ -125,6 +125,8 @@ export interface ModelMetadataOverride {
 export interface ModelCredentialModelCustomizations {
   disabled?: string[];
   contextWindowOverride?: Record<string, number>;
+  /** User-added models not present in the built-in provider's pi catalog. */
+  addedModels?: ModelDefinitionConfig[];
 }
 
 export interface ModelCredentialProfile {
@@ -155,6 +157,7 @@ export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfil
   hasSecret: boolean;
   modelRefs: string[];
   catalogModels?: ModelDefinitionConfig[];
+  addedModels?: ModelDefinitionConfig[];
 }
 
 export interface PublicModelProvider {

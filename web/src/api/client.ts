@@ -257,6 +257,7 @@ export interface ModelMetadataOverride {
 export interface ModelCredentialModelCustomizations {
   disabled?: string[];
   contextWindowOverride?: Record<string, number>;
+  addedModels?: ModelDefinitionConfig[];
 }
 
 export interface PublicModelCredentialProfile {
@@ -280,6 +281,7 @@ export interface PublicModelCredentialProfile {
   hasSecret: boolean;
   modelRefs: string[];
   catalogModels?: ModelDefinitionConfig[];
+  addedModels?: ModelDefinitionConfig[];
 }
 
 export interface ModelCredentialProfileInput extends Omit<PublicModelCredentialProfile, "id" | "createdAt" | "updatedAt" | "hasSecret" | "modelRefs"> {

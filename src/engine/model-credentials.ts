@@ -137,11 +137,13 @@ function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredential
   const catalogModels = isBuiltinProviderProfile(profile)
     ? applyBuiltinMetadataOverrides(modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl), profile.modelCustomizations)
     : undefined;
+  const addedModels = isBuiltinProviderProfile(profile) ? profile.modelCustomizations?.addedModels : undefined;
   return {
     ...rest,
     hasSecret: !!profile.apiKey || !!profile.oauthCredentials,
     modelRefs: profile.models.map((m) => `${profile.providerSlug}/${m.id}`),
     ...(catalogModels ? { catalogModels } : {}),
+    ...(addedModels && addedModels.length > 0 ? { addedModels } : {}),
   };
 }
 
@@ -192,7 +194,8 @@ function validateOverrideValue(value: number | undefined, field: string): number
 function hasModelCustomizations(profile: Pick<ModelCredentialProfile, "modelCustomizations">): boolean {
   const disabled = profile.modelCustomizations?.disabled || [];
   const overrides = profile.modelCustomizations?.contextWindowOverride || {};
-  return disabled.length > 0 || Object.keys(overrides).length > 0;
+  const addedModels = profile.modelCustomizations?.addedModels || [];
+  return disabled.length > 0 || Object.keys(overrides).length > 0 || addedModels.length > 0;
 }
 
 function sanitizeModelCustomizations(customizations: ModelCredentialProfile["modelCustomizations"] | undefined, catalogModels: ModelDefinitionConfig[]): ModelCredentialProfile["modelCustomizations"] | undefined {
@@ -204,7 +207,24 @@ function sanitizeModelCustomizations(customizations: ModelCredentialProfile["mod
     const contextWindow = validateOverrideValue(value, "contextWindow");
     if (contextWindow !== undefined) overrides[id] = contextWindow;
   }
-  return disabled.length > 0 || Object.keys(overrides).length > 0 ? { ...(disabled.length ? { disabled } : {}), ...(Object.keys(overrides).length ? { contextWindowOverride: overrides } : {}) } : undefined;
+  // Auto-reconcile: if the pi catalog later adds a model matching a previously
+  // added custom model's id, the catalog entry wins and the custom one is silently
+  // dropped here rather than shown twice or erroring on unrelated saves/reloads.
+  const addedModels = Array.from(
+    new Map(
+      (customizations?.addedModels || [])
+        .filter((m) => m.id?.trim() && !catalogById.has(m.id.trim()))
+        .map(validateModel)
+        .map((m) => [m.id, m] as const),
+    ).values(),
+  );
+  return disabled.length > 0 || Object.keys(overrides).length > 0 || addedModels.length > 0
+    ? {
+        ...(disabled.length ? { disabled } : {}),
+        ...(Object.keys(overrides).length ? { contextWindowOverride: overrides } : {}),
+        ...(addedModels.length ? { addedModels } : {}),
+      }
+    : undefined;
 }
 
 function deriveBuiltinModelCustomizations(inputModels: ModelDefinitionConfig[] | undefined, catalogModels: ModelDefinitionConfig[]): ModelCredentialProfile["modelCustomizations"] | undefined {
@@ -232,6 +252,11 @@ function applyBuiltinMetadataOverrides(catalogModels: ModelDefinitionConfig[], c
 function applyBuiltinModelCustomizations(catalogModels: ModelDefinitionConfig[], customizations?: ModelCredentialProfile["modelCustomizations"]): ModelDefinitionConfig[] {
   const disabled = new Set(customizations?.disabled || []);
   return applyBuiltinMetadataOverrides(catalogModels, customizations).filter((m) => !disabled.has(m.id));
+}
+
+/** The full effective model set for a built-in provider profile: enabled catalog models plus any user-added custom models. */
+function materializeBuiltinModels(catalogModels: ModelDefinitionConfig[], customizations?: ModelCredentialProfile["modelCustomizations"]): ModelDefinitionConfig[] {
+  return [...applyBuiltinModelCustomizations(catalogModels, customizations), ...(customizations?.addedModels || [])];
 }
 
 function validateOAuthProvider(providerId: string | undefined): string {
@@ -422,12 +447,23 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
     const baseUrlOverride = input.authType === "api_key" ? normalizeOptionalBaseUrl(input.baseUrl) : undefined;
     const catalogModels = modelsForBuiltinProvider(input.providerSlug, baseUrlOverride);
     if (catalogModels.length === 0) throw new Error(`No built-in models found for provider: ${input.providerSlug}`);
+    if (input.modelCustomizations !== undefined) {
+      const catalogIds = new Set(catalogModels.map((m) => m.id));
+      const addedIds = new Set<string>();
+      for (const added of input.modelCustomizations.addedModels || []) {
+        const id = added.id?.trim();
+        if (!id) continue;
+        if (catalogIds.has(id)) throw new Error(`Model "${id}" is already in the provider catalog.`);
+        if (addedIds.has(id)) throw new Error(`Duplicate model id: ${id}`);
+        addedIds.add(id);
+      }
+    }
     const modelCustomizations = input.modelCustomizations !== undefined
       ? sanitizeModelCustomizations(input.modelCustomizations, catalogModels)
       : input.models
         ? deriveBuiltinModelCustomizations(input.models, catalogModels)
         : sanitizeModelCustomizations(existing?.modelCustomizations, catalogModels);
-    const models = applyBuiltinModelCustomizations(catalogModels, modelCustomizations);
+    const models = materializeBuiltinModels(catalogModels, modelCustomizations);
     if (models.length === 0) throw new Error("at least one model must remain visible");
     validateUniqueModels(models);
     return {
@@ -1069,7 +1105,7 @@ function refreshBuiltinProviderProfile(profile: ModelCredentialProfile): ModelCr
   const catalogModels = modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl);
   if (catalogModels.length === 0) return profile;
   const modelCustomizations = sanitizeModelCustomizations(profile.modelCustomizations, catalogModels);
-  const models = applyBuiltinModelCustomizations(catalogModels, modelCustomizations);
+  const models = materializeBuiltinModels(catalogModels, modelCustomizations);
   if (models.length === 0) return profile;
   const next: ModelCredentialProfile = {
     ...profile,

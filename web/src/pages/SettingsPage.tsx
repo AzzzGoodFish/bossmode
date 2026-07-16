@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -960,6 +960,10 @@ function modelOverride(profile: ModelCredentialProfileInput, id: string): { cont
   return profile.modelCustomizations?.contextWindowOverride?.[id] !== undefined ? { contextWindow: modelCustomizations(profile).contextWindowOverride?.[id] } : {};
 }
 
+function addedModels(profile: ModelCredentialProfileInput): ModelDefinitionConfig[] {
+  return profile.modelCustomizations?.addedModels || [];
+}
+
 function formatK(value?: number): string {
   return value ? `${Math.round(value / 1000)}k` : "unavailable";
 }
@@ -1016,6 +1020,21 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     if (value === undefined) delete contextWindowOverride[id];
     else contextWindowOverride[id] = value;
     updateModelCustomizations({ ...current, contextWindowOverride });
+  };
+  const addCustomModel = () => {
+    const current = modelCustomizations(form);
+    updateModelCustomizations({ ...current, addedModels: [...(current.addedModels || []), { id: "", metadataSource: "unknown" }] });
+  };
+  const updateCustomModel = (index: number, patch: Partial<ModelDefinitionConfig>) => {
+    const current = modelCustomizations(form);
+    const next = [...(current.addedModels || [])];
+    next[index] = { ...next[index], ...patch };
+    updateModelCustomizations({ ...current, addedModels: next });
+  };
+  const removeCustomModel = (index: number) => {
+    const current = modelCustomizations(form);
+    const next = (current.addedModels || []).filter((_, i) => i !== index);
+    updateModelCustomizations({ ...current, addedModels: next.length ? next : undefined });
   };
   const fetchModels = async () => {
     setFetchingModels(true);
@@ -1115,6 +1134,27 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                     <Field label="Context window"><div className="space-y-1"><input type="number" min={1} step={1} className={inputCls} value={override.contextWindow ?? ""} onChange={(e) => setModelOverride(m.id, "contextWindow", parseIntegerInput(e.target.value))} placeholder={m.contextWindow ? String(m.contextWindow) : "Default"} /><div className="text-[11px] text-ink-3">Leave empty for default.</div></div></Field>
                   </div>;
                 })}
+                <div className="pt-3 mt-1 border-t border-line-soft">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-ink-1">Custom models</h4>
+                    <button type="button" onClick={addCustomModel} className="text-xs text-accent-ink hover:opacity-80 cursor-pointer">Add custom model</button>
+                  </div>
+                  <p className="text-xs text-ink-3 mt-0.5">Models not yet in the official catalog. Metadata you leave blank uses reasonable defaults.</p>
+                  {addedModels(form).map((m, i) => (
+                    <div key={i} className="border border-line-soft rounded-lg p-3 space-y-2 mt-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-ink-3">Custom</span>
+                        <button type="button" className="text-xs text-blocked cursor-pointer" onClick={() => removeCustomModel(i)}>Remove</button>
+                      </div>
+                      <input className={inputCls} value={m.id} onChange={(e) => updateCustomModel(i, { id: e.target.value })} placeholder="model id" />
+                      <input className={inputCls} value={m.name || ""} onChange={(e) => updateCustomModel(i, { name: e.target.value })} placeholder="display name (optional)" />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => updateCustomModel(i, { contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" })} placeholder="e.g. 128000" /></Field>
+                        <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => updateCustomModel(i, { maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" })} placeholder="optional" /></Field>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </>
             ) : (
               <>
