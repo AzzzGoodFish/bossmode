@@ -17,6 +17,7 @@ class TestHandle implements AgentHandle {
   setModelCalls: string[] = [];
   refreshCalls = 0;
   reloadCalls: any[] = [];
+  failReload = false;
   destroyed = false;
   failRefresh = false;
   failSetModel = false;
@@ -55,6 +56,7 @@ class TestHandle implements AgentHandle {
   }
   async reloadResources(opts: any): Promise<void> {
     this.reloadCalls.push(opts);
+    if (this.failReload) throw new Error("Reload could not apply MCP access.");
     this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
     this.runtimeParams.skills = opts.skillNames;
   }
@@ -346,6 +348,20 @@ describe("agent-manager model hot switch", () => {
     expect(first.destroyed).toBe(false);
     expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), agentPrompt: "test", skillNames: ["review"] });
     expect(first.reloadCalls[0].skillPaths[0]).toContain("/tmp/bossmode-test/skills/review");
+  });
+
+  it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const eventHandler = await import("../../src/engine/event-handler.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.failReload = true;
+
+    await expect(manager.reloadMemberResources("room", "pm")).rejects.toThrow("Reload could not apply MCP access.");
+
+    expect(first.runtimeParams.systemPrompt).toBeUndefined();
+    expect(eventHandler.appendEventToDisk).not.toHaveBeenCalledWith("room", "pm", expect.objectContaining({ text: "Reloaded member resources in place." }));
+    expect(first.destroyed).toBe(false);
   });
 
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
