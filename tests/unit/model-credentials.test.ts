@@ -511,6 +511,34 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
+  it("preserves image input capability declared on a custom model through to the exported runtime config", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "moonshotai", id: "kimi-for-coding", name: "Kimi for Coding", api: "anthropic-messages", baseUrl: "https://api.moonshot.ai/anthropic", contextWindow: 256000, input: ["text"] },
+    ]);
+    const saved = mod.connectBuiltinProviderApiKey({ providerSlug: "moonshotai", apiKey: "sk-moonshot" });
+    const edited = mod.saveModelCredentialProfile({
+      id: saved.id,
+      profileKind: "builtin_provider",
+      name: saved.name,
+      providerSlug: saved.providerSlug,
+      protocol: saved.protocol,
+      baseUrl: saved.baseUrl,
+      authType: "api_key",
+      enabled: true,
+      isDefault: true,
+      models: saved.models,
+      modelCustomizations: { addedModels: [{ id: "k3", contextWindow: 1000000, input: ["text", "image"] }] },
+    });
+
+    expect(edited.addedModels?.[0].input).toEqual(["text", "image"]);
+    const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "moonshotai/k3", credentialId: saved.id });
+    const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
+    const k3 = modelsJson.providers.moonshotai.models.find((m: any) => m.id === "k3");
+    expect(k3.input).toEqual(["text", "image"]);
+    mod.setPiCatalogModelsForTests(null);
+  });
+
   it("rejects a custom model id that already exists in the provider catalog", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     mod.setPiCatalogModelsForTests([

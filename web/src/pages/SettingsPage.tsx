@@ -1152,6 +1152,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                         <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => updateCustomModel(i, { contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" })} placeholder="e.g. 128000" /></Field>
                         <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => updateCustomModel(i, { maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" })} placeholder="optional" /></Field>
                       </div>
+                      <label className="flex items-center gap-2 text-xs text-ink-2">
+                        <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => updateCustomModel(i, { input: e.target.checked ? ["text", "image"] : undefined })} />
+                        Supports image input
+                      </label>
                     </div>
                   ))}
                 </div>
@@ -1167,6 +1171,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                     <Field label="Context window (tokens)"><input type="number" min={1} step={1} className={inputCls} value={m.contextWindow ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, contextWindow: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 1000000" /></Field>
                     <Field label="Max output tokens"><input type="number" min={1} step={1} className={inputCls} value={m.maxTokens ?? ""} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, maxTokens: parseIntegerInput(e.target.value), metadataSource: "endpoint" }; setForm({ ...form, models }); }} placeholder="e.g. 128000" /></Field>
                   </div>
+                  <label className="flex items-center gap-2 text-xs text-ink-2">
+                    <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, input: e.target.checked ? ["text", "image"] : undefined }; setForm({ ...form, models }); }} />
+                    Supports image input
+                  </label>
                   {m.contextWindow ? <div className="text-[11px] text-ink-3">{`${Math.round(m.contextWindow / 1000)}k context${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max output` : ""}`}</div> : null}
                   <button type="button" className="text-xs text-blocked" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
                 </div>)}
