@@ -67,8 +67,8 @@ Room members: ${memberList}
 Working directory: ${args.room.cwd}
 Room leader: ${leader}
 
-Messages you receive are wrapped in envelopes that tell you where they came from and how to reply. Follow the envelope footer.
-Communication goes exclusively through the \`chat\` tool. Bare text responses are not visible to anyone.
+Messages you receive are wrapped in envelopes that tell you where they came from.
+Communication goes exclusively through the \`chat\` tool — every reply goes to the room. Bare text responses are not visible to anyone.
 `;
 }
 
