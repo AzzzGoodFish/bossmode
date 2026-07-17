@@ -27,7 +27,10 @@ export function availableThinkingLevels(model: Pick<AvailableModelOption, "reaso
   if (model.reasoning === false) return ALL_THINKING_LEVELS.filter((l) => l.value === null || l.value === "off");
   const map = model.thinkingLevelMap;
   if (!map) return ALL_THINKING_LEVELS;
-  const allowed = new Set(Object.keys(map));
+  // pi's catalog writes every level key for some models and sets the
+  // unsupported ones to null (e.g. Kimi K3: only `max` is non-null). A key
+  // with a null value means the level is NOT available — only count non-null.
+  const allowed = new Set(Object.entries(map).filter(([, v]) => v != null).map(([k]) => k));
   return ALL_THINKING_LEVELS.filter((l) => l.value === null || l.value === "off" || allowed.has(l.value));
 }
 

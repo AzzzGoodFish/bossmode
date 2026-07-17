@@ -14,6 +14,17 @@ describe("availableThinkingLevels", () => {
     expect(levels.map((l) => l.label)).toEqual(["default", "off", "max"]);
   });
 
+  it("ignores null-valued keys in thinkingLevelMap (real pi K3 shape: 7 keys, 6 are null)", () => {
+    // Regression for QA-caught bug: pi 0.80.10's real K3 thinkingLevelMap is
+    // { off:null, minimal:null, low:null, medium:null, high:null, xhigh:null, max:'max' }.
+    // A key present with a null value means the level is NOT available.
+    const levels = availableThinkingLevels({
+      reasoning: true,
+      thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: "max" },
+    });
+    expect(levels.map((l) => l.label)).toEqual(["default", "off", "max"]);
+  });
+
   it("returns default/off plus the mapped subset for a model with several levels", () => {
     const levels = availableThinkingLevels({ reasoning: true, thinkingLevelMap: { low: "low", high: "high" } });
     expect(levels.map((l) => l.label)).toEqual(["default", "off", "low", "high"]);
