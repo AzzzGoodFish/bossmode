@@ -90,7 +90,8 @@ describe("mainline-store", () => {
       "",
       `- docs/bossmode/prd.md — PRD 存在`,
       `- docs/bossmode/gone.md — 已删除的文档`,
-      `- task:${task.id} — 任务存在`,
+      `- task:${task.id} — 任务存在(全 id 形式)`,
+      `- task:${task.id.replace(/^task-/, "")} — 任务存在(短形式)`,
       `- task:task-deadbeef — 不存在的任务`,
       `- msg:${message.id} — 消息存在(id 形式)`,
       `- msg:#10235 — 尚无 seq 的消息`,
@@ -100,7 +101,9 @@ describe("mainline-store", () => {
     const resolved = resolveMainlineRefs("room-a", content);
     expect(resolved).toContain("- docs/bossmode/prd.md — PRD 存在");
     expect(resolved).toContain("- [stale] docs/bossmode/gone.md — 已删除的文档");
-    expect(resolved).toContain(`- task:${task.id} — 任务存在`);
+    expect(resolved).toContain(`- task:${task.id} — 任务存在(全 id 形式)`);
+    expect(resolved).toContain(`- task:${task.id.replace(/^task-/, "")} — 任务存在(短形式)`);
+    expect(resolved).not.toContain(`[stale] task:${task.id.replace(/^task-/, "")}`);
     expect(resolved).toContain("- [stale] task:task-deadbeef — 不存在的任务");
     expect(resolved).toContain(`- msg:${message.id} — 消息存在(id 形式)`);
     expect(resolved).toContain("- [stale] msg:#10235 — 尚无 seq 的消息");
