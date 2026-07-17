@@ -178,7 +178,7 @@ export async function handleToolCallback(
       // Default: inline text (may be truncated by MAX_RESULT_CHARS)
       return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts, seq: m.seq }));
     }
-    case "read_asset": {
+    case "read_memory": {
       const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const asset = String(params?.asset || "");
@@ -223,8 +223,8 @@ export async function handleToolCallback(
         suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE,
       };
     }
-    case "write_asset":
-    case "edit_asset": {
+    case "write_memory":
+    case "edit_memory": {
       const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const room = roomStore.getRoom(roomId);
@@ -238,7 +238,7 @@ export async function handleToolCallback(
         if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
         try {
           const common = { roomId, memberId: actor.id, actor: { type: "member" as const, memberId: actor.id, name: actor.name }, reason };
-          const mainline = tool === "write_asset"
+          const mainline = tool === "write_memory"
             ? mainlineStore.writeMainline({ ...common, content: String(params?.content ?? "") })
             : mainlineStore.editMainline({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
           const budget = mainlineStore.readMainlineWithBudget(roomId, actor.id).budget;
@@ -270,7 +270,7 @@ export async function handleToolCallback(
           actor: { type: "member" as const, memberId: actor.id, name: actor.name },
           reason,
         };
-        const principles = tool === "write_asset"
+        const principles = tool === "write_memory"
           ? principlesStore.writePrinciples({ ...common, content: String(params?.content ?? "") })
           : principlesStore.editPrinciples({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
         const budget = principlesStore.readPrinciplesWithBudget(roomId, scope as principlesStore.PrinciplesScope, scope === "member" ? actor.id : undefined).budget;

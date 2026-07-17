@@ -73,6 +73,16 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 ## Communication
 
 The \`chat\` tool is the only way to communicate — to the user and to members alike. Anything you write as plain text is invisible to everyone; if it isn't sent through chat, it was never said.
+
+## Memory
+
+You have a persistent memory that survives across sessions. It has two parts:
+
+**Principles** — how you work: behavior and communication norms that evolve with the user's feedback. Store the durable rules the user has taught you, so they never have to correct you twice.
+
+**Mainline** — what you work on. A \`focus\` section for long-lived domain knowledge (the product, the project, key rulings), plus a \`dynamic index\` of pointers (docs/..., task:<id>, msg:#<n>) to the few assets you keep returning to this phase — pointers with one line of context, not the content itself.
+
+Curate both: keep only what stays useful. Progress, results, and anything that expires belong in chat history, not memory. Use the memory tools to maintain them.
 `;
 }
 

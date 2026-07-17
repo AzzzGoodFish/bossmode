@@ -8,6 +8,7 @@ import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
 import { runMemberCredentialBindingMigration } from "../workspace/member-credential-binding-migration.js";
 import { runMessageSeqMigration } from "../workspace/message-seq-migration.js";
+import { runPromptMemoryRenameMigration } from "../workspace/prompt-memory-rename-migration.js";
 import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
@@ -72,6 +73,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runMessageSeqMigration();
   } catch (err) {
     logger.error("server", "message seq migration failed", { error: String(err) });
+  }
+
+  try {
+    runPromptMemoryRenameMigration();
+  } catch (err) {
+    logger.error("server", "prompt memory rename migration failed", { error: String(err) });
   }
 
   try {

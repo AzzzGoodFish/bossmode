@@ -193,7 +193,7 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
 });
 
 // ── Prompt Assets: Principles (准则) & Mainline (主线) — read-only public API ──
-// Writes happen exclusively through member tools (read/edit/write_asset) so governance
+// Writes happen exclusively through member tools (read/edit/write_memory) so governance
 // (reason, budget, history) is enforced in one place.
 
 addRoute("GET", "/api/rooms/:id/principles", async (_req, res, params) => {
