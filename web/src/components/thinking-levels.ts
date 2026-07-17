@@ -14,24 +14,34 @@ export const ALL_THINKING_LEVELS: Array<{ label: string; value: string | null }>
 /**
  * Thinking levels actually selectable for a given model option.
  *
- * - `default` and `off` are always available.
- * - For catalog models with a `thinkingLevelMap`, only the levels present in
- *   the map are offered (e.g. Kimi K3 exposes only `max`, matching pi CLI).
- * - For models with `reasoning: false`, only default/off are offered.
- * - For custom models without thinking metadata (no `thinkingLevelMap` and
- *   `reasoning` not explicitly false), all levels remain available — the
- *   metadata is unknown, so we do not restrict.
+ * Mirrors pi's `getSupportedThinkingLevels` (pi-ai models.ts) exactly — the
+ * rule is asymmetric, and getting it wrong in either direction breaks real
+ * models (0.18.4 shipped a regression that cut Claude models to off/max only):
+ *
+ *   if (!model.reasoning) return ["off"];
+ *   levels.filter(level => {
+ *     const mapped = model.thinkingLevelMap?.[level];
+ *     if (mapped === null) return false;                       // explicit null disables
+ *     if (level === "xhigh" || level === "max") return mapped !== undefined;  // xhigh/max need explicit presence
+ *     return true;                                             // off/minimal/low/medium/high: available unless explicitly null
+ *   });
+ *
+ * So: mid levels and off are available by default and only removed by an
+ * explicit null entry; xhigh/max must be explicitly present. `default` is
+ * always available (it maps to "no thinking override"), independent of the map.
  */
 export function availableThinkingLevels(model: Pick<AvailableModelOption, "reasoning" | "thinkingLevelMap"> | null | undefined) {
   if (!model) return ALL_THINKING_LEVELS;
   if (model.reasoning === false) return ALL_THINKING_LEVELS.filter((l) => l.value === null || l.value === "off");
   const map = model.thinkingLevelMap;
-  if (!map) return ALL_THINKING_LEVELS;
-  // pi's catalog writes every level key for some models and sets the
-  // unsupported ones to null (e.g. Kimi K3: only `max` is non-null). A key
-  // with a null value means the level is NOT available — only count non-null.
-  const allowed = new Set(Object.entries(map).filter(([, v]) => v != null).map(([k]) => k));
-  return ALL_THINKING_LEVELS.filter((l) => l.value === null || l.value === "off" || allowed.has(l.value));
+  return ALL_THINKING_LEVELS.filter((l) => {
+    if (l.value === null) return true; // "default" always available
+    if (l.value === "off") return map?.off !== null;
+    if (l.value === "xhigh" || l.value === "max") return map?.[l.value] != null;
+    // off/minimal/low/medium/high: available unless explicitly null
+    const key = l.value as "minimal" | "low" | "medium" | "high";
+    return map?.[key] !== null;
+  });
 }
 
 /**

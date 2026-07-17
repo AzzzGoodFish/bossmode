@@ -9,28 +9,23 @@ describe("availableThinkingLevels", () => {
     expect(availableThinkingLevels(undefined).map((l) => l.label)).toEqual(fullLevels);
   });
 
-  it("returns only default/off/max for a K3-style model with thinkingLevelMap = { max: 'max' }", () => {
-    const levels = availableThinkingLevels({ reasoning: true, thinkingLevelMap: { max: "max" } });
-    expect(levels.map((l) => l.label)).toEqual(["default", "off", "max"]);
+  it("Opus-style model (map has only xhigh/max) shows all levels — mid levels are available unless explicitly null", () => {
+    // Real pi 0.80.10 Opus map: { xhigh: 'xhigh', max: 'max' }.
+    // pi's rule: off/minimal/low/medium/high are available by default (absence ≠ disabled).
+    const levels = availableThinkingLevels({ reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } });
+    expect(levels.map((l) => l.label)).toEqual(["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
   });
 
-  it("ignores null-valued keys in thinkingLevelMap (real pi K3 shape: 7 keys, 6 are null)", () => {
-    // Regression for QA-caught bug: pi 0.80.10's real K3 thinkingLevelMap is
-    // { off:null, minimal:null, low:null, medium:null, high:null, xhigh:null, max:'max' }.
-    // A key present with a null value means the level is NOT available.
+  it("K3-style model (map has 6 explicit nulls + max) shows only default + max — off is explicitly disabled", () => {
+    // Real pi 0.80.10 K3 map: { off:null, minimal:null, low:null, medium:null, high:null, xhigh:null, max:'max' }.
     const levels = availableThinkingLevels({
       reasoning: true,
       thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: "max" },
     });
-    expect(levels.map((l) => l.label)).toEqual(["default", "off", "max"]);
+    expect(levels.map((l) => l.label)).toEqual(["default", "max"]);
   });
 
-  it("returns default/off plus the mapped subset for a model with several levels", () => {
-    const levels = availableThinkingLevels({ reasoning: true, thinkingLevelMap: { low: "low", high: "high" } });
-    expect(levels.map((l) => l.label)).toEqual(["default", "off", "low", "high"]);
-  });
-
-  it("returns only default/off for a reasoning:false model", () => {
+  it("returns default/off for a reasoning:false model", () => {
     const levels = availableThinkingLevels({ reasoning: false, thinkingLevelMap: undefined });
     expect(levels.map((l) => l.label)).toEqual(["default", "off"]);
   });
@@ -40,9 +35,9 @@ describe("availableThinkingLevels", () => {
     expect(levels.map((l) => l.label)).toEqual(["default", "off"]);
   });
 
-  it("returns all levels for a custom model without thinking metadata", () => {
+  it("custom model without metadata (no map): mid levels available, xhigh/max not (matching pi)", () => {
     const levels = availableThinkingLevels({ reasoning: true, thinkingLevelMap: undefined });
-    expect(levels.map((l) => l.label)).toEqual(fullLevels);
+    expect(levels.map((l) => l.label)).toEqual(["default", "off", "minimal", "low", "medium", "high"]);
   });
 });
 
@@ -77,26 +72,35 @@ describe("member panel select options (same helpers as ThinkingPop)", () => {
     return options.includes(current) ? options : [current, ...options];
   }
 
+  const opusModel = { reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } };
   const k3Model = { reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: "max" } };
   const nonReasoningModel = { reasoning: false, thinkingLevelMap: undefined };
   const customModel = { reasoning: true, thinkingLevelMap: undefined };
 
-  it("K3-bound member select shows only off/max", () => {
+  it("Opus-bound member select shows all levels", () => {
+    expect(selectOptions(opusModel, "off")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    expect(selectOptions(opusModel, "medium")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("K3-bound member select shows only max (off is explicitly disabled by K3's map)", () => {
+    expect(selectOptions(k3Model, "max")).toEqual(["max"]);
+  });
+
+  it("K3-bound member with stored 'off' shows 'off' prepended as the current value", () => {
     expect(selectOptions(k3Model, "off")).toEqual(["off", "max"]);
-    expect(selectOptions(k3Model, "max")).toEqual(["off", "max"]);
   });
 
   it("reasoning:false member select shows only off", () => {
     expect(selectOptions(nonReasoningModel, "off")).toEqual(["off"]);
   });
 
-  it("custom model without metadata keeps all levels", () => {
-    expect(selectOptions(customModel, "medium")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  it("custom model without metadata shows mid levels but not xhigh/max", () => {
+    expect(selectOptions(customModel, "medium")).toEqual(["off", "minimal", "low", "medium", "high"]);
   });
 
   it("member's stored level not in the available set is still shown as the current value", () => {
-    // e.g. member was previously set to "medium" while bound to K3 — the select must
-    // show "medium" as the current value, not silently switch to something else.
-    expect(selectOptions(k3Model, "medium")).toEqual(["medium", "off", "max"]);
+    // e.g. member was previously set to "high" while bound to K3 — the select must
+    // show "high" as the current value, not silently switch to something else.
+    expect(selectOptions(k3Model, "high")).toEqual(["high", "max"]);
   });
 });
