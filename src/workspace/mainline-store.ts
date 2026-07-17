@@ -214,8 +214,12 @@ function resolveRef(ref: RefToken, ctx: { roomId: string; messages: ReturnType<t
       const stripped = ref.path.replace(/^docs\//, "");
       return entryExists(stripped) || entryExists(ref.path);
     }
-    case "task":
-      return getTask(ctx.roomId, ref.id) !== null;
+    case "task": {
+      // Canonical task ids always carry the `task-` prefix; the ref's id part may be
+      // written with it (`task:task-7bbf2d48`) or without (`task:7bbf2d48`) — same reference.
+      const taskId = ref.id.startsWith("task-") ? ref.id : `task-${ref.id}`;
+      return getTask(ctx.roomId, taskId) !== null;
+    }
     case "msg-seq":
       return ctx.messages.some((m) => (m as { seq?: number }).seq === ref.seq);
     case "msg-id":
