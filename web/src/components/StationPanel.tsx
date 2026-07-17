@@ -500,7 +500,6 @@ This clears the member's working session memory and starts fresh. Room messages 
   );
 }
 
-const THINKING_LEVEL_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export function memberMcpDisplayState(
   loadStatus: "loading" | "ready" | "error",
@@ -714,7 +713,13 @@ function MemberConfigPanel({
               onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
               className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
             >
-              {THINKING_LEVEL_OPTIONS.map((level) => <option key={level} value={level}>{level}</option>)}
+              {(() => {
+                const boundModel = findModelOptionForBinding(member.model, member.credentialId, models);
+                const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
+                const current = member.thinkingLevel || "off";
+                const all = options.includes(current) ? options : [current, ...options];
+                return all.map((level) => <option key={level} value={level}>{level}</option>);
+              })()}
             </select>
           </label>
         </div>

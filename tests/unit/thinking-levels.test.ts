@@ -66,3 +66,37 @@ describe("findModelOptionForBinding", () => {
     expect(findModelOptionForBinding("anthropic/claude-other", "cred-a", models)).toBeUndefined();
   });
 });
+
+describe("member panel select options (same helpers as ThinkingPop)", () => {
+  // Mirrors the exact logic in MemberConfigPanel's Think level <select>:
+  // options = availableThinkingLevels(boundModel) minus "default"(null), and the
+  // member's currently stored level is prepended if it is not in the available set.
+  function selectOptions(boundModel: any, currentThinking: string | undefined) {
+    const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
+    const current = currentThinking || "off";
+    return options.includes(current) ? options : [current, ...options];
+  }
+
+  const k3Model = { reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: "max" } };
+  const nonReasoningModel = { reasoning: false, thinkingLevelMap: undefined };
+  const customModel = { reasoning: true, thinkingLevelMap: undefined };
+
+  it("K3-bound member select shows only off/max", () => {
+    expect(selectOptions(k3Model, "off")).toEqual(["off", "max"]);
+    expect(selectOptions(k3Model, "max")).toEqual(["off", "max"]);
+  });
+
+  it("reasoning:false member select shows only off", () => {
+    expect(selectOptions(nonReasoningModel, "off")).toEqual(["off"]);
+  });
+
+  it("custom model without metadata keeps all levels", () => {
+    expect(selectOptions(customModel, "medium")).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("member's stored level not in the available set is still shown as the current value", () => {
+    // e.g. member was previously set to "medium" while bound to K3 — the select must
+    // show "medium" as the current value, not silently switch to something else.
+    expect(selectOptions(k3Model, "medium")).toEqual(["medium", "off", "max"]);
+  });
+});
