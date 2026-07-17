@@ -13,6 +13,8 @@ interface SheetProps {
   open: boolean;
   onClose: () => void;
   size?: "sm" | "md" | "lg" | "xl" | "2xl";
+  /** "right" docks a full-height panel to the right edge (desktop); default is the centered modal. */
+  dock?: "right";
   closeOnOverlayClick?: boolean;
   children: React.ReactNode;
 }
@@ -25,7 +27,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
   ).filter((el) => !el.closest("[disabled]") && getComputedStyle(el).display !== "none");
 }
 
-export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, children }: SheetProps) {
+export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = true, children }: SheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -97,6 +99,26 @@ export function Sheet({ open, onClose, size = "md", closeOnOverlayClick = true, 
   if (!open) return null;
 
   if (!isMobile) {
+    if (dock === "right") {
+      // Right-docked full-height panel (member panel family)
+      return (
+        <div
+          className="fixed inset-0 bg-black/60 z-50"
+          onMouseDown={handleOverlayMouseDown}
+          onMouseUp={handleOverlayMouseUp}
+        >
+          <div
+            ref={panelRef}
+            aria-modal="true"
+            role="dialog"
+            className={`absolute right-0 top-0 bottom-0 w-full ${SIZE_CLS[size]} bg-surface-0 border-l border-line shadow-xl flex flex-col animate-sheet-left`}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {children}
+          </div>
+        </div>
+      );
+    }
     // Desktop: centered modal
     return (
       <div

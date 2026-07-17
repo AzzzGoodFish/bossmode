@@ -264,6 +264,7 @@ export interface AgentMemberConfig extends MemberBase {
   contextLimit?: number;     // max messages per activation (default 50)
   credentialId?: string;     // optional Model Credential Profile override
   mcpServers?: string[];     // room-member scoped MCP server allowlist
+  createdAt?: number;        // room member since (present for room-backed members)
 }
 
 export interface HumanMemberConfig extends MemberBase {
@@ -350,6 +351,24 @@ export interface PromptAssetBudget {
   pct: number;
   /** True when the stored content exceeds the budget — pending curation, writes are rejected until within budget. */
   overLimit: boolean;
+}
+
+/** Structured view of a Mainline document, parsed from the two-section markdown. */
+export interface MainlineIndexEntry {
+  kind: "doc" | "task" | "msg" | "other";
+  /** The reference token as written (e.g. docs/..., task:<id>, msg:#<seq>); empty for non-reference lines. */
+  ref: string;
+  /** Trailing note after the ref (the em-dash separated remark), or the full line for non-reference entries. */
+  note: string;
+  stale: boolean;
+  /** Original line text (without the list marker) for faithful rendering. */
+  raw: string;
+}
+
+export interface ParsedMainline {
+  /** Text of the focus section (领域基石), trimmed. */
+  focus: string;
+  index: MainlineIndexEntry[];
 }
 
 // -- Room --

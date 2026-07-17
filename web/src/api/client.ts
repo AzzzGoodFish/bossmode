@@ -152,6 +152,7 @@ export interface MemberInfo {
   contextLimit?: number;
   credentialId?: string | null;
   mcpServers?: string[];
+  createdAt?: number;
 }
 
 export async function getMembers(): Promise<MemberInfo[]> {
@@ -650,7 +651,22 @@ export interface Principles {
   memberName?: string;
 }
 
-export type Mainline = Principles;
+export interface MainlineIndexEntry {
+  kind: "doc" | "task" | "msg" | "other";
+  ref: string;
+  note: string;
+  stale: boolean;
+  raw: string;
+}
+
+export interface ParsedMainline {
+  focus: string;
+  index: MainlineIndexEntry[];
+}
+
+export interface Mainline extends Principles {
+  parsed: ParsedMainline;
+}
 
 export interface Room {
   id: string;

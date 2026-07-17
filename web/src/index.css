@@ -234,6 +234,15 @@ textarea::-webkit-scrollbar {
   animation: folder-pulse 900ms ease-out;
 }
 
+/* Desktop: right-docked Sheet slide-in animation */
+@keyframes sheet-left {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-sheet-left {
+  animation: sheet-left 280ms ease-out;
+}
+
 /* Mobile: Sheet slide-up animation */
 @keyframes sheet-up {
   from { transform: translateY(100%); }

@@ -233,9 +233,11 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, 
     return;
   }
   const mainline = mainlineStore.readMainlineWithBudget(params.id, member.id);
+  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, mainline.content);
   sendJson(res, 200, {
     ...mainline,
-    content: mainlineStore.resolveMainlineRefs(params.id, mainline.content),
+    content: resolvedContent,
+    parsed: mainlineStore.parseMainline(resolvedContent),
     asset: "mainline",
     scope: "member",
     memberId: member.id,

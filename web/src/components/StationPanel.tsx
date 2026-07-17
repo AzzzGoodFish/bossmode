@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Square, ChevronDown } from "lucide-react";
+import { Square, ChevronDown, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles,
+  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail,
 } from "../api/client";
+import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
 import { Markdown } from "./Markdown";
 import { compactionEndDetail, compactionReasonLabel, formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
@@ -470,7 +471,7 @@ This clears the member's working session memory and starts fresh. Room messages 
           );
         })}
       </div>
-      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="2xl">
+      <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl" dock="right">
         {selectedMember && memberInfos[selectedMember] && (
           <MemberConfigPanel
             roomId={roomId}
@@ -485,6 +486,7 @@ This clears the member's working session memory and starts fresh. Room messages 
             onRetryMcp={refreshMcpSettings}
             onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
             onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
+            onClose={() => setSelectedMember(null)}
             onRename={(name) => handleRenameMember(memberInfos[selectedMember], name)}
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
             onSwitchThinking={(thinkingLevel) => handleSwitchThinking(memberInfos[selectedMember], thinkingLevel)}
@@ -529,21 +531,208 @@ function availabilityTone(status?: string): string {
   return "text-ink-4 border-line bg-surface-2";
 }
 
-function PrinciplesPreview({ title, principles, empty }: { title: string; principles: Principles | null; empty: string }) {
-  const content = principles?.content?.trim() || "";
+type PanelTab = "overview" | "assets" | "session";
+
+function BudgetMeter({ budget }: { budget?: PromptAssetBudget }) {
+  if (!budget) return null;
+  const tone = budgetTone(budget);
+  const numCls = tone === "over" ? "text-blocked" : tone === "warn" ? "text-think" : "text-ink-2";
+  const barCls = tone === "over" ? "bg-blocked" : tone === "warn" ? "bg-think" : "bg-accent";
   return (
-    <div>
-      <div className="text-[11px] text-ink-4 uppercase tracking-wide mb-1.5">{title}</div>
-      <div className="rounded-lg border border-line-soft bg-surface-1 p-3 min-h-24 max-h-[38vh] overflow-auto">
-        {principles === null ? (
-          <div className="text-xs text-ink-4">Loading…</div>
-        ) : content ? (
-          <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={content} /></div>
-        ) : (
-          <div className="text-xs text-ink-4 leading-relaxed">{empty}</div>
-        )}
-      </div>
+    <span className="ml-auto flex items-center gap-2 shrink-0" title={budget.overLimit ? "Over budget — pending curation" : "Prompt asset capacity"}>
+      <span className="text-[10.5px] text-ink-4 whitespace-nowrap">
+        <span className={`font-semibold ${numCls}`}>{budget.pct}%</span> — {budget.usage.toLocaleString("en-US")} / {budget.limit.toLocaleString("en-US")}
+      </span>
+      <span className="w-[74px] h-[5px] rounded-full bg-surface-3 overflow-hidden">
+        <span className={`block h-full rounded-full ${barCls}`} style={{ width: `${Math.max(2, Math.min(100, budget.pct))}%` }} />
+      </span>
+    </span>
+  );
+}
+
+function AssetRevLine({ left, right }: { left: string; right?: string }) {
+  return (
+    <div className="mt-2 flex items-center justify-between gap-3 text-[10.5px] text-ink-4">
+      <span>{left}</span>
+      {right ? <span className="text-right">{right}</span> : null}
     </div>
+  );
+}
+
+function AssetTag({ children }: { children: string }) {
+  return (
+    <span className="text-[9.5px] font-bold uppercase tracking-wide border border-line-soft bg-surface-2 text-ink-4 rounded-full px-2 py-0.5 shrink-0">
+      {children}
+    </span>
+  );
+}
+
+function PanelCard({ title, tag, aside, hint, children }: {
+  title: string;
+  tag?: React.ReactNode;
+  aside?: React.ReactNode;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
+      <div className="flex items-center gap-2 min-w-0">
+        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
+        {tag}
+        {aside}
+      </div>
+      {hint ? <div className="text-[11.5px] text-ink-4 mt-0.5 leading-relaxed">{hint}</div> : null}
+      {children}
+    </section>
+  );
+}
+
+function EmptyAsset({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="mt-2.5 rounded-lg border border-dashed border-line px-4 py-4 text-center">
+      <div className="text-[12.5px] font-semibold text-ink-3">{title}</div>
+      <div className="text-xs text-ink-4 mt-0.5 leading-relaxed">{hint}</div>
+    </div>
+  );
+}
+
+function Fold({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  return (
+    <details open={defaultOpen} className="mt-2.5 rounded-lg border border-line-soft bg-surface-1">
+      <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-ink-3 hover:text-ink-1 transition-colors">{title}</summary>
+      <div className="border-t border-line-soft px-3 py-2.5">{children}</div>
+    </details>
+  );
+}
+
+const INDEX_KIND_CLS: Record<string, string> = {
+  doc: "bg-accent-dim text-accent-ink",
+  task: "bg-think/10 text-think",
+  msg: "bg-surface-3 text-ink-3",
+};
+
+function MainlineIndexList({ index }: { index: MainlineIndexEntry[] }) {
+  if (index.length === 0) return null;
+  return (
+    <ul className="mt-2.5 flex flex-col gap-1.5">
+      {index.map((entry, i) => (
+        <li key={`${entry.raw}:${i}`} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${entry.stale ? "border-dashed border-line opacity-60" : "border-line-soft bg-surface-1"}`}>
+          {entry.kind !== "other" && (
+            <span className={`text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 shrink-0 ${INDEX_KIND_CLS[entry.kind]}`}>{entry.kind}</span>
+          )}
+          <span className={`font-mono text-[11.5px] text-ink-1 truncate ${entry.stale ? "line-through" : ""}`}>{entry.kind === "other" ? entry.note : entry.ref}</span>
+          {entry.stale && <span className="text-[9.5px] font-bold uppercase text-blocked shrink-0">stale</span>}
+          {entry.kind !== "other" && entry.note && (
+            <span className="ml-auto text-[11px] text-ink-4 truncate max-w-[40%] text-right shrink-0">{entry.note}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function revisionLine(asset: Principles | Mainline): string {
+  return `revision ${asset.revision} · updated ${formatRelativeTime(asset.updatedAt)}`;
+}
+
+function PrinciplesCard({ title, hint, principles, full, emptyTitle, emptyHint }: {
+  title: string;
+  hint: string;
+  principles: Principles | null;
+  full?: boolean;
+  emptyTitle: string;
+  emptyHint: string;
+}) {
+  return (
+    <PanelCard title={title} aside={<BudgetMeter budget={principles?.budget} />} hint={hint}>
+      {principles === null ? (
+        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+      ) : principles.content.trim() ? (
+        <>
+          <div className={`mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3 overflow-y-auto ${full ? "" : "max-h-56"}`}>
+            <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown"><Markdown content={principles.content} /></div>
+          </div>
+          <AssetRevLine left={revisionLine(principles)} right="member-curated" />
+        </>
+      ) : (
+        <EmptyAsset title={emptyTitle} hint={emptyHint} />
+      )}
+    </PanelCard>
+  );
+}
+
+function MainlineCard({ member, mainline, full }: { member: MemberInfo; mainline: Mainline | null; full?: boolean }) {
+  return (
+    <PanelCard
+      title="Mainline"
+      aside={<BudgetMeter budget={mainline?.budget} />}
+      hint="What this member is working on — durable focus plus live pointers into docs, tasks and messages."
+    >
+      {mainline === null ? (
+        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+      ) : mainline.content.trim() ? (
+        <>
+          {mainline.parsed.focus && (full ? (
+            <div className="mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3">
+              <div className="text-[12.5px] text-ink-2 leading-relaxed preview-markdown"><Markdown content={mainline.parsed.focus} /></div>
+            </div>
+          ) : (
+            <Fold title="Focus — long-lived working knowledge" defaultOpen>
+              <div className="text-[12.5px] text-ink-2 leading-relaxed preview-markdown max-h-40 overflow-y-auto"><Markdown content={mainline.parsed.focus} /></div>
+            </Fold>
+          ))}
+          <MainlineIndexList index={mainline.parsed.index} />
+          <AssetRevLine
+            left={revisionLine(mainline)}
+            right={mainline.parsed.index.length > 0
+              ? `${mainline.parsed.index.length} pinned references${mainline.parsed.index.some((i) => i.stale) ? " · stale shown honestly" : ""}`
+              : undefined}
+          />
+        </>
+      ) : (
+        <EmptyAsset title="No mainline yet" hint={`Once @${member.name} settles into work, it pins its focus and key references here.`} />
+      )}
+    </PanelCard>
+  );
+}
+
+function IdentityCard({ member }: { member: MemberInfo }) {
+  const agentName = member.agent || member.sourceAgent || member.name;
+  const [agent, setAgent] = useState<AgentDetail | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setAgent(null);
+    setLoadFailed(false);
+    getAgent(agentName)
+      .then((detail) => { if (!cancelled) setAgent(detail); })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [agentName]);
+  return (
+    <PanelCard
+      title="Identity"
+      tag={<AssetTag>from Agent · stable</AssetTag>}
+      hint={<>Who this member is. Defined by the <b className="text-ink-2">{displayAgentLabel(agentName)}</b> Agent template; identical across rooms that use it.</>}
+    >
+      {agent ? (
+        <div className="mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3 max-h-32 overflow-y-auto">
+          <div className="text-[12.5px] text-ink-2 leading-relaxed">
+            <b className="text-ink-1">{displayAgentLabel(agent.name)}</b>
+            {agent.description ? ` — ${agent.description}` : ""}
+          </div>
+          {agent.skills.length > 0 && (
+            <div className="mt-1.5 text-[11.5px] text-ink-4">
+              Skills: {agent.skills.map((skill) => <code key={skill} className="bg-surface-3 rounded px-1 py-0.5 text-[11px] mr-1">{skill}</code>)}
+            </div>
+          )}
+        </div>
+      ) : loadFailed ? (
+        <EmptyAsset title="Agent template unavailable" hint="The Agent definition could not be loaded; this member still runs on its saved configuration." />
+      ) : (
+        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+      )}
+    </PanelCard>
   );
 }
 
@@ -560,6 +749,7 @@ function MemberConfigPanel({
   onRetryMcp,
   onOpenWorkstation,
   onOpenMcpSettings,
+  onClose,
   onRename,
   onSwitchModel,
   onSwitchThinking,
@@ -581,6 +771,7 @@ function MemberConfigPanel({
   onRetryMcp: () => void;
   onOpenWorkstation: () => void;
   onOpenMcpSettings: () => void;
+  onClose: () => void;
   onRename: (name: string) => Promise<void>;
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
   onSwitchThinking: (thinkingLevel: string | null) => void;
@@ -594,28 +785,35 @@ function MemberConfigPanel({
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
   const statusText = statusLabel(status).toLowerCase();
   const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
+  const [tab, setTab] = useState<PanelTab>("overview");
+  const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
   const [roomPrinciples, setRoomPrinciples] = useState<Principles | null>(null);
   const [memberPrinciples, setMemberPrinciples] = useState<Principles | null>(null);
+  const [mainline, setMainline] = useState<Mainline | null>(null);
 
-  useEffect(() => { setDraftName(member.name); }, [member.id, member.name]);
+  useEffect(() => { setDraftName(member.name); setEditingName(false); setTab("overview"); }, [member.id, member.name]);
 
   useEffect(() => {
     let cancelled = false;
     setRoomPrinciples(null);
     setMemberPrinciples(null);
+    setMainline(null);
     Promise.all([
       getRoomPrinciples(roomId),
       getMemberPrinciples(roomId, member.id || member.name),
-    ]).then(([roomAsset, memberAsset]) => {
+      getMemberMainline(roomId, member.id || member.name),
+    ]).then(([roomAsset, memberAsset, mainlineAsset]) => {
       if (cancelled) return;
       setRoomPrinciples(roomAsset);
       setMemberPrinciples(memberAsset);
+      setMainline(mainlineAsset);
     }).catch(() => {
       if (cancelled) return;
       setRoomPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
       setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+      setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
     });
     return () => { cancelled = true; };
   }, [roomId, member.id, member.name]);
@@ -628,239 +826,300 @@ function MemberConfigPanel({
     setSavingName(true);
     try {
       await onRename(draftName.trim());
+      setEditingName(false);
     } finally {
       setSavingName(false);
     }
   };
 
+  const assetCount = promptAssetCount([memberPrinciples, roomPrinciples, mainline]);
+  const footerMeta = assetCount === 0
+    ? "no assets yet"
+    : [
+        memberPrinciples && memberPrinciples.content.trim() ? `principles rev ${memberPrinciples.revision}` : null,
+        mainline && mainline.content.trim() ? `mainline rev ${mainline.revision}` : null,
+      ].filter(Boolean).join(" · ") || "loading…";
+
   return (
-    <div className="p-5 space-y-4">
-      <header className="flex items-start justify-between gap-4 pb-1">
-        <div className="flex items-center gap-3 min-w-0">
-          <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="text-lg font-semibold text-ink-1 truncate">{member.name}</div>
-              <span className={`text-[10px] border rounded-full px-2 py-0.5 uppercase ${status === "working" ? "text-onair border-onair/30 bg-onair/10" : "text-ink-4 border-line bg-surface-2"}`}>{statusText}</span>
-            </div>
-            <div className="text-xs text-ink-4 font-mono mt-1">@{member.name} · {displayAgentLabel(member.agent || member.sourceAgent || member.name)}</div>
-          </div>
-        </div>
-        <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 shrink-0">View session detail</button>
-      </header>
-
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div>
-          <div className="text-sm font-semibold text-ink-1">Profile</div>
-          <div className="text-xs text-ink-4 mt-0.5">Member name is used for @ mentions in this Room.</div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Member name</div>
-            <div className="flex gap-2">
-              <input
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void saveName(); }}
-                className="min-w-0 flex-1 bg-surface-3 border border-line rounded px-2 py-1.5 font-mono text-sm text-ink-1 focus:outline-none focus:border-line-strong"
-                placeholder="member-name"
-                disabled={status === "working" || savingName}
-              />
-              <button
-                type="button"
-                onClick={() => void saveName()}
-                disabled={!canSaveName || status === "working"}
-                className="px-3 py-1.5 rounded border border-line text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50"
-              >
-                {savingName ? "Saving…" : "Save"}
-              </button>
-            </div>
-            {nameConflict ? (
-              <div className="text-[11px] text-blocked">This room already has a member named {draftNameTrimmed}. Pick another name.</div>
-            ) : (
-              <div className="text-[11px] text-ink-4">Mention as <span className="font-mono">@{member.name}</span>{status === "working" ? " · rename disabled while working" : ""}</div>
-            )}
-          </label>
-          <div className="rounded-lg border border-line-soft bg-surface-1 p-3">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">Agent</div>
-            <div className="font-mono text-sm text-ink-1 mt-1">{displayAgentLabel(member.agent || member.sourceAgent || member.name)}</div>
-
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-ink-1">Model config</div>
-            <div className="text-xs text-ink-4 mt-0.5">Choose this member’s model and thinking level for this Room. Changes apply on the next turn.</div>
-          </div>
-          <span className="text-[10px] text-ink-4 border border-line-soft rounded-full px-2 py-0.5 shrink-0">room only</span>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start">
-          <label className="block space-y-1.5 min-w-0">
-            <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
-            <ModelPicker
-              value={{ model: member.model ?? null, credentialId: member.credentialId ?? null }}
-              models={models}
-              onChange={(value) => onSwitchModel(value.model, value.credentialId)}
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-[11px] font-medium text-ink-3">Think level</span>
-            <select
-              value={member.thinkingLevel || "off"}
-              onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
-              className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
-            >
-              {(() => {
-                const boundModel = findModelOptionForBinding(member.model, member.credentialId, models);
-                const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
-                const current = member.thinkingLevel || "off";
-                const all = options.includes(current) ? options : [current, ...options];
-                return all.map((level) => <option key={level} value={level}>{level}</option>);
-              })()}
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-ink-1">Tools</div>
-            <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Use Reload after changing tools.</div>
-          </div>
-          <button onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">Manage servers</button>
-        </div>
-        {mcpDisplayState === "loading" ? (
-          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading MCP servers…</div>
-        ) : mcpDisplayState === "error" ? (
-          <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
-            <span>Couldn’t load MCP servers.</span>
-            <button type="button" onClick={onRetryMcp} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10">Retry</button>
-          </div>
-        ) : mcpDisplayState === "disabled" ? (
-          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP servers are turned off. Turn them on in Settings → Integrations.</div>
-        ) : mcpDisplayState === "empty" ? (
-          <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured. Add one in Settings → Integrations.</div>
-        ) : <div className="space-y-2">
-          {mcpServers.map((server) => {
-            const checked = (member.mcpServers || []).includes(server.name);
-            const availability = server.availability;
-            const statusValue = availability?.status || "unchecked";
-            const invalid = server.transport === "invalid" || statusValue === "invalid-config";
-            const unavailable = statusValue === "unavailable" || statusValue === "auth-required";
-            const disabled = !mcpEnabled || (!checked && (invalid || unavailable));
-            return (
-              <div key={server.name} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
-                <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink uppercase shrink-0">{server.name.slice(0, 2)}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
-                    <span className={`text-[10px] border rounded px-1.5 py-0.5 ${availabilityTone(statusValue)}`}>{memberMcpStatusLabel(statusValue)}</span>
-                  </div>
-                  <div className="text-[11px] text-ink-4 mt-1 truncate">
-                    {availability?.toolCount !== undefined ? `${availability.toolCount} tools` : "Tool count unknown"}{checked ? " · enabled for this member" : " · off for this member"}
-                  </div>
-                  {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server in Settings → Integrations.</div>}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onToggleMcp(server.name)}
-                  disabled={disabled}
-                  className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50 ${checked ? "bg-accent" : "bg-surface-3"}`}
-                  title={invalid ? "This server needs attention in Settings" : unavailable ? "This server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
-                </button>
+    <div className="flex h-full flex-col">
+      <div className="px-5 pt-5 flex flex-col gap-4 shrink-0">
+        <header className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                {editingName ? (
+                  <span className="flex items-center gap-1.5">
+                    <input
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveName(); if (e.key === "Escape") { setDraftName(member.name); setEditingName(false); } }}
+                      className="w-40 bg-surface-3 border border-line rounded px-2 py-1 font-mono text-sm text-ink-1 focus:outline-none focus:border-line-strong"
+                      placeholder="member-name"
+                      autoFocus
+                      disabled={savingName}
+                    />
+                    <button type="button" onClick={() => void saveName()} disabled={!canSaveName} className="px-2 py-1 rounded border border-line text-[11px] text-ink-2 hover:bg-surface-2 disabled:opacity-50 cursor-pointer">{savingName ? "Saving…" : "Save"}</button>
+                    <button type="button" onClick={() => { setDraftName(member.name); setEditingName(false); }} className="px-2 py-1 rounded text-[11px] text-ink-4 hover:text-ink-1 cursor-pointer">Cancel</button>
+                  </span>
+                ) : (
+                  <>
+                    <div className="text-lg font-semibold text-ink-1 truncate">{member.name}</div>
+                    <button
+                      type="button"
+                      title={status === "working" ? "Rename disabled while working" : "Rename member"}
+                      onClick={() => setEditingName(true)}
+                      disabled={status === "working"}
+                      className="text-ink-4 hover:text-ink-1 disabled:opacity-40 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </>
+                )}
+                <span className={`text-[10px] border rounded-full px-2 py-0.5 uppercase shrink-0 ${status === "working" ? "text-onair border-onair/30 bg-onair/10" : "text-ink-4 border-line bg-surface-2"}`}>{statusText}</span>
               </div>
-            );
-          })}
-        </div>}
-      </section>
+              {editingName && nameConflict ? (
+                <div className="text-[11px] text-blocked mt-1">This room already has a member named {draftNameTrimmed}. Pick another name.</div>
+              ) : null}
+              <div className="text-xs text-ink-4 mt-1 truncate">
+                {displayAgentLabel(member.agent || member.sourceAgent || member.name)} · <span className="font-mono">@{member.name}</span>
+                {member.createdAt ? ` · in this room since ${formatSinceDate(member.createdAt)}` : ""}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 cursor-pointer">View session detail</button>
+            <button onClick={onClose} title="Close" className="p-1.5 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-surface-2 transition-colors cursor-pointer"><X size={16} /></button>
+          </div>
+        </header>
 
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-ink-1">Context & Session</div>
-            <div className="text-xs text-ink-4 mt-0.5">Manage this member’s conversation context and apply recent changes.</div>
-          </div>
-          <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">View session detail</button>
+        <div className="flex gap-1 rounded-xl border border-line-soft bg-inset p-1">
+          {([["overview", "Overview"], ["assets", "Prompt assets"], ["session", "Session & tools"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`flex-1 rounded-lg px-2 py-1.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${tab === key ? "bg-surface-1 text-ink-1 border border-line-soft shadow-sm" : "text-ink-3 hover:text-ink-1 border border-transparent"}`}
+            >
+              {label}
+              {key === "assets" && assetCount !== null ? <span className="ml-1 text-[11px] font-normal text-ink-4">{assetCount}</span> : null}
+            </button>
+          ))}
         </div>
-        {hasUsage ? (
-          <div className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
-            <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
-            <div className="text-[11px] text-ink-4">Compact shortens conversation history. Reload applies recent prompt, skill, and tool changes.</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+        {tab === "overview" && (
+          <div className="space-y-4 pb-6">
+            <IdentityCard member={member} />
+            <PanelCard title="Model" tag={<AssetTag>this room</AssetTag>} hint="Model and thinking level for this member in this room. Applies on the next turn.">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
+                <label className="block space-y-1.5 min-w-0">
+                  <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
+                  <ModelPicker
+                    value={{ model: member.model ?? null, credentialId: member.credentialId ?? null }}
+                    models={models}
+                    onChange={(value) => onSwitchModel(value.model, value.credentialId)}
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-[11px] font-medium text-ink-3">Think level</span>
+                  <select
+                    value={member.thinkingLevel || "off"}
+                    onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
+                    className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
+                  >
+                    {(() => {
+                      const boundModel = findModelOptionForBinding(member.model, member.credentialId, models);
+                      const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
+                      const current = member.thinkingLevel || "off";
+                      const all = options.includes(current) ? options : [current, ...options];
+                      return all.map((level) => <option key={level} value={level}>{level}</option>);
+                    })()}
+                  </select>
+                </label>
+              </div>
+            </PanelCard>
+            <PrinciplesCard
+              title="Principles"
+              hint="How this member works — durable rules grown from your feedback. Read-only here."
+              principles={memberPrinciples}
+              emptyTitle="No principles yet"
+              emptyHint={`Tell @${member.name} in chat how you want it to work — it will curate them here itself.`}
+            />
+            <MainlineCard member={member} mainline={mainline} />
           </div>
-        ) : (
-          <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Context usage is unavailable for this member.</div>
         )}
 
-        <div className="space-y-2">
-          <div className="rounded-xl border border-line-soft bg-surface-1 px-3 py-2.5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-ink-1 leading-5">Compact</div>
-              <div className="text-[11px] text-ink-4 leading-relaxed">Compress conversation history without changing this member’s setup.</div>
-            </div>
-            <button
-              type="button"
-              onClick={onCompact}
-              className="shrink-0 min-w-20 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-sm cursor-pointer transition-colors hover:bg-surface-3 hover:text-ink-1 hover:border-line-strong active:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        {tab === "assets" && (
+          <div className="space-y-4 pb-6">
+            <PrinciplesCard
+              title="Principles"
+              hint="Member-level principles. Injected into every prompt compile; takes effect on Reload / next activation."
+              principles={memberPrinciples}
+              full
+              emptyTitle="Empty"
+              emptyHint="Nothing curated yet."
+            />
+            <PanelCard
+              title="Room principles"
+              tag={<AssetTag>shared · leader-written</AssetTag>}
+              aside={<BudgetMeter budget={roomPrinciples?.budget} />}
+              hint="Team-wide working rules for this room, shared by all members."
             >
-              Run
-            </button>
-          </div>
-          <div className="rounded-xl border border-accent/30 bg-accent-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
-              <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, skills, and tools without clearing the conversation.</div>
+              {roomPrinciples === null ? (
+                <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+              ) : roomPrinciples.content.trim() ? (
+                <Fold title={`Preview — ${roomPrinciples.budget ? `${roomPrinciples.budget.pct}% of ${roomPrinciples.budget.limit.toLocaleString("en-US")}` : "shared"}`}>
+                  <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown max-h-48 overflow-y-auto"><Markdown content={roomPrinciples.content} /></div>
+                </Fold>
+              ) : (
+                <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />
+              )}
+            </PanelCard>
+            <MainlineCard member={member} mainline={mainline} full />
+            <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
+              <span className="font-extrabold text-accent-ink shrink-0">i</span>
+              <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_asset</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
             </div>
-            <button
-              type="button"
-              onClick={onReload}
-              className="shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-            >
-              Reload
-            </button>
           </div>
-          <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-blocked leading-5">Reset session</div>
-              <div className="text-[11px] text-ink-3 leading-relaxed">Start fresh and clear working memory. Room messages stay visible. Requires confirm.</div>
-            </div>
-            <button
-              type="button"
-              onClick={onResetSession}
-              className="shrink-0 min-w-20 rounded-lg border border-blocked/40 bg-blocked/10 px-3 py-1.5 text-xs font-semibold text-blocked shadow-sm cursor-pointer transition-colors hover:bg-blocked/15 hover:border-blocked/60 active:bg-blocked/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blocked/50"
-            >
-              Reset…
-            </button>
-          </div>
-        </div>
+        )}
 
-        <details className="rounded-lg border border-line-soft bg-surface-1 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-ink-3 hover:text-ink-1">Troubleshooting</summary>
-          <div className="mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line-soft pt-2">
-            <div className="text-[11px] text-ink-4 leading-relaxed">
-              If Reload does not resolve a stuck member, restart it.
-            </div>
-            <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0">Restart member</button>
-          </div>
-        </details>
-      </section>
+        {tab === "session" && (
+          <div className="space-y-4 pb-6">
+            <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-ink-1">Context &amp; Session</div>
+                  <div className="text-xs text-ink-4 mt-0.5">Manage this member’s conversation context and apply recent changes.</div>
+                </div>
+                <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">View session detail</button>
+              </div>
+              {hasUsage ? (
+                <div className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
+                  <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
+                  <div className="text-[11px] text-ink-4">Compact shortens conversation history. Reload applies recent prompt, principles, mainline, and tool changes.</div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Context usage is unavailable for this member.</div>
+              )}
 
-      <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-        <div>
-          <div className="text-sm font-semibold text-ink-1">Principles</div>
-          <div className="text-xs text-ink-4 mt-0.5">Preview only. Ask the Room leader or this member to update these in chat.</div>
-        </div>
-        <div className="space-y-3">
-          <PrinciplesPreview title="Room Principles" principles={roomPrinciples} empty="Room principles are empty." />
-          <PrinciplesPreview title={`${member.name} Member Principles`} principles={memberPrinciples} empty="Member principles are empty." />
-        </div>
-      </section>
+              <div className="space-y-2">
+                <div className="rounded-xl border border-line-soft bg-surface-1 px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-ink-1 leading-5">Compact</div>
+                    <div className="text-[11px] text-ink-4 leading-relaxed">Compress conversation history without changing this member’s setup.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onCompact}
+                    className="shrink-0 min-w-20 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-sm cursor-pointer transition-colors hover:bg-surface-3 hover:text-ink-1 hover:border-line-strong active:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  >
+                    Run
+                  </button>
+                </div>
+                <div className="rounded-xl border border-accent/30 bg-accent-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
+                    <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, principles, mainline and tools without clearing the conversation.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onReload}
+                    className="shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                  >
+                    Reload
+                  </button>
+                </div>
+                <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-blocked leading-5">Reset session</div>
+                    <div className="text-[11px] text-ink-3 leading-relaxed">Start fresh and clear working memory. Room messages stay visible. Requires confirm.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onResetSession}
+                    className="shrink-0 min-w-20 rounded-lg border border-blocked/40 bg-blocked/10 px-3 py-1.5 text-xs font-semibold text-blocked shadow-sm cursor-pointer transition-colors hover:bg-blocked/15 hover:border-blocked/60 active:bg-blocked/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blocked/50"
+                  >
+                    Reset…
+                  </button>
+                </div>
+              </div>
+
+              <details className="rounded-lg border border-line-soft bg-surface-1 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-ink-3 hover:text-ink-1">Troubleshooting</summary>
+                <div className="mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line-soft pt-2">
+                  <div className="text-[11px] text-ink-4 leading-relaxed">
+                    If Reload does not resolve a stuck member, restart it.
+                  </div>
+                  <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Restart member</button>
+                </div>
+              </details>
+            </section>
+
+            <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-ink-1">Tools</div>
+                  <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Use Reload after changing tools.</div>
+                </div>
+                <button onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Manage servers</button>
+              </div>
+              {mcpDisplayState === "loading" ? (
+                <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading MCP servers…</div>
+              ) : mcpDisplayState === "error" ? (
+                <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
+                  <span>Couldn’t load MCP servers.</span>
+                  <button type="button" onClick={onRetryMcp} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
+                </div>
+              ) : mcpDisplayState === "disabled" ? (
+                <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP servers are turned off. Turn them on in Settings → Integrations.</div>
+              ) : mcpDisplayState === "empty" ? (
+                <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured. Add one in Settings → Integrations.</div>
+              ) : <div className="space-y-2">
+                {mcpServers.map((server) => {
+                  const checked = (member.mcpServers || []).includes(server.name);
+                  const availability = server.availability;
+                  const statusValue = availability?.status || "unchecked";
+                  const invalid = server.transport === "invalid" || statusValue === "invalid-config";
+                  const unavailable = statusValue === "unavailable" || statusValue === "auth-required";
+                  const disabled = !mcpEnabled || (!checked && (invalid || unavailable));
+                  return (
+                    <div key={server.name} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
+                      <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink uppercase shrink-0">{server.name.slice(0, 2)}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
+                          <span className={`text-[10px] border rounded px-1.5 py-0.5 ${availabilityTone(statusValue)}`}>{memberMcpStatusLabel(statusValue)}</span>
+                        </div>
+                        <div className="text-[11px] text-ink-4 mt-1 truncate">
+                          {availability?.toolCount !== undefined ? `${availability.toolCount} tools` : "Tool count unknown"}{checked ? " · enabled for this member" : " · off for this member"}
+                        </div>
+                        {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server in Settings → Integrations.</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onToggleMcp(server.name)}
+                        disabled={disabled}
+                        className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50 cursor-pointer ${checked ? "bg-accent" : "bg-surface-3"}`}
+                        title={invalid ? "This server needs attention in Settings" : unavailable ? "This server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>}
+            </section>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-line-soft px-5 py-2.5 flex items-center justify-between gap-3 text-[10.5px] text-ink-4 shrink-0">
+        <span>Member assets are maintained by the member itself via chat tools — this panel is read-only.</span>
+        <span className="font-mono shrink-0">{footerMeta}</span>
+      </div>
     </div>
   );
 }

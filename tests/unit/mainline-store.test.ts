@@ -142,4 +142,41 @@ describe("mainline-store", () => {
     expect(healed).not.toContain("[stale]");
     expect(healed).toContain("- docs/bossmode/later.md — 稍后创建");
   });
+
+  it("parseMainline returns structured focus + index with kind/ref/note/stale", async () => {
+    const { parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const { task } = await seedRefs();
+    const content = [
+      "## 焦点",
+      "",
+      "产品理念 X。",
+      "第二行。",
+      "",
+      "## 动态索引",
+      "",
+      "- docs/bossmode/prd.md — PRD 文档",
+      `- task:${task.id} — 主任务`,
+      "- [stale] docs/bossmode/gone.md — 已删",
+      "- 每周五发版 — 非引用行",
+      "- docs/bossmode/nonote.md",
+      "",
+      "## 其它",
+      "",
+      "- docs/bossmode/ignored.md — 不在索引区",
+    ].join("\n");
+    const parsed = parseMainline(content);
+    expect(parsed.focus).toBe("产品理念 X。\n第二行。");
+    expect(parsed.index).toHaveLength(5);
+    expect(parsed.index[0]).toMatchObject({ kind: "doc", ref: "docs/bossmode/prd.md", note: "PRD 文档", stale: false });
+    expect(parsed.index[1]).toMatchObject({ kind: "task", ref: `task:${task.id}`, note: "主任务", stale: false });
+    expect(parsed.index[2]).toMatchObject({ kind: "doc", ref: "docs/bossmode/gone.md", note: "已删", stale: true });
+    expect(parsed.index[3]).toMatchObject({ kind: "other", ref: "", note: "每周五发版 — 非引用行" });
+    expect(parsed.index[4]).toMatchObject({ kind: "doc", ref: "docs/bossmode/nonote.md", note: "" });
+    // parse of stale-resolved content matches resolve+parse round trip
+    const resolved = resolveMainlineRefs("room-a", content);
+    expect(parseMainline(resolved).index[0].stale).toBe(false);
+    // empty content → empty view
+    expect(parseMainline("")).toEqual({ focus: "", index: [] });
+    expect(parseMainline("## 焦点\n\n\n\n## 动态索引\n")).toEqual({ focus: "", index: [] });
+  });
 });

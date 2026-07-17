@@ -29,6 +29,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     contextLimit: config.contextLimit ?? sourceMember?.contextLimit,
     skills: config.skills ?? sourceMember?.skills,
     mcpServers: Array.isArray(config.mcpServers) ? config.mcpServers : [],
+    createdAt: roomMember.createdAt,
   };
 }
 

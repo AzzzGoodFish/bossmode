@@ -8,7 +8,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import type { Mainline, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
+import type { Mainline, MainlineIndexEntry, ParsedMainline, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
 import { getTask } from "./task-store.js";
 import { readAllMessages } from "./message-store.js";
 import { entryExists } from "../knowledge/store.js";
@@ -221,6 +221,49 @@ function resolveRef(ref: RefToken, ctx: { roomId: string; messages: ReturnType<t
     case "msg-id":
       return ctx.messages.some((m) => m.id === ref.id);
   }
+}
+
+/**
+ * Parse a (stale-resolved) Mainline document into a structured view for API/UI:
+ * focus text plus index entries with kind/ref/note/stale. Pure function — the
+ * markdown file stays the only storage form.
+ */
+export function parseMainline(content: string): ParsedMainline {
+  const lines = content.split("\n");
+  let section: "focus" | "index" | null = null;
+  const focusLines: string[] = [];
+  const index: MainlineIndexEntry[] = [];
+
+  for (const line of lines) {
+    const heading = line.trim().match(/^##(?!#)\s*(.*)$/);
+    if (heading) {
+      const name = heading[1].trim();
+      section = name === MAINLINE_FOCUS_HEADING.slice(2).trim() ? "focus" : name === MAINLINE_INDEX_HEADING.slice(2).trim() ? "index" : null;
+      continue;
+    }
+    if (section === "focus") {
+      focusLines.push(line);
+      continue;
+    }
+    if (section !== "index") continue;
+    const item = line.match(LIST_ITEM_RE);
+    if (!item) continue;
+    let body = item[2];
+    let stale = false;
+    if (body.startsWith(STALE_MARK)) {
+      stale = true;
+      body = body.slice(STALE_MARK.length).trimStart();
+    }
+    const parsed = parseIndexRef(body);
+    if (!parsed) {
+      if (body.trim()) index.push({ kind: "other", ref: "", note: body.trim(), stale, raw: body.trim() });
+      continue;
+    }
+    const note = body.slice(body.indexOf(parsed.raw) + parsed.raw.length).replace(/^\s*—\s*/, "").trim();
+    const kind = parsed.ref.kind === "docs" ? "doc" : parsed.ref.kind === "task" ? "task" : "msg";
+    index.push({ kind, ref: parsed.raw, note, stale, raw: body.trim() });
+  }
+  return { focus: focusLines.join("\n").trim(), index };
 }
 
 /**
