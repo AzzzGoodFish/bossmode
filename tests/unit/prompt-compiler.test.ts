@@ -83,6 +83,20 @@ describe("prompt compiler", () => {
     expect(prompt).toContain("[stale] task:task-none");
   });
 
+  it("legacy over-budget asset is injected with a pending-curation capacity header, never cut", async () => {
+    const { writePrinciples } = await import("../../src/workspace/principles-store.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "seed", actor: { type: "member", memberId: "rm_qa" }, reason: "seed" });
+    // Simulate a legacy 20K-era asset (pre-budget) by inflating the file on disk
+    writeFileSync(join(tmpDir, "rooms", "room-a", "prompt-supplements", "members", "rm_qa.md"), "x".repeat(5_000), "utf-8");
+    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(compiled.fullPrompt).toContain("## Member Principles");
+    expect(compiled.fullPrompt).toContain("125% — 5,000/4,000");
+    expect(compiled.fullPrompt).toContain("pending curation");
+    // Content is injected intact — grandfathered, not truncated
+    expect(compiled.fullPrompt).toContain("x".repeat(5_000));
+  });
+
   it("core carries the Communication section (chat is the only channel) and no stale footer/chat lines", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
