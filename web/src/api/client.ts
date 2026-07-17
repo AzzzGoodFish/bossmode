@@ -345,6 +345,9 @@ export interface ModelOption {
   input?: Array<"text" | "image">;
   metadataSource?: ModelMetadataSource;
   credentialStatus: "configured" | "missing" | "no_auth" | "ambient";
+  /** Per-level thinking-effort mapping when known (catalog models). Absent for
+   * custom models without this metadata — callers must not infer levels then. */
+  thinkingLevelMap?: ModelDefinitionConfig["thinkingLevelMap"];
 }
 
 export interface AvailableModelOption extends ModelOption {

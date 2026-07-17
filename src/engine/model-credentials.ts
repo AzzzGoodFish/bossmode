@@ -1342,6 +1342,7 @@ function modelOptionFromProfile(profile: ModelCredentialProfile, model: any): Av
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
     reasoning: model.reasoning,
+    thinkingLevelMap: model.thinkingLevelMap,
     input: Array.isArray(model.input) ? model.input : undefined,
     images: Array.isArray(model.input) ? model.input.includes("image") : false,
     metadataSource: "pi_catalog",

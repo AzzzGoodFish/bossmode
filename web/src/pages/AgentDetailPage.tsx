@@ -351,6 +351,9 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
                           <ThinkingPop
                             anchorRect={thinkingAnchor}
                             currentThinking={row.member.thinkingLevel || "off"}
+                            models={models}
+                            modelRef={row.member.model ?? null}
+                            credentialId={row.member.credentialId ?? null}
                             onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
                             onSelect={(thinkingLevel) => handleSwitchThinking(row.room.id, row.member, thinkingLevel)}
                           />

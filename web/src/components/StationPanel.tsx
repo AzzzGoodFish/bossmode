@@ -407,6 +407,9 @@ This clears the member's working session memory and starts fresh. Room messages 
                       <ThinkingPop
                         anchorRect={thinkingAnchor}
                         currentThinking={info.thinkingLevel || "off"}
+                        models={models}
+                        modelRef={info.model ?? null}
+                        credentialId={info.credentialId ?? null}
                         onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
                         onSelect={(thinkingLevel) => {
                           setOpenThinkingChip(null);
@@ -1117,30 +1120,30 @@ export function ModelPop({
   );
 }
 
+import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
+
 export function ThinkingPop({
   currentThinking,
   anchorRect = null,
   onSelect,
   onClose,
+  models,
+  modelRef,
+  credentialId,
 }: {
   currentThinking: string;
   anchorRect?: DOMRect | null;
   onSelect: (thinkingLevel: string | null) => void;
   onClose?: () => void;
+  models?: AvailableModelOption[];
+  modelRef?: string | null;
+  credentialId?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const width = 200;
   const gap = 6;
-  const levels: Array<{ label: string; value: string | null }> = [
-    { label: "default", value: null },
-    { label: "off", value: "off" },
-    { label: "minimal", value: "minimal" },
-    { label: "low", value: "low" },
-    { label: "medium", value: "medium" },
-    { label: "high", value: "high" },
-    { label: "xhigh", value: "xhigh" },
-    { label: "max", value: "max" },
-  ];
+  const boundModel = models ? findModelOptionForBinding(modelRef, credentialId, models) : undefined;
+  const levels = availableThinkingLevels(boundModel);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
