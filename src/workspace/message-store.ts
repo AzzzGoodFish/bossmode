@@ -10,17 +10,44 @@ function messagesPath(roomId: string): string {
   return join(roomDir(roomId), "messages.jsonl");
 }
 
+function seqPath(roomId: string): string {
+  return join(roomDir(roomId), ".seq");
+}
+
+function readNextSeq(roomId: string): number {
+  const path = seqPath(roomId);
+  if (existsSync(path)) {
+    try {
+      const n = parseInt(readFileSync(path, "utf-8").trim(), 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch {}
+  }
+  // Cold start / legacy room: derive from the highest seq already present in messages.jsonl.
+  let max = 0;
+  for (const m of readAllMessages(roomId)) {
+    if (typeof m.seq === "number" && m.seq > max) max = m.seq;
+  }
+  return max + 1;
+}
+
+function writeNextSeq(roomId: string, next: number): void {
+  writeFileSync(seqPath(roomId), String(next), "utf-8");
+}
+
 // 2a: spread to propagate all fields (type, summary_meta, etc.)
 export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">): RoomMessage {
   const bounded = limitRuntimeFailureRoomMessage(msg);
+  const seq = readNextSeq(roomId);
   const message: RoomMessage = {
     ...bounded,
     id: `msg-${randomUUID().slice(0, 8)}`,
+    seq,
     ts: Date.now(),
   };
 
   const path = messagesPath(roomId);
   appendFileSync(path, JSON.stringify(message) + "\n", "utf-8");
+  writeNextSeq(roomId, seq + 1);
   return message;
 }
 
@@ -210,6 +237,8 @@ export interface SearchOptions {
   before?: number;   // ts < before (epoch ms)
   limit?: number;    // default 50, max 500
   offset?: number;   // default 0
+  type?: string;     // message type filter (e.g. "summary", "task_event", "knowledge_event")
+  aroundSeq?: number; // return a window centered on the message with this seq
 }
 
 export interface SearchResult {
@@ -219,6 +248,18 @@ export interface SearchResult {
 
 export function searchMessages(roomId: string, opts: SearchOptions = {}): SearchResult {
   const all = mergeWithSummaries(readAllMessages(roomId));
+
+  // aroundSeq: window centered on the target seq (bypasses the other filters).
+  if (opts.aroundSeq !== undefined) {
+    const idx = all.findIndex((m) => m.seq === opts.aroundSeq);
+    if (idx === -1) return { total: 0, messages: [] };
+    const total = Math.max(1, Math.min(opts.limit ?? 30, 500));
+    const before = Math.floor((total - 1) / 2);
+    const start = Math.max(0, idx - before);
+    const end = Math.min(all.length, start + total);
+    return { total: 1, messages: all.slice(start, end) };
+  }
+
   const q = opts.query?.toLowerCase();
 
   const filtered = all.filter((m) => {
@@ -226,6 +267,7 @@ export function searchMessages(roomId: string, opts: SearchOptions = {}): Search
     if (opts.from && m.sender !== opts.from) return false;
     if (opts.after !== undefined && m.ts < opts.after) return false;
     if (opts.before !== undefined && m.ts >= opts.before) return false;
+    if (opts.type && m.type !== opts.type) return false;
     return true;
   });
 

@@ -12,7 +12,6 @@ import * as promptSupplementStore from "../workspace/prompt-supplement-store.js"
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
-import { emitAgentReply } from "./agent-manager.js";
 import { getActivationSource } from "./activation-context.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage, SummaryMeta } from "../shared/types.js";
@@ -84,8 +83,7 @@ export async function handleToolCallback(
 
   switch (tool) {
     case "chat": {
-      let target = params?.target || "room";
-      let message = params?.message || "";
+      const message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
 
       const attachments: RoomMessageAttachment[] = [];
@@ -117,16 +115,6 @@ export async function handleToolCallback(
         }
       }
 
-      let warning: string | undefined;
-
-      if (target === "user") {
-        // Private reply: emit as agent_reply event, don't write to room messages
-        // F11: no mention parsing/activation on private path
-        emitAgentReply(roomId, agentName, message);
-        logger.info("callback", "agent_reply", { roomId, agent: agentName, source: source || "unknown" });
-        return warning ? { ok: true, target: "user", warning } : { ok: true, target: "user" };
-      }
-
       const room = roomStore.getRoom(roomId);
       const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
       const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
@@ -139,7 +127,7 @@ export async function handleToolCallback(
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
-      return warning ? { ok: true, warning } : { ok: true };
+      return { ok: true };
     }
     case "mention": {
       // Legacy — redirect to chat with textual @mention.
@@ -163,12 +151,15 @@ export async function handleToolCallback(
         from: params?.from ? String(params.from) : undefined,
         after: params?.after !== undefined ? parseTimeArg(String(params.after)) : undefined,
         before: params?.before !== undefined ? parseTimeArg(String(params.before)) : undefined,
+        type: params?.type ? String(params.type) : undefined,
+        aroundSeq: params?.around_seq !== undefined ? Number(params.around_seq) : undefined,
         limit,
       };
 
       // No search filters — keep original fast path (latest N messages)
       const hasFilter = searchOpts.query || searchOpts.from ||
-        searchOpts.after !== undefined || searchOpts.before !== undefined;
+        searchOpts.after !== undefined || searchOpts.before !== undefined ||
+        searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined;
 
       const messages: RoomMessage[] = hasFilter
         ? messageStore.searchMessages(roomId, searchOpts).messages
@@ -184,7 +175,7 @@ export async function handleToolCallback(
       }
 
       // Default: inline text (may be truncated by MAX_RESULT_CHARS)
-      return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts }));
+      return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts, seq: m.seq }));
     }
     case "read_prompt_supplement": {
       const actor = roomStore.resolveRoomMemberRef(roomId, agentName);

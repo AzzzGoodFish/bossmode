@@ -434,6 +434,10 @@ import type { RoomMessageAttachment } from "./attachments.js";
 
 export interface RoomMessage {
   id: string;
+  /** Room-scoped monotonically increasing sequence number, assigned at append time.
+   * Backfilled for pre-existing messages by the message-seq-v1 migration; absent only
+   * on legacy data that has not yet been migrated (readers must tolerate undefined). */
+  seq?: number;
   sender: string; // member name snapshot or "user" (legacy) or "system"
   senderMemberId?: string;
   content: string;

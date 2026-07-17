@@ -56,18 +56,6 @@ describe("tools chat textual @mention activation", () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it("does not parse mentions for target=user private reply", async () => {
-    const result = await handleToolCallback("chat", "room1", "architect", {
-      message: "@developer this is private",
-      target: "user",
-    });
-
-    expect(mocks.emitAgentReply).toHaveBeenCalledWith("room1", "architect", "@developer this is private");
-    expect(mocks.parseMentions).not.toHaveBeenCalled();
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-    expect(result).toEqual({ ok: true, target: "user" });
-  });
-
   it("falls back to no activation when room lookup fails", async () => {
     mocks.getRoom.mockReturnValue(null);
 

@@ -46,20 +46,6 @@ describe("chat tool textual @mention activation", () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it("does not parse mentions on target=user", async () => {
-    const { handleToolCallback } = await import("../src/engine/tools.js");
-
-    const result = await handleToolCallback("chat", "room-1", "architect", {
-      message: "@developer private note",
-      target: "user",
-    });
-
-    expect(parseMentions).not.toHaveBeenCalled();
-    expect(postMessage).not.toHaveBeenCalled();
-    expect(emitAgentReply).toHaveBeenCalledWith("room-1", "architect", "@developer private note");
-    expect(result).toEqual({ ok: true, target: "user" });
-  });
-
   it("falls back to no activation when room lookup fails", async () => {
     const { handleToolCallback } = await import("../src/engine/tools.js");
 

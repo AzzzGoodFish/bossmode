@@ -1,75 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRIVATE_REPLY_FOOTER,
-  ROOM_REPLY_FOOTER,
   resolveSenderRole,
-  wrapPrivateMessage,
   wrapRoomContextMessage,
-  wrapRoomMentionMessage,
+  wrapRoomMessagesTranscript,
 } from "../../src/engine/message-envelope.js";
 import type { RoomMessage } from "../../src/shared/types.js";
 
-function makeMsg(sender: string, content: string, mentions: string[] = []): RoomMessage {
+function makeMsg(sender: string, content: string, seq?: number, ts?: number): RoomMessage {
   return {
     id: `msg-${sender}`,
     sender,
     content,
-    mentions,
-    ts: Date.now(),
+    mentions: [],
+    ts: ts ?? Date.now(),
+    ...(seq !== undefined ? { seq } : {}),
   };
 }
 
+const FIXED_TS = new Date("2026-07-17T14:32:00").getTime();
+
 describe("message envelope wrappers", () => {
-  it("wrapRoomContextMessage formats user sender with display name", () => {
-    const msg = makeMsg("user", "hello");
+  it("wrapRoomContextMessage formats user sender with display name, seq, and timestamp", () => {
+    const msg = makeMsg("user", "hello", 10235, FIXED_TS);
     expect(wrapRoomContextMessage(msg, "bossmode dev", "user")).toBe(
-      "[Message from room \"bossmode dev\", from user @fish]\n\nhello",
+      "[Message from room \"bossmode dev\". User `fish`, No.10235, 07-17 14:32]\n\nhello",
     );
   });
 
-  it("wrapRoomContextMessage formats member sender", () => {
-    const msg = makeMsg("architect", "sync done");
+  it("wrapRoomContextMessage formats member sender with seq and timestamp", () => {
+    const msg = makeMsg("architect", "sync done", 7, FIXED_TS);
     expect(wrapRoomContextMessage(msg, "bossmode dev", "member")).toBe(
-      "[Message from room \"bossmode dev\", from member @architect]\n\nsync done",
+      "[Message from room \"bossmode dev\". Member `architect`, No.7, 07-17 14:32]\n\nsync done",
     );
   });
 
-  it("wrapRoomMentionMessage formats user sender with display name", () => {
-    const msg = makeMsg("user", "@pm status", ["pm"]);
-    expect(wrapRoomMentionMessage(msg, "bossmode dev", "user", "pm")).toBe(
-      "[Message from room \"bossmode dev\", mentioned by user @fish]\n\n@pm status",
+  it("wrapRoomContextMessage omits No. when seq is absent (legacy unmigrated message)", () => {
+    const msg = makeMsg("user", "hello", undefined, FIXED_TS);
+    expect(wrapRoomContextMessage(msg, "bossmode dev", "user")).toBe(
+      "[Message from room \"bossmode dev\". User `fish`, 07-17 14:32]\n\nhello",
     );
   });
 
-  it("wrapRoomMentionMessage formats member sender", () => {
-    const msg = makeMsg("architect", "@pm status", ["pm"]);
-    expect(wrapRoomMentionMessage(msg, "bossmode dev", "member", "pm")).toBe(
-      "[Message from room \"bossmode dev\", mentioned by member @architect]\n\n@pm status",
-    );
-  });
-
-  it("wrapPrivateMessage formats private envelope", () => {
-    expect(wrapPrivateMessage("check release risk", "fish")).toBe(
-      "[Private message from user @fish]\n\ncheck release risk",
+  it("wrapRoomMessagesTranscript formats multiple messages with a shared header and per-message sub-headers", () => {
+    const messages = [
+      { msg: makeMsg("user", "message B", 10236, FIXED_TS), role: "user" as const },
+      { msg: makeMsg("qa", "message C", 10237, FIXED_TS), role: "member" as const },
+    ];
+    expect(wrapRoomMessagesTranscript(messages, "bossmode dev")).toBe(
+      "[Messages from room \"bossmode dev\"]\n\n[User `fish`, No.10236, 07-17 14:32]\n\nmessage B\n\n\n[Member `qa`, No.10237, 07-17 14:32]\n\nmessage C",
     );
   });
 
   it("escapes quotes in room and sender labels", () => {
-    const msg = makeMsg('dev\"ops', "quoted");
-    expect(wrapRoomContextMessage(msg, 'boss\"mode', "member")).toContain('room "boss\\"mode"');
-    expect(wrapRoomContextMessage(msg, 'boss\"mode', "member")).toContain('@dev\\"ops');
+    const msg = makeMsg('dev"ops', "quoted", 1, FIXED_TS);
+    expect(wrapRoomContextMessage(msg, 'boss"mode', "member")).toContain('room "boss\\"mode"');
+    expect(wrapRoomContextMessage(msg, 'boss"mode', "member")).toContain('`dev\\"ops`');
   });
 
   it("supports empty content", () => {
-    const msg = makeMsg("user", "");
-    expect(wrapRoomMentionMessage(msg, "bossmode dev", "user", "pm")).toBe(
-      "[Message from room \"bossmode dev\", mentioned by user @fish]\n\n",
+    const msg = makeMsg("user", "", 1, FIXED_TS);
+    expect(wrapRoomContextMessage(msg, "bossmode dev", "user")).toBe(
+      "[Message from room \"bossmode dev\". User `fish`, No.1, 07-17 14:32]\n\n",
     );
-  });
-
-  it("exports canonical footer constants", () => {
-    expect(ROOM_REPLY_FOOTER).toContain('target="room"');
-    expect(PRIVATE_REPLY_FOOTER).toContain('target="user"');
   });
 
   it("resolveSenderRole maps user vs others", () => {

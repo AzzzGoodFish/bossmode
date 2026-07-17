@@ -81,6 +81,8 @@ export const PARAM_DESCRIPTIONS = {
   from: "Filter by sender name (exact match, e.g. 'fish' or 'developer')",
   after: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')",
   before: "Only messages before this time: same format as 'after'",
+  type: "Filter by message type (e.g. 'summary', 'task_event', 'knowledge_event')",
+  around_seq: "Return a window of messages centered on the message with this seq (use with limit to control window size)",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
 

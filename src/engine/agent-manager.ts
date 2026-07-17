@@ -18,19 +18,16 @@ import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/w
 import { compileMemberPrompt } from "./prompt-compiler.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
-  wrapPrivateMessage,
   wrapRoomContextMessage,
-  wrapRoomMentionMessage,
+  wrapRoomMessagesTranscript,
   resolveSenderRole,
-  ROOM_REPLY_FOOTER,
-  PRIVATE_REPLY_FOOTER,
+  type SenderRole,
 } from "./message-envelope.js";
 import {
   setActivationSource,
   clearActivationSource,
   clearAllActivationSources,
 } from "./activation-context.js";
-import { USER_DISPLAY_NAME } from "../shared/user-identity.js";
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
@@ -227,7 +224,7 @@ async function maybeRunLengthContinuation(instance: AgentInstance, trigger: stri
   instance.lastMessageEndWasLength = false;
   markPendingChatReply(instance, "length_continuation");
   logger.warn("agent", "lengthContinuationPrompt", { member: instance.agentName, roomId: instance.roomId, trigger });
-  await runPrompt(instance, `${LENGTH_CONTINUATION_PROMPT}\n\n${ROOM_REPLY_FOOTER}`, "length_continuation", (err) => {
+  await runPrompt(instance, LENGTH_CONTINUATION_PROMPT, "length_continuation", (err) => {
     logger.error("agent", "length continuation prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
   });
   return true;
@@ -244,7 +241,7 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
   if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn && !isSummarizerInstance(instance)) {
     clearPendingChatReply(instance, "chat_warning");
     logger.warn("agent", "pendingChatReplyWarning", { member: instance.agentName, roomId: instance.roomId, trigger });
-    await runPrompt(instance, `${CHAT_REPLY_WARNING}\n\n${ROOM_REPLY_FOOTER}`, "chat_warning", (err) => {
+    await runPrompt(instance, CHAT_REPLY_WARNING, "chat_warning", (err) => {
       logger.error("agent", "chat warning prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
     });
   }
@@ -466,37 +463,31 @@ function renderMessageForAgent(roomId: string, msg: RoomMessage): RoomMessage {
 function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receiver: string, roomName: string): string {
   if (messages.length === 0) return "";
 
-  let triggerIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.type === "summary") continue;
-    if (Array.isArray(msg.mentions) && msg.mentions.includes(receiver)) {
-      triggerIdx = i;
-      break;
-    }
-  }
-
-  if (triggerIdx === -1) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type !== "summary") {
-        triggerIdx = i;
-        break;
-      }
-    }
-  }
-
-  const wrapped = messages.map((raw, idx) => {
+  const items = messages.map((raw) => {
     const m = renderMessageForAgent(roomId, raw);
-    if (m.type === "summary") return m.content;
-    const senderRole = resolveSenderRole(m.sender);
-    if (idx === triggerIdx) {
-      return wrapRoomMentionMessage(m, roomName, senderRole, receiver);
-    }
-    return wrapRoomContextMessage(m, roomName, senderRole);
+    return { msg: m, role: resolveSenderRole(m.sender) as SenderRole, isSummary: m.type === "summary" };
   });
 
-  if (triggerIdx >= 0) wrapped.push(ROOM_REPLY_FOOTER);
-  return wrapped.join("\n\n");
+  const nonSummary = items.filter((i) => !i.isSummary);
+
+  // Single non-summary message → single-message envelope.
+  if (nonSummary.length === 1) {
+    const parts: string[] = [];
+    for (const item of items) {
+      if (item.isSummary) parts.push(item.msg.content);
+      else parts.push(wrapRoomContextMessage(item.msg, roomName, item.role));
+    }
+    return parts.join("\n\n");
+  }
+
+  // Multiple messages → shared transcript envelope (each message keeps its own
+  // full sub-header with seq + timestamp so it can be referenced individually).
+  const transcript = wrapRoomMessagesTranscript(
+    nonSummary.map((i) => ({ msg: i.msg, role: i.role })),
+    roomName,
+  );
+  const summaryParts = items.filter((i) => i.isSummary).map((i) => i.msg.content);
+  return [transcript, ...summaryParts].join("\n\n");
 }
 
 // Resolve skills: member config > agent definition > empty
@@ -998,12 +989,6 @@ function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHist
   });
 }
 
-// -- Agent reply (private, user-only) --
-
-export function emitAgentReply(roomId: string, agentName: string, text: string): void {
-  emitAgentLocalEvent(roomId, agentName, { type: "agent_reply", text });
-}
-
 // -- Steer --
 
 export async function steerAgent(roomId: string, memberRef: string, instruction: string): Promise<void> {
@@ -1020,11 +1005,10 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
   try { appendEventToDisk(roomId, instance.memberId, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId: instance.memberId, error: String(err) }); }
 
   // Slash commands (e.g. /compact, /model) are transparently forwarded to the runtime.
-  // Only regular text gets wrapped with the private envelope + footer.
+  // Plain instructions are sent as-is — the private-message envelope and reply footer
+  // were removed along with private chat (stream 1 envelope normalization).
   const isSlashCommand = instruction.startsWith('/');
-  const userMessage = isSlashCommand
-    ? instruction
-    : `${wrapPrivateMessage(instruction, USER_DISPLAY_NAME)}\n\n${PRIVATE_REPLY_FOOTER}`;
+  const userMessage = instruction;
 
   setActivationSource(roomId, instance.memberId, isSlashCommand ? "system" : "private_instruction");
 

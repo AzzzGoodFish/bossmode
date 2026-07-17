@@ -134,20 +134,23 @@ describe("agent delivery envelope formatting", () => {
     await shutdownAll();
   });
 
-  it("adds context headers per message and one room footer on trigger message", async () => {
+  it("formats multiple messages as a shared transcript with per-message sub-headers", async () => {
     mocks.getMessagesSince.mockReturnValue([
-      { id: "m1", sender: "user", content: "first", mentions: [], ts: 1 },
-      { id: "m2", sender: "architect", content: "second", mentions: [], ts: 2 },
-      { id: "m3", sender: "user", content: "@pm status?", mentions: ["pm"], ts: 3 },
+      { id: "m1", sender: "user", content: "first", mentions: [], ts: 1, seq: 101 },
+      { id: "m2", sender: "architect", content: "second", mentions: [], ts: 2, seq: 102 },
+      { id: "m3", sender: "user", content: "@pm status?", mentions: ["pm"], ts: 3, seq: 103 },
     ]);
 
     await activateAgent("room1", "pm");
 
     const sent = mocks.prompt.mock.calls[0][0] as string;
-    expect(sent).toContain('[Message from room "bossmode dev", from user @fish]');
-    expect(sent).toContain('[Message from room "bossmode dev", from member @architect]');
-    expect(sent).toContain('[Message from room "bossmode dev", mentioned by user @fish]');
-    expect(sent.match(/\[Reply hint: Suggested call the chat tool with target="room"/g)?.length).toBe(1);
+    expect(sent).toContain('[Messages from room "bossmode dev"]');
+    expect(sent).toContain('[User `fish`, No.101');
+    expect(sent).toContain('[Member `architect`, No.102');
+    expect(sent).toContain('[User `fish`, No.103');
+    expect(sent).toContain("@pm status?");
+    expect(sent).not.toContain("Reply hint");
+    expect(sent).not.toContain("mentioned by");
   });
 
   it("keeps summary messages as pass-through", async () => {
@@ -161,15 +164,18 @@ describe("agent delivery envelope formatting", () => {
     expect(sent).toContain("[Summary | covers ...]");
   });
 
-  it("fallbacks to last non-summary as trigger when no mention exists", async () => {
+  it("formats multiple non-mention messages as a shared transcript without any trigger-specific header", async () => {
     mocks.getMessagesSince.mockReturnValue([
-      { id: "m1", sender: "user", content: "plain msg", mentions: [], ts: 1 },
-      { id: "m2", sender: "architect", content: "also plain", mentions: [], ts: 2 },
+      { id: "m1", sender: "user", content: "plain msg", mentions: [], ts: 1, seq: 201 },
+      { id: "m2", sender: "architect", content: "also plain", mentions: [], ts: 2, seq: 202 },
     ]);
 
     await activateAgent("room1", "pm");
     const sent = mocks.prompt.mock.calls[0][0] as string;
-    expect(sent).toContain('[Message from room "bossmode dev", mentioned by member @architect]');
-    expect(sent).toContain('[Reply hint: Suggested call the chat tool with target="room"');
+    expect(sent).toContain('[Messages from room "bossmode dev"]');
+    expect(sent).toContain('[User `fish`, No.201');
+    expect(sent).toContain('[Member `architect`, No.202');
+    expect(sent).not.toContain("mentioned by");
+    expect(sent).not.toContain("Reply hint");
   });
 });

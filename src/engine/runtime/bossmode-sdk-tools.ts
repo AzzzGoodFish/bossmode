@@ -36,15 +36,13 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       description: buildChatToolDescription(opts.roomMembers.filter((m) => m !== opts.agentName).join(", ")),
       parameters: Type.Object({
         message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
-        target: Type.Optional(Type.String({ description: "'room' or 'user'; default follows triggering envelope footer" })),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
         artifacts: Type.Optional(Type.Array(Type.String(), { description: "Document or file paths to show as previewable artifact chips on the room message." })),
       }),
       execute: async (_id, params) => {
         const data = await call("chat", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "Chat failed");
-        const targetText = (params as any).target === "user" ? "Private reply sent." : "Message sent to room.";
-        return textResult(targetText + (data?.warning ? " Warning: " + data.warning : ""));
+        return textResult("Message sent to room.");
       },
     }),
     defineTool({
@@ -56,6 +54,8 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
         from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
         after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
         before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+        type: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.type })),
+        around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
         limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
         output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
       }),
