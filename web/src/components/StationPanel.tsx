@@ -989,7 +989,7 @@ function MemberConfigPanel({
             <MainlineCard member={member} mainline={mainline} full />
             <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
               <span className="font-extrabold text-accent-ink shrink-0">i</span>
-              <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_asset</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
+              <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_memory</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
             </div>
           </div>
         )}
