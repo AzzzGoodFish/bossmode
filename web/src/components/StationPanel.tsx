@@ -709,6 +709,8 @@ function IdentityCard({ member }: { member: MemberInfo }) {
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [agentName]);
+  // Agents without skills metadata legitimately have none (built-in templates ship without it).
+  const skills = agent?.skills ?? [];
   return (
     <PanelCard
       title="Identity"
@@ -721,9 +723,9 @@ function IdentityCard({ member }: { member: MemberInfo }) {
             <b className="text-ink-1">{displayAgentLabel(agent.name)}</b>
             {agent.description ? ` — ${agent.description}` : ""}
           </div>
-          {agent.skills.length > 0 && (
+          {skills.length > 0 && (
             <div className="mt-1.5 text-[11.5px] text-ink-4">
-              Skills: {agent.skills.map((skill) => <code key={skill} className="bg-surface-3 rounded px-1 py-0.5 text-[11px] mr-1">{skill}</code>)}
+              Skills: {skills.map((skill) => <code key={skill} className="bg-surface-3 rounded px-1 py-0.5 text-[11px] mr-1">{skill}</code>)}
             </div>
           )}
         </div>
