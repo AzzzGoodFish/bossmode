@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { logger } from "../foundation/logger.js";
-import { readPromptSupplement } from "../workspace/prompt-supplement-store.js";
+import { formatBudgetHeader, readPrinciplesWithBudget } from "../workspace/principles-store.js";
+import { readMainlineWithBudget, resolveMainlineRefs } from "../workspace/mainline-store.js";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../shared/types.js";
 
 export interface CompiledPromptSection {
-  id: "source-agent" | "bossmode-core" | "room-supplement" | "member-supplement";
+  id: "source-agent" | "bossmode-core" | "room-principles" | "member-principles" | "member-mainline";
   title: string;
   source: string;
   content: string;
@@ -72,8 +73,9 @@ Communication goes exclusively through the \`chat\` tool — every reply goes to
 `;
 }
 
-function wrapSupplement(title: string, content: string): string {
-  return `---\n\n## ${title}\n\n${content.trim()}\n`;
+/** Wrap a prompt asset with its section title and budget header (capacity is always visible). */
+function wrapAsset(title: string, budgetHeader: string, content: string): string {
+  return `---\n\n## ${title}\n\n${budgetHeader}\n\n${content.trim()}\n`;
 }
 
 export function compileMemberPrompt(args: {
@@ -85,19 +87,23 @@ export function compileMemberPrompt(args: {
 }): CompiledMemberPrompt {
   const agentPrompt = args.agentDef.systemPrompt.trim() ? args.agentDef.systemPrompt : "";
   const corePrompt = buildCorePrompt(args);
-  const roomSupplement = readPromptSupplement(args.room.id, "room");
-  const memberSupplement = readPromptSupplement(args.room.id, "member", args.member.id);
+  const roomPrinciples = readPrinciplesWithBudget(args.room.id, "room");
+  const memberPrinciples = readPrinciplesWithBudget(args.room.id, "member", args.member.id);
+  const memberMainline = readMainlineWithBudget(args.room.id, args.member.id);
+  const mainlineContent = memberMainline.content.trim() ? resolveMainlineRefs(args.room.id, memberMainline.content) : memberMainline.content;
 
   const sections = [
     section({ id: "source-agent", title: "Source Agent", source: `agent:${args.agentDef.name}`, content: agentPrompt, included: agentPrompt.trim().length > 0 }),
     section({ id: "bossmode-core", title: "Bossmode Core", source: "bossmode", content: corePrompt, included: true }),
-    section({ id: "room-supplement", title: "Room Supplemental Prompt", source: `room:${args.room.id}`, content: roomSupplement.content, included: roomSupplement.content.trim().length > 0 }),
-    section({ id: "member-supplement", title: "Member Supplemental Prompt", source: `room-member:${args.member.id}`, content: memberSupplement.content, included: memberSupplement.content.trim().length > 0 }),
+    section({ id: "room-principles", title: "Room Principles", source: `room:${args.room.id}`, content: roomPrinciples.content, included: roomPrinciples.content.trim().length > 0 }),
+    section({ id: "member-principles", title: "Member Principles", source: `room-member:${args.member.id}`, content: memberPrinciples.content, included: memberPrinciples.content.trim().length > 0 }),
+    section({ id: "member-mainline", title: "Member Mainline", source: `room-member:${args.member.id}`, content: mainlineContent, included: mainlineContent.trim().length > 0 }),
   ];
 
   const appendSystemPrompt = [corePrompt];
-  if (roomSupplement.content.trim()) appendSystemPrompt.push(wrapSupplement("Room Supplemental Prompt", roomSupplement.content));
-  if (memberSupplement.content.trim()) appendSystemPrompt.push(wrapSupplement("Member Supplemental Prompt", memberSupplement.content));
+  if (roomPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Room Principles", formatBudgetHeader(roomPrinciples.budget), roomPrinciples.content));
+  if (memberPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Member Principles", formatBudgetHeader(memberPrinciples.budget), memberPrinciples.content));
+  if (mainlineContent.trim()) appendSystemPrompt.push(wrapAsset("Member Mainline", formatBudgetHeader(memberMainline.budget), mainlineContent));
 
   const fullPrompt = [agentPrompt, ...appendSystemPrompt].filter((part) => part.trim().length > 0).join("\n\n");
   const manifestHash = hashContent(JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))));

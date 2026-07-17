@@ -8,6 +8,7 @@ import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
 import { runMemberCredentialBindingMigration } from "../workspace/member-credential-binding-migration.js";
 import { runMessageSeqMigration } from "../workspace/message-seq-migration.js";
+import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -71,6 +72,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runMessageSeqMigration();
   } catch (err) {
     logger.error("server", "message seq migration failed", { error: String(err) });
+  }
+
+  try {
+    runPromptAssetsRenameMigration();
+  } catch (err) {
+    logger.error("server", "prompt assets rename migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so

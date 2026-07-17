@@ -17,7 +17,8 @@ import { readConfig, writeConfig } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
-import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
+import * as principlesStore from "../workspace/principles-store.js";
+import * as mainlineStore from "../workspace/mainline-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
@@ -191,19 +192,21 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   sendJson(res, 200, updated);
 });
 
-// ── Prompt Supplements (preview-only public API) ──
+// ── Prompt Assets: Principles (准则) & Mainline (主线) — read-only public API ──
+// Writes happen exclusively through member tools (read/edit/write_asset) so governance
+// (reason, budget, history) is enforced in one place.
 
-addRoute("GET", "/api/rooms/:id/prompt-supplement", async (_req, res, params) => {
+addRoute("GET", "/api/rooms/:id/principles", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
   }
-  const supplement = promptSupplementStore.readPromptSupplement(params.id, "room");
-  sendJson(res, 200, { ...supplement, suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE });
+  const principles = principlesStore.readPrinciplesWithBudget(params.id, "room");
+  sendJson(res, 200, { ...principles, asset: "principles", scope: "room", budgetHeader: principlesStore.formatBudgetHeader(principles.budget), suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
 });
 
-addRoute("GET", "/api/rooms/:id/members/:memberRef/prompt-supplement", async (_req, res, params) => {
+addRoute("GET", "/api/rooms/:id/members/:memberRef/principles", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
@@ -214,8 +217,32 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/prompt-supplement", async (_r
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const supplement = promptSupplementStore.readPromptSupplement(params.id, "member", member.id);
-  sendJson(res, 200, { ...supplement, memberId: member.id, memberName: member.name, suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE });
+  const principles = principlesStore.readPrinciplesWithBudget(params.id, "member", member.id);
+  sendJson(res, 200, { ...principles, asset: "principles", scope: "member", memberId: member.id, memberName: member.name, budgetHeader: principlesStore.formatBudgetHeader(principles.budget), suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
+});
+
+addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const member = roomStore.resolveRoomMemberRef(params.id, params.memberRef);
+  if (!member) {
+    sendJson(res, 404, { error: "Member is not in this room" });
+    return;
+  }
+  const mainline = mainlineStore.readMainlineWithBudget(params.id, member.id);
+  sendJson(res, 200, {
+    ...mainline,
+    content: mainlineStore.resolveMainlineRefs(params.id, mainline.content),
+    asset: "mainline",
+    scope: "member",
+    memberId: member.id,
+    memberName: member.name,
+    budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
+    suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
+  });
 });
 
 // ── Messages ──

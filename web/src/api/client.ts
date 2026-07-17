@@ -627,7 +627,14 @@ export interface RoomMemberRecord {
   updatedAt: number;
 }
 
-export interface PromptSupplement {
+export interface PromptAssetBudget {
+  limit: number;
+  usage: number;
+  pct: number;
+  overLimit: boolean;
+}
+
+export interface Principles {
   content: string;
   revision: number;
   contentHash: string;
@@ -636,10 +643,14 @@ export interface PromptSupplement {
   updatedBy?: "user" | "member";
   updatedByMemberId?: string;
   updatedByName?: string;
+  budget?: PromptAssetBudget;
+  budgetHeader?: string;
   suggestedTemplate?: string;
   memberId?: string;
   memberName?: string;
 }
+
+export type Mainline = Principles;
 
 export interface Room {
   id: string;
@@ -707,12 +718,16 @@ export async function renameRoom(id: string, name: string): Promise<Room> {
   });
 }
 
-export async function getRoomPromptSupplement(roomId: string): Promise<PromptSupplement> {
-  return apiFetch(`/api/rooms/${roomId}/prompt-supplement`);
+export async function getRoomPrinciples(roomId: string): Promise<Principles> {
+  return apiFetch(`/api/rooms/${roomId}/principles`);
 }
 
-export async function getMemberPromptSupplement(roomId: string, memberRef: string): Promise<PromptSupplement> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/prompt-supplement`);
+export async function getMemberPrinciples(roomId: string, memberRef: string): Promise<Principles> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/principles`);
+}
+
+export async function getMemberMainline(roomId: string, memberRef: string): Promise<Mainline> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/mainline`);
 }
 
 // -- Messages --

@@ -323,9 +323,9 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-// -- Prompt Supplements --
+// -- Prompt assets: Principles (准则) & Mainline (主线) --
 
-export interface PromptSupplementMeta {
+export interface PrinciplesMeta {
   revision: number;
   contentHash: string;
   contentLength: number;
@@ -335,8 +335,21 @@ export interface PromptSupplementMeta {
   updatedByName?: string;
 }
 
-export interface PromptSupplement extends PromptSupplementMeta {
+export interface Principles extends PrinciplesMeta {
   content: string;
+}
+
+export interface Mainline extends PrinciplesMeta {
+  content: string;
+}
+
+/** Capacity view of a prompt asset, computed dynamically from content length. */
+export interface PromptAssetBudget {
+  limit: number;
+  usage: number;
+  pct: number;
+  /** True when the stored content exceeds the budget — pending curation, writes are rejected until within budget. */
+  overLimit: boolean;
 }
 
 // -- Room --

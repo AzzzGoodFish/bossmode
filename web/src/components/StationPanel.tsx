@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPromptSupplement, getMemberPromptSupplement,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type PromptSupplement,
+  getRoomPrinciples, getMemberPrinciples,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles,
 } from "../api/client";
 import { Sheet } from "./Sheet";
 import { Markdown } from "./Markdown";
@@ -529,13 +529,13 @@ function availabilityTone(status?: string): string {
   return "text-ink-4 border-line bg-surface-2";
 }
 
-function PromptSupplementPreview({ title, supplement, empty }: { title: string; supplement: PromptSupplement | null; empty: string }) {
-  const content = supplement?.content?.trim() || "";
+function PrinciplesPreview({ title, principles, empty }: { title: string; principles: Principles | null; empty: string }) {
+  const content = principles?.content?.trim() || "";
   return (
     <div>
       <div className="text-[11px] text-ink-4 uppercase tracking-wide mb-1.5">{title}</div>
       <div className="rounded-lg border border-line-soft bg-surface-1 p-3 min-h-24 max-h-[38vh] overflow-auto">
-        {supplement === null ? (
+        {principles === null ? (
           <div className="text-xs text-ink-4">Loading…</div>
         ) : content ? (
           <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={content} /></div>
@@ -596,26 +596,26 @@ function MemberConfigPanel({
   const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
-  const [roomSupplement, setRoomSupplement] = useState<PromptSupplement | null>(null);
-  const [memberSupplement, setMemberSupplement] = useState<PromptSupplement | null>(null);
+  const [roomPrinciples, setRoomPrinciples] = useState<Principles | null>(null);
+  const [memberPrinciples, setMemberPrinciples] = useState<Principles | null>(null);
 
   useEffect(() => { setDraftName(member.name); }, [member.id, member.name]);
 
   useEffect(() => {
     let cancelled = false;
-    setRoomSupplement(null);
-    setMemberSupplement(null);
+    setRoomPrinciples(null);
+    setMemberPrinciples(null);
     Promise.all([
-      getRoomPromptSupplement(roomId),
-      getMemberPromptSupplement(roomId, member.id || member.name),
-    ]).then(([roomPrompt, memberPrompt]) => {
+      getRoomPrinciples(roomId),
+      getMemberPrinciples(roomId, member.id || member.name),
+    ]).then(([roomAsset, memberAsset]) => {
       if (cancelled) return;
-      setRoomSupplement(roomPrompt);
-      setMemberSupplement(memberPrompt);
+      setRoomPrinciples(roomAsset);
+      setMemberPrinciples(memberAsset);
     }).catch(() => {
       if (cancelled) return;
-      setRoomSupplement({ content: "", revision: 0, contentHash: "", contentLength: 0 });
-      setMemberSupplement({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+      setRoomPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+      setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
     });
     return () => { cancelled = true; };
   }, [roomId, member.id, member.name]);
@@ -853,12 +853,12 @@ function MemberConfigPanel({
 
       <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
         <div>
-          <div className="text-sm font-semibold text-ink-1">Prompt supplements</div>
+          <div className="text-sm font-semibold text-ink-1">Principles</div>
           <div className="text-xs text-ink-4 mt-0.5">Preview only. Ask the Room leader or this member to update these in chat.</div>
         </div>
         <div className="space-y-3">
-          <PromptSupplementPreview title="Current Room Supplemental Prompt" supplement={roomSupplement} empty="Room supplement is empty." />
-          <PromptSupplementPreview title={`${member.name} Member Supplemental Prompt`} supplement={memberSupplement} empty="Member supplement is empty." />
+          <PrinciplesPreview title="Room Principles" principles={roomPrinciples} empty="Room principles are empty." />
+          <PrinciplesPreview title={`${member.name} Member Principles`} principles={memberPrinciples} empty="Member principles are empty." />
         </div>
       </section>
     </div>

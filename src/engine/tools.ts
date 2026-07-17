@@ -8,7 +8,8 @@ import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as taskStore from "../workspace/task-store.js";
-import * as promptSupplementStore from "../workspace/prompt-supplement-store.js";
+import * as principlesStore from "../workspace/principles-store.js";
+import * as mainlineStore from "../workspace/mainline-store.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
@@ -177,56 +178,112 @@ export async function handleToolCallback(
       // Default: inline text (may be truncated by MAX_RESULT_CHARS)
       return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts, seq: m.seq }));
     }
-    case "read_prompt_supplement": {
+    case "read_asset": {
       const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const asset = String(params?.asset || "");
+      if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
       const scope = String(params?.scope || "member");
+      if (asset === "mainline") {
+        if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
+        const mainline = mainlineStore.readMainlineWithBudget(roomId, actor.id);
+        return {
+          ok: true,
+          asset,
+          scope: "member",
+          content: mainlineStore.resolveMainlineRefs(roomId, mainline.content),
+          revision: mainline.revision,
+          contentHash: mainline.contentHash,
+          contentLength: mainline.contentLength,
+          updatedAt: mainline.updatedAt,
+          updatedBy: mainline.updatedBy,
+          updatedByMemberId: mainline.updatedByMemberId,
+          updatedByName: mainline.updatedByName,
+          budget: mainline.budget,
+          budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
+          suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
+        };
+      }
       if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
-      const supplement = promptSupplementStore.readPromptSupplement(roomId, scope, scope === "member" ? actor.id : undefined);
+      const principles = principlesStore.readPrinciplesWithBudget(roomId, scope, scope === "member" ? actor.id : undefined);
       return {
         ok: true,
+        asset,
         scope,
-        content: supplement.content,
-        revision: supplement.revision,
-        contentHash: supplement.contentHash,
-        contentLength: supplement.contentLength,
-        updatedAt: supplement.updatedAt,
-        updatedBy: supplement.updatedBy,
-        updatedByMemberId: supplement.updatedByMemberId,
-        updatedByName: supplement.updatedByName,
-        suggestedTemplate: supplement.content.trim() ? undefined : promptSupplementStore.PROMPT_SUPPLEMENT_TEMPLATE,
+        content: principles.content,
+        revision: principles.revision,
+        contentHash: principles.contentHash,
+        contentLength: principles.contentLength,
+        updatedAt: principles.updatedAt,
+        updatedBy: principles.updatedBy,
+        updatedByMemberId: principles.updatedByMemberId,
+        updatedByName: principles.updatedByName,
+        budget: principles.budget,
+        budgetHeader: principlesStore.formatBudgetHeader(principles.budget),
+        suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE,
       };
     }
-    case "write_prompt_supplement":
-    case "edit_prompt_supplement": {
+    case "write_asset":
+    case "edit_asset": {
       const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const room = roomStore.getRoom(roomId);
       if (!room) return { ok: false, error: "Room not found" };
+      const asset = String(params?.asset || "");
+      if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
       const scope = String(params?.scope || "member");
+      const reason = String(params?.reason ?? "").trim();
+      if (!reason) return { ok: false, error: "reason is required — record the source of this change (user feedback, a decision, or curation)" };
+      if (asset === "mainline") {
+        if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
+        try {
+          const common = { roomId, memberId: actor.id, actor: { type: "member" as const, memberId: actor.id, name: actor.name }, reason };
+          const mainline = tool === "write_asset"
+            ? mainlineStore.writeMainline({ ...common, content: String(params?.content ?? "") })
+            : mainlineStore.editMainline({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
+          const budget = mainlineStore.readMainlineWithBudget(roomId, actor.id).budget;
+          return {
+            ok: true,
+            asset,
+            scope: "member",
+            revision: mainline.revision,
+            contentHash: mainline.contentHash,
+            contentLength: mainline.contentLength,
+            budget,
+            budgetHeader: principlesStore.formatBudgetHeader(budget),
+            message: "Saved. Applies on next member activation or Reload.",
+          };
+        } catch (err: any) {
+          return { ok: false, error: err.message || String(err) };
+        }
+      }
       if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
       if (scope === "room") {
-        if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room supplement writes are disabled" };
-        if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room supplement" };
+        if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room principles writes are disabled" };
+        if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room principles" };
       }
       try {
         const common = {
           roomId,
-          scope: scope as promptSupplementStore.PromptSupplementScope,
+          scope: scope as principlesStore.PrinciplesScope,
           memberId: scope === "member" ? actor.id : undefined,
           actor: { type: "member" as const, memberId: actor.id, name: actor.name },
-          note: params?.note ? String(params.note) : undefined,
+          reason,
         };
-        const supplement = tool === "write_prompt_supplement"
-          ? promptSupplementStore.writePromptSupplement({ ...common, content: String(params?.content ?? "") })
-          : promptSupplementStore.editPromptSupplement({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
+        const principles = tool === "write_asset"
+          ? principlesStore.writePrinciples({ ...common, content: String(params?.content ?? "") })
+          : principlesStore.editPrinciples({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
+        const budget = principlesStore.readPrinciplesWithBudget(roomId, scope as principlesStore.PrinciplesScope, scope === "member" ? actor.id : undefined).budget;
         return {
           ok: true,
+          asset,
           scope,
-          revision: supplement.revision,
-          contentHash: supplement.contentHash,
-          contentLength: supplement.contentLength,
-          message: "Saved. Applies on next member restart/reset/recreate.",
+          revision: principles.revision,
+          contentHash: principles.contentHash,
+          contentLength: principles.contentLength,
+          budget,
+          budgetHeader: principlesStore.formatBudgetHeader(budget),
+          message: "Saved. Applies on next member activation or Reload.",
         };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };

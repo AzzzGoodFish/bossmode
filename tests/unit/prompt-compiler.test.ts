@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
@@ -12,6 +12,7 @@ vi.mock("../../src/shared/config.js", () => ({
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "bossmode-prompt-compiler-"));
+  mkdirSync(join(tmpDir, "rooms", "room-a"), { recursive: true });
 });
 
 afterEach(() => {
@@ -40,11 +41,11 @@ const agentDef: AgentDefinition = { name: "qa", description: "QA", systemPrompt:
 const member: AgentMemberConfig = { id: "rm_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
 
 describe("prompt compiler", () => {
-  it("includes core and non-empty supplements without docs tree or ruleDocs content", async () => {
-    const { writePromptSupplement } = await import("../../src/workspace/prompt-supplement-store.js");
+  it("includes core and non-empty principles without docs tree or ruleDocs content", async () => {
+    const { writePrinciples } = await import("../../src/workspace/principles-store.js");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    writePromptSupplement({ roomId: "room-a", scope: "room", content: "Room rule", actor: { type: "member", memberId: "rm_pm" } });
-    writePromptSupplement({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "QA note", actor: { type: "member", memberId: "rm_qa" } });
+    writePrinciples({ roomId: "room-a", scope: "room", content: "Room rule", actor: { type: "member", memberId: "rm_pm" }, reason: "seed" });
+    writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "QA note", actor: { type: "member", memberId: "rm_qa" }, reason: "seed" });
 
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.agentPrompt).toBe("QA ROLE");
@@ -55,5 +56,48 @@ describe("prompt compiler", () => {
     expect(compiled.fullPrompt).not.toContain("Use tasks for tracked work");
     expect(compiled.fullPrompt).not.toContain("Project Documents\n```\ndocs/");
     expect(compiled.fullPrompt).not.toContain("old.md");
+  });
+
+  it("injects the three asset sections with new titles and capacity headers", async () => {
+    const { writePrinciples } = await import("../../src/workspace/principles-store.js");
+    const { writeMainline } = await import("../../src/workspace/mainline-store.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    writePrinciples({ roomId: "room-a", scope: "room", content: "Room rules here", actor: { type: "member", memberId: "rm_pm" }, reason: "seed" });
+    writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "QA working rules", actor: { type: "member", memberId: "rm_qa" }, reason: "seed" });
+    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## 焦点\n\n质量理念。\n\n## 动态索引\n\n- task:task-none — 不存在\n", actor: { type: "member", memberId: "rm_qa" }, reason: "kickoff" });
+
+    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const prompt = compiled.fullPrompt;
+    expect(prompt).toContain("## Room Principles");
+    expect(prompt).toContain("## Member Principles");
+    expect(prompt).toContain("## Member Mainline");
+    expect(prompt).not.toContain("Supplemental Prompt");
+    // Capacity header format per plan: pct% — usage/limit
+    expect(prompt).toMatch(/## Room Principles\n\n\d+% — \d+\/8,000\n/);
+    expect(prompt).toMatch(/## Member Principles\n\n\d+% — \d+\/4,000\n/);
+    expect(prompt).toMatch(/## Member Mainline\n\n\d+% — \d+\/4,000\n/);
+    // Section ids renamed + mainline added
+    const ids = compiled.sections.map((s) => s.id);
+    expect(ids).toEqual(["source-agent", "bossmode-core", "room-principles", "member-principles", "member-mainline"]);
+    // Mainline index resolved at injection: dead task marked stale, never deleted
+    expect(prompt).toContain("[stale] task:task-none");
+  });
+
+  it("mainline section is omitted when empty; stale refs self-heal between compiles", async () => {
+    const { writeMainline } = await import("../../src/workspace/mainline-store.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const empty = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(empty.fullPrompt).not.toContain("## Member Mainline");
+    expect(empty.sections.find((s) => s.id === "member-mainline")?.included).toBe(false);
+
+    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## 焦点\n\nF\n\n## 动态索引\n\n- docs/bossmode/later.md — 稍后建\n", actor: { type: "member", memberId: "rm_qa" }, reason: "pin" });
+    const stale = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(stale.fullPrompt).toContain("[stale] docs/bossmode/later.md");
+    // The doc appears → next compile resolves it (Reload picks this up)
+    mkdirSync(join(tmpDir, "knowledge", "docs", "bossmode"), { recursive: true });
+    writeFileSync(join(tmpDir, "knowledge", "docs", "bossmode", "later.md"), "x", "utf-8");
+    const healed = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(healed.fullPrompt).toContain("- docs/bossmode/later.md — 稍后建");
+    expect(healed.fullPrompt).not.toContain("[stale]");
   });
 });

@@ -67,47 +67,52 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       },
     }),
     defineTool({
-      name: "read_prompt_supplement",
-      label: "Read Prompt Supplement",
-      description: "Read the current room or member supplemental prompt. All room members may read the room supplement; members may read their own member supplement.",
+      name: "read_asset",
+      label: "Read Asset",
+      description: "Read a prompt asset with its budget header (usage/limit). asset 'principles' = durable working rules (HOW you work: behavior and communication norms); asset 'mainline' = your working focus (WHAT you work on: a '## 焦点' section of domain cornerstones plus a '## 动态索引' list of pinned refs — docs/..., task:<id>, msg:#<seq>; refs whose target no longer exists are marked [stale] on read, never auto-deleted). scope 'room'|'member' applies to principles only (default 'member'): all members may read the shared room principles; mainline is member-level only. An over-budget asset is pending curation.",
       parameters: Type.Object({
-        scope: Type.String({ description: "'room' for the shared room supplement, or 'member' for your own member supplement" }),
+        asset: Type.String({ description: "'principles' or 'mainline'" }),
+        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
       }),
       execute: async (_id, params) => {
-        const data = await call("read_prompt_supplement", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Read prompt supplement failed");
-        return textResult(truncate(JSON.stringify(data, null, 2)));
+        const data = await call("read_asset", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Read asset failed");
+        const header = `${data.asset} (${data.scope}) · revision ${data.revision} · ${data.budgetHeader}`;
+        const body = data.content?.trim() ? data.content : `(empty — suggested template:\n${data.suggestedTemplate || "n/a"})`;
+        return textResult(truncate(`${header}\n\n${body}`));
       },
     }),
     defineTool({
-      name: "edit_prompt_supplement",
-      label: "Edit Prompt Supplement",
-      description: "Edit your own member supplement, or the room supplement if you are the configured room leader. oldText must match exactly once.",
+      name: "edit_asset",
+      label: "Edit Asset",
+      description: "Targeted edit of a prompt asset (your own member asset, or the room principles if you are the room leader). oldText must match exactly once. reason is required — record the source of the change (user feedback, a decision, curation). Write discipline: durable only (will it still hold next week?); declarative statements, not imperatives; no task progress/results/SHAs (those belong to chat/tasks/docs); process and how-to belong in skills, not principles. Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars — if the result exceeds the budget the edit is rejected with the current full text; curate (merge/delete) in the same turn and retry, never truncate silently. Mainline edits add/update/remove index lines in '## 动态索引' or adjust the '## 焦点' text. Changes apply on next member activation or Reload.",
       parameters: Type.Object({
-        scope: Type.String({ description: "'room' or 'member'" }),
+        asset: Type.String({ description: "'principles' or 'mainline'" }),
         oldText: Type.String({ description: "Exact text to replace. Must occur exactly once." }),
         newText: Type.String({ description: "Replacement text" }),
-        note: Type.Optional(Type.String({ description: "Optional short reason for audit history" })),
+        reason: Type.String({ description: "Required: source of this change (user feedback, a decision, curation)" }),
+        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
       }),
       execute: async (_id, params) => {
-        const data = await call("edit_prompt_supplement", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Edit prompt supplement failed");
-        return textResult(`Saved ${data.scope} prompt supplement revision ${data.revision}. Applies on next member restart/reset/recreate.`);
+        const data = await call("edit_asset", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Edit asset failed");
+        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). Applies on next member activation or Reload.`);
       },
     }),
     defineTool({
-      name: "write_prompt_supplement",
-      label: "Write Prompt Supplement",
-      description: "Overwrite your own member supplement, or the room supplement if you are the configured room leader.",
+      name: "write_asset",
+      label: "Write Asset",
+      description: "Overwrite a prompt asset wholesale (your own member asset, or the room principles if you are the room leader). reason is required — record the source of the change (user feedback, a decision, curation). Prefer edit_asset for small changes; use write_asset for restructuring or curation. Write discipline: durable only; declarative statements; no task progress/results/SHAs (chat/tasks/docs hold those); process and how-to belong in skills. Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars — over-budget writes are rejected with the current full text; curate (merge/delete) in the same turn and retry, never truncate silently. Mainline keeps two sections: '## 焦点' (domain cornerstones) and '## 动态索引' (one '- <ref> — <note>' per line; refs: docs/..., task:<id>, msg:#<seq>). Changes apply on next member activation or Reload.",
       parameters: Type.Object({
-        scope: Type.String({ description: "'room' or 'member'" }),
+        asset: Type.String({ description: "'principles' or 'mainline'" }),
         content: Type.String({ description: "Full markdown content to save" }),
-        note: Type.Optional(Type.String({ description: "Optional short reason for audit history" })),
+        reason: Type.String({ description: "Required: source of this change (user feedback, a decision, curation)" }),
+        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
       }),
       execute: async (_id, params) => {
-        const data = await call("write_prompt_supplement", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Write prompt supplement failed");
-        return textResult(`Saved ${data.scope} prompt supplement revision ${data.revision}. Applies on next member restart/reset/recreate.`);
+        const data = await call("write_asset", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Write asset failed");
+        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). Applies on next member activation or Reload.`);
       },
     }),
     defineTool({

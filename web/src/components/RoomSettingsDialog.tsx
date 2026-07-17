@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Crown, Trash2 } from "lucide-react";
 import { Sheet } from "./Sheet";
-import type { MemberInfo, PromptSupplement, Room } from "../api/client";
-import { getRoomMembers, getRoomPromptSupplement, updateRoomSettings, deleteRoom } from "../api/client";
+import type { MemberInfo, Principles, Room } from "../api/client";
+import { getRoomMembers, getRoomPrinciples, updateRoomSettings, deleteRoom } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 
@@ -19,19 +19,19 @@ function normalizeDocsPathInput(value: string): string {
   return trimmed ? `${trimmed}/` : "";
 }
 
-type SupplementPreviewState =
+type PrinciplesPreviewState =
   | { status: "loading" }
-  | { status: "ready"; supplement: PromptSupplement }
+  | { status: "ready"; principles: Principles }
   | { status: "error" };
 
-export function promptPreviewDisplayState(state: SupplementPreviewState): "loading" | "loaded" | "empty" | "error" {
+export function promptPreviewDisplayState(state: PrinciplesPreviewState): "loading" | "loaded" | "empty" | "error" {
   if (state.status !== "ready") return state.status;
-  return state.supplement.content.trim() ? "loaded" : "empty";
+  return state.principles.content.trim() ? "loaded" : "empty";
 }
 
-function PromptPreview({ state, onRetry }: { state: SupplementPreviewState; onRetry: () => void }) {
+function PromptPreview({ state, onRetry }: { state: PrinciplesPreviewState; onRetry: () => void }) {
   const displayState = promptPreviewDisplayState(state);
-  const content = state.status === "ready" ? state.supplement.content.trim() : "";
+  const content = state.status === "ready" ? state.principles.content.trim() : "";
   return (
     <div className="rounded-lg border border-line bg-inset p-3 min-h-36 max-h-[46vh] overflow-auto">
       {displayState === "loading" ? (
@@ -57,21 +57,21 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   const [leaderId, setLeaderId] = useState<string>(room.promptLeaderMemberId || "");
   const [docsPath, setDocsPath] = useState(room.docsPath || "");
   const [members, setMembers] = useState<MemberInfo[]>([]);
-  const [supplementState, setSupplementState] = useState<SupplementPreviewState>({ status: "loading" });
-  const supplementRequestRef = useRef(0);
+  const [principlesState, setPrinciplesState] = useState<PrinciplesPreviewState>({ status: "loading" });
+  const principlesRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadSupplement = useCallback(async () => {
-    const request = ++supplementRequestRef.current;
-    setSupplementState({ status: "loading" });
+  const loadPrinciples = useCallback(async () => {
+    const request = ++principlesRequestRef.current;
+    setPrinciplesState({ status: "loading" });
     try {
-      const supplement = await getRoomPromptSupplement(room.id);
-      if (request === supplementRequestRef.current) setSupplementState({ status: "ready", supplement });
+      const principles = await getRoomPrinciples(room.id);
+      if (request === principlesRequestRef.current) setPrinciplesState({ status: "ready", principles });
     } catch (err) {
       console.error("Failed to load Room prompt", err);
-      if (request === supplementRequestRef.current) setSupplementState({ status: "error" });
+      if (request === principlesRequestRef.current) setPrinciplesState({ status: "error" });
     }
   }, [room.id]);
 
@@ -84,8 +84,8 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setMembers([]);
     setError(null);
     getRoomMembers(room.id).then(setMembers).catch((err) => { console.error("Failed to load Room members", err); toast("Couldn’t load Room members. Close Settings and try again.", "error"); });
-    void loadSupplement();
-  }, [open, room, toast, loadSupplement]);
+    void loadPrinciples();
+  }, [open, room, toast, loadPrinciples]);
 
   useEffect(() => {
     if (!open) return;
@@ -160,7 +160,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-ink-1">Room Settings</h2>
-            <p className="text-xs text-ink-4 mt-1">Room-level settings, leadership, and prompt supplement preview.</p>
+            <p className="text-xs text-ink-4 mt-1">Room-level settings, leadership, and principles preview.</p>
           </div>
           <button onClick={onClose} className="text-ink-4 hover:text-ink-1 text-lg transition-colors cursor-pointer" aria-label="Close">×</button>
         </div>
@@ -194,24 +194,24 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
                 <option value="">No leader</option>
                 {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
-              <p className="text-xs text-ink-4">The Room leader can update the Room Supplemental Prompt. You can change or clear the leader at any time.</p>
+              <p className="text-xs text-ink-4">The Room leader can update the Room Principles. You can change or clear the leader at any time.</p>
               {currentLeader && <p className="text-xs text-ink-3">Current leader: <span className="font-mono text-ink-2">@{currentLeader.name}</span></p>}
               {missingLeader && <p className="text-xs text-blocked">Saved leader is no longer a current room member. Select a new leader or clear it.</p>}
             </section>
 
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-ink-1">Prompt supplement preview</h3>
+                <h3 className="text-sm font-semibold text-ink-1">Room principles preview</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full border border-line text-ink-4 uppercase">preview only</span>
               </div>
-              <p className="text-xs text-ink-4">Room Supplemental Prompt is shared by all Room members. Preview only. {currentLeader ? <>Ask <span className="font-mono">@{currentLeader.name}</span> to update it in chat.</> : "Choose a Room leader, then ask them to update it in chat."}</p>
-              <PromptPreview state={supplementState} onRetry={() => void loadSupplement()} />
+              <p className="text-xs text-ink-4">Room Principles are shared by all Room members. Preview only. {currentLeader ? <>Ask <span className="font-mono">@{currentLeader.name}</span> to update it in chat.</> : "Choose a Room leader, then ask them to update it in chat."}</p>
+              <PromptPreview state={principlesState} onRetry={() => void loadPrinciples()} />
             </section>
 
             <section className="rounded-xl border border-blocked/30 bg-blocked-dim/30 p-4 space-y-3">
               <h3 className="text-sm font-semibold text-ink-1">Danger zone</h3>
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-ink-4">Delete this room and its local messages, events, sessions, and supplements.</p>
+                <p className="text-xs text-ink-4">Delete this room and its local messages, events, sessions, and prompt assets.</p>
                 <button type="button" onClick={handleDelete} disabled={deleting} className="inline-flex items-center gap-2 px-3 py-2 border border-blocked/40 rounded-lg text-sm text-blocked hover:bg-blocked-dim/50 disabled:opacity-50 shrink-0">
                   <Trash2 size={14} /> {deleting ? "Deleting…" : "Delete room"}
                 </button>
