@@ -111,7 +111,6 @@ interface AgentInstance {
   compacting: boolean;
   /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
   turnActive: boolean;
-  currentPromptTrigger?: string;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -188,7 +187,6 @@ function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
   logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
 }
 
-const CHAT_REPLY_WARNING = "⚠ You were activated by a room message but ended your turn without calling the `chat` tool — your reply was not delivered to anyone. Please respond now with a single `chat` call. If you have nothing substantial to add, send a one-line status.";
 const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result with a `chat` call.";
 const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
 
@@ -239,11 +237,12 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
   }
   if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
   if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn && !isSummarizerInstance(instance)) {
-    clearPendingChatReply(instance, "chat_warning");
-    logger.warn("agent", "pendingChatReplyWarning", { member: instance.agentName, roomId: instance.roomId, trigger });
-    await runPrompt(instance, CHAT_REPLY_WARNING, "chat_warning", (err) => {
-      logger.error("agent", "chat warning prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
-    });
+    // Silence-visible: a turn ended without a chat reply. Do NOT run a hidden
+    // follow-up prompt (that masked real failures and swallowed their events).
+    // Post an honest system note so the user sees the silence and decides.
+    clearPendingChatReply(instance, "silence_visible");
+    logger.warn("agent", "memberSilent", { member: instance.agentName, roomId: instance.roomId, trigger });
+    postMessage(instance.roomId, "system", `Member "${instance.agentName}" finished without replying.`);
   }
 }
 
@@ -258,16 +257,13 @@ async function runPrompt(
   instance.hadErrorInTurn = false;
   instance.lastMessageEndWasLength = false;
   instance.lengthContinuationPending = false;
-  if (trigger !== "length_continuation" && trigger !== "chat_warning") instance.lengthContinuationAttempted = false;
-  instance.currentPromptTrigger = trigger;
+  if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
   try {
     await instance.handle.prompt(message);
     instance.promptInFlight = false;
-    instance.currentPromptTrigger = undefined;
     await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
   } catch (err: any) {
     instance.promptInFlight = false;
-    instance.currentPromptTrigger = undefined;
     onError(err);
     updateDispatchState(instance, "idle", `${trigger}_prompt_error`);
     instance.queuedInputs = [];
@@ -630,12 +626,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const suppressRoomState = instance.currentPromptTrigger === "chat_warning";
-        const newStatus = suppressRoomState ? undefined : processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
+        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
         if (event.type === "tool_end" && (event.toolName === "chat" || event.toolName === "write_summary") && !(event as any).isError) {
           clearPendingChatReply(instance, `tool:${event.toolName}`);
         }
-        if (suppressRoomState) return;
         if (event.type === "agent_start") {
           instance.turnActive = true;
           if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
