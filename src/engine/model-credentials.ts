@@ -46,7 +46,7 @@ const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
 const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "openai_codex_subscription"];
 const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom_endpoint", "trusted_adapter"];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
-const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together"]);
+const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together", "kimi-coding"]);
 const MIGRATION_CUSTOM_ENDPOINT_VISION_V1 = "custom-endpoint-vision-v1";
 
 type ModelCredentialStore = { profiles: ModelCredentialProfile[]; migrations: string[] };
