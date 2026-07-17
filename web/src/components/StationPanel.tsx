@@ -832,13 +832,20 @@ function MemberConfigPanel({
     }
   };
 
-  const assetCount = promptAssetCount([memberPrinciples, roomPrinciples, mainline]);
-  const footerMeta = assetCount === 0
-    ? "no assets yet"
-    : [
-        memberPrinciples && memberPrinciples.content.trim() ? `principles rev ${memberPrinciples.revision}` : null,
-        mainline && mainline.content.trim() ? `mainline rev ${mainline.revision}` : null,
-      ].filter(Boolean).join(" · ") || "loading…";
+  // Tab badge and footer count the member's own assets (room principles are shared context,
+  // not member assets): principles = 1, mainline = 2 (focus + index) per the approved prototype.
+  const memberAssetCount = promptAssetCount([memberPrinciples, mainline]);
+  const badgeCount = memberAssetCount === null
+    ? null
+    : (memberPrinciples!.content.trim() ? 1 : 0) + (mainline!.content.trim() ? 2 : 0);
+  const footerMeta = memberAssetCount === null
+    ? "loading…"
+    : memberAssetCount === 0
+      ? "no assets yet"
+      : [
+          memberPrinciples!.content.trim() ? `principles rev ${memberPrinciples!.revision}` : null,
+          mainline!.content.trim() ? `mainline rev ${mainline!.revision}` : null,
+        ].filter(Boolean).join(" · ");
 
   return (
     <div className="flex h-full flex-col">
@@ -902,7 +909,7 @@ function MemberConfigPanel({
               className={`flex-1 rounded-lg px-2 py-1.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${tab === key ? "bg-surface-1 text-ink-1 border border-line-soft shadow-sm" : "text-ink-3 hover:text-ink-1 border border-transparent"}`}
             >
               {label}
-              {key === "assets" && assetCount !== null ? <span className="ml-1 text-[11px] font-normal text-ink-4">{assetCount}</span> : null}
+              {key === "assets" && badgeCount !== null ? <span className="ml-1 text-[11px] font-normal text-ink-4">{badgeCount}</span> : null}
             </button>
           ))}
         </div>
