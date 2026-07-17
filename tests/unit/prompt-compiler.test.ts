@@ -83,6 +83,16 @@ describe("prompt compiler", () => {
     expect(prompt).toContain("[stale] task:task-none");
   });
 
+  it("core carries the Communication section (chat is the only channel) and no stale footer/chat lines", async () => {
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(compiled.fullPrompt).toContain("## Communication");
+    expect(compiled.fullPrompt).toContain("The `chat` tool is the only way to communicate — to the user and to members alike.");
+    expect(compiled.fullPrompt).toContain("if it isn't sent through chat, it was never said.");
+    expect(compiled.fullPrompt).not.toContain("envelope footer");
+    expect(compiled.fullPrompt).not.toContain("Communication goes exclusively through");
+  });
+
   it("mainline section is omitted when empty; stale refs self-heal between compiles", async () => {
     const { writeMainline } = await import("../../src/workspace/mainline-store.js");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");

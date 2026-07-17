@@ -69,7 +69,10 @@ Working directory: ${args.room.cwd}
 Room leader: ${leader}
 
 Messages you receive are wrapped in envelopes that tell you where they came from.
-Communication goes exclusively through the \`chat\` tool — every reply goes to the room. Bare text responses are not visible to anyone.
+
+## Communication
+
+The \`chat\` tool is the only way to communicate — to the user and to members alike. Anything you write as plain text is invisible to everyone; if it isn't sent through chat, it was never said.
 `;
 }
 
