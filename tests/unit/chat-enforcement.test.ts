@@ -105,12 +105,13 @@ describe("chat enforcement pending reply", () => {
     await setup();
   });
 
-  it("privately warns once when a room activation ends without chat", async () => {
+  it("posts an honest system note (no hidden follow-up) when a room activation ends without chat", async () => {
     await activateAgent("room1", "developer");
 
-    expect(handle.prompt).toHaveBeenCalledTimes(2);
-    expect(handle.prompt.mock.calls[1][0]).toContain("ended your turn without calling the `chat` tool");
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", expect.stringContaining("ended your turn"));
+    // No hidden chat_warning follow-up prompt — only the original turn ran.
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+    // The silence is made visible to the room as a system message.
+    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("does not warn when chat tool succeeds", async () => {
@@ -123,15 +124,16 @@ describe("chat enforcement pending reply", () => {
     expect(handle.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the warning when chat tool fails", async () => {
+  it("posts the silence note when the chat tool call itself fails", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: false }, isError: true });
     });
 
     await activateAgent("room1", "developer");
 
-    expect(handle.prompt).toHaveBeenCalledTimes(2);
-    expect(handle.prompt.mock.calls[1][0]).toContain("single `chat` call");
+    // Failed chat still counts as "no reply delivered" → silence visible, no hidden retry.
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("exempts summarizer", async () => {
