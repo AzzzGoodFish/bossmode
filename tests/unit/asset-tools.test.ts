@@ -97,7 +97,7 @@ describe("asset tools", () => {
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const room = roomStore.createRoom("r", tmpDir, drafts(["pm", "qa"]), undefined, { promptLeaderMemberName: "pm" });
 
-    const content = "## 焦点\n\n质量理念。\n\n## 动态索引\n\n- task:task-dead — 已删任务\n";
+    const content = "## Focus\n\n质量理念。\n\n## Dynamic Index\n\n- task:task-dead — 已删任务\n";
     const written = await handleToolCallback("write_memory", room.id, "qa", { asset: "mainline", content, reason: "kickoff" }) as any;
     expect(written.ok).toBe(true);
     expect(written.budget.limit).toBe(4_000);
@@ -132,7 +132,7 @@ describe("asset tools", () => {
     const room = roomStore.createRoom("r", tmpDir, drafts(["pm", "qa"]), undefined, { promptLeaderMemberName: "pm" });
     const read = await handleToolCallback("read_memory", room.id, "qa", { asset: "mainline" }) as any;
     expect(read.content).toBe("");
-    expect(read.suggestedTemplate).toContain("## 焦点");
-    expect(read.suggestedTemplate).toContain("## 动态索引");
+    expect(read.suggestedTemplate).toContain("## Focus");
+    expect(read.suggestedTemplate).toContain("## Dynamic Index");
   });
 });

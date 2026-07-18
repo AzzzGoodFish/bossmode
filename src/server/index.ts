@@ -8,8 +8,10 @@ import { runKnowledgeMigration } from "../knowledge/migration.js";
 import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
 import { runMemberCredentialBindingMigration } from "../workspace/member-credential-binding-migration.js";
 import { runMessageSeqMigration } from "../workspace/message-seq-migration.js";
+import { runMemoryStorageReorgMigration } from "../workspace/memory-storage-reorg-migration.js";
 import { runPromptMemoryRenameMigration } from "../workspace/prompt-memory-rename-migration.js";
 import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
+import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -76,6 +78,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
   }
 
   try {
+    runMemoryStorageReorgMigration();
+  } catch (err) {
+    logger.error("server", "memory storage reorg migration failed", { error: String(err) });
+  }
+
+  try {
     runPromptMemoryRenameMigration();
   } catch (err) {
     logger.error("server", "prompt memory rename migration failed", { error: String(err) });
@@ -85,6 +93,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runPromptAssetsRenameMigration();
   } catch (err) {
     logger.error("server", "prompt assets rename migration failed", { error: String(err) });
+  }
+
+  try {
+    runMainlineEnglishHeadingsMigration();
+  } catch (err) {
+    logger.error("server", "mainline english headings migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so

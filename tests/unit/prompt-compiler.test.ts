@@ -64,7 +64,7 @@ describe("prompt compiler", () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     writePrinciples({ roomId: "room-a", scope: "room", content: "Room rules here", actor: { type: "member", memberId: "rm_pm" }, reason: "seed" });
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "QA working rules", actor: { type: "member", memberId: "rm_qa" }, reason: "seed" });
-    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## 焦点\n\n质量理念。\n\n## 动态索引\n\n- task:task-none — 不存在\n", actor: { type: "member", memberId: "rm_qa" }, reason: "kickoff" });
+    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## Focus\n\n质量理念。\n\n## Dynamic Index\n\n- task:task-none — 不存在\n", actor: { type: "member", memberId: "rm_qa" }, reason: "kickoff" });
 
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     const prompt = compiled.fullPrompt;
@@ -88,7 +88,8 @@ describe("prompt compiler", () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_qa", content: "seed", actor: { type: "member", memberId: "rm_qa" }, reason: "seed" });
     // Simulate a legacy 20K-era asset (pre-budget) by inflating the file on disk
-    writeFileSync(join(tmpDir, "rooms", "room-a", "prompt-supplements", "members", "rm_qa.md"), "x".repeat(5_000), "utf-8");
+    mkdirSync(join(tmpDir, "rooms", "room-a", "memory", "members", "rm_qa"), { recursive: true });
+    writeFileSync(join(tmpDir, "rooms", "room-a", "memory", "members", "rm_qa", "principles.md"), "x".repeat(5_000), "utf-8");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("## Member Principles");
     expect(compiled.fullPrompt).toContain("125% — 5,000/4,000");
@@ -116,7 +117,7 @@ describe("prompt compiler", () => {
     expect(empty.fullPrompt).not.toContain("## Member Mainline");
     expect(empty.sections.find((s) => s.id === "member-mainline")?.included).toBe(false);
 
-    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## 焦点\n\nF\n\n## 动态索引\n\n- docs/bossmode/later.md — 稍后建\n", actor: { type: "member", memberId: "rm_qa" }, reason: "pin" });
+    writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## Focus\n\nF\n\n## Dynamic Index\n\n- docs/bossmode/later.md — 稍后建\n", actor: { type: "member", memberId: "rm_qa" }, reason: "pin" });
     const stale = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(stale.fullPrompt).toContain("[stale] docs/bossmode/later.md");
     // The doc appears → next compile resolves it (Reload picks this up)

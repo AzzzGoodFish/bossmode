@@ -41,14 +41,14 @@ describe("mainline-store", () => {
 
   it("writes and reads back focus + index, with revision and history snapshot", async () => {
     const { writeMainline, readMainline, MAINLINE_TEMPLATE } = await import("../../src/workspace/mainline-store.js");
-    expect(MAINLINE_TEMPLATE).toContain("## 焦点");
-    expect(MAINLINE_TEMPLATE).toContain("## 动态索引");
-    const content = "## 焦点\n\n产品理念 X。\n\n## 动态索引\n\n- docs/bossmode/prd.md — PRD\n";
+    expect(MAINLINE_TEMPLATE).toContain("## Focus");
+    expect(MAINLINE_TEMPLATE).toContain("## Dynamic Index");
+    const content = "## Focus\n\n产品理念 X。\n\n## Dynamic Index\n\n- docs/bossmode/prd.md — PRD\n";
     const saved = writeMainline({ roomId: "room-a", memberId: "rm_1", content, actor: ACTOR, reason: "0.19 kickoff" });
     expect(saved.revision).toBe(1);
     expect(readMainline("room-a", "rm_1").content).toBe(content);
     const { readFileSync } = await import("node:fs");
-    const history = readFileSync(join(tmpDir, "rooms", "room-a", "mainlines", "history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+    const history = readFileSync(join(tmpDir, "rooms", "room-a", "memory", "mainline-history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
     expect(history).toHaveLength(1);
     expect(history[0].content).toBe(content);
     expect(history[0].reason).toBe("0.19 kickoff");
@@ -71,7 +71,7 @@ describe("mainline-store", () => {
   it("edits index entries via targeted text replacement", async () => {
     const { writeMainline, editMainline, readMainline } = await import("../../src/workspace/mainline-store.js");
     const { task } = await seedRefs();
-    const content = `## 焦点\n\nF\n\n## 动态索引\n\n- task:${task.id} — 主任务\n`;
+    const content = `## Focus\n\nF\n\n## Dynamic Index\n\n- task:${task.id} — 主任务\n`;
     writeMainline({ roomId: "room-a", memberId: "rm_1", content, actor: ACTOR, reason: "pin" });
     const edited = editMainline({ roomId: "room-a", memberId: "rm_1", oldText: `- task:${task.id} — 主任务`, newText: "", actor: ACTOR, reason: "task done" });
     expect(edited.content).not.toContain(task.id);
@@ -82,11 +82,11 @@ describe("mainline-store", () => {
     const { writeMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
     const { task, message } = await seedRefs();
     const content = [
-      "## 焦点",
+      "## Focus",
       "",
       "F",
       "",
-      "## 动态索引",
+      "## Dynamic Index",
       "",
       `- docs/bossmode/prd.md — PRD 存在`,
       `- docs/bossmode/gone.md — 已删除的文档`,
@@ -109,7 +109,7 @@ describe("mainline-store", () => {
     expect(resolved).toContain("- [stale] msg:#10235 — 尚无 seq 的消息");
     expect(resolved).toContain("- 每周五发版 — 非引用行不动");
     // Focus section is never touched, even if it contains ref-looking text
-    const withRefInFocus = `## 焦点\n\n见 docs/bossmode/gone.md。\n\n## 动态索引\n\n- docs/bossmode/prd.md — ok\n`;
+    const withRefInFocus = `## Focus\n\n见 docs/bossmode/gone.md。\n\n## Dynamic Index\n\n- docs/bossmode/prd.md — ok\n`;
     const out = resolveMainlineRefs("room-a", withRefInFocus);
     expect(out).toContain("见 docs/bossmode/gone.md。");
     expect(out).not.toContain("[stale]");
@@ -125,7 +125,7 @@ describe("mainline-store", () => {
     const lines = readFileSync(path, "utf-8").trim().split("\n").map((l) => ({ ...JSON.parse(l), seq: 7 }));
     write(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf-8");
     expect(message.id).toBeTruthy();
-    const content = `## 动态索引\n\n- msg:#7 — 有 seq 的消息\n`;
+    const content = `## Dynamic Index\n\n- msg:#7 — 有 seq 的消息\n`;
     const resolved = resolveMainlineRefs("room-a", content);
     expect(resolved).toContain("- msg:#7 — 有 seq 的消息");
     expect(resolved).not.toContain("[stale]");
@@ -133,7 +133,7 @@ describe("mainline-store", () => {
 
   it("re-resolution is idempotent and self-healing (stale mark dropped when target returns)", async () => {
     const { resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
-    const staleOnce = resolveMainlineRefs("room-a", "## 动态索引\n\n- docs/bossmode/later.md — 稍后创建\n");
+    const staleOnce = resolveMainlineRefs("room-a", "## Dynamic Index\n\n- docs/bossmode/later.md — 稍后创建\n");
     expect(staleOnce).toContain("[stale]");
     // A second read must not double-mark
     const staleTwice = resolveMainlineRefs("room-a", staleOnce);
@@ -150,12 +150,12 @@ describe("mainline-store", () => {
     const { parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
     const { task } = await seedRefs();
     const content = [
-      "## 焦点",
+      "## Focus",
       "",
       "产品理念 X。",
       "第二行。",
       "",
-      "## 动态索引",
+      "## Dynamic Index",
       "",
       "- docs/bossmode/prd.md — PRD 文档",
       `- task:${task.id} — 主任务`,
@@ -180,6 +180,6 @@ describe("mainline-store", () => {
     expect(parseMainline(resolved).index[0].stale).toBe(false);
     // empty content → empty view
     expect(parseMainline("")).toEqual({ focus: "", index: [] });
-    expect(parseMainline("## 焦点\n\n\n\n## 动态索引\n")).toEqual({ focus: "", index: [] });
+    expect(parseMainline("## Focus\n\n\n\n## Dynamic Index\n")).toEqual({ focus: "", index: [] });
   });
 });

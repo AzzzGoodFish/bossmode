@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,9 @@ vi.mock("../../src/workspace/room-store.js", () => ({
   getRoomsDir: () => join(dir, "rooms"),
 }));
 
-describe("prompt-memory-rename-v1 migration", () => {
+const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+
+describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bossmode-memrename-test-"));
     vi.resetModules();
@@ -25,44 +28,96 @@ describe("prompt-memory-rename-v1 migration", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function seedMemory(roomId: string, kind: "principles" | "mainline", filename: string, content: string) {
-    const subdir = kind === "principles" ? "prompt-supplements" : "mainlines";
-    const target = join(dir, "rooms", roomId, subdir);
-    mkdirSync(target, { recursive: true });
-    writeFileSync(join(target, filename), content);
+  function memDir(roomId: string) {
+    return join(dir, "rooms", roomId, "memory");
   }
 
-  it("rewrites *_asset tool references in principles and mainline files", async () => {
+  function seedRoomPrinciples(roomId: string, content: string) {
+    mkdirSync(memDir(roomId), { recursive: true });
+    writeFileSync(join(memDir(roomId), "room-principles.md"), content);
+    writeFileSync(join(memDir(roomId), "principles-meta.json"), JSON.stringify({ room: { revision: 1, contentHash: sha(content), contentLength: content.length } }, null, 2));
+  }
+
+  function seedMemberPrinciples(roomId: string, memberId: string, content: string) {
+    const memberDir = join(memDir(roomId), "members", memberId);
+    mkdirSync(memberDir, { recursive: true });
+    writeFileSync(join(memberDir, "principles.md"), content);
+    const metaPath = join(memDir(roomId), "principles-meta.json");
+    const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf-8")) : {};
+    meta.members = { ...(meta.members || {}), [memberId]: { revision: 1, contentHash: sha(content), contentLength: content.length } };
+    mkdirSync(memDir(roomId), { recursive: true });
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  }
+
+  function seedMemberMainline(roomId: string, memberId: string, content: string) {
+    const memberDir = join(memDir(roomId), "members", memberId);
+    mkdirSync(memberDir, { recursive: true });
+    writeFileSync(join(memberDir, "mainline.md"), content);
+    const metaPath = join(memDir(roomId), "mainline-meta.json");
+    const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf-8")) : {};
+    meta.members = { ...(meta.members || {}), [memberId]: { revision: 1, contentHash: sha(content), contentLength: content.length } };
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  }
+
+  it("rewrites *_asset references in room, member principles, and member mainline files + syncs meta hashes", async () => {
     const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
-    seedMemory("room1", "principles", "qa.md", "Use read_asset to check, edit_asset to tweak, write_asset to rewrite.");
-    seedMemory("room1", "mainline", "qa.md", "- docs/x.md — see write_asset\n");
+    seedRoomPrinciples("room1", "Room rule: use read_asset.");
+    seedMemberPrinciples("room1", "qa", "Member rule: use write_asset to rewrite.");
+    seedMemberMainline("room1", "qa", "- docs/x.md — see edit_asset\n");
 
     migration.runPromptMemoryRenameMigration();
 
-    const principles = readFileSync(join(dir, "rooms", "room1", "prompt-supplements", "qa.md"), "utf-8");
-    const mainline = readFileSync(join(dir, "rooms", "room1", "mainlines", "qa.md"), "utf-8");
-    expect(principles).toBe("Use read_memory to check, edit_memory to tweak, write_memory to rewrite.");
-    expect(mainline).toBe("- docs/x.md — see write_memory\n");
+    expect(readFileSync(join(memDir("room1"), "room-principles.md"), "utf-8")).toBe("Room rule: use read_memory.");
+    expect(readFileSync(join(memDir("room1"), "members", "qa", "principles.md"), "utf-8")).toBe("Member rule: use write_memory to rewrite.");
+    expect(readFileSync(join(memDir("room1"), "members", "qa", "mainline.md"), "utf-8")).toBe("- docs/x.md — see edit_memory\n");
 
-    // Snapshot was taken
+    const pMeta = JSON.parse(readFileSync(join(memDir("room1"), "principles-meta.json"), "utf-8"));
+    expect(pMeta.room.contentHash).toBe(sha("Room rule: use read_memory."));
+    expect(pMeta.members.qa.contentHash).toBe(sha("Member rule: use write_memory to rewrite."));
+    const mMeta = JSON.parse(readFileSync(join(memDir("room1"), "mainline-meta.json"), "utf-8"));
+    expect(mMeta.members.qa.contentHash).toBe(sha("- docs/x.md — see edit_memory\n"));
+
     const snapshots = readdirSync(join(dir, "pi-agent", "runtime", ".migration-snapshots"));
-    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("orphan member files without a meta entry still get rewritten", async () => {
+    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const memberDir = join(memDir("room1"), "members", "ghost");
+    mkdirSync(memberDir, { recursive: true });
+    writeFileSync(join(memberDir, "principles.md"), "orphan uses read_asset");
+    mkdirSync(memDir("room1"), { recursive: true });
+    writeFileSync(join(memDir("room1"), "principles-meta.json"), JSON.stringify({ members: {} }));
+
+    migration.runPromptMemoryRenameMigration();
+    expect(readFileSync(join(memberDir, "principles.md"), "utf-8")).toBe("orphan uses read_memory");
+  });
+
+  it("self-heals a room wrongly marked done before its member files existed", async () => {
+    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    mkdirSync(memDir("room1"), { recursive: true });
+    migration.runPromptMemoryRenameMigration();
+    const marker1 = JSON.parse(readFileSync(join(dir, "pi-agent", "runtime", ".migrations", "prompt-memory-rename-v1.json"), "utf-8"));
+    expect(marker1.rooms.room1).toBe(true);
+
+    seedMemberPrinciples("room1", "qa", "late file uses write_asset");
+
+    migration.runPromptMemoryRenameMigration();
+    expect(readFileSync(join(memDir("room1"), "members", "qa", "principles.md"), "utf-8")).toBe("late file uses write_memory");
   });
 
   it("leaves files without asset references untouched and is idempotent", async () => {
     const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
-    const content = "No tool references here, just rules.";
-    seedMemory("room1", "principles", "qa.md", content);
+    seedMemberPrinciples("room1", "qa", "No tool references here.");
 
     migration.runPromptMemoryRenameMigration();
-    expect(readFileSync(join(dir, "rooms", "room1", "prompt-supplements", "qa.md"), "utf-8")).toBe(content);
-
-    // Second run: no changes
+    const before = readFileSync(join(memDir("room1"), "members", "qa", "principles.md"), "utf-8");
     migration.runPromptMemoryRenameMigration();
-    expect(readFileSync(join(dir, "rooms", "room1", "prompt-supplements", "qa.md"), "utf-8")).toBe(content);
+    const after = readFileSync(join(memDir("room1"), "members", "qa", "principles.md"), "utf-8");
+    expect(after).toBe(before);
   });
 
-  it("skips rooms with no memory directories", async () => {
+  it("skips rooms with no memory directory", async () => {
     const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
     mkdirSync(join(dir, "rooms", "empty-room"), { recursive: true });
     expect(() => migration.runPromptMemoryRenameMigration()).not.toThrow();
