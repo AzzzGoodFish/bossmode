@@ -160,4 +160,38 @@ describe("mainline-english-headings-v1 migration", () => {
     expect(readFileSync(path, "utf-8")).toContain("## Focus");
     expect(readFileSync(path, "utf-8")).toContain("## Dynamic Index");
   });
+
+  it("syncs mainline-meta.json contentHash/contentLength after rewriting a file (QA-caught bug)", async () => {
+    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const content = "## 焦点\n\n中文内容测试。\n\n## 动态索引\n\n- docs/x.md — 引用\n";
+    seedMainline("room1", "qa", content);
+    const metaPath = join(dir, "rooms", "room1", "memory", "mainline-meta.json");
+    mkdirSync(join(dir, "rooms", "room1", "memory"), { recursive: true });
+    writeFileSync(metaPath, JSON.stringify({ members: { qa: { revision: 1, contentHash: "stale", contentLength: 999 } } }));
+
+    migration.runMainlineEnglishHeadingsMigration();
+
+    const rewritten = readFileSync(join(dir, "rooms", "room1", "memory", "members", "qa", "mainline.md"), "utf-8");
+    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+    // contentLength must be the UTF-16 character count (same unit the stores and
+    // budget system use) — NOT UTF-8 byte length, which would over-count the
+    // Chinese content and silently push members over budget.
+    expect(meta.members.qa.contentLength).toBe(rewritten.length);
+    expect(meta.members.qa.contentLength).not.toBe(Buffer.byteLength(rewritten, "utf8"));
+    expect(meta.members.qa.revision).toBe(1); // untouched fields preserved
+  });
+
+  it("does not touch meta for a file that needed no heading rewrite", async () => {
+    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const content = "## Focus\n\nAlready English.\n\n## Dynamic Index\n\n";
+    seedMainline("room1", "qa", content);
+    const metaPath = join(dir, "rooms", "room1", "memory", "mainline-meta.json");
+    mkdirSync(join(dir, "rooms", "room1", "memory"), { recursive: true });
+    writeFileSync(metaPath, JSON.stringify({ members: { qa: { revision: 1, contentHash: "unchanged", contentLength: 5 } } }));
+
+    migration.runMainlineEnglishHeadingsMigration();
+    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+    expect(meta.members.qa.contentHash).toBe("unchanged");
+    expect(meta.members.qa.contentLength).toBe(5);
+  });
 });
