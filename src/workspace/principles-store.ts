@@ -122,6 +122,16 @@ function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+/** Single source of truth for the {contentHash, contentLength} pair stored in
+ * every principles/mainline meta.json. contentLength is the UTF-16 character
+ * count (`.length`) — the same unit the budget system (computeAssetBudget) and
+ * every store write path use. All migrations that touch stored content must
+ * recompute meta through this helper so length/hash never drift from what the
+ * stores themselves would have written. */
+export function computeContentMeta(content: string): { contentHash: string; contentLength: number } {
+  return { contentHash: hashContent(content), contentLength: content.length };
+}
+
 function readMetaFile(roomId: string): PrinciplesMetaFile {
   const path = metaPath(roomId);
   if (!existsSync(path)) return {};
