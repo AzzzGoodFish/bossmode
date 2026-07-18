@@ -201,19 +201,27 @@ const ROOM_MARKER = "[room]";
 
 /**
  * Extract the room-bound portion of an assistant text per the [room] marker rule.
- * Finds the LAST occurrence of `[room]` immediately followed by a newline; returns
- * the trimmed content after it, or null when there is no usable marker.
- * Content before the marker never reaches the room. A bare `[room]` with no
- * following newline is not a marker.
+ * Scans backwards for the LAST *legal* marker — `[room]` immediately followed by a
+ * newline — and returns the trimmed content after it. Occurrences of `[room]` with
+ * no following newline (bare/inline mentions) are not markers and are skipped, so
+ * talking about the feature inside a message cannot swallow the real one.
+ * Content before the marker never reaches the room.
  */
 export function extractRoomMarkerText(text: string): string | null {
   if (!text) return null;
-  const idx = text.lastIndexOf(ROOM_MARKER);
-  if (idx === -1) return null;
-  const after = text.slice(idx + ROOM_MARKER.length);
-  if (!after.startsWith("\n") && !after.startsWith("\r\n")) return null;
-  const body = after.replace(/^\r?\n/, "").trim();
-  return body.length > 0 ? body : null;
+  let searchFrom = text.length;
+  while (searchFrom > 0) {
+    const idx = text.lastIndexOf(ROOM_MARKER, searchFrom - 1);
+    if (idx === -1) return null;
+    const after = text.slice(idx + ROOM_MARKER.length);
+    if (after.startsWith("\n") || after.startsWith("\r\n")) {
+      const body = after.replace(/^\r?\n/, "").trim();
+      return body.length > 0 ? body : null;
+    }
+    // Not a legal marker (no newline right after) — keep scanning earlier occurrences.
+    searchFrom = idx;
+  }
+  return null;
 }
 
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
