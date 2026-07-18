@@ -15,6 +15,20 @@ describe("extractRoomMarkerText", () => {
     expect(extractRoomMarkerText(text)).toBe("Final answer.");
   });
 
+  it("inline [room] mentions after the real marker do not swallow the message", () => {
+    // Regression for fish's real-world hit: a message about the feature itself
+    // mentions [room] inline after the legal marker. The inline mention (no newline
+    // after it) is not a marker, so the legal one still wins and the inline text is
+    // preserved verbatim in the posted message.
+    const text = "[room]\nTesting the [room] mechanism end to end.";
+    expect(extractRoomMarkerText(text)).toBe("Testing the [room] mechanism end to end.");
+  });
+
+  it("a later inline [room] mention does not hide an earlier legal marker", () => {
+    const text = "Reasoning first.\n[room]\nPosted body.\nNow a trailing inline mention of [room] here.";
+    expect(extractRoomMarkerText(text)).toBe("Posted body.\nNow a trailing inline mention of [room] here.");
+  });
+
   it("returns null when there is no marker", () => {
     expect(extractRoomMarkerText("Just some reasoning, no marker here.")).toBeNull();
   });

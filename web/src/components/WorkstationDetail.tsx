@@ -237,8 +237,15 @@ function EventRow({ event, query }: { event: AgentEvent; query: string }) {
     const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
     return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className={`text-[10px] font-bold tracking-[0.1em] ${tone}`}>{summary.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(summary.detail, query)}</span><span className="font-mono text-[10px] text-ink-4">{time}</span></div>{event.type === "compaction_end" && <pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{formatCompactionPreview(event)}</pre>}</div>;
   }
-  if (event.type === "message_end" && event.thinking) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3 text-xs text-ink-3"><span className="font-bold text-think tracking-[0.1em] text-[10px]">THINKING</span><div className="mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div>;
-  if (event.type === "message_end" && event.text) return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-ink-2 tracking-[0.1em] text-[10px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto">{time}</span></div><Markdown content={String(event.text)} /></div>;
+  if (event.type === "message_end" && (event.thinking || event.text)) {
+    // Render BOTH cards when a message carries thinking and text — previously the
+    // thinking branch returned early and the reply card never rendered for members
+    // with thinking enabled, silently swallowing their text replies in the UI.
+    return <>
+      {event.thinking ? <div className="rounded-lg border border-line-soft bg-surface-0 p-3 text-xs text-ink-3"><span className="font-bold text-think tracking-[0.1em] text-[10px]">THINKING</span><div className="mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div> : null}
+      {event.text ? <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-ink-2 tracking-[0.1em] text-[10px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto">{time}</span></div><Markdown content={String(event.text)} /></div> : null}
+    </>;
+  }
   return <div className="text-xs text-ink-3">{summary.label} {summary.detail} <span className="font-mono text-ink-4">{time}</span></div>;
 }
 
