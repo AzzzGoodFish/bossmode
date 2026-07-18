@@ -14,6 +14,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
+import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt } from "./prompt-compiler.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
@@ -194,6 +195,25 @@ function isLengthStopReason(stopReason: unknown): boolean {
   if (typeof stopReason !== "string") return false;
   const normalized = stopReason.toLowerCase();
   return normalized === "length" || normalized.includes("max_tokens") || normalized.includes("max_output");
+}
+
+const ROOM_MARKER = "[room]";
+
+/**
+ * Extract the room-bound portion of an assistant text per the [room] marker rule.
+ * Finds the LAST occurrence of `[room]` immediately followed by a newline; returns
+ * the trimmed content after it, or null when there is no usable marker.
+ * Content before the marker never reaches the room. A bare `[room]` with no
+ * following newline is not a marker.
+ */
+export function extractRoomMarkerText(text: string): string | null {
+  if (!text) return null;
+  const idx = text.lastIndexOf(ROOM_MARKER);
+  if (idx === -1) return null;
+  const after = text.slice(idx + ROOM_MARKER.length);
+  if (!after.startsWith("\n") && !after.startsWith("\r\n")) return null;
+  const body = after.replace(/^\r?\n/, "").trim();
+  return body.length > 0 ? body : null;
 }
 
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
@@ -666,6 +686,22 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           if (instance.lastMessageEndWasLength) {
             instance.lengthContinuationPending = true;
             logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+          }
+          // [room] marker speech: if this message's text contains `[room]` followed by
+          // a newline, post the content after the last marker to the room. Checked on
+          // every message_end so members can speak while working, not just at turn end.
+          // Skipped on error turns and on length-truncated intermediate messages (the
+          // final settled message is the one that counts).
+          if (event.stopReason !== "error" && !instance.lastMessageEndWasLength) {
+            const roomText = extractRoomMarkerText(event.text || "");
+            if (roomText !== null) {
+              const members = roomStore.getRoomMembers(roomId);
+              const mentions = parseMentions(roomText, members.map((m: any) => m.name));
+              const target = mentions.length === 1 ? roomStore.resolveRoomMemberRef(roomId, mentions[0]) : undefined;
+              postMessage(roomId, memberName, roomText, mentions, { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+              clearPendingChatReply(instance, "room_marker");
+              logger.info("agent", "roomMarkerPosted", { member: memberName, roomId, memberId });
+            }
           }
         }
 
