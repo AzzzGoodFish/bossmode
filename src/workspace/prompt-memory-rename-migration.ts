@@ -11,11 +11,11 @@
 // automatically on the next startup. Storage layout is unchanged; every changed
 // file is snapshotted first.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import { getRoomsDir } from "./room-store.js";
+import { computeContentMeta } from "./principles-store.js";
 
 const MIGRATION_ID = "prompt-memory-rename-v1";
 
@@ -68,9 +68,6 @@ function snapshotFile(sourcePath: string, label: string): void {
   mkdirSync(dirname(target), { recursive: true });
   copyFileSync(sourcePath, target);
 }
-function hashContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
 
 function rewriteRetiredToolNames(content: string): string | null {
   let next = content;
@@ -103,7 +100,7 @@ function migrateRoom(roomId: string): number {
   if (roomResult.changed && roomResult.content !== undefined) {
     changed += 1;
     if (pMeta.room) {
-      pMeta.room = { ...pMeta.room, contentHash: hashContent(roomResult.content), contentLength: roomResult.content.length };
+      pMeta.room = { ...pMeta.room, ...computeContentMeta(roomResult.content) };
       pMetaChanged = true;
     }
   }
@@ -123,7 +120,7 @@ function migrateRoom(roomId: string): number {
         changed += 1;
         if (!pMeta.members) pMeta.members = {};
         if (pMeta.members[entry.name]) {
-          pMeta.members[entry.name] = { ...pMeta.members[entry.name], contentHash: hashContent(pResult.content), contentLength: pResult.content.length };
+          pMeta.members[entry.name] = { ...pMeta.members[entry.name], ...computeContentMeta(pResult.content) };
           pMetaChanged = true;
         }
       }
@@ -132,7 +129,7 @@ function migrateRoom(roomId: string): number {
         changed += 1;
         if (!mMeta.members) mMeta.members = {};
         if (mMeta.members[entry.name]) {
-          mMeta.members[entry.name] = { ...mMeta.members[entry.name], contentHash: hashContent(mResult.content), contentLength: mResult.content.length };
+          mMeta.members[entry.name] = { ...mMeta.members[entry.name], ...computeContentMeta(mResult.content) };
           mMetaChanged = true;
         }
       }
