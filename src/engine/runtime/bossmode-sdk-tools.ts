@@ -69,7 +69,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     defineTool({
       name: "read_memory",
       label: "Read Memory",
-      description: "Read your persistent memory with its budget header (usage/limit). asset 'principles' = durable working rules (HOW you work: behavior and communication norms); asset 'mainline' = your working focus (WHAT you work on: a '## 焦点' section of domain cornerstones plus a '## 动态索引' list of pinned refs — docs/..., task:<id>, msg:#<seq>; refs whose target no longer exists are marked [stale] on read, never auto-deleted). scope 'room'|'member' applies to principles only (default 'member'): all members may read the shared room principles; mainline is member-level only. An over-budget memory is pending curation.",
+      description: "Read your persistent memory, with its budget header (usage/limit). asset: 'principles' (durable working rules) or 'mainline' (working focus: a '## Focus' section plus a '## Dynamic Index' list of refs — docs/..., task:<id>, msg:#<seq>; refs whose target no longer exists are marked [stale] on read, never auto-deleted). scope (optional): 'room' or 'member', principles only, default 'member'. Mainline is member-level only.",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
@@ -85,7 +85,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     defineTool({
       name: "edit_memory",
       label: "Edit Memory",
-      description: "Targeted edit of your persistent memory (your own member memory, or the room principles if you are the room leader). oldText must match exactly once. reason is required — record the source of the change (user feedback, a decision, curation). Memory discipline: durable facts only — things that save the user from correcting you again. Progress, results, and anything that expires belong in chat history, not memory. Declarative statements, not imperatives; no task progress/results/SHAs (chat/tasks/docs hold those); process and how-to belong in skills. Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars — if the result exceeds the budget the edit is rejected with the current full text; curate (merge/delete) in the same turn and retry, never truncate silently. Mainline edits add/update/remove index lines in '## 动态索引' or adjust the '## 焦点' text. Changes apply on next member activation or Reload.",
+      description: "Edit persistent memory by exact text replacement — your own member memory, or the room principles if you are the room leader. oldText must occur exactly once. reason is required (the source of the change). Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars; over-budget edits are rejected with the current full text. Changes apply on next activation or Reload.",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         oldText: Type.String({ description: "Exact text to replace. Must occur exactly once." }),
@@ -102,7 +102,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     defineTool({
       name: "write_memory",
       label: "Write Memory",
-      description: "Overwrite your persistent memory wholesale (your own member memory, or the room principles if you are the room leader). reason is required — record the source of the change (user feedback, a decision, curation). Prefer edit_memory for small changes; use write_memory for restructuring or curation. Memory discipline: durable facts only — things that save the user from correcting you again. Progress, results, and anything that expires belong in chat history, not memory. Declarative statements, not imperatives; no task progress/results/SHAs (chat/tasks/docs hold those); process and how-to belong in skills. Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars — over-budget writes are rejected with the current full text; curate (merge/delete) in the same turn and retry, never truncate silently. Mainline keeps two sections: '## 焦点' (domain cornerstones) and '## 动态索引' (one '- <ref> — <note>' per line; refs: docs/..., task:<id>, msg:#<seq>). Changes apply on next member activation or Reload.",
+      description: "Overwrite persistent memory wholesale — your own member memory, or the room principles if you are the room leader. reason is required (the source of the change). Budgets and over-budget rejection same as edit_memory. Changes apply on next activation or Reload.",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         content: Type.String({ description: "Full markdown content to save" }),

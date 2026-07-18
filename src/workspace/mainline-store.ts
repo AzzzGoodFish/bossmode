@@ -1,6 +1,6 @@
-// Mainline (主线) store — member-level runtime-layer prompt asset.
-// Single markdown file, two sections: `## 焦点` (domain cornerstones) and
-// `## 动态索引` (pinned refs: docs/..., task:<id>, msg:#<seq>).
+// Mainline store — member-level runtime-layer prompt memory asset.
+// Single markdown file, two sections: `## Focus` (domain cornerstones) and
+// `## Dynamic Index` (pinned refs: docs/..., task:<id>, msg:#<seq>).
 // The index stores pointers only — chat/tasks/docs remain the source of truth.
 // References are resolved at read/inject time; unresolvable lines are honestly
 // marked `[stale]`, never silently deleted.
@@ -42,37 +42,42 @@ interface MainlineHistoryEvent {
 }
 
 export const MAINLINE_MAX_CHARS = 4_000;
-export const MAINLINE_TEMPLATE = "## 焦点\n\n\n\n## 动态索引\n\n";
+export const MAINLINE_TEMPLATE = "## Focus\n\n\n\n## Dynamic Index\n\n";
 
-export const MAINLINE_FOCUS_HEADING = "## 焦点";
-export const MAINLINE_INDEX_HEADING = "## 动态索引";
+export const MAINLINE_FOCUS_HEADING = "## Focus";
+export const MAINLINE_INDEX_HEADING = "## Dynamic Index";
 
 function mainlinesDir(roomId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "mainlines");
+  return join(getBossmodeDir(), "rooms", roomId, "memory");
 }
 
 function membersDir(roomId: string): string {
   return join(mainlinesDir(roomId), "members");
 }
 
+function memberDir(roomId: string, memberId: string): string {
+  return join(membersDir(roomId), safeMemberId(memberId));
+}
+
 function metaPath(roomId: string): string {
-  return join(mainlinesDir(roomId), "meta.json");
+  return join(mainlinesDir(roomId), "mainline-meta.json");
 }
 
 function historyPath(roomId: string): string {
-  return join(mainlinesDir(roomId), "history.jsonl");
+  return join(mainlinesDir(roomId), "mainline-history.jsonl");
 }
 
 function contentPath(roomId: string, memberId: string): string {
-  return join(membersDir(roomId), `${safeMemberId(memberId)}.md`);
+  return join(memberDir(roomId, memberId), "mainline.md");
 }
 
 function safeMemberId(memberId: string): string {
   return memberId.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function ensureMainlinesDir(roomId: string): void {
+function ensureMainlinesDir(roomId: string, memberId?: string): void {
   mkdirSync(membersDir(roomId), { recursive: true });
+  if (memberId) mkdirSync(memberDir(roomId, memberId), { recursive: true });
 }
 
 function hashContent(content: string): string {
@@ -140,7 +145,7 @@ export function writeMainline(args: {
       budget: computeAssetBudget(current.content.length, MAINLINE_MAX_CHARS),
     });
   }
-  ensureMainlinesDir(args.roomId);
+  ensureMainlinesDir(args.roomId, args.memberId);
   const nextMeta: PrinciplesMeta = {
     revision: current.revision + 1,
     contentHash: hashContent(content),
@@ -271,7 +276,7 @@ export function parseMainline(content: string): ParsedMainline {
 }
 
 /**
- * Return the content with every reference-looking line of the `## 动态索引` section
+ * Return the content with every reference-looking line of the `## Dynamic Index` section
  * resolved: unresolvable refs are prefixed with `[stale]` (honest, never deleted);
  * refs that resolve again lose a stale mark left by an earlier read.
  */

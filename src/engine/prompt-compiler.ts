@@ -83,13 +83,17 @@ Found it — the failure is in the token refresh.   ← posted
 
 ## Memory
 
-You have a persistent memory that survives across sessions. It has two parts:
+You have two persistent memory assets, maintained with the read/edit/write_memory tools:
 
-**Principles** — how you work: behavior and communication norms that evolve with the user's feedback. Store the durable rules the user has taught you, so they never have to correct you twice.
+**Principles** — how you work: durable behavior and communication norms that evolve with the user's feedback. Store rules that save the user from correcting you twice.
+  Not this: "Shipped v2.3 on Monday" — it expires; chat history holds it.
+  This: "The user prefers conclusion-first updates; details only on request."
 
-**Mainline** — what you work on. A \`focus\` section for long-lived domain knowledge (the product, the project, key rulings), plus a \`dynamic index\` of pointers (docs/..., task:<id>, msg:#<n>) to the few assets you keep returning to this phase — pointers with one line of context, not the content itself.
+**Mainline** — what you work on: a "## Focus" section for long-lived domain knowledge, plus a "## Dynamic Index" of pointers (docs/..., task:<id>, msg:#<n>) to the few assets you keep returning to this phase — one line of context each, never the content itself.
+  Not this: a full QA report pasted inline.
+  This: "- task:a1b2c3d4 — tool-description simplification (next release batch)"
 
-Curate both: keep only what stays useful. Progress, results, and anything that expires belong in chat history, not memory. Use the memory tools to maintain them.
+Curate both: keep only what stays useful. Progress, results, and anything that expires belong in chat history, not memory.
 `;
 }
 

@@ -83,36 +83,39 @@ function roomDataDir(roomId: string): string {
   return join(getBossmodeDir(), "rooms", roomId);
 }
 
-// Storage directory and file format are intentionally unchanged from the former
-// prompt-supplement layout (see plan-prompt-asset-model-and-governance §5).
-function principlesDir(roomId: string): string {
-  return join(roomDataDir(roomId), "prompt-supplements");
+function memoryDir(roomId: string): string {
+  return join(roomDataDir(roomId), "memory");
 }
 
 function membersDir(roomId: string): string {
-  return join(principlesDir(roomId), "members");
+  return join(memoryDir(roomId), "members");
+}
+
+function memberDir(roomId: string, memberId: string): string {
+  return join(membersDir(roomId), safeMemberId(memberId));
 }
 
 function metaPath(roomId: string): string {
-  return join(principlesDir(roomId), "meta.json");
+  return join(memoryDir(roomId), "principles-meta.json");
 }
 
 function historyPath(roomId: string): string {
-  return join(principlesDir(roomId), "history.jsonl");
+  return join(memoryDir(roomId), "principles-history.jsonl");
 }
 
 function contentPath(roomId: string, scope: PrinciplesScope, memberId?: string): string {
-  if (scope === "room") return join(principlesDir(roomId), "room.md");
+  if (scope === "room") return join(memoryDir(roomId), "room-principles.md");
   if (!memberId) throw new Error("memberId is required for member principles");
-  return join(membersDir(roomId), `${safeMemberId(memberId)}.md`);
+  return join(memberDir(roomId, memberId), "principles.md");
 }
 
 function safeMemberId(memberId: string): string {
   return memberId.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function ensurePrinciplesDir(roomId: string): void {
+function ensurePrinciplesDir(roomId: string, scope?: PrinciplesScope, memberId?: string): void {
   mkdirSync(membersDir(roomId), { recursive: true });
+  if (scope === "member" && memberId) mkdirSync(memberDir(roomId, memberId), { recursive: true });
 }
 
 function hashContent(content: string): string {
@@ -202,7 +205,7 @@ export function writePrinciples(args: {
       budget: computeAssetBudget(current.content.length, limit),
     });
   }
-  ensurePrinciplesDir(args.roomId);
+  ensurePrinciplesDir(args.roomId, args.scope, args.memberId);
   const nextMeta: PrinciplesMeta = {
     revision: current.revision + 1,
     contentHash: hashContent(content),

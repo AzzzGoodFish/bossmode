@@ -10,57 +10,15 @@ Use this tool when:
 
 For large result sets, set output="file" — the result is written to a temp markdown file and the path is returned. Read it with the Read tool to avoid context truncation.`;
 
-export const CREATE_TASK_DESCRIPTION = `Create a task in the current room.
+export const CREATE_TASK_DESCRIPTION = `Create a task in the current room and return its id. Assignment and subscribers record ownership/watchers only; they never activate members.`;
 
-Use this tool when:
-- You receive a user request that needs tracking — decompose into one or more tasks
-- You discover a bug, tech debt, or follow-up item during your work
-- You hand off work to another agent and want a tracked record
-- A discussion produces an actionable item that shouldn't be forgotten
+export const UPDATE_TASK_DESCRIPTION = `Update fields of an existing task (status, assignee, priority, title, description, references, subscribers). Status changes are posted as room system messages. Assignment and subscriber changes never activate members.`;
 
-A task is a unit of work that someone can complete in a focused session. Use description for stable requirements, scope, and acceptance criteria; use comment_task for process notes, implementation progress, QA results, blockers, and handoff records.
+export const LIST_TASKS_DESCRIPTION = `List tasks in the current room, optionally filtered by status or assignee. Returns id, title, status, priority, assignee, references, subscribers, and commentCount per task — comment bodies not included (use get_task).`;
 
-Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.
+export const GET_TASK_DESCRIPTION = `Get full details of a task: description, references, subscribers, and comments.`;
 
-When you should NOT create a task:
-- The work is so small it fits in a single agent turn (just do it)
-- A similar task already exists (use list_tasks first to check)
-- The request is informational only (use chat to respond instead)`;
-
-export const UPDATE_TASK_DESCRIPTION = `Update an existing task in the current room.
-
-Use this tool when:
-- You start working on a task → set status to "in-progress"
-- You finish your part → set status to "review"
-- Verification passed → set status to "done" (typically QA or PM)
-- Priority or scope changes → update fields accordingly
-- Task gets reassigned → update assignee
-
-Task event messages:
-- Status changes are recorded as system messages in the room so others see progress.
-- Assignment and subscribers record ownership/watchers only. They never activate members. To request a member's reply, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.
-
-Always update task status promptly — stale task states erode the team's awareness.
-
-Description is for stable requirements, scope, and acceptance criteria. Use comment_task for process notes, implementation progress, QA results, blockers, and handoff records.`;
-
-export const LIST_TASKS_DESCRIPTION = `List tasks in the current room. Optionally filter by status or assignee.
-
-Use this tool when:
-- You need to see what's currently being worked on
-- Before creating a task, to check for duplicates
-- To find a task ID before updating it
-- To compile a status report
-
-Returns id, title, status, priority, assignee, references, subscribers, and commentCount for each match. It does not return full comment bodies; use get_task for full detail.`;
-
-export const GET_TASK_DESCRIPTION = `Get full details for a task in the current room, including description, references, subscribers, and comments.
-
-Use this before adding a subscriber, when you need task context before implementation or QA, or when list_tasks only returned a summary.`;
-
-export const COMMENT_TASK_DESCRIPTION = `Add a comment to a task in the current room.
-
-Use comments for implementation notes, QA results, blockers, decisions, and handoff records. Comments are persisted on the task but do not activate members, even if the text contains @name. To request action, send a room chat message with exact @name; for FYI/thanks/acknowledgement, write the name without @.`;
+export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comments are persisted on the task only: their content does not appear in the room stream (the room sees just a "commented on task" event) and they never activate members.`;
 
 export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
 
@@ -95,7 +53,7 @@ export const PARAM_DESCRIPTIONS = {
   taskAssignee: "Member name to assign",
   taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name only when requesting action/reply.",
   taskId: "Task ID",
-  taskComment: "Markdown comment to append to the task. Does not activate members.",
+  taskComment: "Markdown comment to append. Persisted on the task only — not shown in the room stream, does not activate members.",
   taskStatusFilter: "Filter: todo | in-progress | review | done",
   taskAssigneeFilter: "Filter by assignee name",
   taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",
