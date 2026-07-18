@@ -72,7 +72,14 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-The \`chat\` tool is the only way to communicate — to the user and to members alike. Anything you write as plain text is invisible to everyone; if it isn't sent through chat, it was never said.
+Two ways to speak in the room: (1) call the \`chat\` tool; (2) write \`[room]\` on its own line — everything after it is posted to the room, everything before it stays private. Text without the marker never reaches the room.
+
+Example:
+\`\`\`
+Let me check the logs first...   ← not posted
+[room]
+Found it — the failure is in the token refresh.   ← posted
+\`\`\`
 
 ## Memory
 
