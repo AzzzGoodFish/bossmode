@@ -26,24 +26,24 @@ describe("mcp-tool-descriptions", () => {
     }
   });
 
-  it("task tool descriptions contain usage guidance", () => {
-    expect(CREATE_TASK_DESCRIPTION).toContain("Use this tool when");
-    expect(CREATE_TASK_DESCRIPTION).toContain("Assignment and subscribers record ownership/watchers only");
-    expect(UPDATE_TASK_DESCRIPTION).toContain("Use this tool when");
-    expect(UPDATE_TASK_DESCRIPTION).toContain("Assignment and subscribers record ownership/watchers only");
-    expect(LIST_TASKS_DESCRIPTION).toContain("Use this tool when");
-    expect(GET_TASK_DESCRIPTION).toContain("full details");
-    expect(COMMENT_TASK_DESCRIPTION).toContain("Add a comment");
+  it("task tool descriptions state capability and mechanical facts, not usage guidance", () => {
+    expect(CREATE_TASK_DESCRIPTION).toContain("Create a task");
+    expect(CREATE_TASK_DESCRIPTION).toContain("never activate members");
+    expect(UPDATE_TASK_DESCRIPTION).toContain("Status changes are posted as room system messages");
+    expect(UPDATE_TASK_DESCRIPTION).toContain("never activate members");
+    expect(LIST_TASKS_DESCRIPTION).toContain("commentCount");
+    expect(GET_TASK_DESCRIPTION).toContain("comments");
+    expect(COMMENT_TASK_DESCRIPTION).toContain("markdown comment");
   });
 
-  it("task tool descriptions do not claim assignment, subscribers, or comments activate members", () => {
+  it("task tool descriptions declare comment visibility as a mechanical fact and carry no usage-guidance phrasing", () => {
     const combined = `${CREATE_TASK_DESCRIPTION}\n${UPDATE_TASK_DESCRIPTION}\n${LIST_TASKS_DESCRIPTION}\n${GET_TASK_DESCRIPTION}\n${COMMENT_TASK_DESCRIPTION}`;
     expect(combined).not.toMatch(/automatically activates?|automatically activated/i);
+    expect(combined).not.toMatch(/use this tool when/i);
     expect(combined).not.toContain("Reassigning to a different agent");
-    expect(combined).toContain("send a room chat message with exact @name");
-    expect(combined).toContain("subscribers");
     expect(combined).toMatch(/never activate members/i);
-    expect(COMMENT_TASK_DESCRIPTION).toContain("do not activate members");
+    expect(COMMENT_TASK_DESCRIPTION).toContain("does not appear in the room stream");
+    expect(COMMENT_TASK_DESCRIPTION).toContain("commented on task");
   });
 
   it("all param descriptions are non-empty", () => {

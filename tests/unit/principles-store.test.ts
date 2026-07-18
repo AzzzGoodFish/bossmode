@@ -88,7 +88,7 @@ describe("principles-store", () => {
     const { writePrinciples, readPrinciplesWithBudget, editPrinciples } = await import("../../src/workspace/principles-store.js");
     // Simulate a legacy 20K-era asset by writing under the limit then inflating the file on disk
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "seed", actor: { type: "member" }, reason: "seed" });
-    const path = join(tmpDir, "rooms", "room-a", "prompt-supplements", "members", "rm_1.md");
+    const path = join(tmpDir, "rooms", "room-a", "memory", "members", "rm_1", "principles.md");
     const { writeFileSync } = await import("node:fs");
     writeFileSync(path, "UNIQUE-" + "x".repeat(4_993), "utf-8");
     const flagged = readPrinciplesWithBudget("room-a", "member", "rm_1");
@@ -107,7 +107,7 @@ describe("principles-store", () => {
     writePrinciples({ roomId: "room-a", scope: "room", content: "v1 content", actor: { type: "member", memberId: "rm_1" }, reason: "first" });
     writePrinciples({ roomId: "room-a", scope: "room", content: "v2 content", actor: { type: "user" }, reason: "user correction" });
     const { readFileSync } = await import("node:fs");
-    const history = readFileSync(join(tmpDir, "rooms", "room-a", "prompt-supplements", "history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+    const history = readFileSync(join(tmpDir, "rooms", "room-a", "memory", "principles-history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
     expect(history).toHaveLength(2);
     expect(history[0].content).toBe("v1 content");
     expect(history[0].reason).toBe("first");
