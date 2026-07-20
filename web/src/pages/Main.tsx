@@ -9,7 +9,6 @@ import { Search, Plus, ScrollText, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
-  steerAgent as apiSteerAgent,
   getSummarizeStatus,
   summarizeRoom as apiSummarizeRoom,
   addMember as apiAddMember,
@@ -202,18 +201,6 @@ export function Main({
   useEffect(() => {
     localStorage.setItem(PREVIEW_PCT_STORAGE_KEY, formatPreviewPct(previewPct));
   }, [previewPct]);
-
-  const handleSteer = useCallback(
-    async (agentName: string, content: string) => {
-      if (!selectedRoomId) return;
-      try {
-        await apiSteerAgent(selectedRoomId, agentName, content);
-      } catch (err: any) {
-        console.error("Steer failed:", err);
-      }
-    },
-    [selectedRoomId],
-  );
 
   const handleCreateRoom = useCallback(
     async (name: string, cwd: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string) => {
@@ -444,7 +431,6 @@ export function Main({
             agentStatus={displayAgentStatus}
             contextUsage={displayContextUsage}
             roomId={room.id}
-            onSteer={handleSteer}
             onOpenMcpSettings={onOpenMcpSettings}
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
@@ -459,7 +445,6 @@ export function Main({
               agentStatus={displayAgentStatus}
               contextUsage={displayContextUsage}
               roomId={room.id}
-              onSteer={handleSteer}
               onOpenMcpSettings={onOpenMcpSettings}
               onMembersChanged={reloadRoom}
               unreadAgents={unreadTabs}

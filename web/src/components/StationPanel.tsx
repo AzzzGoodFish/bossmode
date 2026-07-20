@@ -21,7 +21,6 @@ interface StationPanelProps {
   agentStatus: AgentStatusMap;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
-  onSteer?: (agentName: string, content: string) => void;
   onOpenMcpSettings?: () => void;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
@@ -100,7 +99,7 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onSteer, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -486,7 +485,6 @@ This clears the member's working session memory and starts fresh. Room messages 
             mcpLoadStatus={mcpLoadStatus}
             onRetryMcp={refreshMcpSettings}
             onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
-            onSteer={onSteer}
             onClose={() => setSelectedMember(null)}
             onRename={(name) => handleRenameMember(memberInfos[selectedMember], name)}
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
@@ -852,7 +850,6 @@ function MemberConfigPanel({
   mcpLoadStatus,
   onRetryMcp,
   onOpenMcpSettings,
-  onSteer,
   onClose,
   onRename,
   onSwitchModel,
@@ -874,7 +871,6 @@ function MemberConfigPanel({
   mcpLoadStatus: "loading" | "ready" | "error";
   onRetryMcp: () => void;
   onOpenMcpSettings: () => void;
-  onSteer?: (agentName: string, content: string) => void;
   onClose: () => void;
   onRename: (name: string) => Promise<void>;
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
@@ -890,6 +886,7 @@ function MemberConfigPanel({
   const statusText = statusLabel(status).toLowerCase();
   const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
   const [tab, setTab] = useState<PanelTab>("overview");
+  const tabScrollRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
@@ -962,14 +959,6 @@ function MemberConfigPanel({
   const badgeCount = memberAssetCount === null
     ? null
     : (memberPrinciples!.content.trim() ? 1 : 0) + (mainline!.content.trim() ? 2 : 0);
-  const footerMeta = memberAssetCount === null
-    ? "loading…"
-    : memberAssetCount === 0
-      ? "no assets yet"
-      : [
-          memberPrinciples!.content.trim() ? `principles rev ${memberPrinciples!.revision}` : null,
-          mainline!.content.trim() ? `mainline rev ${mainline!.revision}` : null,
-        ].filter(Boolean).join(" · ");
 
   return (
     <div className="flex h-full flex-col">
@@ -1038,7 +1027,7 @@ function MemberConfigPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+      <div ref={tabScrollRef} className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
         {tab === "overview" && (
           <div className="space-y-4 pb-6">
             <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} />
@@ -1111,7 +1100,7 @@ function MemberConfigPanel({
         )}
 
         {tab === "activity" && (
-          <ActivityTab roomId={roomId} agentName={member.name} onSteer={onSteer} />
+          <ActivityTab roomId={roomId} agentName={member.name} scrollContainerRef={tabScrollRef} />
         )}
 
         {tab === "session" && (
@@ -1242,11 +1231,6 @@ function MemberConfigPanel({
             </section>
           </div>
         )}
-      </div>
-
-      <div className="border-t border-line-soft px-5 py-2.5 flex items-center justify-between gap-3 text-[10.5px] text-ink-4 shrink-0">
-        <span>Member assets are maintained by the member itself via chat tools — this panel is read-only.</span>
-        <span className="font-mono shrink-0">{footerMeta}</span>
       </div>
     </div>
   );
