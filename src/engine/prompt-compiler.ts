@@ -119,15 +119,15 @@ export function compileMemberPrompt(args: {
   const sections = [
     section({ id: "source-agent", title: "Source Agent", source: `agent:${args.agentDef.name}`, content: agentPrompt, included: agentPrompt.trim().length > 0 }),
     section({ id: "bossmode-core", title: "Bossmode Core", source: "bossmode", content: corePrompt, included: true }),
-    section({ id: "room-principles", title: "Room Principles", source: `room:${args.room.id}`, content: roomPrinciples.content, included: roomPrinciples.content.trim().length > 0 }),
     section({ id: "member-principles", title: "Member Principles", source: `room-member:${args.member.id}`, content: memberPrinciples.content, included: memberPrinciples.content.trim().length > 0 }),
     section({ id: "member-mainline", title: "Member Mainline", source: `room-member:${args.member.id}`, content: mainlineContent, included: mainlineContent.trim().length > 0 }),
+    section({ id: "room-principles", title: "Room Principles", source: `room:${args.room.id}`, content: roomPrinciples.content, included: roomPrinciples.content.trim().length > 0 }),
   ];
 
   const appendSystemPrompt = [corePrompt];
-  if (roomPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Room Principles", formatBudgetHeader(roomPrinciples.budget), roomPrinciples.content));
   if (memberPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Member Principles", formatBudgetHeader(memberPrinciples.budget), memberPrinciples.content));
   if (mainlineContent.trim()) appendSystemPrompt.push(wrapAsset("Member Mainline", formatBudgetHeader(memberMainline.budget), mainlineContent));
+  if (roomPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Room Principles", formatBudgetHeader(roomPrinciples.budget), roomPrinciples.content));
 
   const fullPrompt = [agentPrompt, ...appendSystemPrompt].filter((part) => part.trim().length > 0).join("\n\n");
   const manifestHash = hashContent(JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))));

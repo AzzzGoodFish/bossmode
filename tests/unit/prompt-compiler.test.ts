@@ -78,9 +78,19 @@ describe("prompt compiler", () => {
     expect(prompt).toMatch(/## Member Mainline\n\n\d+% — \d+\/4,000\n/);
     // Section ids renamed + mainline added
     const ids = compiled.sections.map((s) => s.id);
-    expect(ids).toEqual(["source-agent", "bossmode-core", "room-principles", "member-principles", "member-mainline"]);
+    expect(ids).toEqual(["source-agent", "bossmode-core", "member-principles", "member-mainline", "room-principles"]);
     // Mainline index resolved at injection: dead task marked stale, never deleted
     expect(prompt).toContain("[stale] task:task-none");
+    // Real injection order in the assembled text: Core -> Member Principles ->
+    // Member Mainline -> Room Principles (fish's ruling: Room principles last).
+    const coreIdx = prompt.indexOf("## Communication");
+    const memberPrinciplesIdx = prompt.indexOf("## Member Principles");
+    const mainlineIdx = prompt.indexOf("## Member Mainline");
+    const roomPrinciplesIdx = prompt.indexOf("## Room Principles");
+    expect(coreIdx).toBeGreaterThan(-1);
+    expect(coreIdx).toBeLessThan(memberPrinciplesIdx);
+    expect(memberPrinciplesIdx).toBeLessThan(mainlineIdx);
+    expect(mainlineIdx).toBeLessThan(roomPrinciplesIdx);
   });
 
   it("legacy over-budget asset is injected with a pending-curation capacity header, never cut", async () => {
