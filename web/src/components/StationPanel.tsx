@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats,
+  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
@@ -817,6 +817,29 @@ function IdentityCard({ member }: { member: MemberInfo }) {
   );
 }
 
+/** Real, compiled Bossmode Core prompt — the platform-shared second block of
+ * the prompt (Environment/Communication/Memory guidance). Sourced from the
+ * same compiler the runtime uses; never a static/hardcoded preview. */
+function CoreCard({ corePrompt }: { corePrompt: { content: string; charCount: number } | null }) {
+  return (
+    <PanelCard
+      title="Core"
+      tag={<AssetTag>platform · shared</AssetTag>}
+      hint="Bossmode Core — environment, communication and Memory guidance shared by every member. Same structure for all; only values (room/member names) differ."
+    >
+      {corePrompt === null ? (
+        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+      ) : corePrompt.content.trim() ? (
+        <Fold title={`Preview — ${formatTokens(corePrompt.charCount)} chars`}>
+          <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown max-h-48 overflow-y-auto whitespace-pre-wrap">{corePrompt.content}</div>
+        </Fold>
+      ) : (
+        <EmptyAsset title="Unavailable" hint="Could not load the compiled Core prompt for this member." />
+      )}
+    </PanelCard>
+  );
+}
+
 function MemberConfigPanel({
   roomId,
   member,
@@ -874,6 +897,7 @@ function MemberConfigPanel({
   const [memberPrinciples, setMemberPrinciples] = useState<Principles | null>(null);
   const [mainline, setMainline] = useState<Mainline | null>(null);
   const [stats, setStats] = useState<MemberStats | null>(null);
+  const [corePrompt, setCorePrompt] = useState<{ content: string; charCount: number } | null>(null);
 
   useEffect(() => { setDraftName(member.name); setEditingName(false); setTab("overview"); }, [member.id, member.name]);
 
@@ -906,6 +930,15 @@ function MemberConfigPanel({
     getMemberStats(member.id || member.name, roomId)
       .then((result) => { if (!cancelled) setStats(result); })
       .catch(() => { if (!cancelled) setStats({ turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 }); });
+    return () => { cancelled = true; };
+  }, [roomId, member.id, member.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCorePrompt(null);
+    getMemberCorePrompt(roomId, member.id || member.name)
+      .then((result) => { if (!cancelled) setCorePrompt(result); })
+      .catch(() => { if (!cancelled) setCorePrompt({ content: "", charCount: 0 }); });
     return () => { cancelled = true; };
   }, [roomId, member.id, member.name]);
 
@@ -1044,6 +1077,7 @@ function MemberConfigPanel({
         {tab === "assets" && (
           <div className="space-y-4 pb-6">
             <IdentityCard member={member} />
+            <CoreCard corePrompt={corePrompt} />
             <PrinciplesCard
               title="Principles"
               hint="Member-level principles. Injected into every prompt compile; takes effect on Reload / next activation."
