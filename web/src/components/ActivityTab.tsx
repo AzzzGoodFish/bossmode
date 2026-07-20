@@ -100,10 +100,10 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
         </div>
         <div className="flex items-center gap-2 bg-inset border border-line-soft rounded-lg px-2.5 py-1.5 flex-1 min-w-0">
           <Search size={13} className="text-ink-4 shrink-0" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity…" className="bg-transparent outline-none text-xs text-ink-1 placeholder:text-ink-4 flex-1 min-w-0" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity…" className="bg-transparent outline-none text-[11.5px] text-ink-1 placeholder:text-ink-4 flex-1 min-w-0" />
         </div>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-[14px]">
         {hasMore && <button onClick={loadOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer">Load earlier activity</button>}
         {loading && <div className="text-center text-sm text-ink-4 py-8">Loading activity…</div>}
         {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
@@ -120,7 +120,7 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
 }
 
 function FilterButton({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
-  return <button onClick={onClick} className={`px-3 py-1 text-xs font-medium rounded-md cursor-pointer ${active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>{label} <span className="font-mono text-[9.5px] text-ink-4">{count}</span></button>;
+  return <button onClick={onClick} className={`px-3 py-1 text-[11.5px] font-semibold rounded-md cursor-pointer ${active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>{label} <span className="font-mono text-[9.5px] text-ink-4">{count}</span></button>;
 }
 
 function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
@@ -143,7 +143,7 @@ function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
 
 function TurnBlock({ index, events, query }: { index: number; events: AgentEvent[]; query: string }) {
   const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
-  return <section className="space-y-2"><div className="flex items-center gap-2"><span className="text-[10px] font-semibold tracking-[0.08em] text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} query={query} />)}</section>;
+  return <section className="space-y-[7px]"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} query={query} />)}</section>;
 }
 
 function EventRow({ event, query }: { event: AgentEvent; query: string }) {
@@ -151,24 +151,24 @@ function EventRow({ event, query }: { event: AgentEvent; query: string }) {
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
   if (event.type === "tool_end") return null;
-  if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4">{summary.detail} · {time}</div>;
+  if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
   if (event.type === "tool_start") {
     const tool = toolDisplay(event.toolName, event.args);
-    return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.1em] text-accent-ink">TOOL·{tool.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4">{time}</span></div><pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{formatToolArgsPreview(event.args)}</pre></div>;
+    return <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]"><div className="flex items-center gap-2"><span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink">TOOL·{tool.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span></div><pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre></div>;
   }
   if (event.type === "compaction_start" || event.type === "compaction_end") {
     const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
-    return <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2"><span className={`text-[10px] font-bold tracking-[0.1em] ${tone}`}>{summary.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(summary.detail, query)}</span><span className="font-mono text-[10px] text-ink-4">{time}</span></div>{event.type === "compaction_end" && <pre className="mt-2 bg-inset rounded p-2 text-[11px] text-ink-4 overflow-x-auto max-h-28">{formatCompactionPreview(event)}</pre>}</div>;
+    return <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]"><div className="flex items-center gap-2"><span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase ${tone}`}>{summary.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(summary.detail, query)}</span><span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span></div>{event.type === "compaction_end" && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}</div>;
   }
   if (event.type === "message_end" && (event.thinking || event.text)) {
     // Both cards render when a message carries thinking and text (thinking-enabled
     // members must not have their reply silently swallowed).
     return <>
-      {event.thinking ? <div className="rounded-lg border border-line-soft bg-surface-0 p-3 text-xs text-ink-3"><span className="font-bold text-think tracking-[0.1em] text-[10px]">THINKING</span><div className="mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div> : null}
-      {event.text ? <div className="rounded-lg border border-line-soft bg-surface-0 p-3"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-ink-2 tracking-[0.1em] text-[10px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto">{time}</span></div><Markdown content={String(event.text)} /></div> : null}
+      {event.thinking ? <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px] text-xs text-ink-3"><span className="font-extrabold text-think tracking-[0.08em] uppercase text-[9.5px]">THINKING</span><div className="mt-[6px] text-[12.5px] text-ink-2 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div> : null}
+      {event.text ? <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]"><div className="flex items-center gap-2 mb-1"><span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span></div><div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={String(event.text)} /></div></div> : null}
     </>;
   }
-  return <div className="text-xs text-ink-3">{summary.label} {summary.detail} <span className="font-mono text-ink-4">{time}</span></div>;
+  return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.label} {summary.detail} <span className="font-mono text-ink-4">{time}</span></div>;
 }
 
 function highlight(text: string, query: string): ReactNode {
