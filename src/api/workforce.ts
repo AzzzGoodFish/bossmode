@@ -18,6 +18,7 @@ import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
+import { readMemberStats } from "../workspace/member-stats-store.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 
@@ -292,6 +293,20 @@ addRoute("GET", "/api/members/:id/token-usage", async (req, res, params) => {
   const member = getMember(params.id);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
   sendJson(res, 200, getMemberTokenUsage(member.name));
+});
+
+/** Persistent per-member stats for this room: turns, tool calls, active work
+ * time (ms), cumulative tokens, and cost. Sourced from the incremental
+ * accumulator (member-stats-store), not a live JSONL rescan. A member with no
+ * recorded activity yet returns real zeros, never fabricated numbers. */
+addRoute("GET", "/api/members/:id/stats", async (req, res, params) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const roomId = url.searchParams.get("roomId");
+  if (!roomId) { sendJson(res, 400, { error: "roomId is required" }); return; }
+  const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string; name: string } | null : undefined;
+  const roomMember = resolveRoomMemberRef?.(roomId, params.id);
+  if (!roomMember) { sendJson(res, 404, { error: "Member not found in this room" }); return; }
+  sendJson(res, 200, readMemberStats(roomId, roomMember.id));
 });
 
 addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {

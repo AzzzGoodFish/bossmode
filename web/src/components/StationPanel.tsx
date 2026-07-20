@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail,
+  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
@@ -697,6 +697,84 @@ function MainlineCard({ member, mainline, full }: { member: MemberInfo; mainline
   );
 }
 
+function formatDuration(ms: number): string {
+  if (ms <= 0) return "0h";
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `${Math.round(ms / 60_000)}m`;
+  if (hours < 100) return `${hours.toFixed(1)}h`;
+  return `${Math.round(hours)}h`;
+}
+
+function StatSlot({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="rounded-lg border border-line-soft bg-inset px-3 py-2.5">
+      <div className="text-[10px] font-semibold tracking-[0.06em] text-ink-4">{label}</div>
+      <div className="mt-1 text-[20px] font-semibold text-ink-1 leading-tight tabular-nums">{value}</div>
+      {detail ? <div className="mt-0.5 text-[11px] text-ink-4 leading-tight">{detail}</div> : null}
+    </div>
+  );
+}
+
+/** Overview status block: six real, data-backed cells. Every value is sourced
+ * from live state or the persistent per-member stats accumulator (never
+ * fabricated) — a member with no recorded activity shows real zeros. */
+function StatusGrid({ status, member, contextUsage, stats, models }: {
+  status: string;
+  member: MemberInfo;
+  contextUsage?: ContextUsageData;
+  stats: MemberStats | null;
+  models: AvailableModelOption[];
+}) {
+  const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
+  const pct = hasUsage ? Math.round(contextUsage.percentage!) : null;
+  const totalTokens = stats ? stats.tokens.input + stats.tokens.output + stats.tokens.cacheRead + stats.tokens.cacheWrite : 0;
+  return (
+    <PanelCard title="Status" tag={<AssetTag>this room</AssetTag>} hint="Live state and cumulative activity for this member, in this room.">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+        <StatSlot label="STATUS" value={statusLabel(status)} />
+        <StatSlot label="MODEL" value={member.model ? compactModelId(member.model, models) : "—"} />
+        <StatSlot label="CONTEXT" value={pct !== null ? `${pct}%` : "—"} detail={contextUsage?.totalTokens ? `${formatTokens(contextUsage.totalTokens)} tok` : undefined} />
+        <StatSlot label="TOKENS · TOTAL" value={stats ? formatTokens(totalTokens) : "—"} detail="cumulative" />
+        <StatSlot label="ACTIVE TIME" value={stats ? formatDuration(stats.activeMs) : "—"} detail="cumulative" />
+        <StatSlot label="ACTIVITY" value={stats ? String(stats.turns) : "—"} detail={stats ? `turns · ${stats.toolCalls} tool calls` : undefined} />
+      </div>
+    </PanelCard>
+  );
+}
+
+/** Overview memory block: budget usage only, no content (content lives in
+ * Prompt assets). */
+function MemoryBudgets({ principlesBudget, mainlineBudget }: { principlesBudget?: PromptAssetBudget; mainlineBudget?: PromptAssetBudget }) {
+  return (
+    <PanelCard title="Memory" tag={<AssetTag>principles · mainline</AssetTag>} hint="How full this member's persistent memory is. See Prompt assets for content.">
+      <div className="space-y-2.5 mt-3">
+        <div>
+          <div className="flex items-center justify-between text-[11px] text-ink-4 mb-1"><span>Principles</span><span>{principlesBudget ? formatBudgetShort(principlesBudget) : "—"}</span></div>
+          <BudgetBar budget={principlesBudget} />
+        </div>
+        <div>
+          <div className="flex items-center justify-between text-[11px] text-ink-4 mb-1"><span>Mainline</span><span>{mainlineBudget ? formatBudgetShort(mainlineBudget) : "—"}</span></div>
+          <BudgetBar budget={mainlineBudget} />
+        </div>
+      </div>
+    </PanelCard>
+  );
+}
+
+function formatBudgetShort(budget: PromptAssetBudget): string {
+  return `${formatTokens(budget.usage)}/${formatTokens(budget.limit)}`;
+}
+
+function BudgetBar({ budget }: { budget?: PromptAssetBudget }) {
+  const pct = budget ? Math.max(2, Math.min(100, budget.pct)) : 0;
+  const tone = !budget ? "bg-surface-3" : budget.overLimit ? "bg-blocked" : budget.pct >= 80 ? "bg-think" : "bg-accent";
+  return (
+    <div className="h-2 rounded-full bg-surface-3 overflow-hidden">
+      <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 function IdentityCard({ member }: { member: MemberInfo }) {
   const agentName = member.agent || member.sourceAgent || member.name;
   const [agent, setAgent] = useState<AgentDetail | null>(null);
@@ -795,6 +873,7 @@ function MemberConfigPanel({
   const [roomPrinciples, setRoomPrinciples] = useState<Principles | null>(null);
   const [memberPrinciples, setMemberPrinciples] = useState<Principles | null>(null);
   const [mainline, setMainline] = useState<Mainline | null>(null);
+  const [stats, setStats] = useState<MemberStats | null>(null);
 
   useEffect(() => { setDraftName(member.name); setEditingName(false); setTab("overview"); }, [member.id, member.name]);
 
@@ -818,6 +897,15 @@ function MemberConfigPanel({
       setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
       setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
     });
+    return () => { cancelled = true; };
+  }, [roomId, member.id, member.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStats(null);
+    getMemberStats(member.id || member.name, roomId)
+      .then((result) => { if (!cancelled) setStats(result); })
+      .catch(() => { if (!cancelled) setStats({ turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 }); });
     return () => { cancelled = true; };
   }, [roomId, member.id, member.name]);
 
@@ -920,7 +1008,8 @@ function MemberConfigPanel({
       <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
         {tab === "overview" && (
           <div className="space-y-4 pb-6">
-            <IdentityCard member={member} />
+            <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} />
+            <MemoryBudgets principlesBudget={memberPrinciples?.budget} mainlineBudget={mainline?.budget} />
             <PanelCard title="Model" tag={<AssetTag>this room</AssetTag>} hint="Model and thinking level for this member in this room. Applies on the next turn.">
               <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
                 <label className="block space-y-1.5 min-w-0">
@@ -949,19 +1038,12 @@ function MemberConfigPanel({
                 </label>
               </div>
             </PanelCard>
-            <PrinciplesCard
-              title="Principles"
-              hint="How this member works — durable rules grown from your feedback. Read-only here."
-              principles={memberPrinciples}
-              emptyTitle="No principles yet"
-              emptyHint={`Tell @${member.name} in chat how you want it to work — it will curate them here itself.`}
-            />
-            <MainlineCard member={member} mainline={mainline} />
           </div>
         )}
 
         {tab === "assets" && (
           <div className="space-y-4 pb-6">
+            <IdentityCard member={member} />
             <PrinciplesCard
               title="Principles"
               hint="Member-level principles. Injected into every prompt compile; takes effect on Reload / next activation."
@@ -970,6 +1052,7 @@ function MemberConfigPanel({
               emptyTitle="Empty"
               emptyHint="Nothing curated yet."
             />
+            <MainlineCard member={member} mainline={mainline} full />
             <PanelCard
               title="Room principles"
               tag={<AssetTag>shared · leader-written</AssetTag>}
@@ -986,7 +1069,6 @@ function MemberConfigPanel({
                 <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />
               )}
             </PanelCard>
-            <MainlineCard member={member} mainline={mainline} full />
             <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
               <span className="font-extrabold text-accent-ink shrink-0">i</span>
               <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_memory</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
