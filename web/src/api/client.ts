@@ -759,6 +759,10 @@ export async function getMemberMainline(roomId: string, memberRef: string): Prom
   return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/mainline`);
 }
 
+export async function getMemberCorePrompt(roomId: string, memberRef: string): Promise<{ content: string; charCount: number }> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/core-prompt`);
+}
+
 // -- Messages --
 
 export interface SummaryMeta {

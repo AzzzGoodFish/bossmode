@@ -13,9 +13,11 @@ import { parseMentionMemberIds, parseMentions } from "../communication/router.js
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
-import { readConfig, writeConfig } from "../shared/config.js";
+import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
+import { compileMemberPrompt } from "../engine/prompt-compiler.js";
+import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
@@ -244,6 +246,34 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, 
     memberName: member.name,
     budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
     suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
+  });
+});
+
+/** Real, compiled Bossmode Core prompt text for this member in this room —
+ * read-only, sourced directly from the same compileMemberPrompt() the runtime
+ * uses to build the actual system prompt (never a static/hardcoded preview). */
+addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const member = resolveRoomMember(params.id, params.memberRef);
+  if (!member) {
+    sendJson(res, 404, { error: "Member is not in this room" });
+    return;
+  }
+  const agentDef = loadAgentDefinition(member.agent);
+  if (!agentDef) {
+    sendJson(res, 404, { error: "Agent definition not found for this member" });
+    return;
+  }
+  const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
+  const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot });
+  const core = compiled.sections.find((s) => s.id === "bossmode-core");
+  sendJson(res, 200, {
+    content: core?.content || "",
+    charCount: core?.charCount ?? 0,
   });
 });
 
