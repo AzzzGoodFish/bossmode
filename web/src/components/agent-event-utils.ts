@@ -222,7 +222,12 @@ export function isCompactionEvent(event: AgentEvent): boolean {
 }
 
 export function isReplyEvent(event: AgentEvent): boolean {
-  return event.type === "message_end" || event.type === "agent_reply" || event.type === "user_steer";
+  // The Replies filter should only surface events with actual reply content —
+  // a message_end from a pure tool-call round (no text, no thinking) carries
+  // nothing the Tools/All view doesn't already show, so it's excluded here
+  // (still shown in All, per fish's ruling).
+  if (event.type === "message_end") return Boolean(event.text || event.thinking);
+  return event.type === "agent_reply" || event.type === "user_steer";
 }
 
 export function diffStatForTool(event: AgentEvent): { added: number; removed: number } | null {

@@ -1,29 +1,33 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Search, Send } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Search } from "lucide-react";
 import { getAgentEventsPaginated, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
 const PAGE_SIZE = 120;
+const LOAD_MORE_THRESHOLD_PX = 80;
 type FilterMode = "all" | "tools" | "replies";
 
 /** Member panel Activity tab: the event stream (tool calls, thinking, replies,
  * compaction) for one member, with filter/search and turn grouping. Renders as
  * normal in-flow content — the panel's own tab body provides the scroll
  * container (same as the Overview/Prompt assets/Session tabs), so this has no
- * height constraints or scrollers of its own. */
-export function ActivityTab({ roomId, agentName, onSteer }: {
+ * height constraints or scrollers of its own. It reaches into that shared
+ * container via `scrollContainerRef` for two things: landing on the newest
+ * event on open, and infinite-scroll-up to load earlier history. */
+export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
   roomId: string;
   agentName: string;
-  onSteer?: (agentName: string, content: string) => void;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [oldestIndex, setOldestIndex] = useState<number | undefined>();
   const [filter, setFilter] = useState<FilterMode>("all");
   const [query, setQuery] = useState("");
-  const [steer, setSteer] = useState("");
+  const scrolledToLatestRef = useRef(false);
 
   const loadInitial = useCallback(async () => {
     setLoading(true);
@@ -37,7 +41,15 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
     }
   }, [roomId, agentName]);
 
-  useEffect(() => { void loadInitial(); }, [loadInitial]);
+  useEffect(() => { scrolledToLatestRef.current = false; void loadInitial(); }, [loadInitial]);
+
+  // Land on the newest event as soon as the initial page has rendered, once per mount.
+  useEffect(() => {
+    if (loading || scrolledToLatestRef.current) return;
+    const el = scrollContainerRef?.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    scrolledToLatestRef.current = true;
+  }, [loading, scrollContainerRef]);
 
   useEffect(() => {
     const token = getToken();
@@ -56,13 +68,39 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
     return () => ws.close();
   }, [roomId, agentName]);
 
-  const loadOlder = async () => {
-    if (!hasMore || oldestIndex === undefined) return;
-    const result = await getAgentEventsPaginated(roomId, agentName, PAGE_SIZE, oldestIndex);
-    setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
-    setHasMore(result.hasMore);
-    setOldestIndex(Math.max(0, oldestIndex - result.events.length));
-  };
+  const loadOlder = useCallback(async () => {
+    if (!hasMore || oldestIndex === undefined || loadingOlder) return;
+    setLoadingOlder(true);
+    const el = scrollContainerRef?.current;
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+    const prevScrollTop = el?.scrollTop ?? 0;
+    try {
+      const result = await getAgentEventsPaginated(roomId, agentName, PAGE_SIZE, oldestIndex);
+      setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
+      setHasMore(result.hasMore);
+      setOldestIndex(Math.max(0, oldestIndex - result.events.length));
+      // Prepending content shifts everything down; restore the pre-load scroll
+      // position so the view doesn't jump (infinite-scroll-up must feel stable).
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMore, oldestIndex, loadingOlder, roomId, agentName, scrollContainerRef]);
+
+  // Infinite scroll: scrolling near the top of the shared tab-body container
+  // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).
+  useEffect(() => {
+    const el = scrollContainerRef?.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollTop <= LOAD_MORE_THRESHOLD_PX) void loadOlder();
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [scrollContainerRef, loadOlder]);
 
   const filteredEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,14 +120,6 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
 
   const turns = useMemo(() => groupTurns(filteredEvents), [filteredEvents]);
 
-  const sendSteer = () => {
-    const text = steer.trim();
-    if (!text || !onSteer) return;
-    onSteer(agentName, text);
-    setEvents((prev) => [...prev, { type: "user_steer", text, ts: Date.now() }]);
-    setSteer("");
-  };
-
   return (
     <div className="space-y-4 pb-6">
       <div className="flex items-center gap-2.5">
@@ -104,17 +134,11 @@ export function ActivityTab({ roomId, agentName, onSteer }: {
         </div>
       </div>
       <div className="space-y-[14px]">
-        {hasMore && <button onClick={loadOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer">Load earlier activity</button>}
+        {hasMore && <button onClick={() => void loadOlder()} disabled={loadingOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer disabled:opacity-50 disabled:cursor-default">{loadingOlder ? "Loading…" : "Load earlier activity"}</button>}
         {loading && <div className="text-center text-sm text-ink-4 py-8">Loading activity…</div>}
         {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
         {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
       </div>
-      {onSteer && (
-        <div className="sticky bottom-0 -mx-5 px-5 pt-3 pb-1 border-t border-line-soft bg-surface-1 flex gap-2">
-          <input value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") sendSteer(); }} placeholder={`Steer @${agentName}…`} className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong" />
-          <button onClick={sendSteer} className="inline-flex items-center gap-1 px-3 py-2 bg-accent text-accent-contrast text-sm font-medium rounded cursor-pointer shrink-0"><Send size={14} />Send</button>
-        </div>
-      )}
     </div>
   );
 }
