@@ -12,6 +12,7 @@ import { runMemoryStorageReorgMigration } from "../workspace/memory-storage-reor
 import { runPromptMemoryRenameMigration } from "../workspace/prompt-memory-rename-migration.js";
 import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
 import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
+import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -99,6 +100,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runMainlineEnglishHeadingsMigration();
   } catch (err) {
     logger.error("server", "mainline english headings migration failed", { error: String(err) });
+  }
+
+  try {
+    runMemberStatsBackfillMigration();
+  } catch (err) {
+    logger.error("server", "member stats backfill migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so

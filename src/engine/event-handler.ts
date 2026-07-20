@@ -10,6 +10,7 @@ import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
+import { recordTurnStart, recordTurnEnd, recordToolCall, recordTokenUsage } from "../workspace/member-stats-store.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -170,6 +171,22 @@ export function handleAgentEvent(
   if (processedEvent.type !== "message_update" && processedEvent.type !== "tool_update") {
     eventBuffer.push(processedEvent);
     try { appendEventToDisk(roomId, memberId || agentName, processedEvent); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
+  }
+
+  // Persistent per-member stats (turns/tool calls/active time/tokens) —
+  // incremental, O(1) per event, so Overview reads never rescan the full log.
+  // agent_start/agent_end don't carry a ts on the wire (only appendEventToDisk
+  // stamps one, into a copy); capture the persist-time timestamp here directly.
+  const statsRef = memberId || agentName;
+  const statsTs = Date.now();
+  if (processedEvent.type === "agent_start") {
+    recordTurnStart(instanceKey, statsTs);
+  } else if (processedEvent.type === "agent_end") {
+    try { recordTurnEnd(roomId, statsRef, instanceKey, statsTs); } catch (err) { logger.error("member-stats", "recordTurnEnd failed", { roomId, agent: agentName, error: String(err) }); }
+  } else if (processedEvent.type === "tool_start") {
+    try { recordToolCall(roomId, statsRef); } catch (err) { logger.error("member-stats", "recordToolCall failed", { roomId, agent: agentName, error: String(err) }); }
+  } else if (processedEvent.type === "message_end" && processedEvent.usage) {
+    try { recordTokenUsage(roomId, statsRef, processedEvent.usage); } catch (err) { logger.error("member-stats", "recordTokenUsage failed", { roomId, agent: agentName, error: String(err) }); }
   }
 
   // WebSocket push — forward all events for live streaming

@@ -193,6 +193,19 @@ export async function getMemberTokenUsage(id: string, roomId?: string): Promise<
   return apiFetch(`/api/members/${id}/token-usage${query}`);
 }
 
+export interface MemberStats {
+  turns: number;
+  toolCalls: number;
+  activeMs: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  cost: number;
+  updatedAt?: number;
+}
+
+export async function getMemberStats(id: string, roomId: string): Promise<MemberStats> {
+  return apiFetch(`/api/members/${id}/stats?roomId=${encodeURIComponent(roomId)}`);
+}
+
 export interface AgentRuntimeParams {
   model?: string;
   thinkingLevel?: string;
