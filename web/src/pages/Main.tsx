@@ -23,7 +23,6 @@ import { TaskPreviewSurface, TaskPreviewPanel } from "../components/TaskPreviewS
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
-import { WorkstationDetail } from "../components/WorkstationDetail";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
 import { useDialog } from "../components/dialogs";
@@ -103,10 +102,8 @@ export function Main({
     }
   }, [externalShowCreateRoom, onCreateRoomShown]);
 
-  // 视图：Chat | Tasks；工位 tab：openLensTabs + lensAgent（当前激活工位）
+  // 视图：Chat | Tasks
   const [view, setView] = useState<RoomView>("chat");
-  const [lensAgent, setLensAgent] = useState<string | null>(null);
-  const [openLensTabs, setOpenLensTabs] = useState<string[]>([]);
 
   const {
     room,
@@ -157,43 +154,18 @@ export function Main({
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
     sessionStorage.removeItem("bossmode_main_restore_tab");
     setView(restoreTab === "tasks" ? "tasks" : "chat");
-    // 从 Team 页 "Lens" 跳转过来时直接打开对应工位 tab
-    const openLensAgent = sessionStorage.getItem("bossmode_main_open_lens");
-    sessionStorage.removeItem("bossmode_main_open_lens");
-    setLensAgent(openLensAgent || null);
-    setOpenLensTabs(openLensAgent ? [openLensAgent] : []);
     setArtifactPreview(null);
     setTaskPreviewId(null);
   }, [selectedRoomId]);
 
   // 通知 Layout 当前关注的 tab key（unread 逻辑）
   useEffect(() => {
-    const key = lensAgent ?? (view === "chat" ? "room" : "tasks");
+    const key = view === "chat" ? "room" : "tasks";
     onActiveTabKeyChange(key);
-  }, [view, lensAgent, onActiveTabKeyChange]);
-
-  const openLens = useCallback((agentName: string) => {
-    setView("chat");
-    setLensAgent(agentName);
-    setOpenLensTabs((prev) => prev.includes(agentName) ? prev : [...prev, agentName]);
-    setMobileMembersOpen(false);
-    if (selectedRoomId) onClearUnreadTab(selectedRoomId, agentName);
-  }, [selectedRoomId, onClearUnreadTab]);
-
-  const closeLens = useCallback(() => {
-    setLensAgent(null);
-    if (selectedRoomId) onClearUnreadTab(selectedRoomId, "room");
-  }, [selectedRoomId, onClearUnreadTab]);
-
-  const closeLensTab = useCallback((agentName: string) => {
-    setOpenLensTabs((prev) => prev.filter((name) => name !== agentName));
-    setLensAgent((current) => current === agentName ? null : current);
-    if (selectedRoomId && lensAgent === agentName) onClearUnreadTab(selectedRoomId, "room");
-  }, [selectedRoomId, lensAgent, onClearUnreadTab]);
+  }, [view, onActiveTabKeyChange]);
 
   const switchView = useCallback((v: RoomView) => {
     setView(v);
-    setLensAgent(null);
     if (v !== "chat") {
       setArtifactPreview(null);
       setTaskPreviewId(null);
@@ -311,17 +283,6 @@ export function Main({
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.key === "Escape" || e.code === "Escape") && lensAgent) {
-        e.preventDefault();
-        closeLens();
-      }
-    };
-    window.addEventListener("keydown", handler, { capture: true });
-    return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [lensAgent, closeLens]);
-
   const handleAddMember = useCallback(async (agentName: string, memberName?: string) => {
     if (!selectedRoomId) return;
     const name = (memberName || agentName).trim();
@@ -369,20 +330,6 @@ export function Main({
     }`;
   const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
-  const lensFull = view === "chat" && !!lensAgent;
-
-  const lensPanel = lensFull && lensAgent && (
-    <WorkstationDetail
-      key={`${selectedRoomId}:${lensAgent}`}
-      roomId={selectedRoomId!}
-      agentName={lensAgent}
-      status={agentStatus[lensAgent]}
-      contextUsage={contextUsage[lensAgent]}
-      onClose={closeLens}
-      onSteer={(content) => handleSteer(lensAgent, content)}
-    />
-  );
-
   return (
     <>
       {room && (
@@ -406,11 +353,11 @@ export function Main({
         </button>
 
         <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">
-          <button onClick={() => switchView("chat")} className={segBtn(view === "chat" && !lensFull)}>
+          <button onClick={() => switchView("chat")} className={segBtn(view === "chat")}>
             Chat
             {unreadTabs?.has("room") && view !== "chat" && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent ml-1.5 align-middle" />}
           </button>
-          <button onClick={() => switchView("tasks")} className={segBtn(view === "tasks" && !lensFull)}>
+          <button onClick={() => switchView("tasks")} className={segBtn(view === "tasks")}>
             Tasks
           </button>
         </div>
@@ -439,22 +386,10 @@ export function Main({
         </div>
       </div>
 
-      {/* 内容区：chat/tasks + 工位 tab 详情 + 工位墙 */}
+      {/* 内容区：chat/tasks + 工位墙 */}
       <div className="flex-1 flex min-h-0 bg-surface-1">
         <div className="flex-1 flex flex-col min-w-0">
-          {view === "chat" && openLensTabs.length > 0 && (
-            <WorkstationSubTabs
-              roomName={room.name}
-              tabs={openLensTabs}
-              activeAgent={lensAgent}
-              agentStatus={agentStatus}
-              onRoomClick={closeLens}
-              onAgentClick={(agent) => { setLensAgent(agent); if (selectedRoomId) onClearUnreadTab(selectedRoomId, agent); }}
-              onCloseAgent={closeLensTab}
-              roomUnread={!!unreadTabs?.has("room")}
-            />
-          )}
-          {lensFull ? lensPanel : view === "chat" ? (
+          {view === "chat" ? (
             <>
               <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} />
               <MessageInput onSend={sendMessage} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} />
@@ -468,7 +403,7 @@ export function Main({
           ) : null}
         </div>
 
-        {(artifactPreview || taskPreviewId) && view === "chat" && selectedRoomId && !isMobile && !lensFull && (
+        {(artifactPreview || taskPreviewId) && view === "chat" && selectedRoomId && !isMobile && (
           <>
             <div
               role="separator"
@@ -509,7 +444,7 @@ export function Main({
             agentStatus={displayAgentStatus}
             contextUsage={displayContextUsage}
             roomId={room.id}
-            onOpenLens={openLens}
+            onSteer={handleSteer}
             onOpenMcpSettings={onOpenMcpSettings}
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
@@ -524,7 +459,7 @@ export function Main({
               agentStatus={displayAgentStatus}
               contextUsage={displayContextUsage}
               roomId={room.id}
-              onOpenLens={openLens}
+              onSteer={handleSteer}
               onOpenMcpSettings={onOpenMcpSettings}
               onMembersChanged={reloadRoom}
               unreadAgents={unreadTabs}
@@ -630,50 +565,5 @@ export function Main({
         </Sheet>
       )}
     </>
-  );
-}
-
-
-function WorkstationSubTabs({ roomName, tabs, activeAgent, agentStatus, onRoomClick, onAgentClick, onCloseAgent, roomUnread }: {
-  roomName: string;
-  tabs: string[];
-  activeAgent: string | null;
-  agentStatus: Record<string, string>;
-  onRoomClick: () => void;
-  onAgentClick: (agent: string) => void;
-  onCloseAgent: (agent: string) => void;
-  roomUnread: boolean;
-}) {
-  return (
-    <div className="h-9 shrink-0 border-b border-line-soft bg-surface-1 px-3 flex items-center gap-1 overflow-x-auto">
-      <button
-        onClick={onRoomClick}
-        className={`relative h-7 px-3 rounded-md text-xs font-medium shrink-0 cursor-pointer transition-colors ${!activeAgent ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}
-        title={roomName}
-      >
-        <span className="max-w-[180px] truncate block">{roomName}</span>
-        {activeAgent && roomUnread && <span className="absolute right-1.5 top-1.5 w-1.5 h-1.5 rounded-full bg-accent" />}
-      </button>
-      {tabs.map((agent) => {
-        const status = agentStatus[agent] || "inactive";
-        const dot = status === "working" ? "bg-onair" : status === "thinking" ? "bg-think" : "bg-ink-4";
-        const active = activeAgent === agent;
-        return (
-          <div key={agent} className={`h-7 rounded-md shrink-0 flex items-center gap-1.5 pl-2 pr-1 transition-colors ${active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}>
-            <button onClick={() => onAgentClick(agent)} className="min-w-0 inline-flex items-center gap-1.5 cursor-pointer" title={agent}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-              <span className="text-xs font-medium max-w-[140px] truncate">{agent}</span>
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onCloseAgent(agent); }}
-              className="w-5 h-5 rounded flex items-center justify-center text-ink-4 hover:text-ink-2 hover:bg-surface-1 cursor-pointer"
-              title={`Close ${agent}`}
-            >
-              <X size={11} />
-            </button>
-          </div>
-        );
-      })}
-    </div>
   );
 }

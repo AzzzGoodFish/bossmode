@@ -28,10 +28,10 @@ describe("P1 user-language hygiene", () => {
   });
 
   it("does not expose runtime or storage implementation labels on everyday surfaces", () => {
-    const workstation = source("web/src/components/WorkstationDetail.tsx");
+    const activity = source("web/src/components/ActivityTab.tsx");
     const roomSettings = source("web/src/components/RoomSettingsDialog.tsx");
     const models = source("web/src/components/ModelPicker.tsx");
-    expect(workstation).not.toContain('member?.runtime || "pi-sdk"');
+    expect(activity).not.toContain('member?.runtime || "pi-sdk"');
     expect(roomSettings).not.toMatch(/legacy\/global|knowledge docs tree|through[^.]{0,80}\btools\b/i);
     expect(models).not.toMatch(/Import credentials|Model Credentials|not in available models/);
   });
@@ -52,7 +52,7 @@ describe("P1 user-language hygiene", () => {
     const activeSources = [
       "web/src/pages/SettingsPage.tsx",
       "web/src/components/StationPanel.tsx",
-      "web/src/components/WorkstationDetail.tsx",
+      "web/src/components/ActivityTab.tsx",
       "web/src/pages/Main.tsx",
       "web/src/pages/TaskDetailPage.tsx",
       "web/src/pages/KnowledgePage.tsx",

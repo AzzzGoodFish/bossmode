@@ -14,13 +14,14 @@ import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
+import { ActivityTab } from "./ActivityTab";
 
 interface StationPanelProps {
   members: string[];
   agentStatus: AgentStatusMap;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
-  onOpenLens?: (agentName: string) => void;
+  onSteer?: (agentName: string, content: string) => void;
   onOpenMcpSettings?: () => void;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
@@ -99,7 +100,7 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenLens, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onSteer, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -484,8 +485,8 @@ This clears the member's working session memory and starts fresh. Room messages 
             mcpServers={mcpServers}
             mcpLoadStatus={mcpLoadStatus}
             onRetryMcp={refreshMcpSettings}
-            onOpenWorkstation={() => { onOpenLens?.(selectedMember); setSelectedMember(null); }}
             onOpenMcpSettings={() => { onOpenMcpSettings?.(); setSelectedMember(null); }}
+            onSteer={onSteer}
             onClose={() => setSelectedMember(null)}
             onRename={(name) => handleRenameMember(memberInfos[selectedMember], name)}
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
@@ -531,7 +532,7 @@ function availabilityTone(status?: string): string {
   return "text-ink-4 border-line bg-surface-2";
 }
 
-type PanelTab = "overview" | "assets" | "session";
+type PanelTab = "overview" | "assets" | "activity" | "session";
 
 function BudgetMeter({ budget }: { budget?: PromptAssetBudget }) {
   if (!budget) return null;
@@ -749,8 +750,8 @@ function MemberConfigPanel({
   mcpServers,
   mcpLoadStatus,
   onRetryMcp,
-  onOpenWorkstation,
   onOpenMcpSettings,
+  onSteer,
   onClose,
   onRename,
   onSwitchModel,
@@ -771,8 +772,8 @@ function MemberConfigPanel({
   mcpServers: McpServerSummary[];
   mcpLoadStatus: "loading" | "ready" | "error";
   onRetryMcp: () => void;
-  onOpenWorkstation: () => void;
   onOpenMcpSettings: () => void;
+  onSteer?: (agentName: string, content: string) => void;
   onClose: () => void;
   onRename: (name: string) => Promise<void>;
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
@@ -897,13 +898,12 @@ function MemberConfigPanel({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 cursor-pointer">View session detail</button>
             <button onClick={onClose} title="Close" className="p-1.5 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-surface-2 transition-colors cursor-pointer"><X size={16} /></button>
           </div>
         </header>
 
         <div className="flex gap-1 rounded-xl border border-line-soft bg-inset p-1">
-          {([["overview", "Overview"], ["assets", "Prompt assets"], ["session", "Session & tools"]] as const).map(([key, label]) => (
+          {([["overview", "Overview"], ["assets", "Prompt assets"], ["activity", "Activity"], ["session", "Session & tools"]] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -994,6 +994,10 @@ function MemberConfigPanel({
           </div>
         )}
 
+        {tab === "activity" && (
+          <ActivityTab roomId={roomId} agentName={member.name} onSteer={onSteer} />
+        )}
+
         {tab === "session" && (
           <div className="space-y-4 pb-6">
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
@@ -1002,7 +1006,6 @@ function MemberConfigPanel({
                   <div className="text-sm font-semibold text-ink-1">Context &amp; Session</div>
                   <div className="text-xs text-ink-4 mt-0.5">Manage this member’s conversation context and apply recent changes.</div>
                 </div>
-                <button onClick={onOpenWorkstation} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">View session detail</button>
               </div>
               {hasUsage ? (
                 <div className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
