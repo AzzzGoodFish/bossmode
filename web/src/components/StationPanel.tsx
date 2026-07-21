@@ -886,7 +886,6 @@ function MemberConfigPanel({
   const statusText = statusLabel(status).toLowerCase();
   const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
   const [tab, setTab] = useState<PanelTab>("overview");
-  const tabScrollRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
@@ -1027,7 +1026,12 @@ function MemberConfigPanel({
         </div>
       </div>
 
-      <div ref={tabScrollRef} className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+      {tab === "activity" ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <ActivityTab roomId={roomId} agentName={member.name} />
+        </div>
+      ) : (
+      <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
         {tab === "overview" && (
           <div className="space-y-4 pb-6">
             <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} />
@@ -1097,10 +1101,6 @@ function MemberConfigPanel({
               <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_memory</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
             </div>
           </div>
-        )}
-
-        {tab === "activity" && (
-          <ActivityTab roomId={roomId} agentName={member.name} scrollContainerRef={tabScrollRef} />
         )}
 
         {tab === "session" && (
@@ -1232,6 +1232,7 @@ function MemberConfigPanel({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
