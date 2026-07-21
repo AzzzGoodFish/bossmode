@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 import { getAgentEventsPaginated, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
@@ -8,17 +8,19 @@ const PAGE_SIZE = 120;
 const LOAD_MORE_THRESHOLD_PX = 80;
 type FilterMode = "all" | "tools" | "replies";
 
-/** Member panel Activity tab: the event stream (tool calls, thinking, replies,
- * compaction) for one member, with filter/search and turn grouping. Renders as
- * normal in-flow content — the panel's own tab body provides the scroll
- * container (same as the Overview/Prompt assets/Session tabs), so this has no
- * height constraints or scrollers of its own. It reaches into that shared
- * container via `scrollContainerRef` for two things: landing on the newest
- * event on open, and infinite-scroll-up to load earlier history. */
-export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
+/** Member panel Activity tab: event stream with All/Tools/Replies filter + search.
+ *
+ * Layout (sticky sub-header / 粘性子表头):
+ * - Filter bar + search sit OUTSIDE the scroll container as a fixed sub-header —
+ *   always visible regardless of scroll position (fish's 0.18.8 self-test finding:
+ *   when infinite scroll lands on newest/bottom, an in-stream filter was off-screen
+ *   and got pushed away by load-earlier when you scrolled up to reach it).
+ * - Only the event stream scrolls. Infinite scroll-up + scroll anchoring apply to
+ *   that stream container alone.
+ */
+export function ActivityTab({ roomId, agentName }: {
   roomId: string;
   agentName: string;
-  scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,12 @@ export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
   const [oldestIndex, setOldestIndex] = useState<number | undefined>();
   const [filter, setFilter] = useState<FilterMode>("all");
   const [query, setQuery] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledToLatestRef = useRef(false);
+  // Synchronous re-entry guard — React state alone can miss a second scroll
+  // event that fires before the next render (QA noted this under synthetic
+  // scrollTop assignment; real wheel gestures were fine, but a ref is cheap insurance).
+  const loadingOlderRef = useRef(false);
 
   const loadInitial = useCallback(async () => {
     setLoading(true);
@@ -46,10 +53,10 @@ export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
   // Land on the newest event as soon as the initial page has rendered, once per mount.
   useEffect(() => {
     if (loading || scrolledToLatestRef.current) return;
-    const el = scrollContainerRef?.current;
+    const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
     scrolledToLatestRef.current = true;
-  }, [loading, scrollContainerRef]);
+  }, [loading]);
 
   useEffect(() => {
     const token = getToken();
@@ -69,9 +76,10 @@ export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
   }, [roomId, agentName]);
 
   const loadOlder = useCallback(async () => {
-    if (!hasMore || oldestIndex === undefined || loadingOlder) return;
+    if (!hasMore || oldestIndex === undefined || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
     setLoadingOlder(true);
-    const el = scrollContainerRef?.current;
+    const el = scrollRef.current;
     const prevScrollHeight = el?.scrollHeight ?? 0;
     const prevScrollTop = el?.scrollTop ?? 0;
     try {
@@ -80,27 +88,28 @@ export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
       setHasMore(result.hasMore);
       setOldestIndex(Math.max(0, oldestIndex - result.events.length));
       // Prepending content shifts everything down; restore the pre-load scroll
-      // position so the view doesn't jump (infinite-scroll-up must feel stable).
+      // position so the view doesn't jump (scroll anchoring / 滚动锚定).
       requestAnimationFrame(() => {
         if (!el) return;
         el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop;
       });
     } finally {
+      loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore, oldestIndex, loadingOlder, roomId, agentName, scrollContainerRef]);
+  }, [hasMore, oldestIndex, roomId, agentName]);
 
-  // Infinite scroll: scrolling near the top of the shared tab-body container
+  // Infinite scroll: scrolling near the top of the event-stream container
   // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).
   useEffect(() => {
-    const el = scrollContainerRef?.current;
+    const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
       if (el.scrollTop <= LOAD_MORE_THRESHOLD_PX) void loadOlder();
     };
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollContainerRef, loadOlder]);
+  }, [loadOlder]);
 
   const filteredEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -121,23 +130,30 @@ export function ActivityTab({ roomId, agentName, scrollContainerRef }: {
   const turns = useMemo(() => groupTurns(filteredEvents), [filteredEvents]);
 
   return (
-    <div className="space-y-4 pb-6">
-      <div className="flex items-center gap-2.5">
-        <div className="flex bg-inset border border-line-soft rounded-lg p-0.5">
-          <FilterButton label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
-          <FilterButton label="Tools" count={counts.tools} active={filter === "tools"} onClick={() => setFilter("tools")} />
-          <FilterButton label="Replies" count={counts.replies} active={filter === "replies"} onClick={() => setFilter("replies")} />
-        </div>
-        <div className="flex items-center gap-2 bg-inset border border-line-soft rounded-lg px-2.5 py-1.5 flex-1 min-w-0">
-          <Search size={13} className="text-ink-4 shrink-0" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity…" className="bg-transparent outline-none text-[11.5px] text-ink-1 placeholder:text-ink-4 flex-1 min-w-0" />
+    <div className="flex flex-col h-full min-h-0">
+      {/* Sticky sub-header: filter + search stay pinned; never scroll with events. */}
+      <div className="shrink-0 px-5 pt-4 pb-2.5 border-b border-line-soft bg-surface-1">
+        <div className="flex items-center gap-2.5">
+          <div className="flex bg-inset border border-line-soft rounded-lg p-0.5">
+            <FilterButton label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
+            <FilterButton label="Tools" count={counts.tools} active={filter === "tools"} onClick={() => setFilter("tools")} />
+            <FilterButton label="Replies" count={counts.replies} active={filter === "replies"} onClick={() => setFilter("replies")} />
+          </div>
+          <div className="flex items-center gap-2 bg-inset border border-line-soft rounded-lg px-2.5 py-1.5 flex-1 min-w-0">
+            <Search size={13} className="text-ink-4 shrink-0" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity…" className="bg-transparent outline-none text-[11.5px] text-ink-1 placeholder:text-ink-4 flex-1 min-w-0" />
+          </div>
         </div>
       </div>
-      <div className="space-y-[14px]">
-        {hasMore && <button onClick={() => void loadOlder()} disabled={loadingOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer disabled:opacity-50 disabled:cursor-default">{loadingOlder ? "Loading…" : "Load earlier activity"}</button>}
-        {loading && <div className="text-center text-sm text-ink-4 py-8">Loading activity…</div>}
-        {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
-        {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
+
+      {/* Event stream — sole scroll container for infinite scroll-up. */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+        <div className="space-y-[14px] pb-6">
+          {hasMore && <button onClick={() => void loadOlder()} disabled={loadingOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer disabled:opacity-50 disabled:cursor-default">{loadingOlder ? "Loading…" : "Load earlier activity"}</button>}
+          {loading && <div className="text-center text-sm text-ink-4 py-8">Loading activity…</div>}
+          {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
+          {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
+        </div>
       </div>
     </div>
   );
