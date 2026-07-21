@@ -1066,19 +1066,113 @@ async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
  * Startup stays offline (packaged catalog only) — remote refresh is explicit via Refresh models. */
 export async function ensurePiCatalogWarm(): Promise<void> {
   try { await ensureCatalogRegistry(); } catch { /* leave cache cold; sync readers fall back gracefully */ }
+  // Offline: rehydrate last successful pi.dev overlay from disk (no network).
+  if (!remoteCatalogModels) {
+    const cached = readRemoteCatalogCacheFromDisk();
+    if (cached) remoteCatalogModels = cached;
+  }
 }
 
 export type CatalogRefreshSource = "remote" | "bundled";
 
-function piCatalogModelsStorePath(): string {
-  return join(getBossmodeDir(), "pi-catalog-models-store.json");
+const PI_DEV_CATALOG_BASE = "https://pi.dev";
+
+/** In-process overlay from the last successful pi.dev refresh (or disk cache). */
+let remoteCatalogModels: any[] | null = null;
+
+function piCatalogCachePath(): string {
+  return join(getBossmodeDir(), "pi-catalog-remote.json");
+}
+
+function readRemoteCatalogCacheFromDisk(): any[] | null {
+  try {
+    const path = piCatalogCachePath();
+    if (!existsSync(path)) return null;
+    const data = JSON.parse(readFileSync(path, "utf-8"));
+    if (!Array.isArray(data?.models) || data.models.length === 0) return null;
+    return data.models;
+  } catch {
+    return null;
+  }
+}
+
+function writeRemoteCatalogCacheToDisk(models: any[]): void {
+  try {
+    ensureBossmodeDir();
+    writePrivateJson(piCatalogCachePath(), { models, updatedAt: new Date().toISOString() });
+  } catch {
+    /* best-effort cache */
+  }
+}
+
+function loadBundledCatalogSync(): any[] {
+  if (!catalogRegistrySync) return [];
+  try {
+    return typeof catalogRegistrySync.getAll === "function" ? catalogRegistrySync.getAll() : [];
+  } catch {
+    return [];
+  }
+}
+
+function thinkingMapSignature(model: any): string {
+  const map = model?.thinkingLevelMap;
+  if (!map || typeof map !== "object") return "";
+  return Object.keys(map)
+    .filter((k) => (map as any)[k] != null)
+    .sort()
+    .join(",");
+}
+
+/** True when candidate carries metadata the pure bundled catalog does not (new models or richer maps). */
+function catalogHasRemoteEvidence(bundled: any[], candidate: any[]): boolean {
+  if (!candidate.length) return false;
+  const bundledByKey = new Map(bundled.map((m) => [`${m.provider}/${m.id}`, m]));
+  for (const m of candidate) {
+    const key = `${m.provider}/${m.id}`;
+    const base = bundledByKey.get(key);
+    if (!base) return true;
+    if (thinkingMapSignature(m) !== thinkingMapSignature(base)) return true;
+    if ((positiveNumber(m.contextWindow) ?? 0) !== (positiveNumber(base.contextWindow) ?? 0)) return true;
+    if ((positiveNumber(m.maxTokens, m.max_output_tokens) ?? 0) !== (positiveNumber(base.maxTokens, base.max_output_tokens) ?? 0)) return true;
+  }
+  return false;
+}
+
+function parsePiDevProviderCatalog(providerId: string, value: unknown): any[] {
+  const entries = Array.isArray(value)
+    ? value
+    : typeof value === "object" && value !== null && Array.isArray((value as any).models)
+      ? (value as any).models
+      : typeof value === "object" && value !== null
+        ? Object.values(value as Record<string, unknown>)
+        : [];
+  return (entries as unknown[])
+    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && "id" in (entry as object))
+    .map((model: Record<string, unknown>) => ({ ...model, provider: providerId, id: String(model.id) }));
+}
+
+async function fetchPiDevProviderModels(providerId: string, signal?: AbortSignal): Promise<any[]> {
+  const url = new URL(`/api/models/providers/${encodeURIComponent(providerId)}`, PI_DEV_CATALOG_BASE);
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal,
+  });
+  if (response.status === 404 || response.status === 501) return [];
+  if (!response.ok) throw new Error(`pi.dev catalog ${providerId}: HTTP ${response.status}`);
+  return parsePiDevProviderCatalog(providerId, await response.json());
 }
 
 /**
  * Explicitly pull pi.dev provider catalogs (manual Stage 2).
- * On success, replaces the in-process catalog cache so subsequent materialize/
- * picker reads see new thinking levels / models. On failure, leaves the current
- * (or freshly warmed bundled) catalog in place and reports bundled fallback.
+ *
+ * Why we don't use ModelRuntime.refresh(allowModelNetwork):
+ * pi 0.80.10 skips provider.refreshModels unless a credential resolves for that
+ * provider, and modelsPath:null forces InMemory store (modelsStorePath ignored).
+ * QA proved create/refresh can return OK while remote maps never overlay.
+ *
+ * Instead we fetch pi.dev provider shards directly, merge over the packaged
+ * catalog, and only report source:"remote" when the merged set carries evidence
+ * the bundled catalog lacks (e.g. k3 thinkingLevelMap gains low/high).
  */
 export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number }): Promise<{
   source: CatalogRefreshSource;
@@ -1088,29 +1182,70 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
   if (catalogNetworkRefreshForTests) return catalogNetworkRefreshForTests();
   if (piCatalogModelsForTests) return { source: "remote" };
   const timeoutMs = options?.timeoutMs ?? 15_000;
+
   try {
     ensureBossmodeDir();
+    await ensureCatalogRegistry(); // pure bundled registry (offline)
+    const bundled = loadBundledCatalogSync();
+    if (bundled.length === 0) {
+      return { source: "bundled", error: "Packaged model catalog is empty" };
+    }
+
+    const providerIds = new Set<string>();
+    for (const m of bundled) if (m?.provider) providerIds.add(String(m.provider));
+    for (const p of BUILTIN_API_KEY_PROVIDERS) providerIds.add(p);
+    for (const p of OAUTH_PROVIDERS) providerIds.add(p);
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const merged = new Map<string, any>(bundled.map((m) => [`${m.provider}/${m.id}`, m]));
+    let providersFetched = 0;
+    let lastError: string | undefined;
     try {
-      const runtime = await ModelRuntime.create({
-        credentials: new NoopCredentialStore(),
-        modelsPath: null,
-        modelsStorePath: piCatalogModelsStorePath(),
-        allowModelNetwork: true,
-        modelRefreshTimeoutMs: timeoutMs,
-      });
-      // create() already refreshes once with network; force another pass so a
-      // stale on-disk models-store cache (4h TTL inside pi) cannot skip the fetch.
-      await runtime.refresh({ allowNetwork: true, force: true, signal: controller.signal });
-      catalogRuntimeSync = runtime;
-      catalogRegistrySync = new ModelRegistry(runtime);
-      catalogRegistryPromise = Promise.resolve(catalogRegistrySync);
-      return { source: "remote" };
+      for (const providerId of providerIds) {
+        if (controller.signal.aborted) break;
+        try {
+          const remoteModels = await fetchPiDevProviderModels(providerId, controller.signal);
+          if (remoteModels.length === 0) continue;
+          providersFetched += 1;
+          for (const model of remoteModels) {
+            merged.set(`${model.provider}/${model.id}`, model);
+          }
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+        }
+      }
     } finally {
       clearTimeout(timer);
     }
+
+    const candidate = Array.from(merged.values());
+
+    if (providersFetched === 0) {
+      // No provider shard applied — do not claim remote (pi allSettled-style silent skip).
+      remoteCatalogModels = null;
+      return {
+        source: "bundled",
+        error: lastError || "Remote catalog fetch did not return any provider data",
+      };
+    }
+
+    // Require evidence the packaged catalog lacks (e.g. k3 gains low/high), OR accept
+    // remote-as-current when fetch succeeded but metadata already matched packaged
+    // (after a prior successful refresh the disk cache may already equal remote).
+    const hasEvidence = catalogHasRemoteEvidence(bundled, candidate);
+    if (!hasEvidence) {
+      // Fetch returned data but it is identical to bundled — still a successful remote
+      // contact; keep overlay cleared so materialize uses packaged (same content).
+      remoteCatalogModels = null;
+      return { source: "remote" };
+    }
+
+    remoteCatalogModels = candidate;
+    writeRemoteCatalogCacheToDisk(candidate);
+    return { source: "remote" };
   } catch (err) {
+    remoteCatalogModels = null;
     try { await ensurePiCatalogWarm(); } catch { /* ignore */ }
     return {
       source: "bundled",
@@ -1121,6 +1256,7 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
 
 async function loadPiCatalogModels(): Promise<any[]> {
   if (piCatalogModelsForTests) return piCatalogModelsForTests;
+  if (remoteCatalogModels) return remoteCatalogModels;
   try {
     const registry = await ensureCatalogRegistry();
     return typeof registry.getAll === "function" ? registry.getAll() : [];
@@ -1131,12 +1267,8 @@ async function loadPiCatalogModels(): Promise<any[]> {
 
 function loadPiCatalogModelsSync(): any[] {
   if (piCatalogModelsForTests) return piCatalogModelsForTests;
-  if (!catalogRegistrySync) return [];
-  try {
-    return typeof catalogRegistrySync.getAll === "function" ? catalogRegistrySync.getAll() : [];
-  } catch {
-    return [];
-  }
+  if (remoteCatalogModels) return remoteCatalogModels;
+  return loadBundledCatalogSync();
 }
 
 function displayNameForProvider(providerSlug: string): string {
