@@ -108,13 +108,21 @@ describe("prompt compiler", () => {
     expect(compiled.fullPrompt).toContain("x".repeat(5_000));
   });
 
-  it("core carries the Communication section (chat tool + [room] marker) and no stale footer/chat lines", async () => {
+  it("core carries the Communication section (chat tool + [room] marker + activation rules) and no stale footer/chat lines", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("## Communication");
     expect(compiled.fullPrompt).toContain("call the `chat` tool");
     expect(compiled.fullPrompt).toContain("[room]");
     expect(compiled.fullPrompt).toContain("Text without the marker never reaches the room.");
+    // Activation rules (fish 0.18.9): @ = immediate activate; plain name = mention only;
+    // multiple @ are parallel; sequential work hands off one at a time.
+    expect(compiled.fullPrompt).toContain("`@name` activates that member immediately");
+    expect(compiled.fullPrompt).toContain("write the name without `@`");
+    expect(compiled.fullPrompt).toContain("activate all of them at the same time");
+    expect(compiled.fullPrompt).toContain("cannot express \"A first, then B\"");
+    expect(compiled.fullPrompt).toContain('"developer, the RC is ready"');
+    expect(compiled.fullPrompt).toContain('"@developer please repack the RC"');
     expect(compiled.fullPrompt).not.toContain("envelope footer");
     expect(compiled.fullPrompt).not.toContain("Communication goes exclusively through");
     expect(compiled.fullPrompt).not.toContain("only way to communicate");
