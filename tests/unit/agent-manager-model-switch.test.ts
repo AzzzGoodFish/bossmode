@@ -182,7 +182,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
   });
 
-  it("recreates the handle for cross-credential/provider switches so auth and extensions reload", async () => {
+  it("applies cross-credential/provider switches via setModel without recreating the handle", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -190,27 +190,28 @@ describe("agent-manager model hot switch", () => {
     const result = await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
 
     expect(result.applied).toBe(true);
-    expect(handles).toHaveLength(2);
-    expect(first.destroyed).toBe(true);
-    expect(first.setModelCalls).toEqual([]);
-    expect(handles[1].runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
+    expect(result.pending).toBe(false);
+    expect(handles).toHaveLength(1);
+    expect(first.destroyed).toBe(false);
+    expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
+    expect(first.runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
     expect(exportedCalls.at(-1)).toMatchObject({ modelRef: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
   });
 
-  it("recreates for same-provider credential changes so AuthStorage is fresh", async () => {
+  it("applies same-provider credential changes via setModel without recreating (live credential store)", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
     await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-b");
 
-    expect(handles).toHaveLength(2);
-    expect(first.destroyed).toBe(true);
-    expect(first.setModelCalls).toEqual([]);
-    expect(handles[1].runtimeParams.model).toBe("anthropic/claude-b");
+    expect(handles).toHaveLength(1);
+    expect(first.destroyed).toBe(false);
+    expect(first.setModelCalls).toEqual(["anthropic/claude-b"]);
+    expect(first.runtimeParams.model).toBe("anthropic/claude-b");
   });
 
-  it("recreates when switching from proxy back to builtin provider", async () => {
+  it("applies proxy→builtin switches via setModel without recreating", async () => {
     member = { ...member, model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" };
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
@@ -218,9 +219,9 @@ describe("agent-manager model hot switch", () => {
 
     await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a");
 
-    expect(handles).toHaveLength(2);
-    expect(first.destroyed).toBe(true);
-    expect(handles[1].runtimeParams.model).toBe("anthropic/claude-b");
+    expect(handles).toHaveLength(1);
+    expect(first.destroyed).toBe(false);
+    expect(first.setModelCalls).toEqual(["anthropic/claude-b"]);
   });
 
   it("reports member busy while dispatch is not idle", async () => {
@@ -346,22 +347,19 @@ describe("agent-manager model hot switch", () => {
     expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
   });
 
-  it("queues a cross-provider switch while working and recreates after agent_end", async () => {
+  it("applies a cross-provider switch immediately even while working (no queue)", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.emit({ type: "agent_start" });
 
     const result = await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
-    expect(result.pending).toBe(true);
+    expect(result.applied).toBe(true);
+    expect(result.pending).toBe(false);
     expect(handles).toHaveLength(1);
-
-    first.emit({ type: "agent_end" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(handles).toHaveLength(2);
-    expect(first.destroyed).toBe(true);
-    expect(handles[1].runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
+    expect(first.destroyed).toBe(false);
+    expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
+    expect(first.runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
   });
 
   it("refreshes an idle active agent when its credential profile changes", async () => {

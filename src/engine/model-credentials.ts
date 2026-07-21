@@ -315,7 +315,8 @@ function persistApiKeyForProfile(profileId: string, providerSlug: string, apiKey
   return next;
 }
 
-class BossmodeCredentialStore implements CredentialStore {
+/** Profile-scoped store for OAuth login / one-off profile mutation flows. */
+class ProfileCredentialStore implements CredentialStore {
   constructor(private readonly profileId: string, private readonly providerSlug: string) {}
 
   async read(providerId: string): Promise<Credential | undefined> {
@@ -344,13 +345,72 @@ class BossmodeCredentialStore implements CredentialStore {
   }
 
   async delete(_providerId: string): Promise<void> {
-    // No-op: credential lifecycle is owned by bossmode's profile store
-    // (deleteModelCredentialProfile), not by the SDK's credential store.
+    // No-op: credential lifecycle is owned by bossmode's profile store.
   }
 }
 
+/**
+ * Per-request credential resolution for a live room member.
+ * Holds (roomId, memberId) and re-reads the member's current binding on every
+ * `read(providerId)` so a mid-session credential switch takes effect on the
+ * next model call — no session recreate, no end-of-turn queue (pi-aligned).
+ * Never guesses a different profile: if the bound profile's provider does not
+ * match the requested providerId, returns undefined.
+ */
+class MemberCredentialStore implements CredentialStore {
+  constructor(private readonly roomId: string, private readonly memberId: string) {}
+
+  /** Lazy import keeps model-credentials free of a hard edge into room-member-resolver
+   * (avoids pulling agent-store into modules that only partially mock config). */
+  private async resolveBoundProfile(): Promise<ModelCredentialProfile | null> {
+    const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
+    const member = resolveRoomMember(this.roomId, this.memberId);
+    if (!member?.credentialId) return null;
+    const profile = getModelCredentialProfile(member.credentialId);
+    if (!profile || !profile.enabled) return null;
+    return profile;
+  }
+
+  async read(providerId: string): Promise<Credential | undefined> {
+    const profile = await this.resolveBoundProfile();
+    if (!profile || profile.providerSlug !== providerId) return undefined;
+    return authEntry(profile) as Credential | undefined;
+  }
+
+  async list(): Promise<readonly CredentialInfo[]> {
+    const profile = await this.resolveBoundProfile();
+    if (!profile) return [];
+    const credential = await this.read(profile.providerSlug);
+    return credential ? [{ providerId: profile.providerSlug, type: credential.type }] : [];
+  }
+
+  async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
+    const profile = await this.resolveBoundProfile();
+    if (!profile || profile.providerSlug !== providerId) return fn(undefined);
+    const current = await this.read(providerId);
+    const next = await fn(current);
+    if (next?.type === "oauth") {
+      const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
+      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(profile.id, profile.providerSlug, oauth);
+    } else if (next?.type === "api_key" && typeof (next as any).key === "string" && (next as any).key.length > 0) {
+      persistApiKeyForProfile(profile.id, profile.providerSlug, (next as any).key);
+    }
+    return next;
+  }
+
+  async delete(_providerId: string): Promise<void> {
+    // No-op: credential lifecycle is owned by bossmode's profile store.
+  }
+}
+
+/** Profile-scoped store (OAuth login / profile mutation). */
 export function createCredentialStore(profile: Pick<ModelCredentialProfile, "id" | "providerSlug">): CredentialStore {
-  return new BossmodeCredentialStore(profile.id, profile.providerSlug);
+  return new ProfileCredentialStore(profile.id, profile.providerSlug);
+}
+
+/** Member-scoped store — live-reads the room member's current credential binding per request. */
+export function createMemberCredentialStore(roomId: string, memberId: string): CredentialStore {
+  return new MemberCredentialStore(roomId, memberId);
 }
 
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
@@ -1441,6 +1501,43 @@ export function resolveCredentialProfileForModel(args: { modelRef: string; crede
   return profile;
 }
 
+/** Provider entry for models.json — endpoint + model metadata only, no secrets.
+ * Auth is supplied per-request by MemberCredentialStore. */
+function piProviderCatalogEntry(profile: ModelCredentialProfile): Record<string, unknown> | undefined {
+  if (shouldUseSdkBuiltinCatalog(profile)) return undefined;
+  const full = piProviderConfig(profile);
+  const { apiKey: _apiKey, ...rest } = full as Record<string, unknown> & { apiKey?: unknown };
+  return rest;
+}
+
+function mergeProviderCatalogEntries(a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> {
+  const aModels = Array.isArray(a.models) ? (a.models as any[]) : [];
+  const bModels = Array.isArray(b.models) ? (b.models as any[]) : [];
+  const byId = new Map<string, any>();
+  for (const m of aModels) if (m?.id) byId.set(String(m.id), m);
+  for (const m of bModels) if (m?.id) byId.set(String(m.id), m);
+  // Prefer `b` (later / preferred profile) for endpoint fields.
+  return { ...a, ...b, models: Array.from(byId.values()) };
+}
+
+/** Build models.json providers map for every enabled profile (no auth secrets). */
+export function buildAllProvidersCatalog(preferredProfileId?: string): Record<string, Record<string, unknown>> {
+  const providers: Record<string, Record<string, unknown>> = {};
+  const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
+  // Write non-preferred first, preferred last so its endpoint wins on slug collision.
+  const ordered = [
+    ...profiles.filter((p) => p.id !== preferredProfileId),
+    ...profiles.filter((p) => p.id === preferredProfileId),
+  ];
+  for (const profile of ordered) {
+    const entry = piProviderCatalogEntry(profile);
+    if (!entry) continue;
+    const slug = profile.providerSlug;
+    providers[slug] = providers[slug] ? mergeProviderCatalogEntries(providers[slug], entry) : entry;
+  }
+  return providers;
+}
+
 export function exportPiConfigForMember(args: {
   roomId: string;
   memberName: string;
@@ -1455,11 +1552,12 @@ export function exportPiConfigForMember(args: {
   const agentDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
   mkdirSync(agentDir, { recursive: true });
 
-  const resolved = resolveRuntimeCredential(profile.id);
-  const runtimeProfile = resolved.profile;
+  // Materialize ALL enabled providers (endpoint + model metadata only). Auth is
+  // live-read per request via MemberCredentialStore, so cross-provider setModel
+  // works without recreating the runtime.
   writePrivateJson(join(agentDir, "models.json"), {
-    providers: resolved.providerConfig ? { [runtimeProfile.providerSlug]: resolved.providerConfig } : {},
+    providers: buildAllProvidersCatalog(profile.id),
   });
 
-  return { agentDir, extensionPaths: [], profile: sanitizeProfile(runtimeProfile) };
+  return { agentDir, extensionPaths: [], profile: sanitizeProfile(profile) };
 }

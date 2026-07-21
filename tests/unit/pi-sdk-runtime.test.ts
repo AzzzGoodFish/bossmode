@@ -46,7 +46,7 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
-  createCredentialStore: (profile: any) => ({ kind: "credentials", profile }),
+  createMemberCredentialStore: (roomId: string, memberId: string) => ({ kind: "credentials", roomId, memberId }),
 }));
 
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
@@ -193,7 +193,7 @@ describe("PiSdkRuntime", () => {
     await new PiSdkRuntime().createAgent(baseOpts());
 
     expect(modelRegistryCreate).toHaveBeenCalledWith(expect.objectContaining({
-      credentials: expect.objectContaining({ profile: { id: "test-profile", providerSlug: "anthropic" } }),
+      credentials: expect.objectContaining({ roomId: "room-a", memberId: "pm" }),
       modelsPath: join(agentDir, "models.json"),
     }));
   });

@@ -250,7 +250,7 @@ describe("model credential profiles", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
-  it("exports agent-scoped pi models with a real apiKey and no placeholder", async () => {
+  it("exports agent-scoped models.json without auth secrets (auth is live-read via credential store)", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
@@ -259,10 +259,12 @@ describe("model credential profiles", () => {
     expect(exported?.agentDir).toContain(join("pi-agent", "runtime"));
     const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
     expect(modelsJson).not.toContain("__bossmode_managed_key__");
-    expect(JSON.parse(modelsJson).providers.openrouter.apiKey).toBe("sk-secret");
+    expect(modelsJson).not.toContain("sk-secret");
+    expect(JSON.parse(modelsJson).providers.openrouter.apiKey).toBeUndefined();
+    expect(JSON.parse(modelsJson).providers.openrouter.models[0].id).toBe("anthropic/claude-sonnet");
   });
 
-  it("projects authType none with only the non-secret no-auth sentinel", async () => {
+  it("projects authType none into models.json without embedding secrets", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
       ...baseProfile,
@@ -275,7 +277,9 @@ describe("model credential profiles", () => {
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "keyless-proxy/claude-keyless", credentialId: saved.id });
     const modelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
 
-    expect(modelsJson.providers["keyless-proxy"].apiKey).toBe("__bossmode_no_auth__");
+    // Auth (including the no-auth sentinel) is supplied by the credential store, not models.json.
+    expect(modelsJson.providers["keyless-proxy"].apiKey).toBeUndefined();
+    expect(modelsJson.providers["keyless-proxy"].models[0].id).toBe("claude-keyless");
     expect(readFileSync(join(dir, "model-credentials.json"), "utf-8")).not.toContain("sk-secret");
   });
 
@@ -291,9 +295,11 @@ describe("model credential profiles", () => {
     });
     expect(updated.hasSecret).toBe(true);
 
+    // Secret stays on the profile store, not in models.json.
+    expect(mod.getModelCredentialProfile(saved.id)!.apiKey).toBe("sk-secret");
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openrouter/anthropic/claude-sonnet", credentialId: saved.id });
     const modelsJson = readFileSync(join(exported!.agentDir, "models.json"), "utf-8");
-    expect(modelsJson).toContain("sk-secret");
+    expect(modelsJson).not.toContain("sk-secret");
     expect(JSON.parse(modelsJson).providers.openrouter.models[0]).toMatchObject({ contextWindow: 500000, maxTokens: 64000 });
   });
 
@@ -855,7 +861,11 @@ describe("model credential profiles", () => {
 
     const exported = mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "openai-codex/gpt-5-codex", credentialId: saved.id });
     const oauthModelsJson = JSON.parse(readFileSync(join(exported!.agentDir, "models.json"), "utf-8"));
-    expect(oauthModelsJson.providers["openai-codex"].apiKey).toBe("old-access");
+    // Auth tokens stay out of models.json — supplied per-request by the credential store.
+    if (oauthModelsJson.providers["openai-codex"]) {
+      expect(oauthModelsJson.providers["openai-codex"].apiKey).toBeUndefined();
+    }
+    expect(JSON.stringify(oauthModelsJson)).not.toContain("old-access");
     expect(JSON.stringify(oauthModelsJson)).not.toContain("__bossmode_managed_key__");
     const profile = mod.getModelCredentialProfile(saved.id)!;
     const store = mod.createCredentialStore(profile);

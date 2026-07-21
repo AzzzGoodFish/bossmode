@@ -75,11 +75,6 @@ function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string
   return messages.filter((message) => !isMemberRuntimeFailureMessage(message));
 }
 
-interface PendingModelSwitch {
-  model: string;
-  credentialId?: string;
-}
-
 interface PendingThinkingSwitch {
   thinkingLevel: string;
 }
@@ -100,7 +95,6 @@ interface AgentInstance {
   dispatchState: DispatchState;
   promptInFlight: boolean;
   queuedInputs: string[];
-  pendingModelSwitch?: PendingModelSwitch;
   pendingThinkingSwitch?: PendingThinkingSwitch;
   pendingCredentialRefresh?: PendingCredentialRefresh;
   pendingChatReply: boolean;
@@ -168,7 +162,8 @@ function queueInput(instance: AgentInstance, input: string, trigger: string): vo
 
 function applyPendingAfterPromptSettlement(instance: AgentInstance, trigger: string): void {
   applyPendingCredentialRefresh(instance, trigger);
-  applyPendingModelSwitch(instance, trigger);
+  // Model/credential switches apply immediately (live credential store + setModel);
+  // only thinking-level switches still settle at end of turn.
   applyPendingThinkingSwitch(instance, trigger);
 }
 
@@ -302,30 +297,14 @@ function normalizeSwitchModelRef(model: string): string {
   return normalizeModelRef(model.trim());
 }
 
-function shouldRecreateForModelSwitch(instance: AgentInstance, credentialId?: string): boolean {
-  return instance.appliedCredentialId !== credentialId;
-}
-
-async function recreateInstanceForModelSwitch(instance: AgentInstance, model: string, credentialId: string | undefined, trigger: string): Promise<void> {
-  const key = instanceKey(instance.roomId, instance.memberId);
-  const queuedInputs = instance.queuedInputs.splice(0);
-  try { await instance.handle.waitForIdle?.(); } catch {}
-  try { instance.unsubscribe(); } catch {}
-  try { instance.handle.destroy(); } catch {}
-  if (instances.get(key) === instance) instances.delete(key);
-  contextUsageCache.delete(key);
-  contextCompactionWarningCache.delete(key);
-
-  const next = await getOrCreate(instance.roomId, instance.memberId);
-  if (!next) throw new Error(`Failed to recreate member "${instance.agentName}" for model switch`);
-  next.queuedInputs.push(...queuedInputs);
-  next.appliedModel = model;
-  next.appliedCredentialId = credentialId;
-  logger.info("agent", "modelSwitchRecreated", { member: instance.agentName, roomId: instance.roomId, model, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: next.status });
-}
-
-async function applyModelSwitchToInstance(instance: AgentInstance, pending: PendingModelSwitch, trigger: string): Promise<void> {
+/** Apply model/credential switch immediately via setModel + models.json refresh.
+ * Credentials are live-read per request (MemberCredentialStore), so no session
+ * recreate and no end-of-turn queue — next model call uses the new binding. */
+async function applyModelSwitchToInstance(
+  instance: AgentInstance,
+  pending: { model: string; credentialId?: string },
+  trigger: string,
+): Promise<void> {
   const model = normalizeSwitchModelRef(pending.model);
   const credentialId = pending.credentialId;
   const exported = exportPiConfigForMember({
@@ -336,11 +315,6 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
   });
   if (!exported) throw new Error(`No model credentials configured for ${model}`);
   const resolvedCredentialId = exported.profile?.id || credentialId;
-
-  if (shouldRecreateForModelSwitch(instance, resolvedCredentialId)) {
-    await recreateInstanceForModelSwitch(instance, model, resolvedCredentialId, trigger);
-    return;
-  }
 
   if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
   await instance.handle.refreshModelRegistry?.();
@@ -354,16 +328,6 @@ async function applyModelSwitchToInstance(instance: AgentInstance, pending: Pend
   instance.appliedCredentialId = resolvedCredentialId;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
   broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
-}
-
-function applyPendingModelSwitch(instance: AgentInstance, trigger: string): void {
-  const pending = instance.pendingModelSwitch;
-  if (!pending) return;
-  instance.pendingModelSwitch = undefined;
-  applyModelSwitchToInstance(instance, pending, trigger).catch((err) => {
-    logger.error("agent", "modelSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
-    postMessage(instance.roomId, "system", `Failed to switch model for "${instance.agentName}": ${err.message || String(err)}`);
-  });
 }
 
 async function applyThinkingSwitchToInstance(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
@@ -837,24 +801,19 @@ export async function activateAll(roomId: string): Promise<void> {
 export async function switchMemberModel(roomId: string, memberRef: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  const memberName = member?.name || memberRef;
   const normalizedModel = normalizeSwitchModelRef(model);
   const available = listAvailableModels().some((m) => m.ref === normalizedModel);
   if (!available) throw new Error(`Model is not available or credential is missing: ${normalizedModel}`);
+  // Persist first so MemberCredentialStore live-reads the new binding on the next request.
   if (persistRoomOverride) roomStore.updateRoomMemberOverride(roomId, memberId, { model: normalizedModel, credentialId: credentialId || null });
 
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance) return { applied: false, pending: false, active: false, model: normalizedModel };
 
-  const pending = { model: normalizedModel, credentialId: credentialId || undefined };
-  if (instance.status === "working" || instance.dispatchState !== "idle") {
-    instance.pendingModelSwitch = pending;
-    logger.info("agent", "modelSwitchQueued", { member: memberName, memberId, roomId, model: normalizedModel, status: instance.status, dispatchState: instance.dispatchState });
-    return { applied: false, pending: true, active: true, model: normalizedModel };
-  }
-
-  await applyModelSwitchToInstance(instance, pending, "switchMemberModel");
+  // Always apply immediately (setModel + refresh models.json). No queue, no recreate —
+  // credentials are resolved per request from the room member binding.
+  await applyModelSwitchToInstance(instance, { model: normalizedModel, credentialId: credentialId || undefined }, "switchMemberModel");
   return { applied: true, pending: false, active: true, model: normalizedModel };
 }
 
