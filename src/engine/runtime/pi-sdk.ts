@@ -16,7 +16,7 @@ import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
-import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createCredentialStore } from "../model-credentials.js";
+import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore } from "../model-credentials.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts } from "./types.js";
@@ -484,7 +484,9 @@ export class PiSdkRuntime implements AgentRuntime {
     mkdirSync(sessionDir, { recursive: true });
 
     if (!piConfig.profile) throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
-    const authStorageCredentials = createCredentialStore(piConfig.profile);
+    // Live-read the member's current credential binding on every request so a
+    // mid-session credential switch takes effect on the next model call.
+    const authStorageCredentials = createMemberCredentialStore(opts.roomId, opts.member.id);
     const runtime = await ModelRuntime.create({ credentials: authStorageCredentials, modelsPath: join(runtimeAgentDir, "models.json"), allowModelNetwork: false });
     const modelRegistry = new ModelRegistry(runtime);
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
