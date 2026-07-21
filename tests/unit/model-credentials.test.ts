@@ -692,9 +692,32 @@ describe("model credential profiles", () => {
     const listed = mod.listPublicModelCredentialProfiles().find((p) => p.id === saved.id)!;
     expect(listed.models.map((m) => m.id)).toContain("claude-fable-5");
     expect(mod.listAvailableModels().map((m) => m.ref)).toContain("anthropic/claude-fable-5");
-    const refreshed = mod.refreshModelCredentialProfileModels(saved.id);
-    expect(refreshed.models.find((m) => m.id === "claude-fable-5")).toMatchObject({ contextWindow: 1000000, maxTokens: 128000, reasoning: true });
+    const refreshed = await mod.refreshModelCredentialProfileModels(saved.id);
+    expect(refreshed.catalogSource).toBe("remote"); // test catalog injection counts as remote path
+    expect(refreshed.profile.models.find((m) => m.id === "claude-fable-5")).toMatchObject({ contextWindow: 1000000, maxTokens: 128000, reasoning: true });
     mod.setPiCatalogModelsForTests(null);
+  });
+
+  it("falls back to packaged catalog with an honest message when remote refresh fails", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-static", name: "Claude Static", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, input: ["text"] },
+    ]);
+    const saved = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
+
+    mod.setCatalogNetworkRefreshForTests(async () => ({
+      source: "bundled",
+      error: "network down",
+    }));
+    try {
+      const refreshed = await mod.refreshModelCredentialProfileModels(saved.id);
+      expect(refreshed.catalogSource).toBe("bundled");
+      expect(refreshed.catalogMessage).toMatch(/Remote model catalog unavailable/);
+      expect(refreshed.profile.models.map((m) => m.id)).toContain("claude-static");
+    } finally {
+      mod.setCatalogNetworkRefreshForTests(null);
+      mod.setPiCatalogModelsForTests(null);
+    }
   });
 
   it("includes Claude Fable 5 in the upgraded Anthropic SDK catalog", async () => {

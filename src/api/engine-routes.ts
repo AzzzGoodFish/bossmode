@@ -158,9 +158,9 @@ addRoute("PUT", "/api/model-providers/:id", updateModelCredentialProfileRoute);
 
 async function refreshModelCredentialProfileModelsRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
-    const profile = refreshModelCredentialProfileModels(params.id);
-    await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
-    sendJson(res, 200, profile);
+    const result = await refreshModelCredentialProfileModels(params.id);
+    await invalidateModelCredentialProfile(result.profile.id, result.profile.providerSlug, "profileUpdated");
+    sendJson(res, 200, result);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
   }
