@@ -390,7 +390,13 @@ export async function updateModelCredentialProfile(id: string, data: Partial<Mod
   return apiFetch(`/api/model-credential-profiles/${id}`, { method: "PUT", body: JSON.stringify(data) });
 }
 
-export async function refreshModelCredentialProfileModels(id: string): Promise<PublicModelCredentialProfile> {
+export interface RefreshModelCredentialProfileResult {
+  profile: PublicModelCredentialProfile;
+  catalogSource: "remote" | "bundled";
+  catalogMessage?: string;
+}
+
+export async function refreshModelCredentialProfileModels(id: string): Promise<RefreshModelCredentialProfileResult> {
   return apiFetch(`/api/model-credential-profiles/${id}/refresh-models`, { method: "POST" });
 }
 

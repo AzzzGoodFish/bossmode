@@ -1012,6 +1012,14 @@ export function setPiCatalogModelsForTests(models: any[] | null): void {
   piCatalogModelsForTests = models;
 }
 
+/** Test-only override for the network catalog refresh path. */
+let catalogNetworkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) = null;
+export function setCatalogNetworkRefreshForTests(
+  fn: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>),
+): void {
+  catalogNetworkRefreshForTests = fn;
+}
+
 class NoopCredentialStore implements CredentialStore {
   async read(): Promise<Credential | undefined> { return undefined; }
   async list(): Promise<readonly CredentialInfo[]> { return []; }
@@ -1054,9 +1062,61 @@ async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
 }
 
 /** Pre-warm the credential-less catalog cache so the synchronous readers below have data
- * immediately. Call once at server startup; safe to call multiple times (memoized). */
+ * immediately. Call once at server startup; safe to call multiple times (memoized).
+ * Startup stays offline (packaged catalog only) — remote refresh is explicit via Refresh models. */
 export async function ensurePiCatalogWarm(): Promise<void> {
   try { await ensureCatalogRegistry(); } catch { /* leave cache cold; sync readers fall back gracefully */ }
+}
+
+export type CatalogRefreshSource = "remote" | "bundled";
+
+function piCatalogModelsStorePath(): string {
+  return join(getBossmodeDir(), "pi-catalog-models-store.json");
+}
+
+/**
+ * Explicitly pull pi.dev provider catalogs (manual Stage 2).
+ * On success, replaces the in-process catalog cache so subsequent materialize/
+ * picker reads see new thinking levels / models. On failure, leaves the current
+ * (or freshly warmed bundled) catalog in place and reports bundled fallback.
+ */
+export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number }): Promise<{
+  source: CatalogRefreshSource;
+  error?: string;
+}> {
+  // Test injection short-circuits network so unit tests can control the catalog.
+  if (catalogNetworkRefreshForTests) return catalogNetworkRefreshForTests();
+  if (piCatalogModelsForTests) return { source: "remote" };
+  const timeoutMs = options?.timeoutMs ?? 15_000;
+  try {
+    ensureBossmodeDir();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const runtime = await ModelRuntime.create({
+        credentials: new NoopCredentialStore(),
+        modelsPath: null,
+        modelsStorePath: piCatalogModelsStorePath(),
+        allowModelNetwork: true,
+        modelRefreshTimeoutMs: timeoutMs,
+      });
+      // create() already refreshes once with network; force another pass so a
+      // stale on-disk models-store cache (4h TTL inside pi) cannot skip the fetch.
+      await runtime.refresh({ allowNetwork: true, force: true, signal: controller.signal });
+      catalogRuntimeSync = runtime;
+      catalogRegistrySync = new ModelRegistry(runtime);
+      catalogRegistryPromise = Promise.resolve(catalogRegistrySync);
+      return { source: "remote" };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    try { await ensurePiCatalogWarm(); } catch { /* ignore */ }
+    return {
+      source: "bundled",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 async function loadPiCatalogModels(): Promise<any[]> {
@@ -1251,15 +1311,38 @@ function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }):
   return profiles;
 }
 
-export function refreshModelCredentialProfileModels(id: string): PublicModelCredentialProfile {
+export interface RefreshModelCredentialProfileResult {
+  profile: PublicModelCredentialProfile;
+  /** Where model metadata came from for this refresh. */
+  catalogSource: CatalogRefreshSource;
+  /** User-facing note when remote catalog was unavailable. */
+  catalogMessage?: string;
+}
+
+/**
+ * Refresh models button handler: try pi.dev catalog first, then rematerialize
+ * the built-in provider profile from whatever catalog is now in memory.
+ * Never fails solely because remote is down — falls back to packaged catalog.
+ */
+export async function refreshModelCredentialProfileModels(id: string): Promise<RefreshModelCredentialProfileResult> {
+  const existing = getModelCredentialProfile(id);
+  if (!existing) throw new Error("Model credential profile not found");
+  if (!isBuiltinProviderProfile(existing)) throw new Error("Only built-in provider profiles can refresh models from catalog");
+
+  const catalog = await refreshPiCatalogFromNetwork();
   const profiles = refreshBuiltinProviderProfilesFromStore({ persist: false });
   const profile = profiles.find((p) => p.id === id);
   if (!profile) throw new Error("Model credential profile not found");
-  if (!isBuiltinProviderProfile(profile)) throw new Error("Only built-in provider profiles can refresh models from catalog");
   const refreshed = refreshBuiltinProviderProfile(profile);
   const next = profiles.map((p) => p.id === id ? refreshed : p);
   writeStore(next);
-  return sanitizeProfile(refreshed);
+  return {
+    profile: sanitizeProfile(refreshed),
+    catalogSource: catalog.source,
+    catalogMessage: catalog.source === "bundled"
+      ? "Remote model catalog unavailable; refreshed from the packaged catalog."
+      : undefined,
+  };
 }
 
 function catalogMetadata(m: any): ModelDiscoveredMetadata {

@@ -181,9 +181,16 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
 
   const handleRefreshProfileModels = async (profile: PublicModelCredentialProfile) => {
     try {
-      const refreshed = await refreshModelCredentialProfileModels(profile.id);
+      const result = await refreshModelCredentialProfileModels(profile.id);
       await refreshProfiles();
-      toast(`Refreshed ${refreshed.models.length} model${refreshed.models.length === 1 ? "" : "s"}.`, "success");
+      const count = result.profile.models.length;
+      const base = `Refreshed ${count} model${count === 1 ? "" : "s"}`;
+      if (result.catalogMessage) {
+        // Remote catalog unavailable — honest bundled fallback (spec).
+        toast(`${base}. ${result.catalogMessage}`, "info");
+      } else {
+        toast(`${base} from the online catalog.`, "success");
+      }
     } catch (err) {
       console.error("Failed to refresh models", err);
       toast(userActionError("refresh models", "Check the provider connection, then try again."), "error");
