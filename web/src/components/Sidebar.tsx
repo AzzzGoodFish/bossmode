@@ -4,14 +4,15 @@ import {
   CheckSquare, Plus, Users,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
-import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode } from "../api/client";
-import { getRooms, getAgents, getSkills, getKnowledgeTree } from "../api/client";
+import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
+import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 
 export type SettingsSection = "models" | "runtime" | "summary" | "integrations" | "team-updates";
 
 export type ActivePage =
   | { type: "room"; id: string }
+  | { type: "team"; name: string | null }
   | { type: "agent"; name: string | null }
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
@@ -24,6 +25,7 @@ type Domain = "rooms" | "team" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
+    case "team":
     case "agent":
     case "skill":
       return "team";
@@ -87,6 +89,7 @@ export function Sidebar({
 }: SidebarProps) {
   const isMobile = useIsMobile();
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [teams, setTeams] = useState<TeamTemplateSummary[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
@@ -99,6 +102,7 @@ export function Sidebar({
 
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
+    getTeams().then(setTeams).catch(() => setTeams([]));
     getAgents().then(setAgents).catch(console.error);
     getSkills().then(setSkills).catch(console.error);
     getKnowledgeTree()
@@ -120,6 +124,7 @@ export function Sidebar({
   const displayRooms = liveRooms ?? rooms;
 
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
+  const selectedTeamName = activePage?.type === "team" ? activePage.name : null;
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
   const selectedKnowledgeFolder =
@@ -154,7 +159,7 @@ export function Sidebar({
         <MessageSquare size={18} />
         {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
       </button>
-      <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "agent", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
+      <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "team", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
         {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Users size={18} />
       </button>
@@ -255,6 +260,22 @@ export function Sidebar({
 
         {domain === "team" && (
           <>
+            <SectionHead label={`TEAMS · ${teams.length}`} onCreate={() => onNavigate({ type: "team", name: null })} />
+            <button onClick={() => onNavigate({ type: "team", name: null })} className={itemCls(activePage?.type === "team" && activePage.name === null)}>
+              <span className="text-[12.5px] font-medium text-ink-2">All teams</span>
+            </button>
+            {teams.map((t) => (
+              <button key={t.name} onClick={() => onNavigate({ type: "team", name: t.name })} className={itemCls(selectedTeamName === t.name)}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center text-[10px] font-bold shrink-0">{(t.name[0] || "?").toUpperCase()}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className={`block text-[12.5px] font-medium truncate ${selectedTeamName === t.name ? "text-ink-1" : "text-ink-2"}`}>{t.name}</span>
+                    <span className="block text-[10px] text-ink-4 truncate">{(t.agentNames ?? []).length} agents · {t.version}</span>
+                  </div>
+                </div>
+              </button>
+            ))}
+            <div className="h-3" />
             <SectionHead label={`AGENTS · ${agents.length}`} onCreate={() => onNavigate({ type: "agent", name: "__new__" })} />
             <button onClick={() => onNavigate({ type: "agent", name: null })} className={itemCls(activePage?.type === "agent" && activePage.name === null)}>
               <span className="text-[12.5px] font-medium text-ink-2">All agents</span>

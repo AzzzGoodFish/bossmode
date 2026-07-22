@@ -203,8 +203,8 @@ export function Main({
   }, [previewPct]);
 
   const handleCreateRoom = useCallback(
-    async (name: string, cwd: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string) => {
-      const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName);
+    async (name: string, cwd: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string, templateName?: string) => {
+      const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName, templateName);
       onRoomCreated(newRoom);
       setShowCreateRoom(false);
     },

@@ -14,6 +14,8 @@ import {
   dismissTeamUpdate,
 } from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
+import { TeamsPage } from "./TeamsPage";
+import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
 import { AgentsPage } from "./AgentsPage";
@@ -284,6 +286,20 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onClearUnreadTab={() => {}}
             onActiveTabKeyChange={() => {}}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+          />
+        )}
+
+        {/* Teams library (0.19 team layer) */}
+        {activePage?.type === "team" && workspaceResourceRouteMode(activePage.name) !== "detail" && (
+          <TeamsPage
+            onSelectTeam={(name) => setActivePage({ type: "team", name })}
+            onRefresh={refreshSidebar}
+          />
+        )}
+        {activePage?.type === "team" && workspaceResourceRouteMode(activePage.name) === "detail" && (
+          <TeamDetailPage
+            name={activePage.name || ""}
+            onBack={() => { setActivePage({ type: "team", name: null }); refreshSidebar(); }}
           />
         )}
 

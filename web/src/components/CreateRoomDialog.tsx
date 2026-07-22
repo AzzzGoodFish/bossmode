@@ -3,6 +3,7 @@ import { Check, Crown, FolderOpen, Info, Pencil, Plus, Trash2, UserRound, Users,
 import type { AgentInfo, CreateRoomMemberInput } from "../api/client";
 import { getAgents } from "../api/client";
 import { FolderPicker } from "./FolderPicker";
+import { MemberPickerDialog, type PickedMemberDraft } from "./MemberPickerDialog";
 import { Sheet } from "./Sheet";
 import { suggestMemberName } from "../utils/member-name-suggestion";
 import { userActionError } from "../utils/user-error";
@@ -11,11 +12,12 @@ interface DraftRoomMember {
   id: string;
   name: string;
   agent: string;
+  source?: "template" | "agent";
 }
 
 interface DraftEditorState {
-  mode: "add" | "edit";
-  draftId?: string;
+  mode: "edit";
+  draftId: string;
 }
 
 type AgentLoadStatus = "loading" | "ready" | "error";
@@ -27,7 +29,7 @@ export function agentAuthorityDisplayState(status: AgentLoadStatus, agentCount: 
 
 interface CreateRoomDialogProps {
   onClose: () => void;
-  onSubmit: (name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string) => Promise<void>;
+  onSubmit: (name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string, templateName?: string) => Promise<void>;
 }
 
 function displayAgentName(agentName: string): string {
@@ -73,6 +75,8 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [drafts, setDrafts] = useState<DraftRoomMember[]>([]);
   const [leaderName, setLeaderName] = useState("");
   const [editor, setEditor] = useState<DraftEditorState | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [templateName, setTemplateName] = useState<string | undefined>(undefined);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -116,6 +120,35 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     setSubmitError(null);
   };
 
+  const applyPickedDrafts = (picked: PickedMemberDraft[], fromTemplate?: string) => {
+    // Instantiating a template replaces the draft roster (prototype semantics).
+    // Adding a single agent appends onto existing drafts.
+    const base = fromTemplate ? [] : [...drafts];
+    const existing = new Set(base.map((d) => d.name.toLowerCase()));
+    const nextDrafts: DraftRoomMember[] = [...base];
+    let nextLeader = fromTemplate ? "" : leaderName;
+    for (const p of picked) {
+      let name = p.name.trim();
+      if (existing.has(name.toLowerCase())) {
+        name = suggestMemberName(p.agent || p.name, [...existing]);
+      }
+      existing.add(name.toLowerCase());
+      const draft: DraftRoomMember = {
+        id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        agent: p.agent,
+        source: p.source,
+      };
+      nextDrafts.push(draft);
+      if (p.leader) nextLeader = name;
+      if (!nextLeader) nextLeader = name;
+    }
+    setDrafts(nextDrafts);
+    setLeaderName(nextLeader);
+    if (fromTemplate) setTemplateName(fromTemplate);
+    setSubmitError(null);
+  };
+
   const removeDraft = (draftId: string) => {
     const removed = drafts.find((draft) => draft.id === draftId);
     const remaining = drafts.filter((draft) => draft.id !== draftId);
@@ -131,7 +164,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      await onSubmit(name.trim(), cwd.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName);
+      await onSubmit(name.trim(), cwd.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName, templateName);
       onClose();
     } catch (error: any) {
       setSubmitError(error?.message || "Couldn’t create the Room. Your draft is still here.");
@@ -205,7 +238,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                 {drafts.length > 0 && <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[10px] font-medium text-ink-3">{drafts.length}</span>}
               </div>
               {drafts.length > 0 && (
-                <button type="button" onClick={() => setEditor({ mode: "add" })} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-xs font-semibold text-ink-2 hover:border-line-strong hover:bg-surface-2">
+                <button type="button" onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-xs font-semibold text-ink-2 hover:border-line-strong hover:bg-surface-2">
                   <Plus size={14} /> Add member
                 </button>
               )}
@@ -216,8 +249,8 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                 <div className="flex min-h-40 flex-col items-center justify-center px-4 py-6 text-center">
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-2 text-ink-4"><Users size={19} /></div>
                   <p className="text-sm font-medium text-ink-2">No members yet</p>
-                  <p className="mt-1 max-w-sm text-xs leading-5 text-ink-4">Add an Agent template as a named member of this Room. You can add the same Agent more than once.</p>
-                  <button type="button" onClick={() => setEditor({ mode: "add" })} className="mt-4 flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90">
+                  <p className="mt-1 max-w-sm text-xs leading-5 text-ink-4">Add an agent as a named member — or instantiate a whole team template at once.</p>
+                  <button type="button" onClick={() => setPickerOpen(true)} className="mt-4 flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90">
                     <Plus size={14} /> Add member
                   </button>
                 </div>
@@ -233,7 +266,9 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                           <span className="truncate font-mono text-sm font-semibold text-ink-1">{draft.name}</span>
                           <span className="truncate text-xs text-ink-4">{displayAgentName(draft.agent)}</span>
                         </div>
-                        <div className="mt-0.5 text-[11px] text-ink-4">Defaults for model, thinking, and tools</div>
+                        <div className="mt-0.5 text-[11px] text-ink-4">
+                          {draft.source === "template" ? "from template · " : ""}Defaults for model, thinking, and tools
+                        </div>
                       </div>
                       {leaderName === draft.name && (
                         <span className="hidden items-center gap-1 rounded-full bg-think/10 px-2 py-1 text-[10px] font-medium text-think sm:flex"><Crown size={10} /> Leader</span>
@@ -288,6 +323,13 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         </div>
       </form>
 
+      <MemberPickerDialog
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPickTemplate={(picked, tplName) => applyPickedDrafts(picked, tplName)}
+        onPickAgent={(picked) => applyPickedDrafts([picked])}
+      />
+
       {editor && (
         <DraftMemberEditor
           agents={agents}
@@ -295,7 +337,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           agentLoadError={agentLoadError}
           onRetryAgents={() => void loadAgents()}
           drafts={drafts}
-          editing={editor.draftId ? drafts.find((draft) => draft.id === editor.draftId) : undefined}
+          editing={drafts.find((draft) => draft.id === editor.draftId)}
           onSave={(draft) => upsertDraft(draft, editor.draftId)}
           onClose={() => setEditor(null)}
         />
