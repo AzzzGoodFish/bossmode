@@ -71,7 +71,7 @@ addRoute("GET", "/api/teams/:name", async (_req, res, params) => {
       sendJson(res, 404, { error: "Team template not found" });
       return;
     }
-    sendJson(res, 200, team);
+    sendJson(res, 200, { ...team, builtIn: team.meta.type === "builtin" });
   } catch (err: any) {
     sendJson(res, 500, { error: err.message || String(err) });
   }

@@ -61,7 +61,7 @@ export function TeamsPage({ onSelectTeam, onRefresh }: TeamsPageProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-[960px] mx-auto px-6 md:px-9 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <div className="flex items-end justify-between gap-4 mb-1">
           <div>
             <h1 className="text-[17px] font-semibold tracking-tight text-ink-1">Teams</h1>
@@ -143,6 +143,9 @@ export function TeamsPage({ onSelectTeam, onRefresh }: TeamsPageProps) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1 truncate text-[14.5px] font-bold text-ink-1">{t.name}</div>
+                        {t.builtIn && (
+                          <span className="shrink-0 rounded-full border border-line-soft bg-surface-2 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-ink-3">builtin</span>
+                        )}
                         <span className="shrink-0 rounded-full border border-line-soft px-2 py-0.5 font-mono text-[10px] text-ink-4">{t.version}</span>
                       </div>
                       <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-3">{t.description || "No description."}</p>
