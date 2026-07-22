@@ -168,12 +168,7 @@ function applyPendingAfterPromptSettlement(instance: AgentInstance, trigger: str
   applyPendingThinkingSwitch(instance, trigger);
 }
 
-function isSummarizerInstance(instance: AgentInstance): boolean {
-  return instance.sourceAgent === "summarizer";
-}
-
 function markPendingChatReply(instance: AgentInstance, trigger: string): void {
-  if (isSummarizerInstance(instance)) return;
   if (!instance.pendingChatReply) logger.info("agent", "pendingChatReplySet", { member: instance.agentName, roomId: instance.roomId, trigger });
   instance.pendingChatReply = true;
 }
@@ -233,7 +228,7 @@ function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): vo
 }
 
 async function maybeRunLengthContinuation(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<boolean> {
-  if (!instance.lengthContinuationPending || opts.skipChatWarning || isSummarizerInstance(instance)) return false;
+  if (!instance.lengthContinuationPending || opts.skipChatWarning) return false;
   instance.lengthContinuationPending = false;
   if (instance.lengthContinuationAttempted) {
     instance.lastMessageEndWasLength = false;
@@ -260,7 +255,7 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
     return;
   }
   if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
-  if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn && !isSummarizerInstance(instance)) {
+  if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn) {
     // Silence-visible: a turn ended without a chat reply. Do NOT run a hidden
     // follow-up prompt (that masked real failures and swallowed their events).
     // Post an honest system note so the user sees the silence and decides.

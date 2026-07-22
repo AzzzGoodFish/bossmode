@@ -147,15 +147,6 @@ describe("chat enforcement pending reply", () => {
     expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
-  it("exempts summarizer", async () => {
-    state.sourceAgent = "summarizer";
-    await setup();
-
-    await activateAgent("room1", "developer");
-
-    expect(handle.prompt).toHaveBeenCalledTimes(1);
-  });
-
   it("continues once after length truncation even when SDK emits no compaction event", async () => {
     state.promptImpl = vi.fn(async () => {
       const call = handle.prompt.mock.calls.length;
