@@ -28,10 +28,6 @@ export const CONFIGURE_INTEGRATION_DESCRIPTION = `Configure an external integrat
 
 For Linear v1, use this to bind the current room to a Linear team and optional project. Do not pass API keys; Linear API keys must be configured in Settings.`;
 
-export const WRITE_SUMMARY_DESCRIPTION = `Create a topic-based summary message that covers a range of messages. Only callable by the summarizer agent.
-
-Use this when a contiguous segment of messages forms a coherent topic that can be condensed into a 1-3 sentence summary. The original messages remain in storage but the summary becomes the canonical view in the merged message stream.`;
-
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   // query_room_messages
@@ -63,10 +59,4 @@ export const PARAM_DESCRIPTIONS = {
   integrationTeam: "Linear team name, key, or id. API key must already be configured in Settings.",
   integrationProject: "Optional Linear project name or id within the selected team.",
   integrationEnabled: "Enable or disable syncing for this room.",
-
-  // write_summary
-  summaryTitle: "Short topic title for this summary segment",
-  summary: "1-3 sentence summary of the key content, decisions, and conclusions",
-  summaryFromId: "Message ID of the first message in this segment",
-  summaryToId: "Message ID of the last message in this segment",
 } as const;

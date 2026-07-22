@@ -6,7 +6,6 @@ import {
   LIST_TASKS_DESCRIPTION,
   GET_TASK_DESCRIPTION,
   COMMENT_TASK_DESCRIPTION,
-  WRITE_SUMMARY_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../src/shared/mcp-tool-descriptions.js";
 
@@ -19,11 +18,19 @@ describe("mcp-tool-descriptions", () => {
       LIST_TASKS_DESCRIPTION,
       GET_TASK_DESCRIPTION,
       COMMENT_TASK_DESCRIPTION,
-      WRITE_SUMMARY_DESCRIPTION,
     ]) {
       expect(typeof desc).toBe("string");
       expect(desc.length).toBeGreaterThan(50);
     }
+  });
+
+  it("has no leftover write_summary / summarizer residue", async () => {
+    const mod = await import("../../src/shared/mcp-tool-descriptions.js");
+    expect((mod as any).WRITE_SUMMARY_DESCRIPTION).toBeUndefined();
+    expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summaryTitle");
+    expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summaryFromId");
+    expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summaryToId");
+    expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summary");
   });
 
   it("task tool descriptions state capability and mechanical facts, not usage guidance", () => {
