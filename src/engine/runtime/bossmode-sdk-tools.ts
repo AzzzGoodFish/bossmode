@@ -10,7 +10,6 @@ import {
   COMMENT_TASK_DESCRIPTION,
   QUERY_INTEGRATION_DESCRIPTION,
   CONFIGURE_INTEGRATION_DESCRIPTION,
-  WRITE_SUMMARY_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 
@@ -209,21 +208,6 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
         enabled: Type.Optional(Type.Boolean({ description: PARAM_DESCRIPTIONS.integrationEnabled })),
       }),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("configure_integration", params as any), null, 2))),
-    }),
-    defineTool({
-      name: "write_summary",
-      label: "Write Summary",
-      description: WRITE_SUMMARY_DESCRIPTION,
-      parameters: Type.Object({
-        title: Type.String({ description: PARAM_DESCRIPTIONS.summaryTitle }),
-        summary: Type.String({ description: PARAM_DESCRIPTIONS.summary }),
-        from_id: Type.String({ description: PARAM_DESCRIPTIONS.summaryFromId }),
-        to_id: Type.String({ description: PARAM_DESCRIPTIONS.summaryToId }),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("write_summary", params as any) as any;
-        return data?.ok ? textResult("Summary created: \"" + (params as any).title + "\" (" + data.coveredCount + " messages)") : textResult("Failed: " + data?.error);
-      },
     }),
   ];
 }

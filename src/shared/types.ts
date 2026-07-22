@@ -433,6 +433,8 @@ export interface Room {
   docsPath?: string;
   /** Authoritative room-local members for v0.14+. */
   roomMembers?: RoomMemberRecord[];
+  /** Provenance: which team template (and version) this room was instantiated from. */
+  template?: { name: string; version: string };
   createdAt: number;
   /**
    * Legacy selected document paths (relative to ~/.bossmode/knowledge/docs/).

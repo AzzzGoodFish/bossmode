@@ -1,4 +1,15 @@
 import { describe, expect, it } from "vitest";
+
+
+vi.mock("../../src/workspace/team-store.js", () => ({
+  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+}));
 import { extractRoomMarkerText } from "../../src/engine/agent-manager.js";
 
 describe("extractRoomMarkerText", () => {
