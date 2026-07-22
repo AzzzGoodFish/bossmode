@@ -22,6 +22,8 @@ export interface TeamTemplateMeta {
   version: string;
   leader?: string;
   slug: string;
+  /** Product-shipped template (synced from templates/teams/). */
+  type?: "builtin" | "user";
 }
 
 export interface TeamTemplateAgent extends AgentDefinition {
@@ -52,6 +54,7 @@ export interface TeamTemplateSummary {
   agentNames: string[];
   skillNames: string[];
   usedInRoomCount: number;
+  builtIn?: boolean;
 }
 
 const STANDARD_TOP = new Set(["team.md", "agents", "skills"]);
@@ -163,9 +166,21 @@ function readTeamAt(dir: string, slug: string): TeamTemplate | null {
     }
   }
 
+  // Leader first in roster (prototype order).
+  if (leader) {
+    agents.sort((a, b) => {
+      if (a.name === leader) return -1;
+      if (b.name === leader) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  const typeRaw = meta.type ? asString(meta.type).toLowerCase() : "";
+  const type = typeRaw === "builtin" ? "builtin" as const : "user" as const;
+
   return {
     slug,
-    meta: { name, description, version, leader, slug },
+    meta: { name, description, version, leader, slug, type },
     teamMdBody: body,
     agents,
     skills,
@@ -191,9 +206,11 @@ export function listTeamTemplates(): TeamTemplateSummary[] {
       description: team.meta.description,
       version: team.meta.version,
       leader: team.meta.leader,
+      // agents already leader-first from readTeamAt
       agentNames: team.agents.map((a) => a.name),
       skillNames: team.skills.map((s) => s.name),
       usedInRoomCount: usedCounts.get(team.meta.name) || usedCounts.get(slug) || 0,
+      builtIn: team.meta.type === "builtin",
     });
   }
   return out;
@@ -201,11 +218,22 @@ export function listTeamTemplates(): TeamTemplateSummary[] {
 
 export function getTeamTemplate(nameOrSlug: string): TeamTemplate | null {
   ensureTeamsDir();
-  const direct = teamDir(nameOrSlug);
-  if (existsSync(join(direct, "team.md"))) return readTeamAt(direct, nameOrSlug);
-  // match by frontmatter name
+  const key = (nameOrSlug || "").trim();
+  if (!key) return null;
+  const candidates = [key, slugify(key)];
+  for (const c of candidates) {
+    const direct = teamDir(c);
+    if (existsSync(join(direct, "team.md"))) return readTeamAt(direct, c);
+  }
+  // match by frontmatter name (case-insensitive)
+  const lower = key.toLowerCase();
   for (const summary of listTeamTemplates()) {
-    if (summary.name === nameOrSlug || summary.slug === nameOrSlug) {
+    if (
+      summary.name === key ||
+      summary.slug === key ||
+      summary.name.toLowerCase() === lower ||
+      summary.slug.toLowerCase() === lower
+    ) {
       return readTeamAt(teamDir(summary.slug), summary.slug);
     }
   }
@@ -377,12 +405,49 @@ export function exportTeamToZip(nameOrSlug: string, outZipPath: string): string 
   return outZipPath;
 }
 
+
+/** Sync packaged builtin teams from templates/teams/* into ~/.bossmode/teams/.
+ * Idempotent: overwrites builtin slugs when packaged template is newer (by version string)
+ * or missing; never clobbers user teams (type !== builtin). */
+export function syncBuiltinTeamTemplates(): { synced: string[] } {
+  const synced: string[] = [];
+  const packagedRoot = join(import.meta.dirname, "../../templates/teams");
+  if (!existsSync(packagedRoot)) return { synced };
+  ensureTeamsDir();
+  for (const entry of readdirSync(packagedRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const src = join(packagedRoot, entry.name);
+    if (!existsSync(join(src, "team.md"))) continue;
+    const packaged = readTeamAt(src, entry.name);
+    if (!packaged || packaged.meta.type !== "builtin") continue;
+    const dest = teamDir(entry.name);
+    const existing = existsSync(join(dest, "team.md")) ? readTeamAt(dest, entry.name) : null;
+    // Skip overwrite of user-owned team that hijacked the slug
+    if (existing && existing.meta.type !== "builtin") {
+      logger.warn("team-store", "skip builtin sync — slug owned by user team", { slug: entry.name });
+      continue;
+    }
+    // Sync when missing or version differs
+    if (!existing || existing.meta.version !== packaged.meta.version) {
+      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+      cpSync(src, dest, { recursive: true });
+      synced.push(entry.name);
+      logger.info("team-store", "synced builtin team template", { slug: entry.name, version: packaged.meta.version });
+    }
+  }
+  return { synced };
+}
+
 /** Seed default team templates from packaged agents (idempotent). */
 export function seedDefaultTeamTemplatesFromAgents(): { created: string[] } {
   ensureTeamsDir();
+  // Always sync product-shipped builtin teams first.
+  try { syncBuiltinTeamTemplates(); } catch (err) {
+    logger.error("team-store", "builtin team sync failed", { error: String(err) });
+  }
   const created: string[] = [];
-  // Prefer shipping a dev-team package from templates/agents if teams dir empty of real packages
   const existing = listTeamTemplates();
+  // If any team exists (including builtin Dev Team), skip Default Team seed.
   if (existing.length > 0) return { created };
 
   const agentsDir = join(getBossmodeDir(), "agents");

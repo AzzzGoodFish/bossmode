@@ -23,22 +23,28 @@ describe("team-store", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("seeds a default team from global agents and lists it", async () => {
+  it("syncs packaged builtin Dev Team and lists it with leader first + builtIn", async () => {
     const mod = await import("../../src/workspace/team-store.js");
-    const seeded = mod.seedDefaultTeamTemplatesFromAgents();
-    expect(seeded.created.length).toBe(1);
+    const synced = mod.syncBuiltinTeamTemplates();
+    expect(synced.synced).toContain("dev");
     const list = mod.listTeamTemplates();
-    expect(list.length).toBe(1);
-    expect(list[0].agentNames).toEqual(expect.arrayContaining(["pm", "developer"]));
-    const team = mod.getTeamTemplate(list[0].slug);
-    expect(team?.agents.find((a) => a.name === "developer")?.skills).toContain("ship");
+    const dev = list.find((t) => t.slug === "dev");
+    expect(dev).toBeTruthy();
+    expect(dev!.builtIn).toBe(true);
+    expect(dev!.leader).toBe("pm");
+    expect(dev!.agentNames[0]).toBe("pm"); // leader first
+    expect(dev!.agentNames).toEqual(expect.arrayContaining(["pm", "architect", "developer", "qa", "designer", "dev-ben"]));
+
+    // get by display name (spaces) and by slug
+    expect(mod.getTeamTemplate("Dev Team")?.slug).toBe("dev");
+    expect(mod.getTeamTemplate("dev")?.meta.type).toBe("builtin");
   });
 
   it("copies a template into a room team path", async () => {
     const mod = await import("../../src/workspace/team-store.js");
-    mod.seedDefaultTeamTemplatesFromAgents();
+    mod.syncBuiltinTeamTemplates();
     const dest = join(dir, "rooms", "r1", "team");
-    mod.copyTeamTemplateTo("default-team", dest);
+    mod.copyTeamTemplateTo("dev", dest);
     expect(existsSync(join(dest, "team.md"))).toBe(true);
     expect(existsSync(join(dest, "agents", "pm.md"))).toBe(true);
     const agent = mod.loadRoomTeamAgent("r1", "pm");
@@ -47,19 +53,17 @@ describe("team-store", () => {
 
   it("imports and exports a zip package", async () => {
     const mod = await import("../../src/workspace/team-store.js");
-    mod.seedDefaultTeamTemplatesFromAgents();
+    mod.syncBuiltinTeamTemplates();
     const zipPath = join(dir, "pack.zip");
-    mod.exportTeamToZip("default-team", zipPath);
+    mod.exportTeamToZip("dev", zipPath);
     expect(existsSync(zipPath)).toBe(true);
-    // wipe teams and re-import
     rmSync(join(dir, "teams"), { recursive: true, force: true });
     const imported = mod.importTeamFromZip(zipPath);
-    expect(imported.agents.length).toBeGreaterThan(0);
+    expect(imported.agents.length).toBeGreaterThanOrEqual(6);
     expect(mod.listTeamTemplates().length).toBe(1);
   });
 
-  it("team-layer migration backfills room team packages", async () => {
-    // prepare a room without team/
+  it("team-layer migration backfills room team packages and syncs builtin", async () => {
     const roomId = "room-a";
     mkdirSync(join(dir, "rooms", roomId), { recursive: true });
     writeFileSync(join(dir, "rooms", roomId, "room.json"), JSON.stringify({
@@ -73,9 +77,18 @@ describe("team-store", () => {
     const mig = await import("../../src/workspace/team-layer-migration.js");
     mig.runTeamLayerMigration();
     expect(existsSync(join(dir, "rooms", roomId, "team", "agents", "pm.md"))).toBe(true);
-    expect(existsSync(join(dir, "teams", "default-team", "team.md"))).toBe(true);
-    // idempotent
+    expect(existsSync(join(dir, "teams", "dev", "team.md"))).toBe(true);
     mig.runTeamLayerMigration();
     expect(readFileSync(join(dir, "rooms", roomId, "team", "team.md"), "utf-8")).toContain("Migrated");
+  });
+
+  it("seeds Default Team only when no teams exist at all", async () => {
+    const mod = await import("../../src/workspace/team-store.js");
+    // No packaged builtins if we empty... packaged always exists in repo.
+    // After syncBuiltin, seed creates nothing more.
+    mod.syncBuiltinTeamTemplates();
+    const seeded = mod.seedDefaultTeamTemplatesFromAgents();
+    expect(seeded.created.length).toBe(0);
+    expect(mod.listTeamTemplates().some((t) => t.slug === "dev")).toBe(true);
   });
 });

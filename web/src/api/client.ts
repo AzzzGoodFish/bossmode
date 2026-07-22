@@ -140,6 +140,7 @@ export interface TeamTemplateDetail {
     version: string;
     leader?: string;
     slug: string;
+    type?: "builtin" | "user";
   };
   teamMdBody: string;
   agents: TeamAgentSummary[];

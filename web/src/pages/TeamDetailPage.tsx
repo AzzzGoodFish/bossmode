@@ -115,12 +115,18 @@ export function TeamDetailPage({ name, onBack }: TeamDetailPageProps) {
   const meta = team.meta;
   const skills = team.skills ?? [];
   const resources = team.otherResources ?? [];
-  const agents = team.agents ?? [];
   const leader = meta.leader;
+  const builtIn = team.builtIn || meta.type === "builtin";
+  // Leader first (matches prototype).
+  const agents = [...(team.agents ?? [])].sort((a, b) => {
+    if (a.name === leader) return -1;
+    if (b.name === leader) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="mx-auto w-full max-w-[880px] px-6 py-7 md:px-9 pb-16">
+      <div className="w-full px-6 py-7 md:px-10 pb-16">
         <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-xs text-ink-4 hover:text-ink-1">
           <ArrowLeft size={14} /> Teams
         </button>
@@ -132,8 +138,13 @@ export function TeamDetailPage({ name, onBack }: TeamDetailPageProps) {
           <div className="min-w-0 flex-1">
             <h1 className="text-[19px] font-bold tracking-tight text-ink-1">
               {meta.name}{" "}
+              {builtIn && (
+                <span className="ml-1 align-middle rounded-full border border-line-soft bg-surface-2 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-ink-3">
+                  builtin
+                </span>
+              )}
               <span className={`ml-1 align-middle rounded-full border px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${
-                team.builtIn ? "border-line-soft bg-surface-2 text-ink-3" : "border-accent bg-accent-dim text-accent-ink"
+                builtIn ? "border-line-soft bg-surface-2 text-ink-3" : "border-accent bg-accent-dim text-accent-ink"
               }`}>
                 {meta.version}
               </span>
@@ -192,24 +203,24 @@ export function TeamDetailPage({ name, onBack }: TeamDetailPageProps) {
           )}
         </div>
 
-        {resources.length > 0 && (
-          <>
-            <SectionLabel>other resources ({resources.length})</SectionLabel>
-            <div className="rounded-xl border border-line-soft bg-surface-1 px-4 py-1">
-              {resources.map((path) => (
-                <div key={path} className="flex items-center gap-3 border-b border-line-soft py-2.5 last:border-b-0">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs text-ink-3">▤</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-mono text-[12.5px] font-semibold text-ink-1">{path}</div>
-                  </div>
+        <SectionLabel>other resources ({resources.length})</SectionLabel>
+        <div className="rounded-xl border border-line-soft bg-surface-1 px-4 py-1">
+          {resources.length === 0 ? (
+            <p className="py-3 text-xs text-ink-4">No other resources.</p>
+          ) : (
+            resources.map((path) => (
+              <div key={path} className="flex items-center gap-3 border-b border-line-soft py-2.5 last:border-b-0">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs text-ink-3">▤</span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-[12.5px] font-semibold text-ink-1">{path}</div>
                 </div>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-ink-4">
-              Extra files bundled in the template, referenced from <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">team.md</code>. Not part of the team standard — shown so nothing in the package is hidden.
-            </p>
-          </>
-        )}
+              </div>
+            ))
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-ink-4">
+          Extra files bundled in the template, referenced from <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">team.md</code>. Not part of the team standard — shown so nothing in the package is hidden.
+        </p>
       </div>
     </div>
   );

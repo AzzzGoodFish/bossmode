@@ -265,11 +265,11 @@ export function Sidebar({
               <span className="text-[12.5px] font-medium text-ink-2">All teams</span>
             </button>
             {teams.map((t) => (
-              <button key={t.name} onClick={() => onNavigate({ type: "team", name: t.name })} className={itemCls(selectedTeamName === t.name)}>
+              <button key={t.slug || t.name} onClick={() => onNavigate({ type: "team", name: t.slug || t.name })} className={itemCls(selectedTeamName === (t.slug || t.name))}>
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center text-[10px] font-bold shrink-0">{(t.name[0] || "?").toUpperCase()}</span>
                   <div className="min-w-0 flex-1">
-                    <span className={`block text-[12.5px] font-medium truncate ${selectedTeamName === t.name ? "text-ink-1" : "text-ink-2"}`}>{t.name}</span>
+                    <span className={`block text-[12.5px] font-medium truncate ${selectedTeamName === (t.slug || t.name) ? "text-ink-1" : "text-ink-2"}`}>{t.name}{t.builtIn ? " · builtin" : ""}</span>
                     <span className="block text-[10px] text-ink-4 truncate">{(t.agentNames ?? []).length} agents · {t.version}</span>
                   </div>
                 </div>

@@ -145,7 +145,9 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 
     const params: Record<string, string> = {};
     route.paramNames.forEach((name, i) => {
-      params[name] = match[i + 1];
+      // Decode path params so names with spaces (e.g. Default%20Team) resolve.
+      try { params[name] = decodeURIComponent(match[i + 1]); }
+      catch { params[name] = match[i + 1]; }
     });
 
     try {
