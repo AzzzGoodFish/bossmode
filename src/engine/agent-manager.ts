@@ -6,6 +6,7 @@
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
+import { ensureRoomTeamAgent, resolveRoomSkillPaths } from "../workspace/team-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
@@ -519,9 +520,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     logger.info("agent", "getOrCreate", { member: memberName, memberId, roomId, found: false });
     logger.info("agent", "loadMember", { member: memberName, memberId, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
 
-    const agentDef = loadAgentDefinition(member.agent);
+    // Room-local only: agent definition from rooms/<id>/team/agents/ (no global fallback).
+    const agentDef = ensureRoomTeamAgent(roomId, member.agent);
     if (!agentDef) {
-      logger.error("agent", "agent definition not found", { member: memberName, agent: member.agent });
+      logger.error("agent", "room team agent definition not found", { member: memberName, agent: member.agent, roomId });
       return null;
     }
 
@@ -534,9 +536,9 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
     const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
 
-    // Resolve skills: member config takes precedence over agent definition
+    // Resolve skills: member config takes precedence over agent definition; prefer room team skills/
     const skills = resolveSkills(member, agentDef);
-    const skillPaths = skills.map((s) => join(getBossmodeDir(), "skills", s));
+    const skillPaths = resolveRoomSkillPaths(roomId, skills);
 
     // Session resume (global toggle; default true for backward compatibility)
     let sessionResumeEnabled = true;
@@ -619,7 +621,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
         const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
-        if (event.type === "tool_end" && (event.toolName === "chat" || event.toolName === "write_summary") && !(event as any).isError) {
+        if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
           clearPendingChatReply(instance, `tool:${event.toolName}`);
         }
         if (event.type === "agent_start") {
@@ -1095,12 +1097,12 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   }
   if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
 
-  const agentDef = loadAgentDefinition(member.agent);
-  if (!agentDef) throw new Error(`Agent definition not found: ${member.agent}`);
+  const agentDef = ensureRoomTeamAgent(roomId, member.agent);
+  if (!agentDef) throw new Error(`Room team agent definition not found: ${member.agent}`);
   const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
   const skills = resolveSkills(member, agentDef);
-  const skillPaths = skills.map((s) => join(getBossmodeDir(), "skills", s));
+  const skillPaths = resolveRoomSkillPaths(roomId, skills);
 
   await instance.handle.reloadResources({
     roomId,

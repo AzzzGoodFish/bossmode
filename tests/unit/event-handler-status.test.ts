@@ -1,4 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+
+vi.mock("../../src/workspace/team-store.js", () => ({
+  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+}));
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

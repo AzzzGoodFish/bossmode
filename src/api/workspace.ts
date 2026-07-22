@@ -12,12 +12,12 @@ import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-import { getSummarizePreview, summarizeRoom, isSummarizing } from "../engine/summarizer.js";
+
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
-import { loadAgentDefinition } from "../workforce/agent-store.js";
+import { ensureRoomTeamAgent } from "../workspace/team-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
@@ -46,6 +46,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
     docsPath?: string | null;
+    templateName?: string;
   };
 
   if (!body.name || !body.cwd) {
@@ -91,6 +92,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
       promptLeaderMemberName,
       docsPath: body.docsPath,
+      templateName: typeof body.templateName === "string" ? body.templateName.trim() || undefined : undefined,
     });
     sendJson(res, 200, room);
   } catch (err: any) {
@@ -263,9 +265,9 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, re
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const agentDef = loadAgentDefinition(member.agent);
+  const agentDef = ensureRoomTeamAgent(params.id, member.agent);
   if (!agentDef) {
-    sendJson(res, 404, { error: "Agent definition not found for this member" });
+    sendJson(res, 404, { error: "Room team agent definition not found for this member" });
     return;
   }
   const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
@@ -725,45 +727,7 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/context-usage", async (_req, res, 
   }
 });
 
-// ── Summarize ──
-
-addRoute("GET", "/api/rooms/:id/summarize/status", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-
-  const url = new URL(req.url || "", "http://localhost");
-  const keepCount = parseInt(url.searchParams.get("keepCount") || "50", 10);
-  const preview = getSummarizePreview(params.id, keepCount);
-  sendJson(res, 200, preview);
-});
-
-addRoute("POST", "/api/rooms/:id/summarize", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-
-  const body = (await parseBody(req)) as { keepCount?: number };
-  const keepCount = body.keepCount ?? 50;
-
-  if (isSummarizing(params.id)) {
-    sendJson(res, 409, { error: "Summarization already in progress" });
-    return;
-  }
-
-  // Async execution — return 202 immediately
-  summarizeRoom(params.id, keepCount).catch((err) => {
-    logger.error("api", "summarize failed", { roomId: params.id, error: String(err) });
-  });
-
-  sendJson(res, 202, { ok: true, message: "Summarization started" });
-});
-
-// ── Message Range (for expanding summaries) ──
+// ── Message Range ──
 
 addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);

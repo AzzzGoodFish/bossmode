@@ -15,7 +15,7 @@ import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
 import { getActivationSource } from "./activation-context.js";
 import { logger } from "../foundation/logger.js";
-import type { RoomMessage, SummaryMeta } from "../shared/types.js";
+import type { RoomMessage } from "../shared/types.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
@@ -427,54 +427,6 @@ export async function handleToolCallback(
         enabled: params?.enabled !== false,
       });
       return { ok: true, provider, configured: config, projects };
-    }
-    case "write_summary": {
-      // P0 security: only summarizer agent can call this tool
-      if (agentName !== "summarizer") {
-        return { ok: false, error: "write_summary can only be called by the summarizer agent" };
-      }
-
-      const { title, summary, from_id, to_id } = params;
-      if (!title || !summary || !from_id || !to_id) {
-        return { ok: false, error: "Missing required fields: title, summary, from_id, to_id" };
-      }
-
-      // Read range of original messages to compute metadata
-      const rangeMessages = messageStore.getMessagesByRange(roomId, from_id, to_id);
-      if (rangeMessages.length === 0) {
-        return { ok: false, error: `No messages found in range ${from_id} to ${to_id}` };
-      }
-
-      const participants = [...new Set(rangeMessages.map((m) => m.sender))];
-      const timeFrom = rangeMessages[0].ts;
-      const timeTo = rangeMessages[rangeMessages.length - 1].ts;
-
-      const summaryMeta: SummaryMeta = {
-        title,
-        covered_range: { from_id, to_id, count: rangeMessages.length },
-        time_range: { from: timeFrom, to: timeTo },
-        participants,
-      };
-
-      // Agent-friendly content format
-      const dateFrom = new Date(timeFrom).toISOString().slice(0, 10);
-      const dateTo = new Date(timeTo).toISOString().slice(0, 10);
-      const content = `[Summary | covers ${from_id} to ${to_id} | ${dateFrom} ~ ${dateTo}]\n## ${title}\n${summary}`;
-
-      // Write directly to message-store (bypass postMessage to avoid router @mention parsing)
-      const message = messageStore.addMessage(roomId, {
-        sender: "summarizer",
-        content,
-        mentions: [],
-        type: "summary",
-        summary_meta: summaryMeta,
-      });
-
-      // Broadcast via WS
-      broadcastToRoom(roomId, { type: "room:message", roomId, message });
-      logger.info("summarizer", "summary written", { roomId, title, from_id, to_id, count: rangeMessages.length });
-
-      return { ok: true, title, coveredCount: rangeMessages.length };
     }
     default:
       throw new Error(`Unknown tool: ${tool}`);

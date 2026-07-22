@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
 
+
+vi.mock("../../src/workspace/team-store.js", () => ({
+  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+}));
+
 /**
  * Unit test for slash command detection logic in steerAgent.
  * The actual function is embedded in agent-manager.ts, so we test the logic directly.

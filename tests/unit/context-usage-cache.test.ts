@@ -97,6 +97,25 @@ vi.mock("../../src/engine/event-handler.js", () => ({
   appendEventToDisk: vi.fn(),
 }));
 
+
+vi.mock("../../src/workspace/team-store.js", () => ({
+  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent,
+    description: agent,
+    systemPrompt: "test",
+    tags: [],
+    skills: [],
+  }),
+  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent,
+    description: agent,
+    systemPrompt: "test",
+    tags: [],
+    skills: [],
+  }),
+  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+}));
+
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import {
   activateAgent,

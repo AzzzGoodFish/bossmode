@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+
+vi.mock("../../src/workspace/team-store.js", () => ({
+  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
+    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
+  }),
+  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+}));
+
 const routes = new Map<string, any>();
 const sendJsonMock = vi.fn();
 const destroyInstanceMock = vi.fn();

@@ -90,39 +90,17 @@ describe("Acceptance: Summarize & Message Range", () => {
     return msgs;
   }
 
-  // ── Summarize Status ──
+  // ── Summarize removed in 0.19.0 ──
 
-  describe("Summarize status", () => {
-    it("returns status with available=false when no messages to summarize", async () => {
+  describe("Summarize endpoints removed", () => {
+    it("status route is gone", async () => {
       const room = await createRoom("status-empty", ["pm"]);
-      await sendMessages(room.id, 10);
-
-      // With keepCount=50, 10 messages < 50, nothing to summarize
       const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/summarize/status?keepCount=50`, { token });
-      expect(res.status).toBe(200);
-
-      const data = JSON.parse(res.body);
-      expect(data.available).toBe(false);
-      expect(data.toSummarize).toBe(0);
-      expect(data.isSummarizing).toBe(false);
+      expect(res.status).toBe(404);
     });
 
-    it("returns status with available=true when messages exceed keepCount", async () => {
-      const room = await createRoom("status-available", ["pm"]);
-      await sendMessages(room.id, 20);
-
-      // keepCount=5, so 15 messages can be summarized
-      const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/summarize/status?keepCount=5`, { token });
-      expect(res.status).toBe(200);
-
-      const data = JSON.parse(res.body);
-      expect(data.available).toBe(true);
-      expect(data.toSummarize).toBe(15);
-      expect(data.toKeep).toBe(5);
-    });
-
-    it("returns 404 for nonexistent room", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/rooms/fake-id/summarize/status", { token });
+    it("trigger route is gone", async () => {
+      const res = await jsonRequest(ts.port, "POST", "/api/rooms/fake-id/summarize", { token, body: {} });
       expect(res.status).toBe(404);
     });
   });
@@ -166,15 +144,5 @@ describe("Acceptance: Summarize & Message Range", () => {
     });
   });
 
-  // ── Summarize Trigger ──
-
-  describe("Summarize trigger", () => {
-    it("returns 404 for nonexistent room", async () => {
-      const res = await jsonRequest(ts.port, "POST", "/api/rooms/fake-id/summarize", { token, body: {} });
-      expect(res.status).toBe(404);
-    });
-
-    // Note: Full summarize flow requires a working runtime (agent process).
-    // Integration testing of the actual summarization is done in unit tests.
-  });
 });
+

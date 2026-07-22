@@ -230,18 +230,15 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
     await wsClient.close();
   });
 
-  // ── SM-5: Summarizer timeout protection ─────────────────────────────────
+  // ── SM-5: Summarizer removed in 0.19.0 ─────────────────────────────────
 
-  it("SM-5: Summarizer has 5-minute (300_000ms) per-batch timeout protection", async () => {
+  it("SM-5: write_summary tool and summarize routes are gone", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const src = readFileSync(join(process.cwd(), "src/engine/summarizer.ts"), "utf-8");
-
-    // 5-minute timeout constant
-    expect(src).toMatch(/SUMMARIZER_TIMEOUT_MS\s*=\s*300[_,]?000/);
-    // Promise.race used for enforcement
-    expect(src).toContain("Promise.race");
-    expect(src).toContain("waitWithTimeout");
+    const tools = readFileSync(join(process.cwd(), "src/engine/tools.ts"), "utf-8");
+    const sdk = readFileSync(join(process.cwd(), "src/engine/runtime/bossmode-sdk-tools.ts"), "utf-8");
+    expect(tools).not.toContain('case "write_summary"');
+    expect(sdk).not.toContain('name: "write_summary"');
   });
 
   // ── SM-6: isWorking removed from AgentHandle ──────────────────────────
