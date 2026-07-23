@@ -107,6 +107,17 @@ export interface AgentHandle {
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
   reloadResources?(opts: ReloadAgentResourcesOpts): Promise<void>;
+  /** Active tools currently exposed to the model (session-live). */
+  getActiveTools?(): MemberActiveToolInfo[];
+}
+
+export interface MemberActiveToolInfo {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: unknown;
+  /** builtin | bossmode | mcp | extension:<id> */
+  source: string;
 }
 
 // -- Unified event model --

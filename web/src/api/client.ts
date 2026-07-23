@@ -899,6 +899,25 @@ export async function getMemberCorePrompt(roomId: string, memberRef: string): Pr
   return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/core-prompt`);
 }
 
+export interface MemberActiveTool {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: unknown;
+  /** builtin | bossmode | mcp | extension:<id> */
+  source: string;
+}
+
+export interface MemberActiveToolsResponse {
+  sessionActive: boolean;
+  tools: MemberActiveTool[];
+  message?: string;
+}
+
+export async function getMemberActiveTools(roomId: string, memberRef: string): Promise<MemberActiveToolsResponse> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/tools`);
+}
+
 // -- Messages --
 
 export interface SummaryMeta {

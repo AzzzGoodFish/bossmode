@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getExtensions,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord,
+  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
@@ -921,7 +921,7 @@ function MemberConfigPanel({
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
   onSwitchThinking: (thinkingLevel: string | null) => void;
   onCompact: () => void;
-  onReload: () => void;
+  onReload: () => void | Promise<void>;
   onRestart: () => void;
   onResetSession: () => void;
   onToggleMcp: (server: string) => void;
@@ -944,8 +944,9 @@ function MemberConfigPanel({
   const [mainline, setMainline] = useState<Mainline | null>(null);
   const [stats, setStats] = useState<MemberStats | null>(null);
   const [corePrompt, setCorePrompt] = useState<{ content: string; charCount: number } | null>(null);
+  const [activeToolsReloadKey, setActiveToolsReloadKey] = useState(0);
 
-  useEffect(() => { setDraftName(member.name); setEditingName(false); setTab("overview"); }, [member.id, member.name]);
+  useEffect(() => { setDraftName(member.name); setEditingName(false); setTab("overview"); setActiveToolsReloadKey((k) => k + 1); }, [member.id, member.name]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1155,6 +1156,8 @@ function MemberConfigPanel({
 
         {tab === "session" && (
           <div className="space-y-4 pb-6">
+            <ActiveToolsSection roomId={roomId} memberRef={member.id || member.name} status={status} reloadKey={activeToolsReloadKey} />
+
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1193,7 +1196,7 @@ function MemberConfigPanel({
                   </div>
                   <button
                     type="button"
-                    onClick={onReload}
+                    onClick={() => { void Promise.resolve(onReload()).finally(() => setActiveToolsReloadKey((k) => k + 1)); }}
                     className="shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                   >
                     Reload
@@ -1678,5 +1681,260 @@ export function ThinkingPop({
       {content}
     </div>,
     document.body,
+  );
+}
+
+// ── Active tools (Session & tools top) ──────────────────────────────────────
+
+type ToolFilter = "all" | "builtin" | "bossmode" | "extension" | "mcp";
+
+function toolSourceKind(source: string): ToolFilter {
+  if (source === "builtin") return "builtin";
+  if (source === "bossmode") return "bossmode";
+  if (source === "mcp" || source.startsWith("mcp:")) return "mcp";
+  if (source.startsWith("extension:")) return "extension";
+  return "all";
+}
+
+function toolSourceLabel(source: string): string {
+  if (source === "builtin") return "Builtin";
+  if (source === "bossmode") return "Bossmode";
+  if (source === "mcp") return "MCP";
+  if (source.startsWith("mcp:")) return `MCP · ${source.slice(4)}`;
+  if (source.startsWith("extension:")) {
+    const id = source.slice("extension:".length);
+    return id === "unknown" ? "Extension" : `Extension · ${id}`;
+  }
+  return source;
+}
+
+function toolBadgeClass(source: string): string {
+  const kind = toolSourceKind(source);
+  if (kind === "builtin") return "text-ink-3 border-line-strong";
+  if (kind === "bossmode") return "text-accent-ink border-accent bg-accent-dim";
+  if (kind === "extension") return "text-thinking border-thinking bg-thinking-dim";
+  if (kind === "mcp") return "text-[#7aa2ff] border-[#7aa2ff] bg-[rgba(122,162,255,.12)]";
+  return "text-ink-4 border-line";
+}
+
+function groupToolsBySource(tools: MemberActiveTool[]): Array<{ source: string; tools: MemberActiveTool[] }> {
+  const order: string[] = [];
+  const map = new Map<string, MemberActiveTool[]>();
+  for (const t of tools) {
+    if (!map.has(t.source)) {
+      map.set(t.source, []);
+      order.push(t.source);
+    }
+    map.get(t.source)!.push(t);
+  }
+  // Prefer builtin → bossmode → extension* → mcp*
+  const rank = (s: string) => {
+    if (s === "builtin") return 0;
+    if (s === "bossmode") return 1;
+    if (s.startsWith("extension:")) return 2;
+    if (s === "mcp" || s.startsWith("mcp:")) return 3;
+    return 4;
+  };
+  order.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  return order.map((source) => ({ source, tools: map.get(source)! }));
+}
+
+function paramEntries(parameters: unknown): Array<{ name: string; type: string; required: boolean; description: string }> {
+  if (!parameters || typeof parameters !== "object") return [];
+  const schema = parameters as { properties?: Record<string, any>; required?: string[] };
+  const props = schema.properties || {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  return Object.entries(props).map(([name, def]) => {
+    const d = def && typeof def === "object" ? def : {};
+    const type = typeof d.type === "string" ? d.type : Array.isArray(d.type) ? d.type.join("|") : "any";
+    return {
+      name,
+      type,
+      required: required.has(name),
+      description: typeof d.description === "string" ? d.description : "",
+    };
+  });
+}
+
+function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
+  roomId: string;
+  memberRef: string;
+  status: string;
+  reloadKey: number;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [sessionActive, setSessionActive] = useState(false);
+  const [tools, setTools] = useState<MemberActiveTool[]>([]);
+  const [message, setMessage] = useState<string | undefined>();
+  const [error, setError] = useState(false);
+  const [filter, setFilter] = useState<ToolFilter>("all");
+  const [query, setQuery] = useState("");
+  const [openNames, setOpenNames] = useState<Set<string>>(new Set());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await getMemberActiveTools(roomId, memberRef);
+      setSessionActive(!!data.sessionActive);
+      setTools(Array.isArray(data.tools) ? data.tools : []);
+      setMessage(data.message);
+    } catch {
+      setError(true);
+      setSessionActive(false);
+      setTools([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [roomId, memberRef]);
+
+  useEffect(() => { void load(); }, [load, reloadKey, status]);
+
+  const filtered = tools.filter((t) => {
+    if (filter !== "all" && toolSourceKind(t.source) !== filter) return false;
+    if (!query.trim()) return true;
+    const q = query.trim().toLowerCase();
+    return t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
+  });
+  const groups = groupToolsBySource(filtered);
+
+  return (
+    <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-ink-1">Active tools</div>
+          <div className="text-xs text-ink-4 mt-0.5">
+            {sessionActive
+              ? `${tools.length} tool${tools.length === 1 ? "" : "s"} live on this session`
+              : "Tools are read from the running session — we don’t guess from config."}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-3">Loading tools…</div>
+      ) : error ? (
+        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
+          <span>Couldn’t load active tools.</span>
+          <button type="button" onClick={() => void load()} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
+        </div>
+      ) : !sessionActive ? (
+        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4 leading-relaxed space-y-1">
+          <div className="font-semibold text-ink-2">No active session.</div>
+          <div>{message || "Start or Reload this member to see active tools."}</div>
+          <div className="text-ink-4">Tools are read from the running session — we don’t guess from config.</div>
+        </div>
+      ) : tools.length === 0 ? (
+        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Session is active but no tools are enabled.</div>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              ["all", "All"],
+              ["builtin", "Builtin"],
+              ["bossmode", "Bossmode"],
+              ["extension", "Extensions"],
+              ["mcp", "MCP"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${filter === key ? "border-accent bg-accent-dim text-accent-ink" : "border-line bg-surface-1 text-ink-3 hover:bg-surface-2"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search tools…"
+            className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-xs font-mono text-ink-1 outline-none focus:border-accent placeholder:text-ink-4 placeholder:font-sans"
+          />
+          {groups.length === 0 ? (
+            <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No tools match this filter.</div>
+          ) : (
+            <div className="space-y-3">
+              {groups.map(({ source, tools: groupTools }) => (
+                <div key={source}>
+                  <div className="flex items-center gap-2 text-[10px] font-bold tracking-wide uppercase text-ink-4 mb-1.5">
+                    <span>{toolSourceLabel(source)}</span>
+                    <span className="font-semibold normal-case tracking-normal">· {groupTools.length}</span>
+                    <span className="flex-1 h-px bg-line-soft" />
+                  </div>
+                  <div className="space-y-1.5">
+                    {groupTools.map((tool) => {
+                      const open = openNames.has(tool.name);
+                      const params = paramEntries(tool.parameters);
+                      return (
+                        <div key={tool.name} className={`rounded-[10px] border bg-surface-1 overflow-hidden ${open ? "border-line-strong" : "border-line-soft"}`}>
+                          <button
+                            type="button"
+                            onClick={() => setOpenNames((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(tool.name)) next.delete(tool.name);
+                              else next.add(tool.name);
+                              return next;
+                            })}
+                            className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left cursor-pointer hover:bg-surface-2 border-0 bg-transparent text-inherit"
+                          >
+                            <span className={`text-[10px] text-ink-4 mt-1 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-[12.5px] font-bold text-ink-1">{tool.name}</span>
+                                <span className={`text-[9px] font-bold uppercase tracking-wide border rounded-full px-1.5 py-px ${toolBadgeClass(tool.source)}`}>
+                                  {toolSourceKind(tool.source)}
+                                </span>
+                              </div>
+                              {tool.description && (
+                                <div className="text-[11px] text-ink-3 mt-0.5 line-clamp-2 leading-snug">{tool.description}</div>
+                              )}
+                            </div>
+                          </button>
+                          {open && (
+                            <div className="border-t border-line-soft px-3 py-2.5 bg-inset space-y-2">
+                              {tool.description && (
+                                <p className="text-[11.5px] text-ink-2 leading-relaxed m-0">{tool.description}</p>
+                              )}
+                              <div className="text-[9.5px] font-bold tracking-wide uppercase text-ink-4">Parameters</div>
+                              {params.length === 0 ? (
+                                <div className="text-[11px] text-ink-4">No parameters.</div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {params.map((p) => (
+                                    <div key={p.name} className="rounded-lg border border-line-soft bg-surface-1 px-2.5 py-2">
+                                      <div>
+                                        <span className="font-mono text-[11.5px] font-bold text-ink-1">{p.name}</span>
+                                        {p.required && <span className="text-blocked ml-1 text-[11px]">*</span>}
+                                        <span className="font-mono text-[10px] text-ink-4 ml-1.5">{p.type}</span>
+                                      </div>
+                                      {p.description && <div className="text-[11px] text-ink-3 mt-0.5 leading-snug">{p.description}</div>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="text-[10.5px] text-ink-4">source · {tool.source}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }

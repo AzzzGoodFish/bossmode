@@ -17,10 +17,44 @@ import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore } from "../model-credentials.js";
-import { resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
+import { listInstalledExtensions, resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts } from "./types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
+
+const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
+const BOSSMODE_TOOL_NAMES = new Set([
+  "chat", "query_room_messages",
+  "read_memory", "edit_memory", "write_memory",
+  "create_task", "update_task", "list_tasks", "get_task", "comment_task",
+  "query_integration", "configure_integration",
+]);
+
+function classifyToolSource(name: string, sourceInfo?: { path?: string; source?: string; baseDir?: string }): string {
+  if (BUILTIN_TOOL_NAMES.has(name)) return "builtin";
+  if (BOSSMODE_TOOL_NAMES.has(name)) return "bossmode";
+  if (name === "mcp") return "mcp";
+  const haystack = [sourceInfo?.path, sourceInfo?.baseDir, sourceInfo?.source].filter(Boolean).join(" ");
+  if (haystack) {
+    try {
+      for (const ext of listInstalledExtensions()) {
+        const markers = [ext.name, ...ext.extensionPaths, ...(ext.id ? [ext.id] : [])];
+        if (markers.some((m) => m && haystack.includes(m))) {
+          return `extension:${ext.name}`;
+        }
+      }
+    } catch {
+      /* ignore catalog errors — fall through */
+    }
+    // Path still looks like an extension even if not in catalog
+    if (/extensions|node_modules|\.ts$|\.js$/i.test(haystack) && !/pi-mcp-adapter/.test(haystack)) {
+      const leaf = haystack.split(/[/\\]/).filter(Boolean).find((p) => p.startsWith("pi-") || p.includes("web-access"));
+      if (leaf) return `extension:${leaf.replace(/@.*$/, "")}`;
+    }
+    if (/pi-mcp-adapter|mcp/i.test(haystack)) return "mcp";
+  }
+  return "extension:unknown";
+}
 
 function safeSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -365,6 +399,37 @@ class PiSdkAgentHandle implements AgentHandle {
     } catch (err) {
       logger.warn("runtime:pi-sdk", "getContextUsage failed", { error: String(err) });
       return null;
+    }
+  }
+
+  getActiveTools(): MemberActiveToolInfo[] {
+    if (this.destroyed) return [];
+    try {
+      const session = this.session as any;
+      if (typeof session.getActiveToolNames !== "function" || typeof session.getAllTools !== "function") return [];
+      const active = new Set<string>((session.getActiveToolNames() as string[]) || []);
+      const all = (session.getAllTools() as Array<{
+        name: string;
+        description?: string;
+        parameters?: unknown;
+        sourceInfo?: { path?: string; source?: string; baseDir?: string };
+      }>) || [];
+      const tools: MemberActiveToolInfo[] = [];
+      for (const t of all) {
+        if (!t?.name || !active.has(t.name)) continue;
+        const def = typeof session.getToolDefinition === "function" ? session.getToolDefinition(t.name) : undefined;
+        tools.push({
+          name: t.name,
+          label: typeof def?.label === "string" ? def.label : t.name,
+          description: t.description || "",
+          parameters: t.parameters ?? { type: "object", properties: {} },
+          source: classifyToolSource(t.name, t.sourceInfo),
+        });
+      }
+      return tools;
+    } catch (err) {
+      logger.warn("runtime:pi-sdk", "getActiveTools failed", { error: String(err) });
+      return [];
     }
   }
 

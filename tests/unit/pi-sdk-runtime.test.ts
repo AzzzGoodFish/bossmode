@@ -634,4 +634,44 @@ describe("PiSdkRuntime", () => {
     expect(resourceLoaderCtor).toHaveBeenCalledWith(expect.objectContaining({ additionalSkillPaths: [] }));
     expect(handle.runtimeParams?.skills).toEqual(["impeccable", "custom-skill"]);
   });
+
+  it("getActiveTools returns intersection of registry and active names with source labels", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    activeToolNames = ["read", "bash", "chat", "web_search", "mcp"];
+    createAgentSession.mockResolvedValueOnce({
+      session: {
+        subscribe: vi.fn(() => vi.fn()),
+        prompt: vi.fn(), steer: vi.fn(), abort: vi.fn(), abortCompaction: vi.fn(), abortBranchSummary: vi.fn(), dispose: vi.fn(),
+        reload: vi.fn(), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(),
+        setActiveToolsByName: vi.fn((names: string[]) => { activeToolNames = names; }),
+        getActiveToolNames: vi.fn(() => activeToolNames),
+        getAllTools: vi.fn(() => [
+          { name: "read", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }, sourceInfo: { path: "builtin", source: "builtin" } },
+          { name: "bash", description: "Run bash", parameters: { type: "object", properties: {} }, sourceInfo: { path: "builtin", source: "builtin" } },
+          { name: "chat", description: "Post to room", parameters: { type: "object", properties: {} }, sourceInfo: { path: "bossmode", source: "custom" } },
+          { name: "web_search", description: "Search the web", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, sourceInfo: { path: "/tmp/extensions/node_modules/pi-web-access/index.ts", source: "extension", baseDir: "/tmp/extensions/node_modules/pi-web-access" } },
+          { name: "mcp", description: "MCP proxy", parameters: { type: "object", properties: {} }, sourceInfo: { path: "vendor/pi-mcp-adapter/index.ts", source: "extension" } },
+          { name: "inactive_tool", description: "Should be filtered", parameters: {}, sourceInfo: { path: "x" } },
+        ]),
+        getToolDefinition: vi.fn((name: string) => ({ name, label: name })),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+        sessionId: "session-a", sessionFile: join(dir, "session.json"), thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const tools = handle.getActiveTools!();
+    const names = tools.map((t) => t.name).sort();
+    expect(names).toEqual(["bash", "chat", "mcp", "read", "web_search"]);
+    expect(tools.find((t) => t.name === "read")?.source).toBe("builtin");
+    expect(tools.find((t) => t.name === "chat")?.source).toBe("bossmode");
+    expect(tools.find((t) => t.name === "mcp")?.source).toBe("mcp");
+    expect(tools.find((t) => t.name === "web_search")?.source).toMatch(/^extension:/);
+    expect(tools.find((t) => t.name === "web_search")?.parameters).toMatchObject({ required: ["query"] });
+    expect(tools.find((t) => t.name === "inactive_tool")).toBeUndefined();
+  });
+
 });
