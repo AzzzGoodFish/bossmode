@@ -104,7 +104,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
   const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
   const [extensionsData, setExtensionsData] = useState<ExtensionsListResponse | null>(null);
-  const [extPackage, setExtPackage] = useState("pi-web-access");
+  const [extPackage, setExtPackage] = useState("");
   const [extBusy, setExtBusy] = useState(false);
   const [extError, setExtError] = useState<string | null>(null);
 
@@ -347,22 +347,28 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       </div>
       )}
 
-      {/* Extensions */}
+      {/* Extensions — prototype: extensions-install-v1 */}
       {section === "extensions" && (
       <div className="space-y-4">
+        <p className="text-sm text-ink-3 leading-relaxed">
+          Extensions add capabilities to your members — install one and every member can use its tools after Reload. Same model as the <b className="text-ink-2">pi CLI</b>.
+        </p>
+
         <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
           <div>
-            <div className="text-sm font-medium text-ink-1">Bossmode-managed extensions</div>
+            <div className="text-sm font-medium text-ink-1">Install an extension</div>
             <div className="text-xs text-ink-3 mt-0.5">
-              Install pi agent packages (same model as <code className="text-[11px]">pi install npm:…</code>). After install, Reload members to pick up new tools.
+              Enter a package source — an npm package, a git repo, a URL, or a local path.
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               value={extPackage}
               onChange={(e) => setExtPackage(e.target.value)}
-              placeholder="pi-web-access or npm:pi-web-access"
-              className="flex-1 rounded-lg border border-line bg-inset px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong font-mono"
+              placeholder="npm:pi-web-access"
+              spellCheck={false}
+              autoComplete="off"
+              className="flex-1 rounded-lg border border-line bg-inset px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong font-mono placeholder:text-ink-4"
             />
             <button
               type="button"
@@ -373,7 +379,8 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 try {
                   await installExtension(extPackage.trim());
                   await refreshExtensions();
-                  toast(`Installed ${extPackage.trim()}. Reload members to use new tools.`, "success");
+                  setExtPackage("");
+                  toast(`Installed. Reload members to use new tools.`, "success");
                 } catch (err) {
                   const msg = err instanceof Error ? err.message : userActionError("install extension");
                   setExtError(msg);
@@ -388,51 +395,105 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
             </button>
           </div>
           {extError && <div className="text-xs text-blocked">{extError}</div>}
+
+          {/* Source format examples — flat 2×2 cards (approved prototype) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            {([
+              { kind: "npm:", example: "npm:@foo/bar" },
+              { kind: "git:", example: "git:github.com/user/repo" },
+              { kind: "https:", example: "https://github.com/user/repo" },
+              { kind: "path:", example: "./local/path" },
+            ] as const).map((ex) => (
+              <button
+                key={ex.kind}
+                type="button"
+                onClick={() => setExtPackage(ex.example)}
+                className="flex items-center gap-2.5 rounded-lg border border-line-soft bg-inset px-3 py-2.5 text-left hover:border-line-strong hover:bg-surface-2 cursor-pointer transition-colors"
+              >
+                <span className="shrink-0 rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent-ink">{ex.kind}</span>
+                <span className="min-w-0 truncate font-mono text-[11.5px] text-ink-3">{ex.example}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-line-soft">
+            <span className="text-[11.5px] text-ink-4">Not sure what to install? Browse the pi package catalog.</span>
+            <a
+              href="https://pi.dev/packages"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-ink hover:underline shrink-0"
+            >
+              Browse packages ↗
+            </a>
+          </div>
+
           <div className="text-[11px] text-ink-4">
-            Web search keys: <code className="rounded bg-surface-3 px-1">{extensionsData?.webSearchConfig.path || "~/.pi/web-search.json"}</code>
+            Some extensions need keys in <code className="rounded bg-surface-3 px-1">{extensionsData?.webSearchConfig.path || "~/.pi/web-search.json"}</code>
             {" · "}
             {extensionsData?.webSearchConfig.exists ? "found" : "not configured yet (optional for Exa default)"}
           </div>
         </div>
 
-        <div className="bg-surface-1 border border-line rounded-lg divide-y divide-line-soft">
-          {(extensionsData?.extensions ?? []).length === 0 ? (
-            <p className="px-4 py-6 text-sm text-ink-4">No extensions installed.</p>
-          ) : (
-            (extensionsData?.extensions ?? []).map((ext: ExtensionRecord) => (
-              <div key={ext.id} className="flex items-start gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-semibold text-ink-1">{ext.name}</span>
-                    {ext.version && <span className="text-[10px] text-ink-4 font-mono">{ext.version}</span>}
-                    <span className="text-[10px] text-ink-4">{ext.extensionPaths.length} entry · {ext.skillPaths.length} skill dir</span>
-                  </div>
-                  {ext.description && <p className="mt-0.5 text-xs text-ink-3 line-clamp-2">{ext.description}</p>}
-                  {ext.error && <p className="mt-0.5 text-xs text-blocked">{ext.error}</p>}
-                </div>
-                <button
-                  type="button"
-                  disabled={extBusy}
-                  onClick={async () => {
-                    if (!(await confirm(`Uninstall ${ext.name}?`))) return;
-                    setExtBusy(true);
-                    try {
-                      await uninstallExtension(ext.name);
-                      await refreshExtensions();
-                      toast(`Uninstalled ${ext.name}.`, "success");
-                    } catch (err) {
-                      toast(err instanceof Error ? err.message : userActionError("uninstall extension"), "error");
-                    } finally {
-                      setExtBusy(false);
-                    }
-                  }}
-                  className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink-3 hover:text-blocked hover:border-blocked/40 cursor-pointer"
-                >
-                  Uninstall
-                </button>
+        <div className="bg-surface-1 border border-line rounded-lg">
+          <div className="px-4 pt-3.5 pb-1">
+            <div className="text-sm font-medium text-ink-1">
+              Installed{" "}
+              <span className="text-[10px] font-semibold text-ink-4">{extensionsData?.extensions?.length ?? 0}</span>
+            </div>
+            <div className="text-xs text-ink-3 mt-0.5">Active for all members after Reload. Uninstall to remove an extension&apos;s tools.</div>
+          </div>
+          <div className="divide-y divide-line-soft mt-1">
+            {(extensionsData?.extensions ?? []).length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-ink-4">
+                <div className="text-2xl mb-2 opacity-40">⧉</div>
+                No extensions installed yet.
+                <br />
+                Install one above, or{" "}
+                <a href="https://pi.dev/packages" target="_blank" rel="noopener noreferrer" className="text-accent-ink hover:underline">browse the catalog</a>.
               </div>
-            ))
-          )}
+            ) : (
+              (extensionsData?.extensions ?? []).map((ext: ExtensionRecord) => (
+                <div key={ext.id} className="flex items-start gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm font-semibold text-ink-1">{ext.name}</span>
+                      <span className="text-[10px] text-ink-4 font-mono">{ext.id}</span>
+                      {ext.version && <span className="text-[10px] text-ink-4 font-mono">{ext.version}</span>}
+                      {!ext.error && ext.extensionPaths.length > 0 && (
+                        <span className="rounded-full border border-onair/40 bg-onair/10 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-onair">active</span>
+                      )}
+                    </div>
+                    {ext.description && <p className="mt-0.5 text-xs text-ink-3 line-clamp-2">{ext.description}</p>}
+                    <p className="mt-0.5 text-[10.5px] text-ink-4">
+                      {ext.extensionPaths.length} entry · {ext.skillPaths.length} skill dir
+                    </p>
+                    {ext.error && <p className="mt-0.5 text-xs text-blocked">{ext.error}</p>}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={extBusy}
+                    onClick={async () => {
+                      if (!(await confirm(`Uninstall ${ext.name}?`))) return;
+                      setExtBusy(true);
+                      try {
+                        await uninstallExtension(ext.name);
+                        await refreshExtensions();
+                        toast(`Uninstalled ${ext.name}.`, "success");
+                      } catch (err) {
+                        toast(err instanceof Error ? err.message : userActionError("uninstall extension"), "error");
+                      } finally {
+                        setExtBusy(false);
+                      }
+                    }}
+                    className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink-3 hover:text-blocked hover:border-blocked/40 cursor-pointer"
+                  >
+                    Uninstall
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
       )}
