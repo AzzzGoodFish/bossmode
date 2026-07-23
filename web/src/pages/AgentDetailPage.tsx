@@ -194,9 +194,9 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
       <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
         <MobileTopBar title={isCreate ? "New Agent" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
         <div className="flex-1 flex flex-col min-h-0 w-full px-6 md:px-10 py-6">
+          <BackLink label="Agents" onClick={isCreate ? onBack : handleCancel} />
           <div className="flex items-center justify-between mb-4 shrink-0">
             <div className="flex items-center gap-3">
-              <BackLink label="Agents" onClick={isCreate ? onBack : handleCancel} className="mb-0" />
               {isCreate ? (
                 <input
                   value={agentName}

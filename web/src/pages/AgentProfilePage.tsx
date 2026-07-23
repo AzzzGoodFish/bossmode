@@ -100,8 +100,9 @@ export function AgentProfilePage({ name, onBack, onDeleted, onOpenMobileSidebar 
             </div>
           )}
 
+          <BackLink label="Agents" onClick={onBack} />
+
           <div className="flex items-start gap-4">
-            <BackLink label="Team" onClick={onBack} className="mb-0 mt-1" />
             <StaffBadge name={name} avatar={agent.avatar} status={anyWorking ? "working" : "idle"} size="lg" />
             <div className="min-w-0">
               <h2 className="text-[19px] font-semibold tracking-tight text-ink-1 flex items-center gap-2.5 flex-wrap">
