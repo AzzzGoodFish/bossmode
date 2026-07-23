@@ -84,10 +84,10 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     <div className="flex-1 flex flex-col overflow-hidden">
       <MobileTopBar title={isCreate ? "New Skill" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 flex flex-col p-6 overflow-hidden">
+      <BackLink label="Skills" onClick={onBack} />
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div className="flex items-center gap-3">
-          <BackLink label="Skills" onClick={onBack} className="mb-0" />
           {isCreate ? (
             <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="skill-name"
               className="text-lg font-bold text-ink-1 bg-transparent border-b border-line focus:border-accent outline-none px-1" />

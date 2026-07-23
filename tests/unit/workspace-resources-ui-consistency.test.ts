@@ -29,7 +29,7 @@ describe("workspace resources UI consistency (Teams / Agents / Skills)", () => {
   it("uses shared BackLink and full-width Agents shells", () => {
     const back = source("web/src/components/BackLink.tsx");
     expect(back).toContain("ArrowLeft");
-    expect(back).toContain("size={16}");
+    expect(back).toContain("size={18}");
 
     for (const path of [
       "web/src/pages/TeamDetailPage.tsx",
@@ -40,6 +40,7 @@ describe("workspace resources UI consistency (Teams / Agents / Skills)", () => {
       const src = source(path);
       expect(src).toContain("BackLink");
       expect(src).not.toMatch(/<ArrowLeft\b/);
+      expect(src).not.toMatch(/BackLink[^>]*className=/);
     }
 
     const agentsPage = source("web/src/pages/AgentsPage.tsx");
