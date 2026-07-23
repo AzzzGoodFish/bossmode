@@ -179,6 +179,35 @@ export async function importTeamZip(file: File): Promise<TeamTemplateDetail> {
   return res.json();
 }
 
+// -- Extensions (bossmode-managed pi packages) --
+
+export interface ExtensionRecord {
+  id: string;
+  name: string;
+  version?: string;
+  description?: string;
+  extensionPaths: string[];
+  skillPaths: string[];
+  error?: string;
+}
+
+export interface ExtensionsListResponse {
+  extensions: ExtensionRecord[];
+  webSearchConfig: { path: string; exists: boolean };
+}
+
+export async function getExtensions(): Promise<ExtensionsListResponse> {
+  return apiFetch("/api/extensions");
+}
+
+export async function installExtension(pkg: string): Promise<ExtensionRecord> {
+  return apiFetch("/api/extensions/install", { method: "POST", body: JSON.stringify({ package: pkg }) });
+}
+
+export async function uninstallExtension(name: string): Promise<{ ok: true; id: string }> {
+  return apiFetch(`/api/extensions/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
 export async function exportTeamZip(name: string): Promise<Blob> {
   const headers: Record<string, string> = {};
   const token = getToken();
