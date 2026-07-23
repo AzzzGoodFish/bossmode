@@ -46,16 +46,50 @@ function manifestPath(): string {
   return join(getBossmodeDir(), MANIFEST_FILE);
 }
 
-function normalizePackageId(input: string): { id: string; name: string } {
+/** Map user-facing source (pi install style) to npm install arg + manifest id. */
+function normalizePackageId(input: string): { id: string; name: string; npmArg: string } {
   const raw = input.trim();
   if (!raw) throw new Error("Package name is required");
+
+  // npm:@scope/pkg or npm:pkg
   if (raw.startsWith("npm:")) {
     const name = raw.slice("npm:".length).trim();
-    if (!name) throw new Error("Invalid package id");
-    return { id: `npm:${name}`, name };
+    if (!name) throw new Error("Invalid npm package id");
+    return { id: `npm:${name}`, name, npmArg: name };
   }
+
+  // git:github.com/user/repo  or git:git@github.com:user/repo
+  if (raw.startsWith("git:")) {
+    const rest = raw.slice("git:".length).trim();
+    if (!rest) throw new Error("Invalid git source");
+    let npmArg: string;
+    if (rest.startsWith("git@") || rest.startsWith("ssh://")) {
+      npmArg = rest.startsWith("git+") ? rest : `git+${rest}`;
+    } else if (rest.startsWith("http://") || rest.startsWith("https://")) {
+      npmArg = rest.startsWith("git+") ? rest : `git+${rest}`;
+    } else {
+      // host/user/repo (e.g. github.com/user/repo)
+      npmArg = `git+https://${rest}`;
+    }
+    const leaf = rest.split(/[/:]/).filter(Boolean).pop()?.replace(/\.git$/, "") || rest;
+    return { id: raw, name: leaf, npmArg };
+  }
+
+  // https:// or ssh:// URL
+  if (/^https?:\/\//i.test(raw) || /^ssh:\/\//i.test(raw)) {
+    const leaf = raw.split("/").filter(Boolean).pop()?.replace(/\.git$/, "") || "package";
+    const npmArg = raw.startsWith("git+") ? raw : (/^https?:\/\//i.test(raw) ? raw : `git+${raw}`);
+    return { id: raw, name: leaf, npmArg };
+  }
+
+  // local path
+  if (raw.startsWith("./") || raw.startsWith("../") || raw.startsWith("/")) {
+    const leaf = raw.split("/").filter(Boolean).pop() || "local-package";
+    return { id: `path:${raw}`, name: leaf, npmArg: raw };
+  }
+
   // bare name → npm scheme (pi CLI convention)
-  return { id: `npm:${raw}`, name: raw };
+  return { id: `npm:${raw}`, name: raw, npmArg: raw };
 }
 
 function readManifest(): ExtensionsManifest {
@@ -174,14 +208,14 @@ export function resolveInstalledExtensionSkillPaths(): string[] {
 }
 
 export function installExtension(packageSpec: string): ExtensionRecord {
-  const { id, name } = normalizePackageId(packageSpec);
+  const { id, name, npmArg } = normalizePackageId(packageSpec);
   ensureBossmodeDir();
   ensureExtensionsProject();
   const dir = extensionsProjectDir();
 
-  logger.info("extensions", "install start", { id, name, dir });
+  logger.info("extensions", "install start", { id, name, npmArg, dir });
   try {
-    execFileSync("npm", ["install", name, "--save", "--no-fund", "--no-audit"], {
+    execFileSync("npm", ["install", npmArg, "--save", "--no-fund", "--no-audit"], {
       cwd: dir,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, npm_config_update_notifier: "false" },
@@ -193,19 +227,44 @@ export function installExtension(packageSpec: string): ExtensionRecord {
     throw new Error(`Failed to install ${name}: ${stderr.slice(0, 300)}`);
   }
 
-  const inspected = inspectPackage(name);
-  if (inspected.error && inspected.extensionPaths.length === 0) {
-    // roll back install record-wise but leave node_modules (user may retry)
-    throw new Error(`Installed ${name} but it is not a pi extension (missing pi.extensions): ${inspected.error}`);
+  // Resolve actual package name from node_modules after install (git URLs rename).
+  let resolvedName = name;
+  const nm = join(dir, "node_modules");
+  if (!existsSync(join(nm, resolvedName, "package.json")) && existsSync(nm)) {
+    // Find newest package with pi.extensions
+    try {
+      for (const entry of readdirSync(nm, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        if (entry.name.startsWith("@")) {
+          for (const scoped of readdirSync(join(nm, entry.name), { withFileTypes: true })) {
+            if (!scoped.isDirectory()) continue;
+            const full = `${entry.name}/${scoped.name}`;
+            const insp = inspectPackage(full);
+            if (insp.extensionPaths.length > 0) resolvedName = full;
+          }
+        } else {
+          const insp = inspectPackage(entry.name);
+          if (insp.extensionPaths.length > 0 && !readManifest().packages.some((p) => normalizePackageId(p).name === entry.name)) {
+            resolvedName = entry.name;
+          }
+        }
+      }
+    } catch { /* keep name */ }
   }
 
+  const inspected = inspectPackage(resolvedName);
+  if (inspected.error && inspected.extensionPaths.length === 0) {
+    throw new Error(`Installed ${resolvedName} but it is not a pi extension (missing pi.extensions): ${inspected.error}`);
+  }
+
+  const manifestId = id.startsWith("npm:") ? `npm:${resolvedName}` : id;
   const manifest = readManifest();
-  if (!manifest.packages.includes(id)) {
-    manifest.packages = [...manifest.packages, id].sort();
+  if (!manifest.packages.includes(manifestId)) {
+    manifest.packages = [...manifest.packages, manifestId].sort();
     writeManifest(manifest);
   }
-  logger.info("extensions", "install ok", { id, version: inspected.version, extensions: inspected.extensionPaths.length });
-  return { id, ...inspected };
+  logger.info("extensions", "install ok", { id: manifestId, version: inspected.version, extensions: inspected.extensionPaths.length });
+  return { id: manifestId, ...inspected };
 }
 
 export function uninstallExtension(packageSpec: string): { ok: true; id: string } {
