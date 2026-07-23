@@ -1,17 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Plus, RefreshCw, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
-import { Sheet } from "../components/Sheet";
 import {
   type Room,
-  type TeamUpdateCandidate,
-  type TeamUpdateCheckResult,
-  checkTeamUpdates,
-  applyTeamUpdates,
-  dismissTeamUpdate,
 } from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { TeamsPage } from "./TeamsPage";
@@ -401,20 +395,6 @@ interface HomePageProps {
 
 function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobileSidebar }: HomePageProps) {
   const hasRooms = rooms.length > 0;
-  const [updateCheck, setUpdateCheck] = useState<TeamUpdateCheckResult | null>(null);
-  const [dismissedSession, setDismissedSession] = useState(false);
-  const [showReview, setShowReview] = useState(false);
-  const [updateResultNote, setUpdateResultNote] = useState<string | null>(null);
-
-  const refreshUpdateCheck = useCallback(() => {
-    checkTeamUpdates().then(setUpdateCheck).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    refreshUpdateCheck();
-  }, [refreshUpdateCheck]);
-
-  const showBanner = !!(updateCheck?.hasUpdates && !updateCheck.dismissed && !dismissedSession);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -431,37 +411,6 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
             <h1 className="text-2xl font-semibold text-ink-1 mb-1">Get started</h1>
             <p className="text-sm text-ink-3 mb-8">Create your first room to begin.</p>
           </>
-        )}
-
-        {showBanner && updateCheck && (
-          <UpdateBanner
-            check={updateCheck}
-            onReview={() => setShowReview(true)}
-            onDismiss={() => setDismissedSession(true)}
-            onDismissVersion={async () => {
-              await dismissTeamUpdate("version", updateCheck.currentVersion);
-              await refreshUpdateCheck();
-            }}
-            onDismissPermanent={async () => {
-              await dismissTeamUpdate("permanent");
-              await refreshUpdateCheck();
-            }}
-            onUpdateAll={async () => {
-              const modifiedCount = updateCheck.candidates.filter((c) => c.status === "modified").length;
-              if (modifiedCount > 0) {
-                const ok = window.confirm(`Update All will overwrite ${modifiedCount} modified built-in file${modifiedCount === 1 ? "" : "s"}. Continue?`);
-                if (!ok) return;
-              }
-              const paths = updateCheck.candidates.map((c) => c.relativePath);
-              const result = await applyTeamUpdates(paths);
-              setUpdateResultNote(`Updated ${result.applied.length} files.`);
-              await refreshUpdateCheck();
-            }}
-          />
-        )}
-
-        {updateResultNote && (
-          <div className="mb-3 text-xs text-onair">{updateResultNote}</div>
         )}
 
         <div className="space-y-2">
@@ -515,145 +464,7 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
           </button>
         </div>
       </div>
-
-      {showReview && updateCheck && (
-        <ReviewDialog
-          check={updateCheck}
-          onClose={() => setShowReview(false)}
-          onApply={async (paths) => {
-            const result = await applyTeamUpdates(paths);
-            setUpdateResultNote(`Updated ${result.applied.length} selected file${result.applied.length === 1 ? "" : "s"}.`);
-            setShowReview(false);
-            await refreshUpdateCheck();
-          }}
-        />
-      )}
     </div>
     </div>
-  );
-}
-
-function buildSummaryText(candidates: TeamUpdateCandidate[]): string {
-  const bucket = new Map<string, number>();
-  for (const c of candidates) {
-    const key = `${c.category}:${c.status}`;
-    bucket.set(key, (bucket.get(key) || 0) + 1);
-  }
-  const parts: string[] = [];
-  for (const [k, count] of bucket.entries()) {
-    const [category, status] = k.split(":") as [string, string];
-    parts.push(`${count} ${category}${count > 1 ? "s" : ""} ${status}`);
-  }
-  return parts.join(", ");
-}
-
-function UpdateBanner({
-  check,
-  onDismiss,
-  onDismissVersion,
-  onDismissPermanent,
-  onReview,
-  onUpdateAll,
-}: {
-  check: TeamUpdateCheckResult;
-  onDismiss: () => void;
-  onDismissVersion: () => Promise<void>;
-  onDismissPermanent: () => Promise<void>;
-  onReview: () => void;
-  onUpdateAll: () => Promise<void>;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  return (
-    <div className="mb-4 rounded-lg border border-accent/30 bg-accent-dim px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <RefreshCw size={14} className="text-accent-ink shrink-0" />
-            <span className="text-sm font-medium text-accent-ink">
-              Built-in team update available ({check.installedVersion} → {check.currentVersion})
-            </span>
-          </div>
-          <p className="text-xs text-accent-ink">{buildSummaryText(check.candidates)}</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onReview} className="text-xs text-accent-ink hover:underline cursor-pointer">Review</button>
-          <button onClick={() => void onUpdateAll()} className="text-xs bg-accent text-accent-contrast hover:opacity-90 px-2.5 py-1 rounded cursor-pointer">Update All</button>
-          <div className="relative">
-            <button onClick={() => setMenuOpen((v) => !v)} className="text-xs text-ink-3 hover:text-ink-2 cursor-pointer">Dismiss ▾</button>
-            {menuOpen && (
-              <div className="absolute right-0 top-6 z-20 w-48 rounded border border-line bg-surface-3 shadow-lg py-1">
-                <button onClick={() => { onDismiss(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Dismiss</button>
-                <button onClick={() => { void onDismissVersion(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Skip this version</button>
-                <button onClick={() => { void onDismissPermanent(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 cursor-pointer">Don't check for updates</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReviewDialog({
-  check,
-  onClose,
-  onApply,
-}: {
-  check: TeamUpdateCheckResult;
-  onClose: () => void;
-  onApply: (paths: string[]) => Promise<void>;
-}) {
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(check.candidates.filter((c) => c.status !== "modified").map((c) => c.relativePath)),
-  );
-
-  const toggle = (path: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const groups: Array<{ key: TeamUpdateCandidate["category"]; label: string }> = [
-    { key: "agent", label: "Agents" },
-    { key: "skill", label: "Skills" },
-    { key: "rule", label: "Rules" },
-  ];
-
-  return (
-    <Sheet open onClose={onClose} size="xl" closeOnOverlayClick={false}>
-      <div>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-line-soft">
-          <h3 className="text-sm font-semibold">Review Updates</h3>
-          <button onClick={onClose} className="text-ink-3 hover:text-ink-1 cursor-pointer"><X size={14} /></button>
-        </div>
-        <div className="max-h-[60vh] overflow-y-auto p-4 space-y-4">
-          {groups.map((g) => {
-            const items = check.candidates.filter((c) => c.category === g.key);
-            if (items.length === 0) return null;
-            return (
-              <div key={g.key}>
-                <div className="text-xs font-semibold text-ink-3 uppercase tracking-wider mb-2">{g.label}</div>
-                <div className="space-y-2">
-                  {items.map((c) => (
-                    <label key={c.relativePath} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={selected.has(c.relativePath)} onChange={() => toggle(c.relativePath)} className="cursor-pointer" />
-                      <span className="flex-1 truncate">{c.name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.status === "new" ? "bg-onair-dim text-onair" : c.status === "updated" ? "bg-accent-dim text-accent-ink" : "bg-think-dim text-think"}`}>{c.status}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-line-soft">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm text-ink-3 hover:text-ink-1 cursor-pointer">Cancel</button>
-          <button onClick={() => void onApply([...selected])} className="px-3 py-1.5 text-sm rounded bg-accent text-accent-contrast hover:opacity-90 cursor-pointer">Apply {selected.size} selected</button>
-        </div>
-      </div>
-    </Sheet>
   );
 }

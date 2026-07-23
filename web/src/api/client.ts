@@ -1128,27 +1128,6 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   return res.json();
 }
 
-// -- Summarize --
-
-export interface SummarizeStatus {
-  available: boolean;
-  toSummarize: number;
-  toKeep: number;
-  isSummarizing: boolean;
-}
-
-export async function getSummarizeStatus(roomId: string, keepCount?: number): Promise<SummarizeStatus> {
-  const params = keepCount ? `?keepCount=${keepCount}` : "";
-  return apiFetch(`/api/rooms/${roomId}/summarize/status${params}`);
-}
-
-export async function summarizeRoom(roomId: string, keepCount?: number): Promise<{ ok: boolean; message: string }> {
-  return apiFetch(`/api/rooms/${roomId}/summarize`, {
-    method: "POST",
-    body: JSON.stringify({ keepCount }),
-  });
-}
-
 export async function getMessageRange(roomId: string, fromId: string, toId: string): Promise<RoomMessage[]> {
   return apiFetch(`/api/rooms/${roomId}/messages/range?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
 }
@@ -1158,7 +1137,6 @@ export async function getMessageRange(roomId: string, fromId: string, toId: stri
 export interface SummarySettings {
   autoEnabled: boolean;
   threshold: number;
-  keepCount: number;
 }
 
 export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
@@ -1196,26 +1174,6 @@ export interface McpSettings {
   servers?: McpServerSummary[];
   availability?: Record<string, McpServerAvailability>;
   sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
-}
-
-export interface TeamUpdateCandidate {
-  category: "agent" | "skill" | "rule";
-  relativePath: string;
-  name: string;
-  status: "new" | "updated" | "modified";
-}
-
-export interface TeamUpdateCheckResult {
-  hasUpdates: boolean;
-  currentVersion: string;
-  installedVersion: string;
-  candidates: TeamUpdateCandidate[];
-  dismissed: boolean;
-}
-
-export interface TeamUpdateSettings {
-  dismissPermanent: boolean;
-  installedVersion: string;
 }
 
 export async function getSummarySettings(): Promise<SummarySettings> {
@@ -1373,35 +1331,4 @@ export interface FsListDirsResult {
 
 export async function listDirs(path: string): Promise<FsListDirsResult> {
   return apiFetch(`/api/fs/list-dirs?path=${encodeURIComponent(path)}`);
-}
-
-// -- Built-in Team Updates --
-
-export async function checkTeamUpdates(): Promise<TeamUpdateCheckResult> {
-  return apiFetch("/api/team-updates/check");
-}
-
-export async function applyTeamUpdates(paths: string[]): Promise<{ applied: string[]; skipped: string[]; errors: string[] }> {
-  return apiFetch("/api/team-updates/apply", {
-    method: "POST",
-    body: JSON.stringify({ paths }),
-  });
-}
-
-export async function dismissTeamUpdate(type: "version" | "permanent", version?: string): Promise<void> {
-  await apiFetch("/api/team-updates/dismiss", {
-    method: "POST",
-    body: JSON.stringify({ type, version }),
-  });
-}
-
-export async function getTeamUpdateSettings(): Promise<TeamUpdateSettings> {
-  return apiFetch("/api/team-updates/settings");
-}
-
-export async function updateTeamUpdateSettings(dismissPermanent: boolean): Promise<TeamUpdateSettings> {
-  return apiFetch("/api/team-updates/settings", {
-    method: "POST",
-    body: JSON.stringify({ dismissPermanent }),
-  });
 }

@@ -51,7 +51,6 @@ export interface BossmodeConfig {
   summary?: {
     autoEnabled: boolean;
     threshold: number;  // message count to trigger auto-summary
-    keepCount: number;  // keep latest N messages unsummarized
   };
   runtime?: BossmodeRuntimeConfig;
   mcp?: BossmodeMcpConfig;

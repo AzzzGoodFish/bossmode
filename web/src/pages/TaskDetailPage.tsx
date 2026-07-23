@@ -31,7 +31,6 @@ const PRIORITY_META: Record<TaskPriority, { label: string; icon: any; dot: strin
 const AVATAR_COLORS: Record<string, string> = {
   pm: "bg-avatar-pm", developer: "bg-accent", qa: "bg-onair",
   architect: "bg-think", designer: "bg-avatar-designer", user: "bg-avatar-user", fish: "bg-avatar-user",
-  summarizer: "bg-surface-3",
 };
 function avatarColor(name: string) {
   return AVATAR_COLORS[name] || "bg-surface-3";

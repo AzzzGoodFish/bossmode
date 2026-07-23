@@ -94,13 +94,11 @@ describe("team-store", () => {
     expect(readFileSync(join(dir, "rooms", roomId, "team", "team.md"), "utf-8")).toContain("Migrated");
   });
 
-  it("seeds Default Team only when no teams exist at all", async () => {
+  it("ensureBuiltinTeamsSynced syncs Dev Team and never fabricates a Default Team", async () => {
     const mod = await import("../../src/workspace/team-store.js");
-    // No packaged builtins if we empty... packaged always exists in repo.
-    // After syncBuiltin, seed creates nothing more.
-    mod.syncBuiltinTeamTemplates();
-    const seeded = mod.seedDefaultTeamTemplatesFromAgents();
-    expect(seeded.created.length).toBe(0);
+    mod.ensureBuiltinTeamsSynced();
     expect(mod.listTeamTemplates().some((t) => t.slug === "dev")).toBe(true);
+    expect(mod.listTeamTemplates().some((t) => t.slug === "default-team")).toBe(false);
+    expect((mod as any).seedDefaultTeamTemplatesFromAgents).toBeUndefined();
   });
 });

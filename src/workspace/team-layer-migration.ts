@@ -1,5 +1,5 @@
 // Migration: team-layer-v1
-// 1) Seed default team template(s) from global agents if teams/ is empty
+// 1) Ensure builtin team templates (e.g. Dev Team) are synced
 // 2) Backfill rooms/<id>/team/ from each room's current members (copy agents from global)
 // Idempotent + data-state driven (re-derives correctness from disk, not a stale "done" flag alone).
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import { getRoomsDir } from "./room-store.js";
-import { seedDefaultTeamTemplatesFromAgents, writeTeamPackage } from "./team-store.js";
+import { ensureBuiltinTeamsSynced, writeTeamPackage } from "./team-store.js";
 import type { Room } from "../shared/types.js";
 
 const MIGRATION_ID = "team-layer-v1";
@@ -73,11 +73,11 @@ function backfillRoomTeam(roomId: string): boolean {
 }
 
 export function runTeamLayerMigration(): void {
-  // Always attempt seed (no-op if teams already present)
+  // Always ensure builtin teams are synced (no-op if already current)
   try {
-    seedDefaultTeamTemplatesFromAgents();
+    ensureBuiltinTeamsSynced();
   } catch (err) {
-    logger.error("migration", "team-layer-v1 seed failed", { error: String(err) });
+    logger.error("migration", "team-layer-v1 sync failed", { error: String(err) });
   }
 
   const roomsDir = getRoomsDir();

@@ -405,7 +405,7 @@ export function runKnowledgeMigration(): void {
     logger.error("knowledge-migration", "room field migration failed", { error: String(err) });
   }
 
-  // Built-in team seeding is handled by seedBuiltinTeam() in server startup.
+  // Built-in asset seeding is handled by seedBuiltinAssets() in server startup.
 }
 
 // Silence the unused-import warnings for functions that might later be needed

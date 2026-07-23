@@ -1,18 +1,13 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse } from "../api/client";
+import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse } from "../api/client";
 import {
-  getSummarySettings,
-  updateSummarySettings,
   getRuntimeSettings,
   updateRuntimeSettings,
   getMcpSettings,
   updateMcpSettings,
   checkMcpServers,
-  getTeamUpdateSettings,
-  updateTeamUpdateSettings,
-  checkTeamUpdates,
   getModelCredentialProfiles,
   createModelCredentialProfile,
   updateModelCredentialProfile,
@@ -49,9 +44,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   models: { title: "Models", desc: "Connect providers and choose available models." },
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
   extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
-  summary: { title: "Summarization", desc: "Choose when long conversations are summarized." },
   integrations: { title: "Integrations", desc: "Connect external tools and services." },
-  "team-updates": { title: "Built-in Updates", desc: "Updates for built-in Agents and Skills." },
 };
 
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
@@ -81,13 +74,6 @@ export function oauthStatusLabel(status: OAuthLoginJob["status"]): string {
 
 export function SettingsPage({ section = "models", onOpenMobileSidebar }: SettingsPageProps = {}) {
   const { toast, confirm } = useDialog();
-  const [summarySettings, setSummarySettings] = useState<SummarySettings>({
-    autoEnabled: false,
-    threshold: 200,
-    keepCount: 50,
-  });
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summarySaved, setSummarySaved] = useState(false);
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
     codexTransport: "auto",
@@ -95,8 +81,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   });
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [runtimeSaved, setRuntimeSaved] = useState(false);
-  const [teamUpdateSettings, setTeamUpdateSettings] = useState<TeamUpdateSettings | null>(null);
-  const [checkingTeamUpdates, setCheckingTeamUpdates] = useState(false);
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
@@ -111,29 +95,12 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const refreshExtensions = () => getExtensions().then(setExtensionsData).catch(console.error);
 
   useEffect(() => {
-    getSummarySettings().then(setSummarySettings).catch(console.error);
     getRuntimeSettings().then((v) => setRuntimeSettings(normalizeRuntimeSettings(v))).catch(console.error);
-    getTeamUpdateSettings().then(setTeamUpdateSettings).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
     getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
     getMcpSettings().then(setMcpSettings).catch(console.error);
     refreshExtensions();
   }, []);
-
-  const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
-    const newSettings = { ...summarySettings, ...updates };
-    setSummarySettings(newSettings);
-    setSummaryLoading(true);
-    try {
-      await updateSummarySettings(newSettings);
-      setSummarySaved(true);
-      setTimeout(() => setSummarySaved(false), 2000);
-    } catch (err: any) {
-      console.error("Failed to save summary settings:", err);
-    } finally {
-      setSummaryLoading(false);
-    }
-  };
 
   const handleRuntimeChange = async (updates: Partial<RuntimeSettings>) => {
     const previous = runtimeSettings;
@@ -172,16 +139,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     });
   };
 
-  const handleTeamUpdateToggle = async () => {
-    if (!teamUpdateSettings) return;
-    try {
-      const next = await updateTeamUpdateSettings(!teamUpdateSettings.dismissPermanent);
-      setTeamUpdateSettings(next);
-    } catch (err) {
-      console.error("Failed to update team update settings", err);
-    }
-  };
-
   const refreshProfiles = async () => setProfiles(await getModelCredentialProfiles());
 
   const handleDeleteProfile = async (profile: PublicModelCredentialProfile) => {
@@ -205,18 +162,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     } catch (err) {
       console.error("Failed to refresh models", err);
       toast(userActionError("refresh models", "Check the provider connection, then try again."), "error");
-    }
-  };
-
-  const handleCheckTeamUpdates = async () => {
-    setCheckingTeamUpdates(true);
-    try {
-      const result = await checkTeamUpdates();
-      console.info("team updates check", result);
-    } catch (err) {
-      console.error("Failed to check team updates", err);
-    } finally {
-      setCheckingTeamUpdates(false);
     }
   };
 
@@ -494,91 +439,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               ))
             )}
           </div>
-        </div>
-      </div>
-      )}
-
-      {/* Auto-Summary */}
-      {section === "summary" && (
-      <div>
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Enable Auto-Summary</div>
-              <div className="text-xs text-ink-3 mt-0.5">Automatically summarize when message count exceeds threshold</div>
-            </div>
-            <button
-              onClick={() => handleSummaryChange({ autoEnabled: !summarySettings.autoEnabled })}
-              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${
-                summarySettings.autoEnabled ? "bg-accent" : "bg-surface-3"
-              }`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                summarySettings.autoEnabled ? "translate-x-5" : "translate-x-0"
-              }`} />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="text-xs text-ink-3 block mb-1">Threshold (messages)</label>
-              <input
-                type="number"
-                value={summarySettings.threshold}
-                onChange={(e) => handleSummaryChange({ threshold: parseInt(e.target.value) || 200 })}
-                min={50}
-                max={1000}
-                className="w-full bg-inset border border-line rounded px-3 py-1.5 text-sm text-ink-1"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs text-ink-3 block mb-1">Keep latest (messages)</label>
-              <input
-                type="number"
-                value={summarySettings.keepCount}
-                onChange={(e) => handleSummaryChange({ keepCount: parseInt(e.target.value) || 50 })}
-                min={10}
-                max={200}
-                className="w-full bg-inset border border-line rounded px-3 py-1.5 text-sm text-ink-1"
-              />
-            </div>
-          </div>
-
-          <div className="text-xs text-ink-4">
-            Summarizer's model can be configured from its workstation card in any room.
-            {summarySaved && <span className="ml-2 text-onair">Saved!</span>}
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* Built-in Team Updates */}
-      {section === "team-updates" && (
-      <div>
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Check for updates automatically</div>
-              <div className="text-xs text-ink-3 mt-0.5">Installed version: {teamUpdateSettings?.installedVersion || "-"}</div>
-            </div>
-            <button
-              onClick={handleTeamUpdateToggle}
-              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${
-                teamUpdateSettings?.dismissPermanent ? "bg-surface-3" : "bg-accent"
-              }`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                teamUpdateSettings?.dismissPermanent ? "translate-x-0" : "translate-x-5"
-              }`} />
-            </button>
-          </div>
-          <button
-            onClick={handleCheckTeamUpdates}
-            disabled={checkingTeamUpdates}
-            className="px-3 py-1.5 text-xs border border-line rounded text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer disabled:opacity-60"
-          >
-            {checkingTeamUpdates ? "Checking..." : "Check now"}
-          </button>
         </div>
       </div>
       )}

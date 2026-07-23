@@ -14,6 +14,7 @@ import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-renam
 import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
+import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -22,7 +23,7 @@ import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
-import { seedBuiltinTeam } from "../workforce/team-updates.js";
+import { seedBuiltinAssets } from "../workforce/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -52,7 +53,7 @@ export interface ServerOptions {
 export function startServer(opts: ServerOptions): Promise<void> {
   // Ensure dirs + seed builtin team files on first run
   ensureBossmodeDir();
-  seedBuiltinTeam();
+  seedBuiltinAssets();
 
   // Knowledge: migrate legacy JSON-entry KBs to filesystem-markdown layout (idempotent)
   try {
@@ -113,6 +114,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runTeamLayerMigration();
   } catch (err) {
     logger.error("server", "team layer migration failed", { error: String(err) });
+  }
+
+  try {
+    runTeamMetaCleanupMigration();
+  } catch (err) {
+    logger.error("server", "team meta cleanup migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so

@@ -1,16 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
-import type { Room, SummarizeStatus, MemberInfo } from "../api/client";
+import type { Room, MemberInfo } from "../api/client";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
-import { Search, Plus, ScrollText, Settings, X } from "lucide-react";
+import { Search, Plus, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
-  getSummarizeStatus,
-  summarizeRoom as apiSummarizeRoom,
   addMember as apiAddMember,
 } from "../api/client";
 import { useRoom } from "../hooks/useRoom";
@@ -214,52 +212,6 @@ export function Main({
   );
 
   const [searchOpen, setSearchOpen] = useState(false);
-  const [summarizeDialog, setSummarizeDialog] = useState<{ status: SummarizeStatus; totalMessages: number } | null>(null);
-  const [summarizeKeepCount, setSummarizeKeepCount] = useState(50);
-
-  const handleSummarize = useCallback(async () => {
-    if (!selectedRoomId) return;
-    try {
-      const status = await getSummarizeStatus(selectedRoomId);
-      if (status.isSummarizing) {
-        toast("Summarization already in progress.", "info");
-        return;
-      }
-      if (!status.available && status.toSummarize === 0) {
-        toast("No messages to summarize.", "info");
-        return;
-      }
-      const total = status.toSummarize + status.toKeep;
-      setSummarizeKeepCount(status.toKeep);
-      setSummarizeDialog({ status, totalMessages: total });
-    } catch (err) {
-      console.error("Failed to check summarization", err);
-      toast(userActionError("check summarization"), "error");
-    }
-  }, [selectedRoomId, toast]);
-
-  const handleSummarizeConfirm = useCallback(async () => {
-    if (!selectedRoomId) return;
-    setSummarizeDialog(null);
-    try {
-      await apiSummarizeRoom(selectedRoomId, summarizeKeepCount);
-      toast("Summarization started.", "success");
-    } catch (err) {
-      console.error("Failed to start summarization", err);
-      toast(userActionError("start summarization"), "error");
-    }
-  }, [selectedRoomId, summarizeKeepCount, toast]);
-
-  useEffect(() => {
-    if (!summarizeDialog || !selectedRoomId) return;
-    const total = summarizeDialog.totalMessages;
-    const toSummarize = Math.max(0, total - summarizeKeepCount);
-    setSummarizeDialog((prev) => prev ? {
-      ...prev,
-      status: { ...prev.status, toSummarize, toKeep: summarizeKeepCount, available: toSummarize > 0 },
-    } : null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summarizeKeepCount]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -365,9 +317,6 @@ export function Main({
           </button>
           <button onClick={() => setShowAddMember(true)} className={toolBtn} title="Add member">
             <Plus size={14} />
-          </button>
-          <button onClick={handleSummarize} className={toolBtn} title="Summarize messages">
-            <ScrollText size={13} />
           </button>
           <button onClick={() => setSearchOpen((v) => !v)} className={toolBtn} title="Search messages (Ctrl+F)">
             <Search size={13} />
@@ -506,52 +455,6 @@ export function Main({
       )}
       {showAddMember && (
         <AddMemberDialog currentMembers={displayMembers} currentMemberInfos={displayMemberInfos} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
-      )}
-      {summarizeDialog && (
-        <Sheet open={!!summarizeDialog} onClose={() => setSummarizeDialog(null)} size="sm">
-          <div className="p-5">
-            <h3 className="text-sm font-semibold text-ink-1 mb-3">Summarize Messages</h3>
-            <p className="text-sm text-ink-2 mb-4">
-              {summarizeKeepCount === 0
-                ? `Summarize all ${summarizeDialog.totalMessages} messages into topic summaries.`
-                : `Summarize ${summarizeDialog.status.toSummarize} of ${summarizeDialog.totalMessages} messages into topic summaries. Latest ${summarizeKeepCount} will be kept as-is.`}
-            </p>
-            <div className="mb-4">
-              <label className="text-xs text-ink-3 block mb-1.5">Keep latest messages</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0}
-                  max={summarizeDialog.totalMessages}
-                  value={summarizeKeepCount}
-                  onChange={(e) => setSummarizeKeepCount(parseInt(e.target.value))}
-                  className="flex-1 accent-(--accent)"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={summarizeDialog.totalMessages}
-                  value={summarizeKeepCount}
-                  onChange={(e) => setSummarizeKeepCount(Math.min(summarizeDialog.totalMessages, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-16 bg-inset border border-line rounded px-2 py-1 text-sm text-ink-1 text-center"
-                />
-              </div>
-              {summarizeKeepCount === 0 && (
-                <p className="text-xs text-think mt-1.5">All messages will be summarized — agents will lose raw context.</p>
-              )}
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setSummarizeDialog(null)}
-                className="px-4 py-2 text-sm text-ink-3 hover:text-ink-1 cursor-pointer transition-colors">
-                Cancel
-              </button>
-              <button onClick={handleSummarizeConfirm} disabled={summarizeDialog.status.toSummarize === 0}
-                className="px-4 py-2 bg-accent text-accent-contrast disabled:opacity-40 text-sm font-semibold rounded-md cursor-pointer transition-opacity hover:opacity-90">
-                Summarize
-              </button>
-            </div>
-          </div>
-        </Sheet>
       )}
     </>
   );

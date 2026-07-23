@@ -808,20 +808,19 @@ addRoute("GET", "/api/rooms/:id/messages/range", async (req, res, params) => {
 addRoute("GET", "/api/settings/summary", async (_req, res) => {
   try {
     const config = readConfig();
-    sendJson(res, 200, config.summary || { autoEnabled: false, threshold: 200, keepCount: 50 });
+    sendJson(res, 200, config.summary || { autoEnabled: false, threshold: 200 });
   } catch {
-    sendJson(res, 200, { autoEnabled: false, threshold: 200, keepCount: 50 });
+    sendJson(res, 200, { autoEnabled: false, threshold: 200 });
   }
 });
 
 addRoute("PUT", "/api/settings/summary", async (req, res) => {
-  const body = (await parseBody(req)) as { autoEnabled?: boolean; threshold?: number; keepCount?: number };
+  const body = (await parseBody(req)) as { autoEnabled?: boolean; threshold?: number };
   try {
     const config = readConfig();
     config.summary = {
       autoEnabled: body.autoEnabled ?? false,
       threshold: body.threshold ?? 200,
-      keepCount: body.keepCount ?? 50,
     };
     writeConfig(config);
     sendJson(res, 200, config.summary);

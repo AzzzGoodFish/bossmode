@@ -203,31 +203,6 @@ export function getMessagesByRange(roomId: string, fromId: string, toId: string)
   return all.slice(fromIdx, toIdx + 1).filter((m) => m.type !== "summary");
 }
 
-// 2e: Get unsummarized messages (for summarizer), excluding latest keepCount
-export function getUnsummarizedMessages(roomId: string, keepCount: number): RoomMessage[] {
-  const all = readAllMessages(roomId);
-
-  // Find the last summary's to_id to know where summarized content ends
-  let lastSummarizedIdx = -1;
-  for (let i = all.length - 1; i >= 0; i--) {
-    if (all[i].type === "summary" && all[i].summary_meta) {
-      const toIdx = all.findIndex((m) => m.id === all[i].summary_meta!.covered_range.to_id);
-      if (toIdx > lastSummarizedIdx) {
-        lastSummarizedIdx = toIdx;
-      }
-    }
-  }
-
-  // Get only non-summary messages after the last summarized point
-  const unsummarized = all
-    .slice(lastSummarizedIdx + 1)
-    .filter((m) => m.type !== "summary" && m.sender !== "system");
-
-  // Exclude the latest keepCount messages
-  if (unsummarized.length <= keepCount) return [];
-  return unsummarized.slice(0, unsummarized.length - keepCount);
-}
-
 // -- Message search --
 
 export interface SearchOptions {

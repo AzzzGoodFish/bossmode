@@ -438,48 +438,14 @@ export function syncBuiltinTeamTemplates(): { synced: string[] } {
   return { synced };
 }
 
-/** Seed default team templates from packaged agents (idempotent). */
-export function seedDefaultTeamTemplatesFromAgents(): { created: string[] } {
+/** Ensure builtin team templates (e.g. Dev Team) are present/current. No
+ * synthetic "Default Team" is fabricated from loose agents — an install with
+ * no builtin/user teams shows an honest empty Teams gallery. */
+export function ensureBuiltinTeamsSynced(): void {
   ensureTeamsDir();
-  // Always sync product-shipped builtin teams first.
   try { syncBuiltinTeamTemplates(); } catch (err) {
     logger.error("team-store", "builtin team sync failed", { error: String(err) });
   }
-  const created: string[] = [];
-  const existing = listTeamTemplates();
-  // If any team exists (including builtin Dev Team), skip Default Team seed.
-  if (existing.length > 0) return { created };
-
-  const agentsDir = join(getBossmodeDir(), "agents");
-  const templateAgentsDir = join(import.meta.dirname, "../../templates/agents");
-  const sourceDir = existsSync(agentsDir) && readdirSync(agentsDir).some((f) => f.endsWith(".md"))
-    ? agentsDir
-    : templateAgentsDir;
-  if (!existsSync(sourceDir)) return { created };
-
-  const agentFiles = readdirSync(sourceDir).filter((f) => f.endsWith(".md") && f !== "summarizer.md");
-  if (agentFiles.length === 0) return { created };
-
-  const slug = "default-team";
-  const dest = teamDir(slug);
-  if (existsSync(join(dest, "team.md"))) return { created };
-
-  const agents = agentFiles.map((file) => ({
-    fileName: file,
-    markdown: readFileSync(join(sourceDir, file), "utf-8"),
-  }));
-  const names = agents.map((a) => a.fileName.replace(/\.md$/, ""));
-  const leader = names.includes("pm") ? "pm" : names[0];
-  writeTeamPackage(dest, {
-    name: "Default Team",
-    description: "Seeded from local agent library",
-    version: "1.0.0",
-    leader,
-    agents,
-  });
-  created.push(slug);
-  logger.info("team-store", "seeded default team template", { slug, agents: names.length });
-  return { created };
 }
 
 export function assertPathInside(base: string, target: string): string {

@@ -10,7 +10,8 @@ describe("P1 user-language hygiene", () => {
   it("uses the English Settings terminology baseline", () => {
     const sidebar = source("web/src/components/Sidebar.tsx");
     expect(sidebar).toContain('title="Settings"');
-    expect(sidebar).toContain('title: "Built-in Updates"');
+    expect(sidebar).toContain('title: "Extensions"');
+    expect(sidebar).not.toContain("Built-in Updates");
     expect(sidebar).toContain("No Rooms yet. Click + to create one.");
     expect(sidebar).not.toMatch(/[\u3400-\u9fff]/u);
   });
