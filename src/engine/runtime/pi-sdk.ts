@@ -377,8 +377,6 @@ class PiSdkAgentHandle implements AgentHandle {
     const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
       ? [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)), mcpSettings.adapterPath]
       : [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p))];
-    const activeTools = [...this.baseToolNames, ...(mcpSettings.enabled ? ["mcp"] : [])];
-
     const loader = this.resourceLoader as any;
     loader.systemPromptSource = opts.agentPrompt.trim() || undefined;
     loader.appendSystemPromptSource = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
@@ -390,6 +388,19 @@ class PiSdkAgentHandle implements AgentHandle {
     if (mcpSettings.enabled) await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
     if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
       throw new Error("Runtime cannot verify active tools after reload.");
+    }
+    // Keep extension tools enabled after reload (pi reload uses includeAllExtensionTools).
+    // Do NOT reset active tools to base+mcp only — that stripped web_search/fetch_content.
+    const registeredNames: string[] = typeof (this.session as any).getAllTools === "function"
+      ? (this.session as any).getAllTools().map((t: { name: string }) => t.name)
+      : [];
+    let activeTools = registeredNames.length > 0
+      ? registeredNames
+      : [...this.baseToolNames, ...(mcpSettings.enabled ? ["mcp"] : [])];
+    if (!mcpSettings.enabled) {
+      activeTools = activeTools.filter((n) => n !== "mcp");
+    } else if (!activeTools.includes("mcp")) {
+      activeTools = [...activeTools, "mcp"];
     }
     (this.session as any).setActiveToolsByName(activeTools);
     const activeToolNames = await (this.session as any).getActiveToolNames();
@@ -573,10 +584,10 @@ export class PiSdkRuntime implements AgentRuntime {
 
     const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
     const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
-    // Pi treats the creation-time tool list as a lifetime allowlist. Keep Bossmode's
-    // dynamic MCP proxy permitted even before the member receives an MCP assignment;
-    // without its adapter extension, it is not registered or active for that member.
-    const permittedTools = [...baseTools, "mcp"];
+    // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
+    // when tools is provided it becomes a lifetime allowlist and strips extension
+    // tools like web_search/fetch_content). MCP is gated by whether its adapter
+    // is in additionalExtensionPaths, not by a create-time name list.
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -587,7 +598,6 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager,
       settingsManager,
       customTools,
-      tools: permittedTools,
     });
 
     if (mcpSettings.enabled) {
