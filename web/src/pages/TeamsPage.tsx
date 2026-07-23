@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Upload } from "lucide-react";
+import { Search, FileDown } from "lucide-react";
 import type { TeamTemplateSummary } from "../api/client";
 import { getTeams, importTeamZip } from "../api/client";
 import { matchesWorkspaceResourceSearch } from "./resource-list-filter";
@@ -83,7 +83,7 @@ export function TeamsPage({ onSelectTeam, onRefresh }: TeamsPageProps) {
               onClick={() => fileRef.current?.click()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-1 px-3 py-2 text-xs font-semibold text-ink-2 hover:border-line-strong hover:bg-surface-2 disabled:opacity-50"
             >
-              <Upload size={14} />
+              <FileDown size={14} />
               {importing ? "Importing…" : "Import team (.zip)"}
             </button>
           </div>
@@ -120,7 +120,7 @@ export function TeamsPage({ onSelectTeam, onRefresh }: TeamsPageProps) {
                 onClick={() => fileRef.current?.click()}
                 className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90"
               >
-                <Upload size={14} /> Import team (.zip)
+                <FileDown size={14} /> Import team (.zip)
               </button>
             )}
           </div>
@@ -187,7 +187,7 @@ export function TeamsPage({ onSelectTeam, onRefresh }: TeamsPageProps) {
               onClick={() => fileRef.current?.click()}
               className="flex min-h-[150px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-surface-1 p-4 text-ink-4 transition-colors hover:border-line-strong hover:text-ink-2"
             >
-              <Upload size={22} />
+              <FileDown size={22} />
               <span className="text-[12.5px] font-semibold">Import a team</span>
               <span className="text-[10.5px]">zip package · team.md + agents/ + skills/</span>
             </button>

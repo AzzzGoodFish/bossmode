@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import type { AgentInfo, SkillInfo } from "../api/client";
 import { getAgents, getSkills } from "../api/client";
 import { StaffBadge } from "../components/StaffBadge";
@@ -11,7 +11,7 @@ import { userActionError } from "../utils/user-error";
 interface AgentsPageProps {
   onSelectAgent: (name: string) => void;
   onSelectSkill: (name: string) => void;
-  onCreateSkill: () => void;
+  onCreateSkill?: () => void;
   onRefresh: () => void;
   /** open the create dialog on mount (sidebar "+" route) */
   autoCreate?: boolean;
@@ -19,7 +19,7 @@ interface AgentsPageProps {
 }
 
 /** Team page — Agent templates and their real room-local member facts. */
-export function AgentsPage({ onSelectAgent, onSelectSkill, onCreateSkill, onRefresh, autoCreate, onCloseCreate }: AgentsPageProps) {
+export function AgentsPage({ onSelectAgent, onSelectSkill, onRefresh, autoCreate, onCloseCreate }: AgentsPageProps) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [facts, setFacts] = useState<RoomMemberFact[]>([]);
@@ -63,7 +63,7 @@ export function AgentsPage({ onSelectAgent, onSelectSkill, onCreateSkill, onRefr
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-[880px] mx-auto px-6 md:px-9 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-[17px] font-semibold tracking-tight text-ink-1">Team</h1>
@@ -91,9 +91,6 @@ export function AgentsPage({ onSelectAgent, onSelectSkill, onCreateSkill, onRefr
 
         {baseReady && <><div className="flex items-center justify-between mb-2.5">
           <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-4">AGENTS · {agents.length}</h2>
-          <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast text-[11.5px] font-semibold rounded-md cursor-pointer hover:opacity-90 transition-opacity">
-            <Plus size={12} /> New Agent
-          </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-8">
           {filteredAgents.map((agent) => {
@@ -124,9 +121,6 @@ export function AgentsPage({ onSelectAgent, onSelectSkill, onCreateSkill, onRefr
 
         <div className="flex items-center justify-between mb-2.5">
           <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-4">SKILLS · {skills.length}</h2>
-          <button onClick={onCreateSkill} className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-medium text-ink-3 border border-line rounded-md hover:text-ink-1 hover:border-line-strong cursor-pointer transition-colors">
-            <Plus size={12} /> New Skill
-          </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {filteredSkills.map((skill) => {
