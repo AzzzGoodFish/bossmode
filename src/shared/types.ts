@@ -264,6 +264,8 @@ export interface AgentMemberConfig extends MemberBase {
   contextLimit?: number;     // max messages per activation (default 50)
   credentialId?: string;     // optional Model Credential Profile override
   mcpServers?: string[];     // room-member scoped MCP server allowlist
+  /** Enabled bossmode-managed extension package ids (e.g. "pi-web-access"). Default empty = none. */
+  extensions?: string[];
   createdAt?: number;        // room member since (present for room-backed members)
 }
 
@@ -392,6 +394,8 @@ export interface RoomMemberConfig {
   contextLimit?: number;
   skills?: string[];
   mcpServers?: string[];
+  /** Enabled extension package names/ids. Default empty = none loaded. */
+  extensions?: string[];
 }
 
 export interface CreateRoomMemberInput {

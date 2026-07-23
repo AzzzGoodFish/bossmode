@@ -277,6 +277,8 @@ export interface MemberInfo {
   contextLimit?: number;
   credentialId?: string | null;
   mcpServers?: string[];
+  /** Enabled extension package names (default empty = none). */
+  extensions?: string[];
   createdAt?: number;
 }
 
@@ -303,7 +305,7 @@ export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
 export async function updateRoomMember(
   roomId: string,
   memberName: string,
-  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
+  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null },
 ): Promise<MemberInfo> {
   const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
   return result.member;

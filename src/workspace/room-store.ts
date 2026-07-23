@@ -67,6 +67,7 @@ function cleanMemberConfig(config: RoomMemberConfig): RoomMemberConfig {
   if (typeof config.contextLimit === "number" && Number.isFinite(config.contextLimit)) next.contextLimit = config.contextLimit;
   if (Array.isArray(config.skills) && config.skills.length > 0) next.skills = Array.from(new Set(config.skills.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
   if (Array.isArray(config.mcpServers) && config.mcpServers.length > 0) next.mcpServers = Array.from(new Set(config.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
+  if (Array.isArray(config.extensions) && config.extensions.length > 0) next.extensions = Array.from(new Set(config.extensions.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
   return next;
 }
 
@@ -387,7 +388,7 @@ function cleanOverride(override: RoomMemberOverride): RoomMemberOverride {
   return cleanMemberConfig(override);
 }
 
-function applyConfigPatch(current: RoomMemberConfig, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null }): RoomMemberConfig {
+function applyConfigPatch(current: RoomMemberConfig, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null }): RoomMemberConfig {
   const next: RoomMemberConfig = { ...current };
   if (Object.prototype.hasOwnProperty.call(patch, "model")) {
     if (patch.model) next.model = patch.model;
@@ -408,10 +409,14 @@ function applyConfigPatch(current: RoomMemberConfig, patch: { model?: string | n
     if (Array.isArray(patch.mcpServers) && patch.mcpServers.length > 0) next.mcpServers = Array.from(new Set(patch.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
     else delete next.mcpServers;
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "extensions")) {
+    if (Array.isArray(patch.extensions) && patch.extensions.length > 0) next.extensions = Array.from(new Set(patch.extensions.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
+    else delete next.extensions;
+  }
   return cleanMemberConfig(next);
 }
 
-export function updateRoomMemberOverride(roomId: string, memberRef: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null }): Room | null {
+export function updateRoomMemberOverride(roomId: string, memberRef: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null }): Room | null {
   const room = getRoom(roomId);
   if (!room) return null;
 

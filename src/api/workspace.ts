@@ -452,13 +452,14 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     return;
   }
 
-  const body = (await parseBody(req)) as { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null };
-  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null } = {};
+  const body = (await parseBody(req)) as { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null };
+  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null } = {};
   const hasName = Object.prototype.hasOwnProperty.call(body, "name");
   const hasModel = Object.prototype.hasOwnProperty.call(body, "model");
   const hasCredential = Object.prototype.hasOwnProperty.call(body, "credentialId");
   const hasThinking = Object.prototype.hasOwnProperty.call(body, "thinkingLevel");
   const hasMcpServers = Object.prototype.hasOwnProperty.call(body, "mcpServers");
+  const hasExtensions = Object.prototype.hasOwnProperty.call(body, "extensions");
 
   let model: string | null | undefined;
   if (hasModel) {
@@ -516,7 +517,27 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     }
   }
 
-  if (!hasName && !hasModel && !hasCredential && !hasThinking && !hasMcpServers) {
+  if (hasExtensions) {
+    if (body.extensions === null) patch.extensions = null;
+    else if (Array.isArray(body.extensions)) {
+      try {
+        const next = Array.from(new Set(body.extensions.map((value) => {
+          if (typeof value !== "string") throw new Error("extensions must be an array of strings");
+          return value.trim();
+        }).filter(Boolean)));
+        // Allow enabling ids that are not currently installed (silent skip at load time).
+        patch.extensions = next;
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message || String(err) });
+        return;
+      }
+    } else {
+      sendJson(res, 400, { error: "extensions must be an array of strings or null" });
+      return;
+    }
+  }
+
+  if (!hasName && !hasModel && !hasCredential && !hasThinking && !hasMcpServers && !hasExtensions) {
     sendJson(res, 400, { error: "Nothing to update" });
     return;
   }
@@ -545,7 +566,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     result.taskReferencesUpdated = taskStore.renameParticipant(params.id, { memberId: renamed.member.id, oldName, newName: renamed.member.name });
   }
 
-  if (hasModel || hasCredential || hasThinking || hasMcpServers) {
+  if (hasModel || hasCredential || hasThinking || hasMcpServers || hasExtensions) {
     roomStore.updateRoomMemberOverride(params.id, currentMemberRef, patch);
   }
   const effective = resolveRoomMember(params.id, currentMemberRef);

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { ensureRoomTeamAgent, resolveRoomSkillPaths } from "../workspace/team-store.js";
-import { resolveInstalledExtensionSkillPaths } from "../workspace/extension-store.js";
+import { resolveMemberExtensionSkillPaths } from "../workspace/extension-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
@@ -536,7 +536,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     const skills = resolveSkills(member, agentDef);
     const skillPaths = [
       ...resolveRoomSkillPaths(roomId, skills),
-      ...resolveInstalledExtensionSkillPaths(),
+      ...resolveMemberExtensionSkillPaths(member.extensions),
     ];
 
     // Session resume (global toggle; default true for backward compatibility)
@@ -1103,7 +1103,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   const skills = resolveSkills(member, agentDef);
   const skillPaths = [
     ...resolveRoomSkillPaths(roomId, skills),
-    ...resolveInstalledExtensionSkillPaths(),
+    ...resolveMemberExtensionSkillPaths(member.extensions),
   ];
 
   await instance.handle.reloadResources({

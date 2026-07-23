@@ -179,10 +179,24 @@ export function listInstalledExtensions(): ExtensionRecord[] {
 
 /** Absolute extension entry paths for all installed packages (for session injection). */
 export function resolveInstalledExtensionPaths(): string[] {
+  return collectPaths(listInstalledExtensions(), "extensionPaths");
+}
+
+/** Absolute skill dirs declared by installed packages. */
+export function resolveInstalledExtensionSkillPaths(): string[] {
+  return collectPaths(listInstalledExtensions(), "skillPaths");
+}
+
+function extensionMatchesEnabled(ext: ExtensionRecord, enabled: Set<string>): boolean {
+  const keys = [ext.id, ext.name, ext.id.replace(/^npm:/, ""), `npm:${ext.name}`];
+  return keys.some((k) => enabled.has(k));
+}
+
+function collectPaths(exts: ExtensionRecord[], field: "extensionPaths" | "skillPaths"): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
-  for (const ext of listInstalledExtensions()) {
-    for (const p of ext.extensionPaths) {
+  for (const ext of exts) {
+    for (const p of ext[field]) {
       if (!seen.has(p)) {
         seen.add(p);
         paths.push(p);
@@ -192,19 +206,22 @@ export function resolveInstalledExtensionPaths(): string[] {
   return paths;
 }
 
-/** Absolute skill dirs declared by installed packages. */
-export function resolveInstalledExtensionSkillPaths(): string[] {
-  const paths: string[] = [];
-  const seen = new Set<string>();
-  for (const ext of listInstalledExtensions()) {
-    for (const p of ext.skillPaths) {
-      if (!seen.has(p)) {
-        seen.add(p);
-        paths.push(p);
-      }
-    }
-  }
-  return paths;
+/**
+ * Paths for extensions explicitly enabled on a member (`config.extensions`).
+ * Default empty list = load nothing. Unknown/uninstalled ids are skipped silently.
+ */
+export function resolveMemberExtensionPaths(enabledIds: string[] | undefined | null): string[] {
+  if (!enabledIds?.length) return [];
+  const enabled = new Set(enabledIds.map((s) => s.trim()).filter(Boolean));
+  const matched = listInstalledExtensions().filter((ext) => extensionMatchesEnabled(ext, enabled));
+  return collectPaths(matched, "extensionPaths");
+}
+
+export function resolveMemberExtensionSkillPaths(enabledIds: string[] | undefined | null): string[] {
+  if (!enabledIds?.length) return [];
+  const enabled = new Set(enabledIds.map((s) => s.trim()).filter(Boolean));
+  const matched = listInstalledExtensions().filter((ext) => extensionMatchesEnabled(ext, enabled));
+  return collectPaths(matched, "skillPaths");
 }
 
 export function installExtension(packageSpec: string): ExtensionRecord {

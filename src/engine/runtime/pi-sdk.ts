@@ -17,7 +17,7 @@ import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore } from "../model-credentials.js";
-import { resolveInstalledExtensionPaths } from "../../workspace/extension-store.js";
+import { resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts } from "./types.js";
@@ -372,8 +372,8 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     await this.waitForIdle();
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    // Re-resolve managed extensions on every reload so install/uninstall takes effect without recreate.
-    const managedExtensions = resolveInstalledExtensionPaths();
+    // Re-resolve member-enabled extensions on every reload (install/uninstall + toggles).
+    const managedExtensions = resolveMemberExtensionPaths(opts.member.extensions);
     const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
       ? [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)), mcpSettings.adapterPath]
       : [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p))];
@@ -552,7 +552,8 @@ export class PiSdkRuntime implements AgentRuntime {
     ).filter((v): v is string => !!v && v.trim().length > 0);
     const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    const managedExtensions = resolveInstalledExtensionPaths();
+    // Only extensions explicitly enabled on this member (default empty = none).
+    const managedExtensions = resolveMemberExtensionPaths(opts.member.extensions);
     const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
     const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
       ? [...extensionPaths, mcpSettings.adapterPath]

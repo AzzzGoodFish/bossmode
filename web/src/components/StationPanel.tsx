@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Square, ChevronDown, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats,
+  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getExtensions,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
@@ -113,6 +113,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(false);
   const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [installedExtensions, setInstalledExtensions] = useState<ExtensionRecord[]>([]);
+  const [extensionsLoadStatus, setExtensionsLoadStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     getRoomMembers(roomId)
@@ -142,6 +144,20 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
   }, []);
 
   useEffect(() => { void refreshMcpSettings(); }, [refreshMcpSettings]);
+
+  const refreshExtensions = useCallback(async () => {
+    setExtensionsLoadStatus("loading");
+    try {
+      const data = await getExtensions();
+      setInstalledExtensions(data.extensions || []);
+      setExtensionsLoadStatus("ready");
+    } catch (err) {
+      console.error("Failed to load extensions:", err);
+      setExtensionsLoadStatus("error");
+    }
+  }, []);
+
+  useEffect(() => { void refreshExtensions(); }, [refreshExtensions]);
 
   // Close the model picker when clicking outside it.
   useEffect(() => {
@@ -290,6 +306,24 @@ This clears the member's working session memory and starts fresh. Room messages 
       toast("Couldn’t save tool access. Check the server in Settings → Integrations, then try again.", "error");
     }
   }, [mcpServers, refreshMcpSettings, roomId, toast]);
+
+  const toggleMemberExtension = useCallback(async (member: MemberInfo, extId: string) => {
+    const current = new Set(member.extensions || []);
+    // Match by name or id variants
+    const keys = [extId];
+    const hit = [...current].find((c) => c === extId || c === `npm:${extId}` || extId.endsWith(c) || c.endsWith(extId));
+    if (hit) current.delete(hit);
+    else current.add(extId);
+    const next = Array.from(current);
+    try {
+      const updated = await updateRoomMember(roomId, member.id, { extensions: next });
+      setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
+      toast(`Saved. Reload ${member.name} to apply extension tools.`, "success");
+    } catch (err) {
+      console.error("Failed to save member extensions", err);
+      toast("Couldn’t save extension access. Try again.", "error");
+    }
+  }, [roomId, toast]);
 
   const workingCount = members.filter((m) => agentStatus[m] === "working").length;
 
@@ -494,6 +528,10 @@ This clears the member's working session memory and starts fresh. Room messages 
             onRestart={() => handleRestartMember(memberInfos[selectedMember])}
             onResetSession={() => handleResetSession(memberInfos[selectedMember])}
             onToggleMcp={(server) => toggleMemberMcpServer(memberInfos[selectedMember], server)}
+            installedExtensions={installedExtensions}
+            extensionsLoadStatus={extensionsLoadStatus}
+            onRetryExtensions={refreshExtensions}
+            onToggleExtension={(extId) => toggleMemberExtension(memberInfos[selectedMember], extId)}
           />
         )}
       </Sheet>
@@ -859,6 +897,10 @@ function MemberConfigPanel({
   onRestart,
   onResetSession,
   onToggleMcp,
+  installedExtensions,
+  extensionsLoadStatus,
+  onRetryExtensions,
+  onToggleExtension,
 }: {
   roomId: string;
   member: MemberInfo;
@@ -880,6 +922,10 @@ function MemberConfigPanel({
   onRestart: () => void;
   onResetSession: () => void;
   onToggleMcp: (server: string) => void;
+  installedExtensions: ExtensionRecord[];
+  extensionsLoadStatus: "loading" | "ready" | "error";
+  onRetryExtensions: () => void;
+  onToggleExtension: (extId: string) => void;
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
@@ -1173,6 +1219,61 @@ function MemberConfigPanel({
                   <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Restart member</button>
                 </div>
               </details>
+            </section>
+
+            <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-ink-1">Extensions</div>
+                  <div className="text-xs text-ink-4 mt-0.5">Enable installed extensions for this member. Use Reload after changing.</div>
+                </div>
+              </div>
+              {extensionsLoadStatus === "loading" ? (
+                <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading extensions…</div>
+              ) : extensionsLoadStatus === "error" ? (
+                <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
+                  <span>Couldn’t load extensions.</span>
+                  <button type="button" onClick={onRetryExtensions} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
+                </div>
+              ) : installedExtensions.length === 0 ? (
+                <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">
+                  No extensions installed yet. Install one in Settings → Extensions, then enable it here.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {installedExtensions.map((ext) => {
+                    const enabledIds = member.extensions || [];
+                    const checked = enabledIds.some((id) => id === ext.name || id === ext.id || id === `npm:${ext.name}` || ext.id.endsWith(id));
+                    return (
+                      <div key={ext.id} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
+                        <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink shrink-0">⧉</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm font-medium text-ink-1 truncate font-mono">{ext.name}</span>
+                            <span className={`text-[10px] border rounded px-1.5 py-0.5 ${checked ? "border-accent/40 text-accent-ink bg-accent-dim" : "border-line-soft text-ink-4"}`}>
+                              {checked ? "ENABLED" : "OFF"}
+                            </span>
+                            {ext.version && <span className="text-[10px] text-ink-4 font-mono">{ext.version}</span>}
+                          </div>
+                          <div className="text-[11px] text-ink-4 mt-1 truncate">
+                            {ext.description || `${ext.extensionPaths.length} tools entry · ${ext.skillPaths.length} skills`}
+                            {checked ? " · enabled for this member" : " · off for this member"}
+                          </div>
+                          {ext.error && <div className="text-[11px] text-blocked mt-1">{ext.error}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onToggleExtension(ext.name)}
+                          className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer ${checked ? "bg-accent" : "bg-surface-3"}`}
+                          title={checked ? "Disable for this member" : "Enable for this member"}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
 
             <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">

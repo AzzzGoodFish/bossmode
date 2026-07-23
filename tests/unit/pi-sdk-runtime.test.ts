@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/workspace/extension-store.js", () => ({
-  resolveInstalledExtensionPaths: () => [],
-  resolveInstalledExtensionSkillPaths: () => [],
+  resolveMemberExtensionPaths: () => [],
+  resolveMemberExtensionSkillPaths: () => [],
 }));
 
 let dir: string;

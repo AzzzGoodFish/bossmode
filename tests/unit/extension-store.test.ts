@@ -64,3 +64,19 @@ describe("extension-store", () => {
     expect(mod.listInstalledExtensions()).toEqual([]);
   });
 });
+
+  it("resolveMemberExtensionPaths returns empty when none enabled", async () => {
+    const mod = await import("../../src/workspace/extension-store.js");
+    const root = join(dir, "extensions", "node_modules", "pi-web-access");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "index.ts"), "export default {};\n", "utf-8");
+    writeFileSync(join(root, "package.json"), JSON.stringify({
+      name: "pi-web-access", version: "0.1.0", pi: { extensions: ["./index.ts"] },
+    }), "utf-8");
+    writeFileSync(join(dir, "extensions.json"), JSON.stringify({ packages: ["npm:pi-web-access"] }), "utf-8");
+    expect(mod.resolveMemberExtensionPaths([])).toEqual([]);
+    expect(mod.resolveMemberExtensionPaths(undefined)).toEqual([]);
+    expect(mod.resolveMemberExtensionPaths(["pi-web-access"]).length).toBe(1);
+    expect(mod.resolveMemberExtensionPaths(["npm:pi-web-access"]).length).toBe(1);
+    expect(mod.resolveMemberExtensionPaths(["other-ext"])).toEqual([]);
+  });
