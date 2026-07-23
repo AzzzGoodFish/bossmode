@@ -904,6 +904,35 @@ export function getAgentContextUsage(roomId: string, memberRef: string): Context
   return contextUsageCache.get(key) ?? null;
 }
 
+/** Live tools from the running session. No session → sessionActive false, empty tools (no config projection). */
+export function getMemberActiveTools(roomId: string, memberRef: string): {
+  sessionActive: boolean;
+  tools: Array<{ name: string; label?: string; description: string; parameters: unknown; source: string }>;
+  message?: string;
+} {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const key = instanceKey(roomId, memberId);
+  const instance = instances.get(key);
+  if (!instance?.handle.getActiveTools) {
+    return {
+      sessionActive: false,
+      tools: [],
+      message: "Start or Reload this member to see active tools.",
+    };
+  }
+  try {
+    const tools = instance.handle.getActiveTools() || [];
+    return { sessionActive: true, tools };
+  } catch {
+    return {
+      sessionActive: false,
+      tools: [],
+      message: "Start or Reload this member to see active tools.",
+    };
+  }
+}
+
 interface RefreshContextUsageOptions {
   /** Trust compacted/null-token usage as a real post-compact update instead of carrying forward the previous value. */
   acceptCompactedSnapshot?: boolean;

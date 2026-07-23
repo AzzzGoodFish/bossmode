@@ -10,7 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
@@ -249,6 +249,21 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, 
     budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
     suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
   });
+});
+
+/** Live active tools for a running member session (getAllTools ∩ active). No session → empty. */
+addRoute("GET", "/api/rooms/:id/members/:memberRef/tools", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const member = resolveRoomMember(params.id, params.memberRef);
+  if (!member) {
+    sendJson(res, 404, { error: "Member is not in this room" });
+    return;
+  }
+  sendJson(res, 200, getMemberActiveTools(params.id, params.memberRef));
 });
 
 /** Real, compiled Bossmode Core prompt text for this member in this room —
