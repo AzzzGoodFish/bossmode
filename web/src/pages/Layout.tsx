@@ -269,6 +269,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
             onNavigateToKnowledge={(path) => setActivePage({ type: "knowledge", path })}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
+            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
 

@@ -22,6 +22,7 @@ interface StationPanelProps {
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
   onOpenMcpSettings?: () => void;
+  onOpenExtensionsSettings?: () => void;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
 }
@@ -99,7 +100,7 @@ function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -532,6 +533,7 @@ This clears the member's working session memory and starts fresh. Room messages 
             extensionsLoadStatus={extensionsLoadStatus}
             onRetryExtensions={refreshExtensions}
             onToggleExtension={(extId) => toggleMemberExtension(memberInfos[selectedMember], extId)}
+            onOpenExtensionsSettings={() => { onOpenExtensionsSettings?.(); setSelectedMember(null); }}
           />
         )}
       </Sheet>
@@ -901,6 +903,7 @@ function MemberConfigPanel({
   extensionsLoadStatus,
   onRetryExtensions,
   onToggleExtension,
+  onOpenExtensionsSettings,
 }: {
   roomId: string;
   member: MemberInfo;
@@ -926,6 +929,7 @@ function MemberConfigPanel({
   extensionsLoadStatus: "loading" | "ready" | "error";
   onRetryExtensions: () => void;
   onToggleExtension: (extId: string) => void;
+  onOpenExtensionsSettings?: () => void;
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
@@ -1227,6 +1231,7 @@ function MemberConfigPanel({
                   <div className="text-sm font-semibold text-ink-1">Extensions</div>
                   <div className="text-xs text-ink-4 mt-0.5">Enable installed extensions for this member. Use Reload after changing.</div>
                 </div>
+                <button type="button" onClick={() => onOpenExtensionsSettings?.()} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Install…</button>
               </div>
               {extensionsLoadStatus === "loading" ? (
                 <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading extensions…</div>

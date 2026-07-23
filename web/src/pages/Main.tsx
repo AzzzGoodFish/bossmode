@@ -46,6 +46,7 @@ interface MainProps {
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
   onNavigateToKnowledge?: (path: string) => void;
   onOpenMcpSettings?: () => void;
+  onOpenExtensionsSettings?: () => void;
 }
 
 type RoomView = "chat" | "tasks";
@@ -75,6 +76,7 @@ export function Main({
   onNavigateToTask,
   onNavigateToKnowledge,
   onOpenMcpSettings,
+  onOpenExtensionsSettings,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -432,6 +434,7 @@ export function Main({
             contextUsage={displayContextUsage}
             roomId={room.id}
             onOpenMcpSettings={onOpenMcpSettings}
+            onOpenExtensionsSettings={onOpenExtensionsSettings}
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
           />
@@ -446,6 +449,7 @@ export function Main({
               contextUsage={displayContextUsage}
               roomId={room.id}
               onOpenMcpSettings={onOpenMcpSettings}
+            onOpenExtensionsSettings={onOpenExtensionsSettings}
               onMembersChanged={reloadRoom}
               unreadAgents={unreadTabs}
             />
