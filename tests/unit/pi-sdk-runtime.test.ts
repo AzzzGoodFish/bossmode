@@ -163,6 +163,7 @@ describe("PiSdkRuntime", () => {
         setThinkingLevel: vi.fn(),
         setActiveToolsByName: vi.fn((names: string[]) => { if (!ignoreActiveToolChanges) activeToolNames = names; }),
         getActiveToolNames: vi.fn(() => activeToolNames),
+        getAllTools: vi.fn(() => activeToolNames.map((name: string) => ({ name }))),
         bindExtensions: sessionBindExtensions,
         extensionRunner: {
           setFlagValue: sessionExtensionSetFlagValue,
@@ -296,11 +297,12 @@ describe("PiSdkRuntime", () => {
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
     expect(loaderOptions.additionalExtensionPaths).toEqual([]);
-    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
+    // No tools allowlist — extension tools stay enabled (pi SDK default when tools omitted).
+    expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     expect(sessionBindExtensions).not.toHaveBeenCalled();
   });
 
-  it("does not expose mcp tool when MCP is globally enabled but member has no assigned servers", async () => {
+  it("does not load MCP adapter when MCP is globally enabled but member has no assigned servers", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -308,10 +310,10 @@ describe("PiSdkRuntime", () => {
     await new PiSdkRuntime().createAgent(baseOpts());
 
     expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toEqual([]);
-    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
+    expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
   });
 
-  it("loads only the pinned MCP adapter and exposes mcp proxy tool when MCP is enabled for an assigned server", async () => {
+  it("loads only the pinned MCP adapter when MCP is enabled for an assigned server", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
@@ -324,8 +326,7 @@ describe("PiSdkRuntime", () => {
     expect(loaderOptions.noExtensions).toBe(true);
     expect(loaderOptions.additionalExtensionPaths).toHaveLength(1);
     expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
-    expect(createAgentSession.mock.calls[0][0].tools).toContain("mcp");
-    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("playwright_browser_navigate");
+    expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(scopedPath).toMatch(/\.bossmode\/mcp\/runtime\/scopes\/room-a\/pm\/mcp\.json$/);
     const scoped = JSON.parse(readFileSync(scopedPath, "utf-8"));
@@ -346,6 +347,8 @@ describe("PiSdkRuntime", () => {
     const handle = await runtime.createAgent(baseOpts());
     const sessionId = (handle as any).session.sessionId;
 
+    // Simulate registry after reload including extension + mcp tools
+    activeToolNames = ["read", "bash", "edit", "write", "chat", "mcp", "web_search"];
     await handle.reloadResources!({
       roomId: "room-a",
       member: { ...baseOpts().member, mcpServers: ["playwright"] },
@@ -357,6 +360,7 @@ describe("PiSdkRuntime", () => {
 
     expect((handle as any).session.sessionId).toBe(sessionId);
     expect(activeToolNames).toContain("mcp");
+    expect(activeToolNames).toContain("web_search");
     expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
   });
 
@@ -367,7 +371,7 @@ describe("PiSdkRuntime", () => {
     writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
-    activeToolNames = ["read", "bash", "edit", "write", "mcp"];
+    activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
 
     await handle.reloadResources!({
       roomId: "room-a",
