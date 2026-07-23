@@ -261,10 +261,11 @@ export function Sidebar({
 
         {domain === "team" && (
           <>
-            <SectionHead label={`TEAMS · ${teams.length}`} onCreate={() => onNavigate({ type: "team", name: null })} />
-            <button onClick={() => onNavigate({ type: "team", name: null })} className={itemCls(activePage?.type === "team" && activePage.name === null)}>
-              <span className="text-[12.5px] font-medium text-ink-2">All teams</span>
-            </button>
+            <SectionHead
+              label={`TEAMS · ${teams.length}`}
+              onLabelClick={() => onNavigate({ type: "team", name: null })}
+              active={activePage?.type === "team" && activePage.name === null}
+            />
             {teams.map((t) => (
               <button key={t.slug || t.name} onClick={() => onNavigate({ type: "team", name: t.slug || t.name })} className={itemCls(selectedTeamName === (t.slug || t.name))}>
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -277,10 +278,11 @@ export function Sidebar({
               </button>
             ))}
             <div className="h-3" />
-            <SectionHead label={`AGENTS · ${agents.length}`} onCreate={() => onNavigate({ type: "agent", name: "__new__" })} />
-            <button onClick={() => onNavigate({ type: "agent", name: null })} className={itemCls(activePage?.type === "agent" && activePage.name === null)}>
-              <span className="text-[12.5px] font-medium text-ink-2">All agents</span>
-            </button>
+            <SectionHead
+              label={`AGENTS · ${agents.length}`}
+              onLabelClick={() => onNavigate({ type: "agent", name: null })}
+              active={activePage?.type === "agent" && activePage.name === null}
+            />
             {agents.map((a) => (
               <button key={a.name} onClick={() => onNavigate({ type: "agent", name: a.name })} className={itemCls(selectedAgentName === a.name)}>
                 <div className="flex items-center gap-2.5">
@@ -290,7 +292,11 @@ export function Sidebar({
               </button>
             ))}
             <div className="h-3" />
-            <SectionHead label={`SKILLS · ${skills.length}`} onCreate={() => onNavigate({ type: "skill", name: "__new__" })} />
+            <SectionHead
+              label={`SKILLS · ${skills.length}`}
+              onLabelClick={() => onNavigate({ type: "skill", name: null })}
+              active={activePage?.type === "skill" && activePage.name === null}
+            />
             {skills.map((s) => (
               <button key={s.name} onClick={() => onNavigate({ type: "skill", name: s.name })} className={itemCls(selectedSkillName === s.name)}>
                 <div className="flex items-center gap-2.5">
@@ -359,10 +365,27 @@ export function Sidebar({
   );
 }
 
-function SectionHead({ label, onCreate }: { label: string; onCreate?: () => void }) {
+function SectionHead({ label, onCreate, onLabelClick, active }: {
+  label: string;
+  onCreate?: () => void;
+  /** Click section label to open gallery (Teams / Agents / Skills). */
+  onLabelClick?: () => void;
+  active?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between px-2.5 pt-1 pb-1.5">
-      <span className="text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">{label}</span>
+      {onLabelClick ? (
+        <button
+          type="button"
+          onClick={onLabelClick}
+          className={`text-[10.5px] font-semibold tracking-[0.05em] cursor-pointer transition-colors text-left ${active ? "text-ink-1" : "text-ink-4 hover:text-ink-2"}`}
+          title={`Open ${label.split("·")[0].trim().toLowerCase()} gallery`}
+        >
+          {label}
+        </button>
+      ) : (
+        <span className="text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">{label}</span>
+      )}
       {onCreate && (
         <button onClick={onCreate} className="text-ink-4 hover:text-accent-ink cursor-pointer transition-colors" title="Create">
           <Plus size={12} />

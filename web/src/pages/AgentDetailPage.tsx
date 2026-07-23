@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Save, X, ChevronDown } from "lucide-react";
+import { Save, X, ChevronDown } from "lucide-react";
+import { BackLink } from "../components/BackLink";
 import { MobileTopBar } from "../components/MobileTopBar";
 import {
   getAgent, updateAgent, deleteAgent, createAgent,
@@ -192,12 +193,10 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     return (
       <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
         <MobileTopBar title={isCreate ? "New Agent" : name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
-        <div className="flex-1 flex flex-col min-h-0 w-full max-w-[880px] mx-auto px-6 md:px-9 py-6">
+        <div className="flex-1 flex flex-col min-h-0 w-full px-6 md:px-10 py-6">
           <div className="flex items-center justify-between mb-4 shrink-0">
             <div className="flex items-center gap-3">
-              <button onClick={isCreate ? onBack : handleCancel} className="text-ink-4 hover:text-ink-1 transition-colors cursor-pointer">
-                <ArrowLeft size={17} />
-              </button>
+              <BackLink label="Agents" onClick={isCreate ? onBack : handleCancel} className="mb-0" />
               {isCreate ? (
                 <input
                   value={agentName}
@@ -243,7 +242,8 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
     <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
       <MobileTopBar title={name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="w-full max-w-[880px] mx-auto px-6 md:px-9 pt-7 pb-16">
+        <div className="w-full px-6 md:px-10 pt-7 pb-16">
+          <BackLink label="Agents" onClick={onBack} />
 
           {/* Profile header */}
           <div className="flex items-start gap-4.5">

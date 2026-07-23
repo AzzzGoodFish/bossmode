@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { BackLink } from "../components/BackLink";
 import { type AgentDetail, deleteAgent, getAgent } from "../api/client";
 import { StaffBadge } from "../components/StaffBadge";
 import { Markdown } from "../components/Markdown";
@@ -92,7 +92,7 @@ export function AgentProfilePage({ name, onBack, onDeleted, onOpenMobileSidebar 
     <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
       <MobileTopBar title={name} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="w-full max-w-[880px] mx-auto px-6 md:px-9 pt-7 pb-16">
+        <div className="w-full px-6 md:px-10 pt-7 pb-16">
           {activityError && (
             <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blocked/30 bg-blocked-dim/30 px-3 py-2 text-xs text-blocked">
               <span>Member activity unavailable. {activityError}</span>
@@ -101,7 +101,7 @@ export function AgentProfilePage({ name, onBack, onDeleted, onOpenMobileSidebar 
           )}
 
           <div className="flex items-start gap-4">
-            <button onClick={onBack} className="mt-1 text-ink-4 hover:text-ink-1 transition-colors cursor-pointer" aria-label="Back to Team"><ArrowLeft size={16} /></button>
+            <BackLink label="Team" onClick={onBack} className="mb-0 mt-1" />
             <StaffBadge name={name} avatar={agent.avatar} status={anyWorking ? "working" : "idle"} size="lg" />
             <div className="min-w-0">
               <h2 className="text-[19px] font-semibold tracking-tight text-ink-1 flex items-center gap-2.5 flex-wrap">

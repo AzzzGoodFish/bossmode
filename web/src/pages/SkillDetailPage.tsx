@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Save, Trash2, Pencil, X } from "lucide-react";
+import { Save, Trash2, Pencil, X } from "lucide-react";
+import { BackLink } from "../components/BackLink";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { getSkill, updateSkill, deleteSkill, createSkill } from "../api/client";
 import { Markdown } from "../components/Markdown";
@@ -86,9 +87,7 @@ export function SkillDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="text-ink-4 hover:text-ink-1 transition-colors cursor-pointer">
-            <ArrowLeft size={18} />
-          </button>
+          <BackLink label="Skills" onClick={onBack} className="mb-0" />
           {isCreate ? (
             <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="skill-name"
               className="text-lg font-bold text-ink-1 bg-transparent border-b border-line focus:border-accent outline-none px-1" />

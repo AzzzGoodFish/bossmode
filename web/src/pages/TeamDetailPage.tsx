@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { BackLink } from "../components/BackLink";
 import type { TeamAgentSummary, TeamTemplateDetail } from "../api/client";
 import { getTeam } from "../api/client";
 import { Markdown } from "../components/Markdown";
@@ -127,9 +128,7 @@ export function TeamDetailPage({ name, onBack }: TeamDetailPageProps) {
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
       <div className="w-full px-6 py-7 md:px-10 pb-16">
-        <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-xs text-ink-4 hover:text-ink-1">
-          <ArrowLeft size={14} /> Teams
-        </button>
+        <BackLink label="Teams" onClick={onBack} />
 
         <div className="mb-5 flex items-start gap-3.5">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] bg-accent-dim text-lg font-extrabold text-accent-ink">
