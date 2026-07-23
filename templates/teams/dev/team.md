@@ -1,7 +1,7 @@
 ---
 name: Dev Team
 description: Full-stack product team — PM, Architect, Developer, QA, Designer, and a parallel developer stream
-version: 1.0.0
+version: 1.0.1
 leader: pm
 type: builtin
 ---

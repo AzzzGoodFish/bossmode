@@ -1,6 +1,8 @@
 ---
 name: designer
 description: Designer — visual design, UI implementation, and design system stewardship
+skills:
+  - impeccable
 ---
 
 # Designer Agent

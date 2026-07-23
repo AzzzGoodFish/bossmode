@@ -51,6 +51,18 @@ describe("team-store", () => {
     expect(agent?.name).toBe("pm");
   });
 
+  it("syncs builtin Dev Team designer with impeccable skill, including into room copies", async () => {
+    const mod = await import("../../src/workspace/team-store.js");
+    mod.syncBuiltinTeamTemplates();
+    const designerContent = readFileSync(join(dir, "teams", "dev", "agents", "designer.md"), "utf-8");
+    expect(designerContent).toMatch(/skills:\s*\n\s*-\s*impeccable/);
+
+    const dest = join(dir, "rooms", "r2", "team");
+    mod.copyTeamTemplateTo("dev", dest);
+    const roomDesignerContent = readFileSync(join(dest, "agents", "designer.md"), "utf-8");
+    expect(roomDesignerContent).toMatch(/skills:\s*\n\s*-\s*impeccable/);
+  });
+
   it("imports and exports a zip package", async () => {
     const mod = await import("../../src/workspace/team-store.js");
     mod.syncBuiltinTeamTemplates();
