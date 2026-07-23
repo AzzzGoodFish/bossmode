@@ -3,6 +3,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../../src/workspace/extension-store.js", () => ({
+  resolveInstalledExtensionPaths: () => [],
+  resolveInstalledExtensionSkillPaths: () => [],
+}));
+
 let dir: string;
 let exportedConfig: any = null;
 let bossmodeConfig: any;

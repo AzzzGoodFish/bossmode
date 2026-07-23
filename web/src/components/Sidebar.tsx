@@ -8,7 +8,7 @@ import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary
 import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 
-export type SettingsSection = "models" | "runtime" | "summary" | "integrations" | "team-updates";
+export type SettingsSection = "models" | "runtime" | "summary" | "integrations" | "extensions" | "team-updates";
 
 export type ActivePage =
   | { type: "room"; id: string }
@@ -54,6 +54,7 @@ interface SidebarProps {
 const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string }> = [
   { id: "models", title: "Models", desc: "Connect providers and choose available models." },
   { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
+  { id: "extensions", title: "Extensions", desc: "Install pi agent extensions (e.g. web search)." },
   { id: "summary", title: "Summarization", desc: "Choose when long conversations are summarized." },
   { id: "integrations", title: "Integrations", desc: "Connect external tools and services." },
   { id: "team-updates", title: "Built-in Updates", desc: "Updates for built-in Agents and Skills." },

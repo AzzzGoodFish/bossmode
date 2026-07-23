@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { ensureRoomTeamAgent, resolveRoomSkillPaths } from "../workspace/team-store.js";
+import { resolveInstalledExtensionSkillPaths } from "../workspace/extension-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
@@ -533,7 +534,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
     // Resolve skills: member config takes precedence over agent definition; prefer room team skills/
     const skills = resolveSkills(member, agentDef);
-    const skillPaths = resolveRoomSkillPaths(roomId, skills);
+    const skillPaths = [
+      ...resolveRoomSkillPaths(roomId, skills),
+      ...resolveInstalledExtensionSkillPaths(),
+    ];
 
     // Session resume (global toggle; default true for backward compatibility)
     let sessionResumeEnabled = true;
@@ -1097,7 +1101,10 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
   const skills = resolveSkills(member, agentDef);
-  const skillPaths = resolveRoomSkillPaths(roomId, skills);
+  const skillPaths = [
+    ...resolveRoomSkillPaths(roomId, skills),
+    ...resolveInstalledExtensionSkillPaths(),
+  ];
 
   await instance.handle.reloadResources({
     roomId,

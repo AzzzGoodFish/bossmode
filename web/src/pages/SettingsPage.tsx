@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider } from "../api/client";
+import type { SummarySettings, TeamUpdateSettings, RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse } from "../api/client";
 import {
   getSummarySettings,
   updateSummarySettings,
@@ -31,6 +31,9 @@ import {
   getLinearIntegrationStatus,
   connectLinearIntegration,
   disconnectLinearIntegration,
+  getExtensions,
+  installExtension,
+  uninstallExtension,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
 import { useDialog } from "../components/dialogs";
@@ -45,6 +48,7 @@ interface SettingsPageProps {
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   models: { title: "Models", desc: "Connect providers and choose available models." },
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
+  extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
   summary: { title: "Summarization", desc: "Choose when long conversations are summarized." },
   integrations: { title: "Integrations", desc: "Connect external tools and services." },
   "team-updates": { title: "Built-in Updates", desc: "Updates for built-in Agents and Skills." },
@@ -99,6 +103,12 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [showConnectProvider, setShowConnectProvider] = useState(false);
   const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
   const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
+  const [extensionsData, setExtensionsData] = useState<ExtensionsListResponse | null>(null);
+  const [extPackage, setExtPackage] = useState("pi-web-access");
+  const [extBusy, setExtBusy] = useState(false);
+  const [extError, setExtError] = useState<string | null>(null);
+
+  const refreshExtensions = () => getExtensions().then(setExtensionsData).catch(console.error);
 
   useEffect(() => {
     getSummarySettings().then(setSummarySettings).catch(console.error);
@@ -107,6 +117,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
     getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
     getMcpSettings().then(setMcpSettings).catch(console.error);
+    refreshExtensions();
   }, []);
 
   const handleSummaryChange = async (updates: Partial<SummarySettings>) => {
@@ -333,6 +344,96 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           {runtimeSaved && <div className="text-xs text-onair">Saved!</div>}
           </div>
         </details>
+      </div>
+      )}
+
+      {/* Extensions */}
+      {section === "extensions" && (
+      <div className="space-y-4">
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
+          <div>
+            <div className="text-sm font-medium text-ink-1">Bossmode-managed extensions</div>
+            <div className="text-xs text-ink-3 mt-0.5">
+              Install pi agent packages (same model as <code className="text-[11px]">pi install npm:…</code>). After install, Reload members to pick up new tools.
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              value={extPackage}
+              onChange={(e) => setExtPackage(e.target.value)}
+              placeholder="pi-web-access or npm:pi-web-access"
+              className="flex-1 rounded-lg border border-line bg-inset px-3 py-2 text-sm text-ink-1 outline-none focus:border-line-strong font-mono"
+            />
+            <button
+              type="button"
+              disabled={extBusy || !extPackage.trim()}
+              onClick={async () => {
+                setExtBusy(true);
+                setExtError(null);
+                try {
+                  await installExtension(extPackage.trim());
+                  await refreshExtensions();
+                  toast(`Installed ${extPackage.trim()}. Reload members to use new tools.`, "success");
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : userActionError("install extension");
+                  setExtError(msg);
+                  toast(msg, "error");
+                } finally {
+                  setExtBusy(false);
+                }
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              {extBusy ? "Installing…" : "Install"}
+            </button>
+          </div>
+          {extError && <div className="text-xs text-blocked">{extError}</div>}
+          <div className="text-[11px] text-ink-4">
+            Web search keys: <code className="rounded bg-surface-3 px-1">{extensionsData?.webSearchConfig.path || "~/.pi/web-search.json"}</code>
+            {" · "}
+            {extensionsData?.webSearchConfig.exists ? "found" : "not configured yet (optional for Exa default)"}
+          </div>
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg divide-y divide-line-soft">
+          {(extensionsData?.extensions ?? []).length === 0 ? (
+            <p className="px-4 py-6 text-sm text-ink-4">No extensions installed.</p>
+          ) : (
+            (extensionsData?.extensions ?? []).map((ext: ExtensionRecord) => (
+              <div key={ext.id} className="flex items-start gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-ink-1">{ext.name}</span>
+                    {ext.version && <span className="text-[10px] text-ink-4 font-mono">{ext.version}</span>}
+                    <span className="text-[10px] text-ink-4">{ext.extensionPaths.length} entry · {ext.skillPaths.length} skill dir</span>
+                  </div>
+                  {ext.description && <p className="mt-0.5 text-xs text-ink-3 line-clamp-2">{ext.description}</p>}
+                  {ext.error && <p className="mt-0.5 text-xs text-blocked">{ext.error}</p>}
+                </div>
+                <button
+                  type="button"
+                  disabled={extBusy}
+                  onClick={async () => {
+                    if (!(await confirm(`Uninstall ${ext.name}?`))) return;
+                    setExtBusy(true);
+                    try {
+                      await uninstallExtension(ext.name);
+                      await refreshExtensions();
+                      toast(`Uninstalled ${ext.name}.`, "success");
+                    } catch (err) {
+                      toast(err instanceof Error ? err.message : userActionError("uninstall extension"), "error");
+                    } finally {
+                      setExtBusy(false);
+                    }
+                  }}
+                  className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink-3 hover:text-blocked hover:border-blocked/40 cursor-pointer"
+                >
+                  Uninstall
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
       )}
 

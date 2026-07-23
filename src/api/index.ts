@@ -94,6 +94,7 @@ async function ensureRoutesRegistered(): Promise<void> {
   await import("./workforce.js");
   await import("./workspace.js");
   await import("./teams.js");
+  await import("./extensions.js");
   await import("./uploads.js");
   await import("./knowledge.js");
   await import("./engine-routes.js");
