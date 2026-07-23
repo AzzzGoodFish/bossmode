@@ -803,30 +803,4 @@ addRoute("GET", "/api/rooms/:id/messages/range", async (req, res, params) => {
   sendJson(res, 200, messages);
 });
 
-// ── Summary Settings ──
-
-addRoute("GET", "/api/settings/summary", async (_req, res) => {
-  try {
-    const config = readConfig();
-    sendJson(res, 200, config.summary || { autoEnabled: false, threshold: 200 });
-  } catch {
-    sendJson(res, 200, { autoEnabled: false, threshold: 200 });
-  }
-});
-
-addRoute("PUT", "/api/settings/summary", async (req, res) => {
-  const body = (await parseBody(req)) as { autoEnabled?: boolean; threshold?: number };
-  try {
-    const config = readConfig();
-    config.summary = {
-      autoEnabled: body.autoEnabled ?? false,
-      threshold: body.threshold ?? 200,
-    };
-    writeConfig(config);
-    sendJson(res, 200, config.summary);
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
-});
-
 // Attachment routes moved to src/api/uploads.ts (stream-based)

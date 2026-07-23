@@ -1132,13 +1132,6 @@ export async function getMessageRange(roomId: string, fromId: string, toId: stri
   return apiFetch(`/api/rooms/${roomId}/messages/range?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
 }
 
-// -- Summary Settings --
-
-export interface SummarySettings {
-  autoEnabled: boolean;
-  threshold: number;
-}
-
 export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
 
 export interface RuntimeSettings {
@@ -1174,17 +1167,6 @@ export interface McpSettings {
   servers?: McpServerSummary[];
   availability?: Record<string, McpServerAvailability>;
   sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
-}
-
-export async function getSummarySettings(): Promise<SummarySettings> {
-  return apiFetch("/api/settings/summary");
-}
-
-export async function updateSummarySettings(settings: Partial<SummarySettings>): Promise<SummarySettings> {
-  return apiFetch("/api/settings/summary", {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
 }
 
 export async function getRuntimeSettings(): Promise<RuntimeSettings> {

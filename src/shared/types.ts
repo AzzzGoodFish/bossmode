@@ -48,10 +48,6 @@ export interface BossmodeConfig {
     host: string;
     port: number;
   };
-  summary?: {
-    autoEnabled: boolean;
-    threshold: number;  // message count to trigger auto-summary
-  };
   runtime?: BossmodeRuntimeConfig;
   mcp?: BossmodeMcpConfig;
   integrations?: {
