@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateUsage } from "../../src/api/usage.js";
+import { aggregateUsage, aggregatePlatformUsage } from "../../src/api/usage.js";
 
 // Pure-aggregation tests for the usage API. Covers KPIs, cacheHitRate formula,
 // per-date series with byModel, member×model breakdown, and identity (byAgent)
@@ -102,5 +102,42 @@ describe("aggregateUsage", () => {
     const { byAgent, breakdown } = aggregateUsage(rows, meta);
     expect(byAgent[0].agent).toBe("rm_ghost");
     expect(breakdown[0].memberName).toBeUndefined();
+  });
+});
+
+describe("aggregatePlatformUsage (cross-room)", () => {
+  const roomNames = new Map<string, string>([
+    ["room-a", "bossmode dev"],
+    ["room-b", "test room"],
+  ]);
+
+  function roomRow(p: Partial<Row> & { room_id: string; member_id: string; date: string; model: string }) {
+    return { ...row(p), room_id: p.room_id } as any;
+  }
+
+  it("groups usage by room and aggregates identity across rooms", () => {
+    const rows = [
+      roomRow({ room_id: "room-a", member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 300 }),
+      roomRow({ room_id: "room-b", member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 100 }),
+      roomRow({ room_id: "room-a", member_id: "rm_pm", date: "2026-07-24", model: "b/y", input_tokens: 50 }),
+    ];
+    const { byRoom, byAgent, kpis } = aggregatePlatformUsage(rows, meta, roomNames);
+
+    // byRoom groups + carries names, sorted desc by input.
+    expect(byRoom.map((r: any) => r.roomId)).toEqual(["room-a", "room-b"]);
+    expect(byRoom[0].roomName).toBe("bossmode dev");
+    expect(byRoom[0].inputTokens).toBe(350); // rm_dev 300 + rm_pm 50
+    expect(byRoom[1].inputTokens).toBe(100);
+
+    // Identity aggregates the SAME agent across both rooms.
+    const dev = byAgent.find((a: any) => a.agent === "developer");
+    expect(dev.inputTokens).toBe(400); // rm_dev across room-a + room-b
+    expect(kpis.inputTokens).toBe(450);
+  });
+
+  it("leaves roomName undefined for unknown rooms", () => {
+    const rows = [roomRow({ room_id: "room-x", member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 10 })];
+    const { byRoom } = aggregatePlatformUsage(rows, meta, roomNames);
+    expect(byRoom[0].roomName).toBeUndefined();
   });
 });

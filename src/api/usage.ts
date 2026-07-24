@@ -10,7 +10,7 @@
 import { addRoute, sendJson } from "./index.js";
 import { getProjectionDb } from "../workspace/db/projection.js";
 import { getBackfillStatus } from "../workspace/db/projection.js";
-import { getRoom, deriveRoomMembers } from "../workspace/room-store.js";
+import { getRoom, deriveRoomMembers, listRooms } from "../workspace/room-store.js";
 import { logger } from "../foundation/logger.js";
 
 interface RollupRow {
@@ -23,6 +23,12 @@ interface RollupRow {
   cache_write: number;
   cost: number;
   turns: number;
+}
+
+// Platform-level rollup row carries its room so cross-room aggregation can group
+// by room without a second query.
+interface RollupRowWithRoom extends RollupRow {
+  room_id: string;
 }
 
 function cacheHitRate(inputTokens: number, cacheRead: number): number {
@@ -193,6 +199,121 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
     series,
     breakdown,
     byAgent,
+    backfillStatus: getBackfillStatus().status,
+  });
+});
+
+/**
+ * Platform-level aggregation across all rooms. Same shape as aggregateUsage plus
+ * a `byRoom` grouping (drives the prototype's "select agent → ring becomes By
+ * room" layer). Identity join uses each room's own member→agent map.
+ */
+export function aggregatePlatformUsage(
+  rows: RollupRowWithRoom[],
+  memberMeta: Map<string, { name: string; agent: string }>,
+  roomNames: Map<string, string>,
+): {
+  kpis: Kpis;
+  series: any[];
+  breakdown: BreakdownRow[];
+  byAgent: AgentBucket[];
+  byRoom: Array<{ roomId: string; roomName?: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }>;
+} {
+  // Reuse the single-room aggregation for kpis/series/breakdown/byAgent — the
+  // member ids are globally unique (rm_<uuid>) so cross-room mixing is safe.
+  const base = aggregateUsage(rows, memberMeta);
+
+  const roomMap = new Map<string, { roomId: string; roomName?: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }>();
+  for (const r of rows) {
+    let rm = roomMap.get(r.room_id);
+    if (!rm) {
+      rm = { roomId: r.room_id, roomName: roomNames.get(r.room_id), inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+      roomMap.set(r.room_id, rm);
+    }
+    rm.inputTokens += r.input_tokens;
+    rm.outputTokens += r.output_tokens;
+    rm.cacheRead += r.cache_read;
+    rm.cacheWrite += r.cache_write;
+    rm.cost += r.cost;
+    rm.turns += r.turns;
+  }
+  const byRoom = [...roomMap.values()].sort((a, b) => b.inputTokens - a.inputTokens);
+
+  return { ...base, byRoom };
+}
+
+addRoute("GET", "/api/usage", async (req, res) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const from = parseDate(url.searchParams.get("from"));
+  const to = parseDate(url.searchParams.get("to"));
+  const agentFilter = url.searchParams.get("agent") || undefined;
+  const modelFilter = url.searchParams.get("model") || undefined;
+
+  const db = getProjectionDb();
+  if (!db) {
+    sendJson(res, 200, {
+      kpis: emptyKpis(),
+      series: [],
+      breakdown: [],
+      byAgent: [],
+      byRoom: [],
+      backfillStatus: getBackfillStatus().status,
+    });
+    return;
+  }
+
+  // Build the platform-wide member→{name,agent} map + room name map from every
+  // room's room.json (this is where the identity mapping lives, not the DB).
+  const memberMeta = new Map<string, { name: string; agent: string }>();
+  const roomNames = new Map<string, string>();
+  for (const room of listRooms()) {
+    roomNames.set(room.id, room.name);
+    for (const m of deriveRoomMembers(room)) memberMeta.set(m.id, { name: m.name, agent: m.sourceAgent });
+  }
+
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (from) {
+    where.push("date >= ?");
+    args.push(from);
+  }
+  if (to) {
+    where.push("date <= ?");
+    args.push(to);
+  }
+  if (modelFilter) {
+    where.push("model = ?");
+    args.push(modelFilter);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  let rows: RollupRowWithRoom[];
+  try {
+    rows = db.all<RollupRowWithRoom>(
+      `SELECT room_id, member_id, date, model, input_tokens, output_tokens, cache_read, cache_write, cost, turns
+       FROM token_usage_daily ${whereSql}`,
+      ...args,
+    );
+  } catch (err) {
+    logger.error("db", "platform usage query failed", { error: String(err) });
+    sendJson(res, 500, { error: "usage query failed" });
+    return;
+  }
+
+  // Agent filter is applied here (not in SQL) since agent lives in room.json, not
+  // the rollup: keep only rows whose member maps to the requested agent.
+  if (agentFilter) {
+    rows = rows.filter((r) => memberMeta.get(r.member_id)?.agent === agentFilter);
+  }
+
+  const { kpis, series, breakdown, byAgent, byRoom } = aggregatePlatformUsage(rows, memberMeta, roomNames);
+
+  sendJson(res, 200, {
+    kpis,
+    series,
+    breakdown,
+    byAgent,
+    byRoom,
     backfillStatus: getBackfillStatus().status,
   });
 });
