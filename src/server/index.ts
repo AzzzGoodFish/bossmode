@@ -15,6 +15,7 @@ import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-engli
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
 import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
+import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
@@ -120,6 +121,14 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runTeamMetaCleanupMigration();
   } catch (err) {
     logger.error("server", "team meta cleanup migration failed", { error: String(err) });
+  }
+
+  // Initialize the SQLite projection (0.19.1). Non-blocking: a fresh DB
+  // backfills in the background; failure never blocks the server (file-only).
+  try {
+    initProjection();
+  } catch (err) {
+    logger.error("server", "projection init failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so

@@ -56,3 +56,6 @@ Thumbs.db
 /*.jpg
 /*.jpeg
 /*.txt
+
+# Local git worktrees for parallel dev (per release process)
+/.worktree/

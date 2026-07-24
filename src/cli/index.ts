@@ -260,14 +260,49 @@ function cmdStatus(): void {
   }
 }
 
+async function cmdDb(args: string[]): Promise<void> {
+  const sub = args[0];
+  if (sub !== "rebuild") {
+    console.error(`Unknown db subcommand: ${sub ?? "(none)"}. Usage: bossmode db rebuild`);
+    process.exit(1);
+  }
+  // Rebuild = drop the projection file, then recreate + backfill from files.
+  // Safe: the DB is a rebuildable projection; file authority is untouched.
+  const { getDbPath, resetDbCache } = await import("../workspace/db/sqlite.js");
+  const { rebuildProjection } = await import("../workspace/db/projection.js");
+  const { existsSync, rmSync } = await import("node:fs");
+  const dbPath = getDbPath();
+  resetDbCache();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const p = dbPath + suffix;
+    if (existsSync(p)) rmSync(p);
+  }
+  console.log(`Rebuilding projection at ${dbPath} ...`);
+  const started = Date.now();
+  try {
+    const progress = await rebuildProjection(dbPath);
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    console.log(
+      `Done in ${secs}s: ${progress.rooms} rooms, ${progress.members} members, ` +
+        `${progress.events} events, ${progress.usageRows} usage rows, ${progress.tasks} tasks ` +
+        `(skipped ${progress.skippedNameKeyedFiles} legacy name-keyed files).`,
+    );
+  } catch (err) {
+    console.error(`Rebuild failed: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 function showHelp(): void {
   console.log(`
 Usage: bossmode <command> [options]
 
 Commands:
-  on      Start the bossmode server (daemon mode)
-  off     Stop the bossmode server
-  status  Show server status
+  on          Start the bossmode server (daemon mode)
+  off         Stop the bossmode server
+  status      Show server status
+  db rebuild  Rebuild the SQLite projection (~/.bossmode/bossmode.db) from files
 
 Options (for 'on'):
   --host <host>   Bind address (default: 127.0.0.1)
@@ -305,6 +340,9 @@ async function main(): Promise<void> {
       break;
     case "status":
       cmdStatus();
+      break;
+    case "db":
+      await cmdDb(process.argv.slice(3));
       break;
     case "help":
     default:
