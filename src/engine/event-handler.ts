@@ -1,5 +1,5 @@
 // Agent event handling — stream accumulation, disk persistence, WS push
-import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
@@ -12,6 +12,7 @@ import type { AgentStatus } from "../shared/types.js";
 import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
 import { recordTurnStart, recordTurnEnd, recordToolCall, recordTokenUsage } from "../workspace/member-stats-store.js";
 import { recordDailyUsage } from "../workspace/db/token-rollup.js";
+import { indexAppendedEvent } from "../workspace/db/activity-index.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -33,7 +34,51 @@ export function appendEventToDisk(roomId: string, agentRef: string, event: Agent
   const dir = agentEventsDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const withTs = { ...limitRuntimeErrorEvent(event), ts: Date.now() };
-  appendFileSync(agentEventsPath(roomId, agentRef), JSON.stringify(withTs) + "\n", "utf-8");
+  const path = agentEventsPath(roomId, agentRef);
+  // Byte offset where this line will start = current file size. seq = 1-based
+  // line number (matches backfill's assignment). Maintained in-memory, seeded
+  // once from the file, so appends stay O(1) and the SQLite index stays aligned.
+  const byteOffsetBefore = existsSync(path) ? statSync(path).size : 0;
+  const seq = nextSeq(roomId, agentRef, path);
+  appendFileSync(path, JSON.stringify(withTs) + "\n", "utf-8");
+  // Live-index for the Activity read path (best-effort; skips non-indexed types).
+  try {
+    indexAppendedEvent(roomId, agentRef, seq, byteOffsetBefore, withTs);
+  } catch {
+    /* projection is best-effort; file remains authority */
+  }
+}
+
+// Per-file 1-based line counter, seeded lazily from the file on first append so
+// live-index seq matches backfill's line-number seq without recounting.
+const seqCache = new Map<string, number>();
+
+function seqCacheKey(roomId: string, agentRef: string): string {
+  return `${roomId}\u0000${agentRef}`;
+}
+
+function countLines(path: string): number {
+  if (!existsSync(path)) return 0;
+  const content = readFileSync(path, "utf-8");
+  if (!content) return 0;
+  // Non-empty lines only (backfill skips blank lines when assigning seq).
+  let n = 0;
+  for (const line of content.split("\n")) if (line.trim()) n += 1;
+  return n;
+}
+
+function nextSeq(roomId: string, agentRef: string, path: string): number {
+  const key = seqCacheKey(roomId, agentRef);
+  let cur = seqCache.get(key);
+  if (cur === undefined) cur = countLines(path);
+  const next = cur + 1;
+  seqCache.set(key, next);
+  return next;
+}
+
+/** Test helper: drop the in-memory seq cache. */
+export function resetEventSeqCache(): void {
+  seqCache.clear();
 }
 
 export function loadEventsFromDisk(roomId: string, agentRef: string): AgentHistoryEvent[] {

@@ -12,6 +12,7 @@ import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
+import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
@@ -643,6 +644,37 @@ addRoute("GET", "/api/rooms/:id/agents/:agent/events", async (req, res, params) 
     const events = getAgentEventHistory(params.id, params.agent);
     sendJson(res, 200, events);
   }
+});
+
+// Index-backed Activity pagination (0.19.1 S3): query the SQLite activity index
+// for a seq window, then O(1) fetch the matching jsonl lines by byte offset —
+// no full-file scan. Falls back to the file tail-scan when the projection is
+// unavailable so the endpoint always answers.
+addRoute("GET", "/api/rooms/:id/members/:ref/events", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const member = roomStore.resolveRoomMemberRef(params.id, params.ref);
+  const memberId = member?.id || params.ref;
+  const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 500));
+  const beforeSeq = url.searchParams.get("beforeSeq") ? parseInt(url.searchParams.get("beforeSeq")!, 10) : undefined;
+  const typesParam = url.searchParams.get("types");
+  const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
+
+  // Self-heal any index gap for this member before serving (tail beyond wm).
+  catchUpActivityIndex(params.id, memberId);
+  const page = queryActivityPage(params.id, memberId, { beforeSeq, limit, types });
+  if (page) {
+    sendJson(res, 200, { events: page.events, hasMore: page.hasMore, nextBeforeSeq: page.nextBeforeSeq });
+    return;
+  }
+  // Fallback: legacy tail-based pagination over the file (no seq index).
+  const before = beforeSeq;
+  const result = loadEventsPaginated(params.id, memberId, limit, before);
+  sendJson(res, 200, { events: result.events, hasMore: result.hasMore, nextBeforeSeq: result.hasMore ? Math.max(0, (result.total - result.events.length)) : null });
 });
 
 addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) => {

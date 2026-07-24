@@ -2,6 +2,7 @@
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as taskStore from "../workspace/task-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import { queryRoomTasks } from "../workspace/db/tasks-index.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { logger } from "../foundation/logger.js";
@@ -109,8 +110,33 @@ addRoute("GET", "/api/tasks", async (req, res) => {
 
 // -- Per-room --
 
-addRoute("GET", "/api/rooms/:id/tasks", async (_req, res, params) => {
+addRoute("GET", "/api/rooms/:id/tasks", async (req, res, params) => {
   if (!roomStore.getRoom(params.id)) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const url = new URL(req.url || "", "http://localhost");
+  const status = (url.searchParams.get("status") as any) || undefined;
+  const assignee = url.searchParams.get("assignee") || undefined;
+  const q = url.searchParams.get("q") || undefined;
+  const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined;
+  const offset = url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!, 10) : undefined;
+  const wantsQuery = Boolean(status || assignee || q || limit !== undefined || offset !== undefined);
+
+  // DB-backed list (filters + pagination) when the caller asks for it; else the
+  // legacy bare-array shape the current UI expects. Falls back to file store if
+  // the projection is unavailable.
+  if (wantsQuery) {
+    const result = queryRoomTasks(params.id, { status, assignee, q, limit, offset });
+    if (result) { sendJson(res, 200, result); return; }
+    // Fallback: filter the file-backed list in memory.
+    let items = taskStore.listTaskSummaries(params.id);
+    if (status) items = items.filter((t) => t.status === status);
+    if (assignee) items = items.filter((t) => t.assignee === assignee);
+    if (q) items = items.filter((t) => t.title.toLowerCase().includes(q.toLowerCase()));
+    const total = items.length;
+    if (offset) items = items.slice(offset);
+    if (limit && limit > 0) items = items.slice(0, limit);
+    sendJson(res, 200, { tasks: items, total });
+    return;
+  }
   sendJson(res, 200, taskStore.listTaskSummaries(params.id));
 });
 

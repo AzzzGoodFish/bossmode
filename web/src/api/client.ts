@@ -1073,6 +1073,30 @@ export async function getAgentEventsPaginated(roomId: string, agentName: string,
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events${params}`);
 }
 
+export interface ActivityEventsPage {
+  events: unknown[];
+  hasMore: boolean;
+  nextBeforeSeq: number | null;
+}
+
+/**
+ * Index-backed Activity pagination (0.19.1 S3). Newest-first pages via the
+ * SQLite activity index + O(1) byte-offset line fetch; `beforeSeq` is the seq
+ * cursor returned as `nextBeforeSeq`. `types` filters to indexed event types.
+ */
+export async function getMemberActivityEvents(
+  roomId: string,
+  ref: string,
+  limit: number,
+  beforeSeq?: number,
+  types?: string[],
+): Promise<ActivityEventsPage> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (beforeSeq !== undefined) qs.set("beforeSeq", String(beforeSeq));
+  if (types && types.length) qs.set("types", types.join(","));
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(ref)}/events?${qs}`);
+}
+
 export async function abortAgent(roomId: string, agentName: string): Promise<{ ok: boolean; action: string }> {
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/abort`, { method: "POST" });
 }

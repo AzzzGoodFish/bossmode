@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { getAgentEventsPaginated, getToken } from "../api/client";
+import { getMemberActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
@@ -26,7 +26,7 @@ export function ActivityTab({ roomId, agentName }: {
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [oldestIndex, setOldestIndex] = useState<number | undefined>();
+  const [beforeSeq, setBeforeSeq] = useState<number | undefined>();
   const [filter, setFilter] = useState<FilterMode>("all");
   const [query, setQuery] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,10 +39,10 @@ export function ActivityTab({ roomId, agentName }: {
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getAgentEventsPaginated(roomId, agentName, PAGE_SIZE);
+      const result = await getMemberActivityEvents(roomId, agentName, PAGE_SIZE);
       setEvents(result.events as AgentEvent[]);
       setHasMore(result.hasMore);
-      setOldestIndex(result.hasMore ? result.total - result.events.length : 0);
+      setBeforeSeq(result.nextBeforeSeq ?? undefined);
     } finally {
       setLoading(false);
     }
@@ -76,17 +76,17 @@ export function ActivityTab({ roomId, agentName }: {
   }, [roomId, agentName]);
 
   const loadOlder = useCallback(async () => {
-    if (!hasMore || oldestIndex === undefined || loadingOlderRef.current) return;
+    if (!hasMore || beforeSeq === undefined || loadingOlderRef.current) return;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     const el = scrollRef.current;
     const prevScrollHeight = el?.scrollHeight ?? 0;
     const prevScrollTop = el?.scrollTop ?? 0;
     try {
-      const result = await getAgentEventsPaginated(roomId, agentName, PAGE_SIZE, oldestIndex);
+      const result = await getMemberActivityEvents(roomId, agentName, PAGE_SIZE, beforeSeq);
       setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
       setHasMore(result.hasMore);
-      setOldestIndex(Math.max(0, oldestIndex - result.events.length));
+      setBeforeSeq(result.nextBeforeSeq ?? undefined);
       // Prepending content shifts everything down; restore the pre-load scroll
       // position so the view doesn't jump (scroll anchoring / 滚动锚定).
       requestAnimationFrame(() => {
@@ -97,7 +97,7 @@ export function ActivityTab({ roomId, agentName }: {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore, oldestIndex, roomId, agentName]);
+  }, [hasMore, beforeSeq, roomId, agentName]);
 
   // Infinite scroll: scrolling near the top of the event-stream container
   // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).

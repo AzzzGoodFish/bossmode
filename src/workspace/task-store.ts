@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir, listRooms } from "./room-store.js";
+import { syncRoomTasks } from "./db/tasks-index.js";
 import type { Task, TaskStatus, TaskPriority, TaskComment, TaskListItem } from "../shared/types.js";
 
 function tasksPath(roomId: string): string {
@@ -63,7 +64,10 @@ function writeTasks(roomId: string, tasks: Task[]): void {
   const p = tasksPath(roomId);
   const dir = join(p, "..");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(tasks.map(normalizeTask), null, 2), "utf-8");
+  const normalized = tasks.map(normalizeTask);
+  writeFileSync(p, JSON.stringify(normalized, null, 2), "utf-8");
+  // Dual-write the SQLite projection (best-effort; file is authority).
+  syncRoomTasks(roomId, normalized);
 }
 
 export function toTaskListItem(task: Task): TaskListItem {
