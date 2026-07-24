@@ -74,6 +74,8 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 Two ways to speak in the room: (1) call the \`chat\` tool; (2) write \`[room]\` on its own line — everything after it is posted to the room, everything before it stays private. Text without the marker never reaches the room.
 
+Use **exactly one** channel per message — either the \`chat\` tool or the \`[room]\` marker, never both. The same content sent through both channels is posted to the room twice.
+
 Example:
 \`\`\`
 Let me check the logs first...   ← not posted
