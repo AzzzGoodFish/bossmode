@@ -8,7 +8,7 @@ import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary
 import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 
-export type SettingsSection = "models" | "runtime" | "integrations" | "extensions";
+export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
 export type ActivePage =
   | { type: "room"; id: string }
@@ -56,6 +56,7 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
   { id: "extensions", title: "Extensions", desc: "Install pi agent extensions (e.g. web search)." },
   { id: "integrations", title: "Integrations", desc: "Connect external tools and services." },
+  { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time." },
 ];
 
 type RoomPresence = "working" | "idle" | "offline";

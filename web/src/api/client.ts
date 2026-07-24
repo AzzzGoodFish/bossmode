@@ -1197,6 +1197,101 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
   return apiFetch("/api/settings/runtime");
 }
 
+// -- Usage (token stats) --
+
+export interface UsageKpis {
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitRate: number;
+  turns: number;
+}
+export interface UsageModelBucket {
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+}
+export interface UsageSeriesPoint {
+  date: string;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  byModel: Record<string, UsageModelBucket>;
+}
+export interface UsageBreakdownRow {
+  memberId: string;
+  memberName?: string;
+  agent?: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  turns: number;
+}
+export interface UsageAgentRow {
+  agent: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  turns: number;
+}
+export interface UsageRoomRow {
+  roomId: string;
+  roomName?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  turns: number;
+}
+export interface UsageResponse {
+  kpis: UsageKpis;
+  series: UsageSeriesPoint[];
+  breakdown: UsageBreakdownRow[];
+  byAgent: UsageAgentRow[];
+  byRoom?: UsageRoomRow[];
+  backfillStatus: string;
+}
+
+/** Platform-wide usage (all rooms). Optional agent/model filters. */
+export async function getPlatformUsage(params?: {
+  from?: string;
+  to?: string;
+  agent?: string;
+  model?: string;
+}): Promise<UsageResponse> {
+  const q = new URLSearchParams();
+  if (params?.from) q.set("from", params.from);
+  if (params?.to) q.set("to", params.to);
+  if (params?.agent) q.set("agent", params.agent);
+  if (params?.model) q.set("model", params.model);
+  const qs = q.toString();
+  return apiFetch(`/api/usage${qs ? `?${qs}` : ""}`);
+}
+
+/** Single-room usage. */
+export async function getRoomUsage(
+  roomId: string,
+  params?: { from?: string; to?: string; member?: string; model?: string },
+): Promise<UsageResponse> {
+  const q = new URLSearchParams();
+  if (params?.from) q.set("from", params.from);
+  if (params?.to) q.set("to", params.to);
+  if (params?.member) q.set("member", params.member);
+  if (params?.model) q.set("model", params.model);
+  const qs = q.toString();
+  return apiFetch(`/api/rooms/${roomId}/usage${qs ? `?${qs}` : ""}`);
+}
+
 export async function updateRuntimeSettings(settings: boolean | Partial<RuntimeSettings>): Promise<RuntimeSettings> {
   return apiFetch("/api/settings/runtime", {
     method: "PUT",

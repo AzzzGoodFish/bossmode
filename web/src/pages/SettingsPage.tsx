@@ -31,6 +31,7 @@ import {
   uninstallExtension,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
+import { UsagePage } from "./UsagePage";
 import { useDialog } from "../components/dialogs";
 import type { SettingsSection } from "../components/Sidebar";
 import { userActionError } from "../utils/user-error";
@@ -45,6 +46,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
   extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
   integrations: { title: "Integrations", desc: "Connect external tools and services." },
+  usage: { title: "Usage", desc: "Token consumption by identity, room and time." },
 };
 
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
@@ -171,11 +173,13 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
       <MobileTopBar title={meta.title} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 flex flex-col overflow-y-auto">
-      <div className="w-full max-w-3xl mx-auto px-6 pt-7 pb-20">
+      <div className={`w-full ${section === "usage" ? "max-w-6xl" : "max-w-3xl"} mx-auto px-6 pt-7 pb-20`}>
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight text-ink-1">{meta.title}</h1>
         <p className="text-xs text-ink-3 mt-1">{meta.desc}</p>
       </div>
+
+      {section === "usage" && <UsagePage />}
 
       {section === "integrations" && (
         <div className="space-y-6">
