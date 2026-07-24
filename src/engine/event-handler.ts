@@ -11,6 +11,7 @@ import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
 import { recordTurnStart, recordTurnEnd, recordToolCall, recordTokenUsage } from "../workspace/member-stats-store.js";
+import { recordDailyUsage } from "../workspace/db/token-rollup.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -76,6 +77,7 @@ export function handleAgentEvent(
   event: AgentStreamEvent,
   eventBuffer: AgentHistoryEvent[],
   memberId?: string,
+  model?: string,
 ): AgentStatus | undefined {
   event = limitRuntimeErrorEvent(event);
 
@@ -158,13 +160,17 @@ export function handleAgentEvent(
   let processedEvent: AgentStreamEvent = event;
   if (event.type === "message_end") {
     const state = streamState.get(instanceKey);
+    const enriched: Record<string, unknown> = { ...event };
     if (state) {
-      const enriched: Record<string, unknown> = { ...event };
       if (!event.text && state.text) enriched.text = state.text;
       if (state.thinking) enriched.thinking = state.thinking;
-      processedEvent = enriched as AgentStreamEvent;
       streamState.delete(instanceKey);
     }
+    // Stamp the live model so by-model usage stats are possible going forward.
+    // Pre-stamp history stays in the 'unknown' bucket (backfill). Only stamp
+    // when we actually know it ("provider/modelId"); omit otherwise.
+    if (model && model.trim() && !("model" in enriched)) enriched.model = model;
+    processedEvent = enriched as AgentStreamEvent;
   }
 
   // Persist non-streaming events to disk
@@ -187,6 +193,19 @@ export function handleAgentEvent(
     try { recordToolCall(roomId, statsRef); } catch (err) { logger.error("member-stats", "recordToolCall failed", { roomId, agent: agentName, error: String(err) }); }
   } else if (processedEvent.type === "message_end" && processedEvent.usage) {
     try { recordTokenUsage(roomId, statsRef, processedEvent.usage); } catch (err) { logger.error("member-stats", "recordTokenUsage failed", { roomId, agent: agentName, error: String(err) }); }
+    // Dual-write the daily rollup (SQLite projection). Best-effort: never blocks
+    // the turn. Uses the persist-time date/model stamped above.
+    try {
+      recordDailyUsage(
+        roomId,
+        statsRef,
+        statsTs,
+        processedEvent.usage,
+        (processedEvent as { model?: string }).model,
+      );
+    } catch (err) {
+      logger.error("db", "recordDailyUsage threw", { roomId, agent: agentName, error: String(err) });
+    }
   }
 
   // WebSocket push — forward all events for live streaming

@@ -619,7 +619,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
       };
 
       const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId);
+        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
         if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
           clearPendingChatReply(instance, `tool:${event.toolName}`);
         }
