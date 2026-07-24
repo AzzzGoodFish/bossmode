@@ -28,7 +28,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
 
-  return [
+  const tools: ToolDefinition[] = [
     defineTool({
       name: "chat",
       label: "Chat",
@@ -210,4 +210,17 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("configure_integration", params as any), null, 2))),
     }),
   ];
+
+  // Defensive normalization: TypeBox omits `required` when every property is
+  // optional — valid JSON Schema (OpenAI/xAI accept it), but some
+  // OpenAI-compatible adapters (e.g. cloudrouter's OpenAI→Anthropic conversion)
+  // silently return an empty stream for such tool schemas. Emit `required: []`
+  // explicitly so every backend sees the most conservative shape.
+  for (const tool of tools) {
+    const parameters = tool.parameters as { type?: string; required?: unknown } | undefined;
+    if (parameters && parameters.type === "object" && !Array.isArray(parameters.required)) {
+      parameters.required = [];
+    }
+  }
+  return tools;
 }
