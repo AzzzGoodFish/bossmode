@@ -35,6 +35,20 @@ function agentColor(agent: string): string {
   return AGENT_COLOR[agent] || "var(--ink-4)";
 }
 
+// Distinct palette for the By-room ring so multiple rooms are visually separable
+// (assigned by index; falls back to cycling). Reuses theme tokens.
+const ROOM_PALETTE = [
+  "var(--accent)",
+  "var(--avatar-pm)",
+  "var(--on-air)",
+  "var(--thinking)",
+  "var(--avatar-designer)",
+  "var(--avatar-user)",
+];
+function roomColor(index: number): string {
+  return ROOM_PALETTE[index % ROOM_PALETTE.length];
+}
+
 function tokensOf(row: { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }): number {
   return row.inputTokens + row.outputTokens + row.cacheRead + row.cacheWrite;
 }
@@ -343,7 +357,7 @@ function ShareDonut({
         id: r.roomId,
         label: r.roomName || r.roomId,
         value: metric === "tokens" ? tokensOf(r) : r.cost,
-        color: agentColor(agentFilter),
+        color: roomColor(data.byRoom.indexOf(r)),
         clickable: true,
       });
     }

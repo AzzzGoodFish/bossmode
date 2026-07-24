@@ -46,7 +46,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
   extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
   integrations: { title: "Integrations", desc: "Connect external tools and services." },
-  usage: { title: "Usage", desc: "Token consumption by identity, room and time." },
+  usage: { title: "Usage", desc: "Token consumption by identity, room and time" },
 };
 
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {

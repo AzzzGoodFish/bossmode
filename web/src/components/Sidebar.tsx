@@ -56,7 +56,7 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
   { id: "extensions", title: "Extensions", desc: "Install pi agent extensions (e.g. web search)." },
   { id: "integrations", title: "Integrations", desc: "Connect external tools and services." },
-  { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time." },
+  { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time" },
 ];
 
 type RoomPresence = "working" | "idle" | "offline";
