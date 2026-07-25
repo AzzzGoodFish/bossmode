@@ -5,7 +5,8 @@
 //                   until done, then "ready". APIs may return partial data.
 //   - DB present   → open (migrations apply), status = "ready". Incremental
 //                   catch-up for files newer than their watermark is handled by
-//                   the live write path (S2/S3) + `bossmode db rebuild`.
+//                   the live write path (S2/S3). Recovery: delete bossmode.db
+//                   and restart → the missing-DB path rebuilds automatically.
 //
 // The projection is best-effort: if node:sqlite is unavailable the whole layer
 // disables and the product keeps working on files alone.
@@ -82,8 +83,9 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
 }
 
 /**
- * Synchronous full rebuild (used by `bossmode db rebuild` CLI and tests).
- * Opens the DB (creating schema), runs backfill to completion, returns progress.
+ * Synchronous full rebuild from files (internal helper; used by tests and the
+ * missing-DB startup path's recovery semantics). Not exposed as a CLI command —
+ * the projection self-heals: delete bossmode.db and restart to rebuild.
  */
 export async function rebuildProjection(path: string = getDbPath()): Promise<BackfillProgress> {
   if (!isDbAvailable()) {
