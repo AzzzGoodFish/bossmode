@@ -50,6 +50,10 @@ function messageEnd(ts: number, usage: Partial<Record<string, number>>): object 
   };
 }
 
+function messageEndModel(ts: number, model: string, usage: Partial<Record<string, number>>): object {
+  return { ...messageEnd(ts, usage), model };
+}
+
 describe("sqlite backfill", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bossmode-db-"));
@@ -277,5 +281,37 @@ describe("sqlite backfill", () => {
       memberId,
     );
     expect(after?.input_tokens).toBe(7);
+  });
+
+  it("honors the stamped model on events (does not wipe to unknown)", async () => {
+    const roomId = "room-model";
+    const memberId = "rm_stamped";
+    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
+    const base = Date.parse("2026-07-24T00:00:00Z");
+    // Two stamped turns (real model) + one legacy turn (no model → unknown).
+    writeEvents(roomId, memberId, [
+      messageEndModel(base, "anthropic/claude-opus-4-8", { inputTokens: 100 }),
+      messageEndModel(base + 1000, "anthropic/claude-opus-4-8", { inputTokens: 50 }),
+      messageEnd(base + 2000, { inputTokens: 30 }),
+    ]);
+
+    const { openDb } = await import("../../src/workspace/db/sqlite.js");
+    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
+    const db = openDb();
+    await backfillAll(db);
+
+    const stamped = db.get<{ input_tokens: number }>(
+      "SELECT input_tokens FROM token_usage_daily WHERE room_id = ? AND member_id = ? AND model = ?",
+      roomId,
+      memberId,
+      "anthropic/claude-opus-4-8",
+    );
+    expect(stamped?.input_tokens).toBe(150); // two stamped turns preserved, not wiped
+    const unknown = db.get<{ input_tokens: number }>(
+      "SELECT input_tokens FROM token_usage_daily WHERE room_id = ? AND member_id = ? AND model = 'unknown'",
+      roomId,
+      memberId,
+    );
+    expect(unknown?.input_tokens).toBe(30); // legacy turn stays unknown
   });
 });

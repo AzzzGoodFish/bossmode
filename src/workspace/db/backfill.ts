@@ -39,6 +39,7 @@ export interface BackfillProgress {
 interface AgentEvent {
   type: string;
   ts?: number;
+  model?: string;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -142,7 +143,7 @@ async function backfillMemberFile(
     );
     const upsertUsage = db.raw.prepare(
       `INSERT INTO token_usage_daily (room_id, member_id, date, model, input_tokens, output_tokens, cache_read, cache_write, cost, turns)
-       VALUES (?, ?, ?, 'unknown', ?, ?, ?, ?, ?, 1)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        ON CONFLICT(room_id, member_id, date, model) DO UPDATE SET
          input_tokens = input_tokens + excluded.input_tokens,
          output_tokens = output_tokens + excluded.output_tokens,
@@ -198,11 +199,16 @@ async function backfillMemberFile(
       if (event.type === "message_end" && event.usage) {
         const u = event.usage;
         const date = utcDate(ts);
+        // Honor the event's stamped model (S2 live-write path); pre-stamp history
+        // has none → honest 'unknown' bucket. Previously hardcoded 'unknown',
+        // which wiped real stamped data on rebuild.
+        const model = event.model && event.model.trim() ? event.model : "unknown";
         batch.push(() =>
           upsertUsage.run(
             roomId,
             memberId,
             date,
+            model,
             u.inputTokens || 0,
             u.outputTokens || 0,
             u.cacheRead || 0,
