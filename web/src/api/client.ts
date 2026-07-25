@@ -1281,12 +1281,13 @@ export async function getPlatformUsage(params?: {
 /** Single-room usage. */
 export async function getRoomUsage(
   roomId: string,
-  params?: { from?: string; to?: string; member?: string; model?: string },
+  params?: { from?: string; to?: string; member?: string; agent?: string; model?: string },
 ): Promise<UsageResponse> {
   const q = new URLSearchParams();
   if (params?.from) q.set("from", params.from);
   if (params?.to) q.set("to", params.to);
   if (params?.member) q.set("member", params.member);
+  if (params?.agent) q.set("agent", params.agent);
   if (params?.model) q.set("model", params.model);
   const qs = q.toString();
   return apiFetch(`/api/rooms/${roomId}/usage${qs ? `?${qs}` : ""}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateUsage, aggregatePlatformUsage } from "../../src/api/usage.js";
+import { aggregateUsage, aggregatePlatformUsage, fillSeriesGaps } from "../../src/api/usage.js";
 
 // Pure-aggregation tests for the usage API. Covers KPIs, cacheHitRate formula,
 // per-date series with byModel, member×model breakdown, and identity (byAgent)
@@ -139,5 +139,36 @@ describe("aggregatePlatformUsage (cross-room)", () => {
     const rows = [roomRow({ room_id: "room-x", member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 10 })];
     const { byRoom } = aggregatePlatformUsage(rows, meta, roomNames);
     expect(byRoom[0].roomName).toBeUndefined();
+  });
+});
+
+describe("fillSeriesGaps (rc.2 zero-fill)", () => {
+  const pt = (date: string, inputTokens = 0) => ({ date, cost: 0, inputTokens, outputTokens: 0, cacheRead: 0, byModel: {} });
+
+  it("fills every calendar day in an explicit from..to range", () => {
+    const series = [pt("2026-07-22", 100), pt("2026-07-24", 200)]; // 07-23 missing
+    const filled = fillSeriesGaps(series as any, "2026-07-22", "2026-07-24");
+    expect(filled.map((s: any) => s.date)).toEqual(["2026-07-22", "2026-07-23", "2026-07-24"]);
+    expect(filled[1].inputTokens).toBe(0); // gap day is a zero point
+    expect(filled[0].inputTokens).toBe(100); // existing point preserved
+    expect(filled[2].inputTokens).toBe(200);
+  });
+
+  it("produces exactly N days for an N-day range (7d => 7 columns)", () => {
+    const filled = fillSeriesGaps([pt("2026-07-24", 5)] as any, "2026-07-18", "2026-07-24");
+    expect(filled.length).toBe(7);
+    expect(filled[filled.length - 1].inputTokens).toBe(5);
+    expect(filled.slice(0, 6).every((s: any) => s.inputTokens === 0)).toBe(true);
+  });
+
+  it("returns input unchanged when range is inverted", () => {
+    const series = [pt("2026-07-24", 1)];
+    expect(fillSeriesGaps(series as any, "2026-07-25", "2026-07-20")).toEqual(series);
+  });
+
+  it("spans the data range when from/to omitted", () => {
+    const series = [pt("2026-07-20", 1), pt("2026-07-22", 1)];
+    const filled = fillSeriesGaps(series as any, undefined, "2026-07-22");
+    expect(filled.map((s: any) => s.date)).toEqual(["2026-07-20", "2026-07-21", "2026-07-22"]);
   });
 });

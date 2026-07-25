@@ -1,7 +1,7 @@
 // Usage API (0.19.1 S2): token usage read endpoints backed by the SQLite
 // projection's token_usage_daily rollup.
 //
-//   GET /api/rooms/:id/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&member=&model=
+//   GET /api/rooms/:id/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&member=&agent=&model=
 //     → { kpis, series, breakdown, byAgent, backfillStatus }
 //
 // The prototype's identity dimension (agent → room → member) needs member→agent
@@ -39,6 +39,46 @@ function cacheHitRate(inputTokens: number, cacheRead: number): number {
 function parseDate(v: string | null): string | undefined {
   if (!v) return undefined;
   return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+}
+
+// UTC date helpers for zero-filling the series across every calendar day in the
+// queried range (SQL GROUP BY only emits days with data → gaps in the chart).
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function eachDay(from: string, to: string): string[] {
+  const out: string[] = [];
+  const d = new Date(from + "T00:00:00Z");
+  const end = new Date(to + "T00:00:00Z");
+  // Guard against inverted/huge ranges: cap at 400 days.
+  let guard = 0;
+  while (d <= end && guard < 400) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+    guard++;
+  }
+  return out;
+}
+
+/**
+ * Fill missing calendar days in a series with empty points so the chart shows
+ * one column per day across the whole range (7d → 7 columns, not "days with
+ * data"). Preserves existing points; adds zero points for gaps.
+ */
+export function fillSeriesGaps(
+  series: Array<{ date: string; cost: number; inputTokens: number; outputTokens: number; cacheRead: number; byModel: Record<string, unknown> }>,
+  from: string | undefined,
+  to: string | undefined,
+): typeof series {
+  // Determine the range: explicit from/to, else span the data (or today).
+  const dates = series.map((s) => s.date).sort();
+  const start = from || dates[0] || todayUtc();
+  const end = to || todayUtc();
+  if (!start || !end || start > end) return series;
+  const byDate = new Map(series.map((s) => [s.date, s]));
+  return eachDay(start, end).map(
+    (date) => byDate.get(date) || { date, cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, byModel: {} },
+  );
 }
 
 /**
@@ -139,6 +179,7 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
   const from = parseDate(url.searchParams.get("from"));
   const to = parseDate(url.searchParams.get("to"));
   const memberFilter = url.searchParams.get("member") || undefined;
+  const agentFilter = url.searchParams.get("agent") || undefined;
   const modelFilter = url.searchParams.get("model") || undefined;
 
   const db = getProjectionDb();
@@ -192,13 +233,20 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
     return;
   }
 
-  const { kpis, series, breakdown, byAgent } = aggregateUsage(rows, memberMeta);
+  // Agent filter applied post-query (agent lives in room.json, not the rollup):
+  // keep only rows whose member maps to the requested agent — same mapping the
+  // platform endpoint uses.
+  if (agentFilter) {
+    rows = rows.filter((r) => memberMeta.get(r.member_id)?.agent === agentFilter);
+  }
+
+  const agg = aggregateUsage(rows, memberMeta);
 
   sendJson(res, 200, {
-    kpis,
-    series,
-    breakdown,
-    byAgent,
+    kpis: agg.kpis,
+    series: fillSeriesGaps(agg.series, from, to),
+    breakdown: agg.breakdown,
+    byAgent: agg.byAgent,
     backfillStatus: getBackfillStatus().status,
   });
 });
@@ -310,7 +358,7 @@ addRoute("GET", "/api/usage", async (req, res) => {
 
   sendJson(res, 200, {
     kpis,
-    series,
+    series: fillSeriesGaps(series, from, to),
     breakdown,
     byAgent,
     byRoom,

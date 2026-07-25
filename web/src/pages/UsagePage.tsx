@@ -18,7 +18,6 @@ import {
   type UsageSeriesPoint,
 } from "../api/client";
 
-type Metric = "tokens" | "cost";
 type RangeDays = 7 | 14 | 30;
 
 // Agent identity → chart color, reusing the product's avatar/status tokens so
@@ -60,9 +59,6 @@ function fmtTokens(n: number): string {
 function fmtCost(n: number): string {
   return "$" + (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2));
 }
-function fmtMetric(metric: Metric, tokens: number, cost: number): string {
-  return metric === "tokens" ? fmtTokens(tokens) : fmtCost(cost);
-}
 function isoDaysAgo(days: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - (days - 1));
@@ -76,7 +72,6 @@ interface UsagePageProps {
 }
 
 export function UsagePage({ roomId }: UsagePageProps) {
-  const [metric, setMetric] = useState<Metric>("tokens");
   const [range, setRange] = useState<RangeDays>(7);
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const [roomFilter, setRoomFilter] = useState<string | null>(roomId ?? null);
@@ -86,6 +81,7 @@ export function UsagePage({ roomId }: UsagePageProps) {
 
   // Fetch whenever range / filters change. Platform vs single-room chosen by the
   // effective room scope: an explicit room filter (or fixed roomId) → room API.
+  // The agent filter is passed through in both modes now (room API supports it).
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -93,7 +89,7 @@ export function UsagePage({ roomId }: UsagePageProps) {
     const from = isoDaysAgo(range);
     const effectiveRoom = roomId ?? roomFilter;
     const req = effectiveRoom
-      ? getRoomUsage(effectiveRoom, { from, model: undefined })
+      ? getRoomUsage(effectiveRoom, { from, agent: agentFilter || undefined })
       : getPlatformUsage({ from, agent: agentFilter || undefined });
     req
       .then((res) => {
@@ -130,7 +126,7 @@ export function UsagePage({ roomId }: UsagePageProps) {
 
   return (
     <div className="w-full">
-      {/* Range + metric toggles */}
+      {/* Range toggle */}
       <div className="flex items-center justify-end gap-2 mb-4">
         {([7, 14, 30] as RangeDays[]).map((r) => (
           <button
@@ -141,18 +137,6 @@ export function UsagePage({ roomId }: UsagePageProps) {
             }`}
           >
             {r}d
-          </button>
-        ))}
-        <span className="w-px h-4 bg-line mx-1" />
-        {(["tokens", "cost"] as Metric[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMetric(m)}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
-              metric === m ? "bg-accent border-accent text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
-            }`}
-          >
-            {m === "tokens" ? "Tokens" : "Spend"}
           </button>
         ))}
       </div>
@@ -172,7 +156,6 @@ export function UsagePage({ roomId }: UsagePageProps) {
           options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
           value={agentFilter}
           onChange={setAgentFilter}
-          disabled={!!(roomId ?? roomFilter)}
         />
         <div className="ml-auto text-[11.5px] text-ink-4">
           {(roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms")}
@@ -195,7 +178,6 @@ export function UsagePage({ roomId }: UsagePageProps) {
       ) : data ? (
         <UsageBody
           data={data}
-          metric={metric}
           effectiveRoom={roomId ?? roomFilter}
           agentFilter={agentFilter}
           onPickAgent={(a) => setAgentFilter(a)}
@@ -211,16 +193,14 @@ function FilterGroup({
   options,
   value,
   onChange,
-  disabled,
 }: {
   label: string;
   options: Array<{ id: string | null; label: string; color?: string }>;
   value: string | null;
   onChange: (v: string | null) => void;
-  disabled?: boolean;
 }) {
   return (
-    <div className={`flex items-center gap-2 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
+    <div className="flex items-center gap-2">
       <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold">{label}</span>
       <div className="flex items-center gap-1.5 flex-wrap">
         {options.map((o) => {
@@ -258,14 +238,12 @@ function EmptyState({ backfilling }: { backfilling: boolean }) {
 
 function UsageBody({
   data,
-  metric,
   effectiveRoom,
   agentFilter,
   onPickAgent,
   onPickRoom,
 }: {
   data: UsageResponse;
-  metric: Metric;
   effectiveRoom: string | null | undefined;
   agentFilter: string | null;
   onPickAgent: (a: string | null) => void;
@@ -296,17 +274,16 @@ function UsageBody({
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
         <ShareDonut
           data={data}
-          metric={metric}
           effectiveRoom={effectiveRoom}
           agentFilter={agentFilter}
           onPickAgent={onPickAgent}
           onPickRoom={onPickRoom}
         />
-        <TrendChart series={data.series} metric={metric} />
+        <TrendChart series={data.series} />
       </div>
 
       {/* Drill table */}
-      <DrillTable data={data} metric={metric} effectiveRoom={effectiveRoom} agentFilter={agentFilter} onPickAgent={onPickAgent} />
+      <DrillTable data={data} effectiveRoom={effectiveRoom} agentFilter={agentFilter} onPickAgent={onPickAgent} />
     </div>
   );
 }
@@ -319,14 +296,12 @@ function UsageBody({
  */
 function ShareDonut({
   data,
-  metric,
   effectiveRoom,
   agentFilter,
   onPickAgent,
   onPickRoom,
 }: {
   data: UsageResponse;
-  metric: Metric;
   effectiveRoom: string | null | undefined;
   agentFilter: string | null;
   onPickAgent: (a: string | null) => void;
@@ -344,7 +319,7 @@ function ShareDonut({
       slices.push({
         id: b.memberId,
         label: b.memberName || b.memberId,
-        value: metric === "tokens" ? tokensOf(b) : b.cost,
+        value: tokensOf(b),
         color: agentColor(b.agent || ""),
         clickable: false,
       });
@@ -356,7 +331,7 @@ function ShareDonut({
       slices.push({
         id: r.roomId,
         label: r.roomName || r.roomId,
-        value: metric === "tokens" ? tokensOf(r) : r.cost,
+        value: tokensOf(r),
         color: roomColor(data.byRoom.indexOf(r)),
         clickable: true,
       });
@@ -366,7 +341,7 @@ function ShareDonut({
       slices.push({
         id: a.agent,
         label: a.agent,
-        value: metric === "tokens" ? tokensOf(a) : a.cost,
+        value: tokensOf(a),
         color: agentColor(a.agent),
         clickable: true,
       });
@@ -442,7 +417,7 @@ function ShareDonut({
 }
 
 /** Stacked daily columns, one stack per date, colored by model bucket. */
-function TrendChart({ series, metric }: { series: UsageSeriesPoint[]; metric: Metric }) {
+function TrendChart({ series }: { series: UsageSeriesPoint[] }) {
   // Collect model keys across the range for stable stacking + legend.
   const models = useMemo(() => {
     const set = new Set<string>();
@@ -459,7 +434,7 @@ function TrendChart({ series, metric }: { series: UsageSeriesPoint[]; metric: Me
   const dayValue = (p: UsageSeriesPoint, m: string): number => {
     const b = p.byModel[m];
     if (!b) return 0;
-    return metric === "tokens" ? b.inputTokens + b.outputTokens + b.cacheRead : b.cost;
+    return b.inputTokens + b.outputTokens + b.cacheRead;
   };
 
   const W = Math.max(460, series.length * 30);
@@ -503,17 +478,30 @@ function TrendChart({ series, metric }: { series: UsageSeriesPoint[]; metric: Me
                       rx={2}
                       fill={modelColor(m, mi)}
                     >
-                      <title>{`${p.date} · ${m}: ${fmtMetric(metric, v, v)}`}</title>
+                      <title>{`${p.date} · ${m === "unknown" ? "unknown (history)" : m}: ${fmtTokens(v)}`}</title>
                     </rect>
                   );
                 });
               })}
             </svg>
           </div>
-          <div className="flex justify-between text-[10.5px] text-ink-4 mt-1 px-0.5">
-            <span>{series[0].date.slice(5)}</span>
-            <span className="text-ink-4">{series.length} days · hover for detail</span>
-            <span>{series[series.length - 1].date.slice(5)}</span>
+          {/* X axis: a tick roughly every ceil(n/8) days so labels are readable
+              across 7/14/30d instead of only first+last. */}
+          <div className="relative h-4 mt-1" style={{ minWidth: 420 }}>
+            {series.map((p, i) => {
+              const tickEvery = Math.max(1, Math.ceil(series.length / 8));
+              if (i % tickEvery !== 0 && i !== series.length - 1) return null;
+              const leftPct = ((pad + i * step + step / 2) / W) * 100;
+              return (
+                <span
+                  key={p.date}
+                  className="absolute text-[10.5px] text-ink-4 -translate-x-1/2 whitespace-nowrap"
+                  style={{ left: `${leftPct}%` }}
+                >
+                  {p.date.slice(5)}
+                </span>
+              );
+            })}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11.5px] text-ink-3">
             {models.map((m, mi) => (
@@ -523,6 +511,12 @@ function TrendChart({ series, metric }: { series: UsageSeriesPoint[]; metric: Me
               </span>
             ))}
           </div>
+          {models.includes("unknown") && (
+            <p className="text-[11px] text-ink-4 mt-2 leading-relaxed">
+              <span className="font-medium">unknown (history)</span> = turns recorded before 0.19.1, when usage events
+              did not carry a model. New turns are stamped with their model.
+            </p>
+          )}
         </>
       )}
     </div>
@@ -532,20 +526,17 @@ function TrendChart({ series, metric }: { series: UsageSeriesPoint[]; metric: Me
 /** Drill table: agents (platform) or members (single room). */
 function DrillTable({
   data,
-  metric,
   effectiveRoom,
   agentFilter,
   onPickAgent,
 }: {
   data: UsageResponse;
-  metric: Metric;
   effectiveRoom: string | null | undefined;
   agentFilter: string | null;
   onPickAgent: (a: string | null) => void;
 }) {
-  const metricHead = metric === "tokens" ? "Tokens" : "Spend";
-
-  // Single room → member×model rows; platform → agent rows.
+  // Single room → member×model rows; platform → agent rows. Tokens is the
+  // primary metric; Spend is a column (no separate spend view).
   if (effectiveRoom) {
     const rows = [...data.breakdown].sort((a, b) => tokensOf(b) - tokensOf(a));
     const total = rows.reduce((s, r) => s + tokensOf(r), 0) || 1;
@@ -556,7 +547,8 @@ function DrillTable({
             <Th>Member</Th>
             <Th>Agent</Th>
             <Th>Model</Th>
-            <Th right>{metricHead}</Th>
+            <Th right>Tokens</Th>
+            <Th right>Spend</Th>
             <Th right>Share</Th>
             <Th right>Cache hit</Th>
           </Tr>
@@ -571,7 +563,8 @@ function DrillTable({
                 <Td strong>{r.memberName || r.memberId}</Td>
                 <Td dim>{r.agent || "—"}</Td>
                 <Td dim>{r.model === "unknown" ? "unknown (history)" : r.model}</Td>
-                <Td right>{fmtMetric(metric, tok, r.cost)}</Td>
+                <Td right>{fmtTokens(tok)}</Td>
+                <Td right>{fmtCost(r.cost)}</Td>
                 <Td right>{pct.toFixed(1)}%</Td>
                 <Td right>{Math.round(hit * 100)}%</Td>
               </Tr>
@@ -590,7 +583,8 @@ function DrillTable({
       <thead>
         <Tr head>
           <Th>Agent</Th>
-          <Th right>{metricHead}</Th>
+          <Th right>Tokens</Th>
+          <Th right>Spend</Th>
           <Th right>Share</Th>
           <Th right>Cache hit</Th>
           <Th />
@@ -610,7 +604,8 @@ function DrillTable({
                   {a.agent}
                 </span>
               </Td>
-              <Td right>{fmtMetric(metric, tok, a.cost)}</Td>
+              <Td right>{fmtTokens(tok)}</Td>
+              <Td right>{fmtCost(a.cost)}</Td>
               <Td right>{pct.toFixed(1)}%</Td>
               <Td right>{Math.round(hit * 100)}%</Td>
               <Td>
