@@ -287,6 +287,16 @@ async function cmdDb(args: string[]): Promise<void> {
         `${progress.events} events, ${progress.usageRows} usage rows, ${progress.tasks} tasks ` +
         `(skipped ${progress.skippedNameKeyedFiles} legacy name-keyed files).`,
     );
+    const mh = progress.modelHistory;
+    if (mh) {
+      const total = mh.attributedTokens + mh.unknownRemainingTokens;
+      const pct = total > 0 ? ((mh.attributedTokens / total) * 100).toFixed(1) : "0.0";
+      console.log(
+        `Model history: attributed ${mh.attributedTokens.toLocaleString()} tokens to real models ` +
+          `(${pct}%), ${mh.unknownRemainingTokens.toLocaleString()} remain unknown ` +
+          `(${mh.membersWithTimeline}/${mh.members} members had a session timeline).`,
+      );
+    }
   } catch (err) {
     console.error(`Rebuild failed: ${(err as Error).message}`);
     process.exit(1);

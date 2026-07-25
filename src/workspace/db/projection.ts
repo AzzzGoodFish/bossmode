@@ -12,6 +12,7 @@
 import { existsSync } from "node:fs";
 import { BossmodeDb, getDbPath, isDbAvailable, openDb } from "./sqlite.js";
 import { backfillAll, type BackfillProgress } from "./backfill.js";
+import { backfillModelHistory, type ModelBackfillReport } from "./model-history-backfill.js";
 import { logger } from "../../foundation/logger.js";
 
 export type BackfillStatus = "idle" | "running" | "ready" | "unavailable" | "error";
@@ -67,6 +68,8 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
     void backfillAll(db)
       .then((progress) => {
         state.progress = progress;
+        // Attribute historical unknown usage to real models from session timelines.
+        try { backfillModelHistory(db); } catch (err) { logger.error("db", "model-history backfill failed", { error: String(err) }); }
         state.status = "ready";
       })
       .catch((err) => {
@@ -91,6 +94,13 @@ export async function rebuildProjection(path: string = getDbPath()): Promise<Bac
   }
   const db = openDb(path);
   const progress = await backfillAll(db);
+  // Attribute historical unknown usage to real models (task ④). Idempotent.
+  try {
+    const report = backfillModelHistory(db);
+    progress.modelHistory = report;
+  } catch (err) {
+    logger.error("db", "model-history backfill failed", { error: String(err) });
+  }
   state.db = db;
   state.progress = progress;
   state.status = "ready";
