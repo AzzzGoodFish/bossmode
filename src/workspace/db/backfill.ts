@@ -34,8 +34,6 @@ export interface BackfillProgress {
   usageRows: number;
   tasks: number;
   skippedNameKeyedFiles: number;
-  /** Historical model-attribution coverage (task ④), filled by rebuildProjection. */
-  modelHistory?: import("./model-history-backfill.js").ModelBackfillReport;
 }
 
 interface AgentEvent {

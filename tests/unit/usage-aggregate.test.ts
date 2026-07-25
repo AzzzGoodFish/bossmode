@@ -67,6 +67,19 @@ describe("aggregateUsage", () => {
     expect(day24.byModel["b/y"].cost).toBeCloseTo(0.5);
   });
 
+  it("builds per-date byAgent totals (v3 trend colored by agent)", () => {
+    const rows = [
+      row({ member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 100, output_tokens: 10, cache_read: 5 }),
+      row({ member_id: "rm_ben", date: "2026-07-24", model: "a/x", input_tokens: 40 }), // same agent=developer
+      row({ member_id: "rm_pm", date: "2026-07-24", model: "b/y", input_tokens: 50 }),
+    ];
+    const { series } = aggregateUsage(rows, meta);
+    const day = series.find((s: any) => s.date === "2026-07-24");
+    // developer = rm_dev(115) + rm_ben(40) = 155 total tokens; pm = 50
+    expect(day.byAgent.developer).toBe(155);
+    expect(day.byAgent.pm).toBe(50);
+  });
+
   it("breakdown is per member×model with joined name/agent, sorted desc by input", () => {
     const rows = [
       row({ member_id: "rm_dev", date: "2026-07-24", model: "a/x", input_tokens: 500 }),

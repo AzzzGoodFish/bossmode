@@ -173,7 +173,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     <div className="flex-1 flex flex-col overflow-hidden bg-surface-1">
       <MobileTopBar title={meta.title} onOpenSidebar={onOpenMobileSidebar || (() => {})} />
       <div className="flex-1 flex flex-col overflow-y-auto">
-      <div className={`w-full ${section === "usage" ? "max-w-6xl" : "max-w-3xl"} mx-auto px-6 pt-7 pb-20`}>
+      <div className={`w-full ${section === "usage" ? "" : "max-w-3xl"} mx-auto px-6 pt-7 pb-20`}>
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight text-ink-1">{meta.title}</h1>
         <p className="text-xs text-ink-3 mt-1">{meta.desc}</p>

@@ -1221,6 +1221,7 @@ export interface UsageSeriesPoint {
   outputTokens: number;
   cacheRead: number;
   byModel: Record<string, UsageModelBucket>;
+  byAgent: Record<string, number>;
 }
 export interface UsageBreakdownRow {
   memberId: string;

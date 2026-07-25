@@ -66,7 +66,7 @@ function eachDay(from: string, to: string): string[] {
  * data"). Preserves existing points; adds zero points for gaps.
  */
 export function fillSeriesGaps(
-  series: Array<{ date: string; cost: number; inputTokens: number; outputTokens: number; cacheRead: number; byModel: Record<string, unknown> }>,
+  series: Array<{ date: string; cost: number; inputTokens: number; outputTokens: number; cacheRead: number; byModel: Record<string, unknown>; byAgent?: Record<string, number> }>,
   from: string | undefined,
   to: string | undefined,
 ): typeof series {
@@ -77,7 +77,7 @@ export function fillSeriesGaps(
   if (!start || !end || start > end) return series;
   const byDate = new Map(series.map((s) => [s.date, s]));
   return eachDay(start, end).map(
-    (date) => byDate.get(date) || { date, cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, byModel: {} },
+    (date) => byDate.get(date) || { date, cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, byModel: {}, byAgent: {} },
   );
 }
 
@@ -102,12 +102,12 @@ export function aggregateUsage(
 
   const seriesMap = new Map<
     string,
-    { date: string; cost: number; inputTokens: number; outputTokens: number; cacheRead: number; byModel: Record<string, ModelBucket> }
+    { date: string; cost: number; inputTokens: number; outputTokens: number; cacheRead: number; byModel: Record<string, ModelBucket>; byAgent: Record<string, number> }
   >();
   for (const r of rows) {
     let s = seriesMap.get(r.date);
     if (!s) {
-      s = { date: r.date, cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, byModel: {} };
+      s = { date: r.date, cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, byModel: {}, byAgent: {} };
       seriesMap.set(r.date, s);
     }
     s.cost += r.cost;
@@ -115,6 +115,9 @@ export function aggregateUsage(
     s.outputTokens += r.output_tokens;
     s.cacheRead += r.cache_read;
     addToBucket((s.byModel[r.model] ||= emptyBucket()), r);
+    // Per-day tokens by agent identity — drives the agent-colored trend (v3).
+    const agent = memberMeta.get(r.member_id)?.agent || r.member_id;
+    s.byAgent[agent] = (s.byAgent[agent] || 0) + r.input_tokens + r.output_tokens + r.cache_read + r.cache_write;
   }
   const series = [...seriesMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 

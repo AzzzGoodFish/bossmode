@@ -1,27 +1,28 @@
-// Usage — token consumption by identity, room and time.
+// Usage — token consumption by identity, room and time (v3 minimal).
 //
-// Rendered inside Settings → Usage (integrated into the product shell, not a
-// standalone page). The explicit Room/Agent filters are the single source of
-// truth; the donut/table also let you drill as a shortcut but always sync back
-// to the filter state. Data comes from the SQLite-backed usage API (S2):
-//   - platform:   GET /api/usage           (+ byRoom)
-//   - single-room GET /api/rooms/:id/usage
-// Historical rows carry model="unknown" (pre-stamp) — shown honestly.
+// Rendered inside Settings → Usage, full-width. One unified filter bar
+// (Room · Agent · Days) is the single source of truth; the donut and table
+// rows also drill as shortcuts and sync back to the filter state.
+//
+// Breakdown dimension is unambiguous:
+//   room selected            → By member
+//   agent selected, no room  → By room
+//   neither                  → By agent
+//
+// No by-model view (historical attribution reverted; model still stamped on new
+// data for a future revisit). The trend is colored by agent. Spend is a table
+// column + the filter readout, not a separate view.
 import { useEffect, useMemo, useState } from "react";
 import {
   getPlatformUsage,
   getRoomUsage,
   type UsageResponse,
-  type UsageAgentRow,
-  type UsageRoomRow,
-  type UsageBreakdownRow,
   type UsageSeriesPoint,
 } from "../api/client";
 
 type RangeDays = 7 | 14 | 30;
 
-// Agent identity → chart color, reusing the product's avatar/status tokens so
-// the page is theme-aware. Unknown agents fall back to a neutral ink.
+// Agent identity → chart color (theme-aware product tokens).
 const AGENT_COLOR: Record<string, string> = {
   pm: "var(--avatar-pm)",
   developer: "var(--accent)",
@@ -33,9 +34,7 @@ const AGENT_COLOR: Record<string, string> = {
 function agentColor(agent: string): string {
   return AGENT_COLOR[agent] || "var(--ink-4)";
 }
-
-// Distinct palette for the By-room ring so multiple rooms are visually separable
-// (assigned by index; falls back to cycling). Reuses theme tokens.
+// Distinct palette for the By-room ring (assigned by index).
 const ROOM_PALETTE = [
   "var(--accent)",
   "var(--avatar-pm)",
@@ -44,13 +43,7 @@ const ROOM_PALETTE = [
   "var(--avatar-designer)",
   "var(--avatar-user)",
 ];
-function roomColor(index: number): string {
-  return ROOM_PALETTE[index % ROOM_PALETTE.length];
-}
 
-function tokensOf(row: { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }): number {
-  return row.inputTokens + row.outputTokens + row.cacheRead + row.cacheWrite;
-}
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
@@ -64,10 +57,15 @@ function isoDaysAgo(days: number): string {
   d.setUTCDate(d.getUTCDate() - (days - 1));
   return d.toISOString().slice(0, 10);
 }
+function tokensOf(row: { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }): number {
+  return row.inputTokens + row.outputTokens + row.cacheRead + row.cacheWrite;
+}
+function hitRate(inputTokens: number, cacheRead: number): number {
+  return inputTokens + cacheRead > 0 ? cacheRead / (inputTokens + cacheRead) : 0;
+}
 
 interface UsagePageProps {
-  // When roomId is set, the page scopes to a single room (Room filter locked).
-  // In Settings → Usage it is undefined → platform-wide.
+  // Fixed room scope (unused in Settings → Usage, which is platform-wide).
   roomId?: string;
 }
 
@@ -79,15 +77,13 @@ export function UsagePage({ roomId }: UsagePageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch whenever range / filters change. Platform vs single-room chosen by the
-  // effective room scope: an explicit room filter (or fixed roomId) → room API.
-  // The agent filter is passed through in both modes now (room API supports it).
+  const effectiveRoom = roomId ?? roomFilter;
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     const from = isoDaysAgo(range);
-    const effectiveRoom = roomId ?? roomFilter;
     const req = effectiveRoom
       ? getRoomUsage(effectiveRoom, { from, agent: agentFilter || undefined })
       : getPlatformUsage({ from, agent: agentFilter || undefined });
@@ -104,44 +100,39 @@ export function UsagePage({ roomId }: UsagePageProps) {
     return () => {
       cancelled = true;
     };
-  }, [range, roomFilter, agentFilter, roomId]);
+  }, [range, roomFilter, agentFilter, roomId, effectiveRoom]);
 
-  // Available filter options come from the platform response (entities with
-  // data). We keep a stable list by fetching platform data once for the pickers.
+  // Filter options from a stable platform fetch (entities with data).
   const [agentOptions, setAgentOptions] = useState<string[]>([]);
-  const [roomOptions, setRoomOptions] = useState<UsageRoomRow[]>([]);
+  const [roomOptions, setRoomOptions] = useState<Array<{ roomId: string; roomName?: string }>>([]);
   useEffect(() => {
-    if (roomId) return; // single-room mode: no room picker
+    if (roomId) return;
     getPlatformUsage({ from: isoDaysAgo(30) })
       .then((res) => {
         setAgentOptions(res.byAgent.map((a) => a.agent));
-        setRoomOptions(res.byRoom || []);
+        setRoomOptions((res.byRoom || []).map((r) => ({ roomId: r.roomId, roomName: r.roomName })));
       })
-      .catch(() => {
-        /* pickers stay empty; honest */
-      });
+      .catch(() => {});
   }, [roomId]);
 
   const backfilling = data?.backfillStatus === "running";
 
+  // Scope totals for the filter readout.
+  const totals = useMemo(() => {
+    if (!data) return { tokens: 0, cost: 0, hit: 0 };
+    const k = data.kpis;
+    return {
+      tokens: k.inputTokens + k.outputTokens + k.cacheRead + k.cacheWrite,
+      cost: k.cost,
+      hit: k.cacheHitRate,
+    };
+  }, [data]);
+
+  const roomLabel = roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms";
+
   return (
     <div className="w-full">
-      {/* Range toggle */}
-      <div className="flex items-center justify-end gap-2 mb-4">
-        {([7, 14, 30] as RangeDays[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
-              range === r ? "bg-accent border-accent text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
-            }`}
-          >
-            {r}d
-          </button>
-        ))}
-      </div>
-
-      {/* Explicit filter bar (single source of truth) */}
+      {/* Unified filter bar: Room · Agent · Days */}
       <div className="bg-surface-1 border border-line rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
         {!roomId && (
           <FilterGroup
@@ -157,12 +148,21 @@ export function UsagePage({ roomId }: UsagePageProps) {
           value={agentFilter}
           onChange={setAgentFilter}
         />
-        <div className="ml-auto text-[11.5px] text-ink-4">
-          {(roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms")}
-          {" · "}
-          {agentFilter || "All agents"}
-          {" · "}
-          {range}d
+        <FilterGroup
+          label="Days"
+          options={([7, 14, 30] as RangeDays[]).map((n) => ({ id: String(n), label: `${n}d` }))}
+          value={String(range)}
+          onChange={(v) => setRange((Number(v) || 7) as RangeDays)}
+          allowNull={false}
+        />
+        <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
+          {roomLabel} · {agentFilter || "All agents"} · {range}d
+          {data && (
+            <>
+              {"  —  "}
+              {fmtTokens(totals.tokens)} · {fmtCost(totals.cost)} · {Math.round(totals.hit * 100)}% cache hit
+            </>
+          )}
         </div>
       </div>
 
@@ -178,10 +178,10 @@ export function UsagePage({ roomId }: UsagePageProps) {
       ) : data ? (
         <UsageBody
           data={data}
-          effectiveRoom={roomId ?? roomFilter}
+          effectiveRoom={effectiveRoom}
           agentFilter={agentFilter}
-          onPickAgent={(a) => setAgentFilter(a)}
-          onPickRoom={(r) => setRoomFilter(r)}
+          onPickAgent={setAgentFilter}
+          onPickRoom={setRoomFilter}
         />
       ) : null}
     </div>
@@ -193,22 +193,27 @@ function FilterGroup({
   options,
   value,
   onChange,
+  allowNull = true,
 }: {
   label: string;
   options: Array<{ id: string | null; label: string; color?: string }>;
   value: string | null;
   onChange: (v: string | null) => void;
+  allowNull?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold">{label}</span>
+      <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold w-12">{label}</span>
       <div className="flex items-center gap-1.5 flex-wrap">
         {options.map((o) => {
           const on = value === o.id;
           return (
             <button
               key={o.id ?? "__all"}
-              onClick={() => onChange(o.id)}
+              onClick={() => {
+                if (!allowNull && o.id === null) return;
+                onChange(o.id);
+              }}
               className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
                 on ? "text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
               }`}
@@ -236,6 +241,8 @@ function EmptyState({ backfilling }: { backfilling: boolean }) {
   );
 }
 
+type BreakdownKind = "agent" | "room" | "member";
+
 function UsageBody({
   data,
   effectiveRoom,
@@ -249,127 +256,80 @@ function UsageBody({
   onPickAgent: (a: string | null) => void;
   onPickRoom: (r: string) => void;
 }) {
-  const kpis = data.kpis;
-  const kpiCards: Array<[string, string, string]> = [
-    ["Total tokens", fmtTokens(kpis.inputTokens + kpis.outputTokens + kpis.cacheRead + kpis.cacheWrite), "input + output + cache"],
-    ["Spend", fmtCost(kpis.cost), "recorded per-turn cost"],
-    ["Cache hit", Math.round(kpis.cacheHitRate * 100) + "%", "cacheRead / (input + cacheRead)"],
-    ["Turns", kpis.turns.toLocaleString(), "agent turns in range"],
-  ];
+  const kind: BreakdownKind = effectiveRoom ? "member" : agentFilter ? "room" : "agent";
 
   return (
     <div className="space-y-4">
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {kpiCards.map(([k, v, s]) => (
-          <div key={k} className="bg-surface-1 border border-line rounded-lg px-4 py-3.5">
-            <div className="text-[11px] text-ink-4 uppercase tracking-wide">{k}</div>
-            <div className="text-[22px] font-bold tabular-nums mt-0.5 text-ink-1">{v}</div>
-            <div className="text-[11px] text-ink-3 mt-0.5">{s}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Donut (identity/room share) + trend */}
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-        <ShareDonut
-          data={data}
-          effectiveRoom={effectiveRoom}
-          agentFilter={agentFilter}
-          onPickAgent={onPickAgent}
-          onPickRoom={onPickRoom}
-        />
-        <TrendChart series={data.series} />
+        <ShareDonut data={data} kind={kind} onPickAgent={onPickAgent} onPickRoom={onPickRoom} />
+        <TrendChart series={data.series} agentFilter={agentFilter} />
       </div>
-
-      {/* Drill table */}
-      <DrillTable data={data} effectiveRoom={effectiveRoom} agentFilter={agentFilter} onPickAgent={onPickAgent} />
+      <DrillTable data={data} kind={kind} onPickAgent={onPickAgent} onPickRoom={onPickRoom} />
     </div>
   );
 }
 
-/**
- * The donut shows the current breakdown dimension:
- *   platform, no agent  → By agent (identity share)
- *   platform, agent set → By room  (where that agent works)
- *   single room         → By member
- */
+interface Slice {
+  id: string;
+  label: string;
+  value: number;
+  color: string;
+  clickable: boolean;
+}
+
+function buildSlices(data: UsageResponse, kind: BreakdownKind): Slice[] {
+  const slices: Slice[] = [];
+  if (kind === "member") {
+    // member × model rows → aggregate to member (v3 table is per-member, no model col)
+    const byMember = new Map<string, { label: string; agent: string; value: number }>();
+    for (const b of data.breakdown) {
+      const cur = byMember.get(b.memberId) || { label: b.memberName || b.memberId, agent: b.agent || "", value: 0 };
+      cur.value += tokensOf(b);
+      byMember.set(b.memberId, cur);
+    }
+    for (const [id, m] of byMember) slices.push({ id, label: m.label, value: m.value, color: agentColor(m.agent), clickable: false });
+  } else if (kind === "room") {
+    (data.byRoom || []).forEach((r, i) =>
+      slices.push({ id: r.roomId, label: r.roomName || r.roomId, value: tokensOf(r), color: ROOM_PALETTE[i % ROOM_PALETTE.length], clickable: true }),
+    );
+  } else {
+    for (const a of data.byAgent) slices.push({ id: a.agent, label: a.agent, value: tokensOf(a), color: agentColor(a.agent), clickable: true });
+  }
+  return slices.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
+}
+
 function ShareDonut({
   data,
-  effectiveRoom,
-  agentFilter,
+  kind,
   onPickAgent,
   onPickRoom,
 }: {
   data: UsageResponse;
-  effectiveRoom: string | null | undefined;
-  agentFilter: string | null;
+  kind: BreakdownKind;
   onPickAgent: (a: string | null) => void;
   onPickRoom: (r: string) => void;
 }) {
-  type Slice = { id: string; label: string; value: number; color: string; clickable: boolean };
-  let title = "By agent";
-  let why = "Which identities consume the most — informs model assignment.";
-  const slices: Slice[] = [];
-
-  if (effectiveRoom) {
-    title = "By member";
-    why = "Member split inside this room.";
-    for (const b of data.breakdown) {
-      slices.push({
-        id: b.memberId,
-        label: b.memberName || b.memberId,
-        value: tokensOf(b),
-        color: agentColor(b.agent || ""),
-        clickable: false,
-      });
-    }
-  } else if (agentFilter && data.byRoom) {
-    title = "By room";
-    why = "Where this agent's consumption happens.";
-    for (const r of data.byRoom) {
-      slices.push({
-        id: r.roomId,
-        label: r.roomName || r.roomId,
-        value: tokensOf(r),
-        color: roomColor(data.byRoom.indexOf(r)),
-        clickable: true,
-      });
-    }
-  } else {
-    for (const a of data.byAgent) {
-      slices.push({
-        id: a.agent,
-        label: a.agent,
-        value: tokensOf(a),
-        color: agentColor(a.agent),
-        clickable: true,
-      });
-    }
-  }
-
-  const sorted = slices.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
-  const total = sorted.reduce((acc, s) => acc + s.value, 0) || 1;
-
+  const slices = buildSlices(data, kind);
+  const total = slices.reduce((acc, s) => acc + s.value, 0) || 1;
+  const title = kind === "agent" ? "By agent" : kind === "room" ? "By room" : "By member";
   const R = 15.915;
   let acc = 0;
 
   const onSlice = (s: Slice) => {
     if (!s.clickable) return;
-    if (!effectiveRoom && !agentFilter) onPickAgent(s.id);
-    else if (!effectiveRoom && agentFilter) onPickRoom(s.id);
+    if (kind === "agent") onPickAgent(s.id);
+    else if (kind === "room") onPickRoom(s.id);
   };
 
   return (
     <div className="bg-surface-1 border border-line rounded-lg p-5">
-      <div className="flex items-baseline justify-between mb-1">
+      <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-[13px] font-semibold text-ink-1">{title}</h3>
-        <span className="text-[11px] text-ink-4">share</span>
+        <span className="text-[11px] text-ink-4">{fmtTokens(total)} tokens</span>
       </div>
-      <p className="text-[11.5px] text-ink-3 mb-4">{why}</p>
       <div className="flex items-center gap-5">
         <svg width="140" height="140" viewBox="0 0 42 42" className="shrink-0 -rotate-90">
-          {sorted.map((s) => {
+          {slices.map((s) => {
             const pct = (s.value / total) * 100;
             if (pct < 0.4) return null;
             const seg = (
@@ -392,7 +352,7 @@ function ShareDonut({
           })}
         </svg>
         <div className="min-w-0 flex-1 space-y-1.5 text-[12.5px]">
-          {sorted.map((s) => {
+          {slices.map((s) => {
             const pct = (s.value / total) * 100;
             return (
               <div key={s.id} className="flex items-center gap-2 min-w-0">
@@ -416,44 +376,36 @@ function ShareDonut({
   );
 }
 
-/** Stacked daily columns, one stack per date, colored by model bucket. */
-function TrendChart({ series }: { series: UsageSeriesPoint[] }) {
-  // Collect model keys across the range for stable stacking + legend.
-  const models = useMemo(() => {
+/** Daily stacked columns colored by agent (no model dimension). */
+function TrendChart({ series, agentFilter }: { series: UsageSeriesPoint[]; agentFilter: string | null }) {
+  // Agents present across the range, for stable stacking + legend.
+  const agents = useMemo(() => {
     const set = new Set<string>();
-    for (const p of series) for (const m of Object.keys(p.byModel)) set.add(m);
-    return [...set].sort();
-  }, [series]);
-
-  const modelColor = (m: string, i: number): string => {
-    if (m === "unknown") return "var(--ink-4)";
-    const palette = ["var(--accent)", "var(--avatar-pm)", "var(--on-air)", "var(--thinking)", "var(--avatar-designer)", "var(--avatar-user)"];
-    return palette[i % palette.length];
-  };
-
-  const dayValue = (p: UsageSeriesPoint, m: string): number => {
-    const b = p.byModel[m];
-    if (!b) return 0;
-    return b.inputTokens + b.outputTokens + b.cacheRead;
-  };
+    for (const p of series) for (const a of Object.keys(p.byAgent || {})) set.add(a);
+    const list = [...set];
+    return agentFilter ? list.filter((a) => a === agentFilter) : list.sort();
+  }, [series, agentFilter]);
 
   const W = Math.max(460, series.length * 30);
   const H = 190;
-  const pad = 4;
-  const max = Math.max(
-    ...series.map((p) => models.reduce((s, m) => s + dayValue(p, m), 0)),
-    1,
-  );
+  const pad = 6;
+  const dayTotal = (p: UsageSeriesPoint) => agents.reduce((s, a) => s + (p.byAgent?.[a] || 0), 0);
+  const max = Math.max(...series.map(dayTotal), 1);
   const step = series.length ? (W - pad * 2) / series.length : 0;
-  const bw = Math.min(22, step * 0.62);
+  const bw = Math.min(20, step * 0.64);
+
+  // X ticks: step back from the last day so the most recent date is always
+  // labeled, even spacing (≤8 ticks), no collision.
+  const interval = Math.max(1, Math.ceil(series.length / 8));
+  const tickIdx: number[] = [];
+  for (let i = series.length - 1; i >= 0; i -= interval) tickIdx.unshift(i);
 
   return (
     <div className="bg-surface-1 border border-line rounded-lg p-5">
-      <div className="flex items-baseline justify-between mb-1">
+      <div className="flex items-baseline justify-between mb-3">
         <h3 className="text-[13px] font-semibold text-ink-1">History</h3>
-        <span className="text-[11px] text-ink-4">per day · stacked by model</span>
+        <span className="text-[11px] text-ink-4">tokens per day</span>
       </div>
-      <p className="text-[11.5px] text-ink-3 mb-3">Work rhythm over time — heavy days vs idle days.</p>
       {series.length === 0 ? (
         <div className="text-[12px] text-ink-3 py-8 text-center">No data in this range.</div>
       ) : (
@@ -463,175 +415,188 @@ function TrendChart({ series }: { series: UsageSeriesPoint[] }) {
               {series.map((p, i) => {
                 let y = H;
                 const x = pad + i * step + (step - bw) / 2;
-                return models.map((m, mi) => {
-                  const v = dayValue(p, m);
+                return agents.map((a) => {
+                  const v = p.byAgent?.[a] || 0;
                   const h = (v / max) * (H - 14);
                   y -= h;
                   if (h <= 0) return null;
                   return (
                     <rect
-                      key={`${p.date}-${m}`}
+                      key={`${p.date}-${a}`}
                       x={x.toFixed(1)}
                       y={y.toFixed(1)}
-                      width={bw}
-                      height={Math.max(h, 0.5).toFixed(1)}
+                      width={bw.toFixed(1)}
+                      height={h.toFixed(1)}
                       rx={2}
-                      fill={modelColor(m, mi)}
+                      fill={agentColor(a)}
                     >
-                      <title>{`${p.date} · ${m === "unknown" ? "unknown (history)" : m}: ${fmtTokens(v)}`}</title>
+                      <title>{`${p.date} · ${a}: ${fmtTokens(v)}`}</title>
                     </rect>
                   );
                 });
               })}
             </svg>
           </div>
-          {/* X axis: a tick roughly every ceil(n/8) days so labels are readable
-              across 7/14/30d instead of only first+last. */}
           <div className="relative h-4 mt-1" style={{ minWidth: 420 }}>
-            {series.map((p, i) => {
-              const tickEvery = Math.max(1, Math.ceil(series.length / 8));
-              if (i % tickEvery !== 0 && i !== series.length - 1) return null;
+            {tickIdx.map((i) => {
               const leftPct = ((pad + i * step + step / 2) / W) * 100;
               return (
                 <span
-                  key={p.date}
+                  key={series[i].date}
                   className="absolute text-[10.5px] text-ink-4 -translate-x-1/2 whitespace-nowrap"
                   style={{ left: `${leftPct}%` }}
                 >
-                  {p.date.slice(5)}
+                  {series[i].date.slice(5)}
                 </span>
               );
             })}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11.5px] text-ink-3">
-            {models.map((m, mi) => (
-              <span key={m} className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: modelColor(m, mi) }} />
-                {m === "unknown" ? "unknown (history)" : m}
+            {agents.map((a) => (
+              <span key={a} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: agentColor(a) }} />
+                {a}
               </span>
             ))}
           </div>
-          {models.includes("unknown") && (
-            <p className="text-[11px] text-ink-4 mt-2 leading-relaxed">
-              <span className="font-medium">unknown (history)</span> = turns recorded before 0.19.1, when usage events
-              did not carry a model. New turns are stamped with their model.
-            </p>
-          )}
         </>
       )}
     </div>
   );
 }
 
-/** Drill table: agents (platform) or members (single room). */
+/** 4-column detail table (identity / Tokens / Spend / Cache hit) + Total row. */
 function DrillTable({
   data,
-  effectiveRoom,
-  agentFilter,
+  kind,
   onPickAgent,
+  onPickRoom,
 }: {
   data: UsageResponse;
-  effectiveRoom: string | null | undefined;
-  agentFilter: string | null;
+  kind: BreakdownKind;
   onPickAgent: (a: string | null) => void;
+  onPickRoom: (r: string) => void;
 }) {
-  // Single room → member×model rows; platform → agent rows. Tokens is the
-  // primary metric; Spend is a column (no separate spend view).
-  if (effectiveRoom) {
-    const rows = [...data.breakdown].sort((a, b) => tokensOf(b) - tokensOf(a));
-    const total = rows.reduce((s, r) => s + tokensOf(r), 0) || 1;
-    return (
-      <TableCard title="Members" sub="member × model in this room">
-        <thead>
-          <Tr head>
-            <Th>Member</Th>
-            <Th>Agent</Th>
-            <Th>Model</Th>
-            <Th right>Tokens</Th>
-            <Th right>Spend</Th>
-            <Th right>Share</Th>
-            <Th right>Cache hit</Th>
-          </Tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const tok = tokensOf(r);
-            const pct = (tok / total) * 100;
-            const hit = r.inputTokens + r.cacheRead > 0 ? r.cacheRead / (r.inputTokens + r.cacheRead) : 0;
-            return (
-              <Tr key={`${r.memberId}-${r.model}`}>
-                <Td strong>{r.memberName || r.memberId}</Td>
-                <Td dim>{r.agent || "—"}</Td>
-                <Td dim>{r.model === "unknown" ? "unknown (history)" : r.model}</Td>
-                <Td right>{fmtTokens(tok)}</Td>
-                <Td right>{fmtCost(r.cost)}</Td>
-                <Td right>{pct.toFixed(1)}%</Td>
-                <Td right>{Math.round(hit * 100)}%</Td>
-              </Tr>
-            );
-          })}
-        </tbody>
-      </TableCard>
-    );
+  interface Row {
+    id: string;
+    label: string;
+    color: string;
+    tokens: number;
+    cost: number;
+    hit: number;
+    clickable: boolean;
   }
+  const rows: Row[] = [];
 
-  // Platform: aggregate to agent rows (byAgent already does this).
-  const rows = [...data.byAgent].sort((a, b) => tokensOf(b) - tokensOf(a));
-  const total = rows.reduce((s, r) => s + tokensOf(r), 0) || 1;
-  return (
-    <TableCard title="Agents" sub={agentFilter ? "filtered to one agent · click a row to toggle" : "click a row to filter to that agent"}>
-      <thead>
-        <Tr head>
-          <Th>Agent</Th>
-          <Th right>Tokens</Th>
-          <Th right>Spend</Th>
-          <Th right>Share</Th>
-          <Th right>Cache hit</Th>
-          <Th />
-        </Tr>
-      </thead>
-      <tbody>
-        {rows.map((a) => {
-          const tok = tokensOf(a);
-          const pct = (tok / total) * 100;
-          const hit = a.inputTokens + a.cacheRead > 0 ? a.cacheRead / (a.inputTokens + a.cacheRead) : 0;
-          const selected = agentFilter === a.agent;
-          return (
-            <Tr key={a.agent} clickable onClick={() => onPickAgent(selected ? null : a.agent)} selected={selected}>
-              <Td strong>
-                <span className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: agentColor(a.agent) }} />
-                  {a.agent}
-                </span>
-              </Td>
-              <Td right>{fmtTokens(tok)}</Td>
-              <Td right>{fmtCost(a.cost)}</Td>
-              <Td right>{pct.toFixed(1)}%</Td>
-              <Td right>{Math.round(hit * 100)}%</Td>
-              <Td>
-                <div className="h-1.5 rounded bg-surface-3 overflow-hidden" style={{ width: "100%" }}>
-                  <div className="h-full rounded" style={{ width: `${pct}%`, background: agentColor(a.agent) }} />
-                </div>
-              </Td>
-            </Tr>
-          );
-        })}
-      </tbody>
-    </TableCard>
-  );
-}
+  if (kind === "member") {
+    const byMember = new Map<string, Row>();
+    for (const b of data.breakdown) {
+      const cur = byMember.get(b.memberId) || {
+        id: b.memberId,
+        label: b.memberName || b.memberId,
+        color: agentColor(b.agent || ""),
+        tokens: 0,
+        cost: 0,
+        hit: 0,
+        clickable: false,
+        _in: 0,
+        _cr: 0,
+      } as Row & { _in: number; _cr: number };
+      (cur as any)._in += b.inputTokens;
+      (cur as any)._cr += b.cacheRead;
+      cur.tokens += tokensOf(b);
+      cur.cost += b.cost;
+      byMember.set(b.memberId, cur);
+    }
+    for (const r of byMember.values()) {
+      r.hit = hitRate((r as any)._in, (r as any)._cr);
+      rows.push(r);
+    }
+  } else if (kind === "room") {
+    (data.byRoom || []).forEach((rm, i) =>
+      rows.push({
+        id: rm.roomId,
+        label: rm.roomName || rm.roomId,
+        color: ROOM_PALETTE[i % ROOM_PALETTE.length],
+        tokens: tokensOf(rm),
+        cost: rm.cost,
+        hit: hitRate(rm.inputTokens, rm.cacheRead),
+        clickable: true,
+      }),
+    );
+  } else {
+    for (const a of data.byAgent)
+      rows.push({
+        id: a.agent,
+        label: a.agent,
+        color: agentColor(a.agent),
+        tokens: tokensOf(a),
+        cost: a.cost,
+        hit: hitRate(a.inputTokens, a.cacheRead),
+        clickable: true,
+      });
+  }
+  rows.sort((a, b) => b.tokens - a.tokens);
 
-function TableCard({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
+  const idHead = kind === "agent" ? "Agent" : kind === "room" ? "Room" : "Member";
+  const title = kind === "agent" ? "Agents" : kind === "room" ? "By room" : "Members";
+  const totalTokens = rows.reduce((s, r) => s + r.tokens, 0);
+  const totalCost = rows.reduce((s, r) => s + r.cost, 0);
+  const totalHit = data.kpis.cacheHitRate;
+
+  const onRow = (r: Row) => {
+    if (!r.clickable) return;
+    if (kind === "agent") onPickAgent(r.id);
+    else if (kind === "room") onPickRoom(r.id);
+  };
+
   return (
     <div className="bg-surface-1 border border-line rounded-lg">
       <div className="flex items-baseline justify-between px-5 pt-4 pb-1">
         <h3 className="text-[13px] font-semibold text-ink-1">{title}</h3>
-        <span className="text-[11px] text-ink-4">{sub}</span>
+        {kind !== "member" && <span className="text-[11px] text-ink-4">click a row to filter</span>}
       </div>
-      <table className="w-full border-collapse">{children}</table>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <Th>{idHead}</Th>
+            <Th right>Tokens</Th>
+            <Th right>Spend</Th>
+            <Th right>Cache hit</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.id}
+              onClick={() => onRow(r)}
+              className={`border-b border-line-soft last:border-0 ${r.clickable ? "cursor-pointer hover:bg-surface-2" : ""}`}
+            >
+              <Td>
+                <span className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: r.color }} />
+                  <span className="text-ink-1 font-medium">{r.label}</span>
+                </span>
+              </Td>
+              <Td right>{fmtTokens(r.tokens)}</Td>
+              <Td right>{fmtCost(r.cost)}</Td>
+              <Td right>{Math.round(r.hit * 100)}%</Td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-line">
+            <Td strong>Total</Td>
+            <Td right strong>{fmtTokens(totalTokens)}</Td>
+            <Td right strong>{fmtCost(totalCost)}</Td>
+            <Td right strong>{Math.round(totalHit * 100)}%</Td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
+
 function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {
   return (
     <th
@@ -643,37 +608,9 @@ function Th({ children, right }: { children?: React.ReactNode; right?: boolean }
     </th>
   );
 }
-function Tr({
-  children,
-  head,
-  clickable,
-  onClick,
-  selected,
-}: {
-  children: React.ReactNode;
-  head?: boolean;
-  clickable?: boolean;
-  onClick?: () => void;
-  selected?: boolean;
-}) {
+function Td({ children, right, strong }: { children?: React.ReactNode; right?: boolean; strong?: boolean }) {
   return (
-    <tr
-      onClick={onClick}
-      className={`${head ? "" : "border-b border-line-soft last:border-0"} ${
-        clickable ? "cursor-pointer hover:bg-surface-2" : ""
-      } ${selected ? "bg-surface-2" : ""}`}
-    >
-      {children}
-    </tr>
-  );
-}
-function Td({ children, right, strong, dim }: { children?: React.ReactNode; right?: boolean; strong?: boolean; dim?: boolean }) {
-  return (
-    <td
-      className={`px-3 py-2 text-[13px] tabular-nums ${right ? "text-right" : "text-left"} ${
-        strong ? "text-ink-1 font-medium" : dim ? "text-ink-3" : "text-ink-2"
-      }`}
-    >
+    <td className={`px-3 py-2 text-[13px] tabular-nums ${right ? "text-right" : "text-left"} ${strong ? "text-ink-1 font-semibold" : "text-ink-2"}`}>
       {children}
     </td>
   );
