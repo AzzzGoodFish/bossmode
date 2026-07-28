@@ -28,6 +28,12 @@ export const CONFIGURE_INTEGRATION_DESCRIPTION = `Configure an external integrat
 
 For Linear v1, use this to bind the current room to a Linear team and optional project. Do not pass API keys; Linear API keys must be configured in Settings.`;
 
+export const WATCH_DESCRIPTION = `Manage one-shot watch subscriptions (room leader only).
+
+A watch on a member activates you the next time that member posts a room message: the activation delivers the new messages (same as an @mention) and advances your cursor, but carries no reply obligation. One watch per target member — subscribing again replaces it. A watch is consumed when it fires, can be removed with unsubscribe, and expires after 7 days.
+
+Actions: "subscribe" (member required), "list", "unsubscribe" (member required).`;
+
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   // query_room_messages

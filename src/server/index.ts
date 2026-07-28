@@ -17,8 +17,9 @@ import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
 import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAgentForWatch, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
+import { initWatchTrigger } from "../engine/watch-trigger.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
@@ -170,6 +171,13 @@ export function startServer(opts: ServerOptions): Promise<void> {
     },
   );
 
+  // Initialize watch trigger — one-shot self-activation for watchers (0.19.2)
+  const unsubscribeWatch = initWatchTrigger((roomId, watcherMemberId, targetName) => {
+    activateAgentForWatch(roomId, watcherMemberId, { targetName }).catch((err) => {
+      logger.error("watch", "activate failed", { roomId, watcherMemberId, error: String(err) });
+    });
+  });
+
   return new Promise((resolve, reject) => {
     const webDistDir = join(import.meta.dirname, "../../web/dist");
 
@@ -240,6 +248,7 @@ export function startServer(opts: ServerOptions): Promise<void> {
     const shutdown = async (signal: string) => {
       logger.info("server", `shutdown signal: ${signal}`, { activeInstances: getActiveInstanceCount() });
       unsubscribeRouter();
+      unsubscribeWatch();
       await shutdownAgents();
       shutdownWebSocket();
       server.close(() => {

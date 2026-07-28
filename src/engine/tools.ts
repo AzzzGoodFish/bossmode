@@ -428,6 +428,47 @@ export async function handleToolCallback(
       });
       return { ok: true, provider, configured: config, projects };
     }
+    case "watch": {
+      // Leader-only (execution gate — the assembly gate in bossmode-sdk-tools is the first door).
+      const room = roomStore.getRoom(roomId);
+      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
+      if (!room || !actor) return { ok: false, error: "Room or member not found" };
+      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; watch is unavailable" };
+      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can manage watches" };
+
+      const { addWatch, removeWatch, listWatches } = await import("../workspace/watch-store.js");
+      const action = String(params?.action || "").trim();
+      const resolveTarget = () => {
+        const ref = String(params?.member || "").trim();
+        if (!ref) return { error: "member is required for this action" } as const;
+        const target = (roomStore as any).resolveRoomMemberRef(roomId, ref);
+        if (!target) return { error: `Member not found: ${ref}` } as const;
+        return { target } as const;
+      };
+      const present = (w: { id: string; targetMemberId: string; createdAt: number; expiresAt: number }) => ({
+        id: w.id,
+        target: (roomStore as any).findRoomMemberById(roomId, w.targetMemberId)?.name || w.targetMemberId,
+        createdAt: w.createdAt,
+        expiresAt: w.expiresAt,
+      });
+
+      if (action === "list") {
+        return { ok: true, watches: listWatches(roomId, actor.id).map(present) };
+      }
+      if (action === "subscribe") {
+        const r = resolveTarget();
+        if ("error" in r) return { ok: false, error: r.error };
+        if (r.target.id === actor.id) return { ok: false, error: "Cannot watch yourself" };
+        const rec = addWatch(roomId, actor.id, r.target.id);
+        return { ok: true, watch: present(rec) };
+      }
+      if (action === "unsubscribe") {
+        const r = resolveTarget();
+        if ("error" in r) return { ok: false, error: r.error };
+        return { ok: true, removed: removeWatch(roomId, actor.id, r.target.id), target: r.target.name };
+      }
+      return { ok: false, error: "action must be 'subscribe', 'list', or 'unsubscribe'" };
+    }
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }

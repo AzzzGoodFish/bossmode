@@ -723,6 +723,30 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 // -- Activation --
 
 export async function activateAgent(roomId: string, memberRef: string): Promise<void> {
+  return activateAgentInternal(roomId, memberRef, { source: "room_mention", replyDebt: true, trigger: "activate" });
+}
+
+/**
+ * Watch-triggered activation (v1, leader-only): same delivery path as @mention
+ * (cursor advance + new-message batch incl. the triggering message) with exactly
+ * two differences — activation source is "watch", and NO pendingChatReply is
+ * marked (a silent turn must not post "finished without replying": the
+ * notification is for the watcher to read, replying is optional).
+ */
+export async function activateAgentForWatch(roomId: string, memberRef: string, opts: { targetName: string }): Promise<void> {
+  return activateAgentInternal(roomId, memberRef, {
+    source: "watch",
+    replyDebt: false,
+    trigger: "activate:watch",
+    banner: `Watch notification: ${opts.targetName} posted in this room.`,
+  });
+}
+
+async function activateAgentInternal(
+  roomId: string,
+  memberRef: string,
+  opts: { source: "room_mention" | "watch"; replyDebt: boolean; trigger: string; banner?: string },
+): Promise<void> {
   const member = resolveRoomMember(roomId, memberRef);
   const memberName = member?.name || memberRef;
   const memberId = member?.id || memberRef;
@@ -757,27 +781,28 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
   logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor });
 
   const formattedMessages = formatMessagesForAgent(roomId, newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
+  const payload = opts.banner ? `${opts.banner}\n\n${formattedMessages}` : formattedMessages;
 
-  setActivationSource(roomId, memberId, "room_mention");
-  markPendingChatReply(instance, "activate");
+  setActivationSource(roomId, memberId, opts.source);
+  if (opts.replyDebt) markPendingChatReply(instance, opts.trigger);
 
   if (instance.compacting) {
-    queueInput(instance, formattedMessages, "activate");
+    queueInput(instance, payload, opts.trigger);
     return;
   }
 
   if (instance.status === "working") {
-    instance.handle.steer(formattedMessages);
+    instance.handle.steer(payload);
     return;
   }
 
   if (instance.dispatchState !== "idle") {
-    queueInput(instance, formattedMessages, "activate");
+    queueInput(instance, payload, opts.trigger);
     return;
   }
 
-  logger.info("agent", "prompt", { member: memberName, messageLength: formattedMessages.length });
-  await runPrompt(instance, formattedMessages, "activate", (err) => {
+  logger.info("agent", "prompt", { member: memberName, messageLength: payload.length, trigger: opts.trigger });
+  await runPrompt(instance, payload, opts.trigger, (err) => {
     logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
     postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
   });

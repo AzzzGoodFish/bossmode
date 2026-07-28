@@ -10,8 +10,10 @@ import {
   COMMENT_TASK_DESCRIPTION,
   QUERY_INTEGRATION_DESCRIPTION,
   CONFIGURE_INTEGRATION_DESCRIPTION,
+  WATCH_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
+import * as roomStore from "../../workspace/room-store.js";
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
@@ -27,6 +29,13 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
+
+  // Assembly gate: watch is leader-only (the callback re-checks at execution).
+  const isRoomLeader = (() => {
+    const room = roomStore.getRoom(opts.roomId);
+    if (!room?.promptLeaderMemberId) return false;
+    return roomStore.getRoomMembers(opts.roomId).find((m) => m.name === opts.agentName)?.id === room.promptLeaderMemberId;
+  })();
 
   const tools: ToolDefinition[] = [
     defineTool({
@@ -210,6 +219,30 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("configure_integration", params as any), null, 2))),
     }),
   ];
+
+  // Leader-only tool (assembly gate). Callback re-validates at execution.
+  if (isRoomLeader) {
+    tools.push(defineTool({
+      name: "watch",
+      label: "Watch",
+      description: WATCH_DESCRIPTION,
+      parameters: Type.Object({
+        action: Type.String({ description: "'subscribe' | 'list' | 'unsubscribe'" }),
+        member: Type.Optional(Type.String({ description: "Target member name (required for subscribe/unsubscribe)" })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("watch", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Watch failed");
+        if (Array.isArray(data?.watches)) {
+          if (data.watches.length === 0) return textResult("No active watches.");
+          return textResult(data.watches.map((w: any) => `${w.target} — created ${new Date(w.createdAt).toISOString()}, expires ${new Date(w.expiresAt).toISOString()} (id: ${w.id})`).join("\n"));
+        }
+        if (data?.watch) return textResult(`Watching ${data.watch.target} — you will be activated on their next room message (expires ${new Date(data.watch.expiresAt).toISOString()}).`);
+        if (data?.removed !== undefined) return textResult(data.removed ? `Watch removed: ${data.target}` : `No active watch on ${data.target}.`);
+        return textResult(truncate(JSON.stringify(data, null, 2)));
+      },
+    }));
+  }
 
   // Defensive normalization: TypeBox omits `required` when every property is
   // optional — valid JSON Schema (OpenAI/xAI accept it), but some
