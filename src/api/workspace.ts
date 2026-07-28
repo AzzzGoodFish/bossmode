@@ -16,7 +16,7 @@ import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activit
 
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getModelCredentialProfile, listAvailableModels, normalizeModelRef, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
+import { getModelCredentialProfile, normalizeModelRef, resolveCredentialProfileForModel, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
 import { ensureRoomTeamAgent } from "../workspace/team-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
@@ -481,9 +481,10 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
   if (hasModel) {
     model = normalizeRoomModelInput(body.model);
     if (model) {
-      const available = listAvailableModels().some((m) => m.ref === model);
-      if (!available) {
-        sendJson(res, 400, { error: `Model is not available or credential is missing: ${model}` });
+      try {
+        assertModelAvailable(model, "PATCH room member model");
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message || String(err) });
         return;
       }
     }

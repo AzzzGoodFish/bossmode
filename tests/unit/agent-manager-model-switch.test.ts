@@ -131,6 +131,11 @@ vi.mock("../../src/engine/event-handler.js", () => ({
 vi.mock("../../src/engine/model-credentials.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => availableModels),
+  assertModelAvailable: vi.fn((model: string) => {
+    if (!availableModels.some((m) => m.ref === model)) {
+      throw new Error(`Model is not available or credential is missing: ${model}`);
+    }
+  }),
   exportPiConfigForMember: vi.fn((args: any) => { exportedCalls.push(args); return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [] }; }),
 }));
 

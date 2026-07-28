@@ -4,6 +4,24 @@ import { dirname, join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { getBossmodeDir, ensureBossmodeDir } from "../shared/config.js";
+import { logger } from "../foundation/logger.js";
+import {
+  setBundledCatalogLoader,
+  setPiCatalogModelsForTests as setCatalogTestModels,
+  setCatalogNetworkRefreshForTests as setCatalogNetworkHook,
+  getCatalogNetworkRefreshForTests,
+  hydrateCatalogFromDisk,
+  getCatalog,
+  getCatalogModels,
+  commitRemoteCatalog,
+  retainLastGoodCatalog,
+  formatCatalogFreshness,
+  type CatalogRefreshSource,
+  type CatalogSnapshot,
+} from "./model-catalog.js";
+
+export type { CatalogRefreshSource, CatalogSnapshot };
+export { getCatalog, formatCatalogFreshness };
 import type {
   ModelCredentialProfile,
   ModelCredentialProfileInput,
@@ -1010,14 +1028,14 @@ function applyConsistentMetadataFallback(matches: ModelDiscoveredMetadata[]): Mo
 
 export function setPiCatalogModelsForTests(models: any[] | null): void {
   piCatalogModelsForTests = models;
+  setCatalogTestModels(models);
 }
 
 /** Test-only override for the network catalog refresh path. */
-let catalogNetworkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) = null;
 export function setCatalogNetworkRefreshForTests(
   fn: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>),
 ): void {
-  catalogNetworkRefreshForTests = fn;
+  setCatalogNetworkHook(fn);
 }
 
 class NoopCredentialStore implements CredentialStore {
@@ -1061,50 +1079,6 @@ async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
   return catalogRuntimeSync;
 }
 
-/** Pre-warm the credential-less catalog cache so the synchronous readers below have data
- * immediately. Call once at server startup; safe to call multiple times (memoized).
- * Startup stays offline (packaged catalog only) — remote refresh is explicit via Refresh models. */
-export async function ensurePiCatalogWarm(): Promise<void> {
-  try { await ensureCatalogRegistry(); } catch { /* leave cache cold; sync readers fall back gracefully */ }
-  // Offline: rehydrate last successful pi.dev overlay from disk (no network).
-  if (!remoteCatalogModels) {
-    const cached = readRemoteCatalogCacheFromDisk();
-    if (cached) remoteCatalogModels = cached;
-  }
-}
-
-export type CatalogRefreshSource = "remote" | "bundled";
-
-const PI_DEV_CATALOG_BASE = "https://pi.dev";
-
-/** In-process overlay from the last successful pi.dev refresh (or disk cache). */
-let remoteCatalogModels: any[] | null = null;
-
-function piCatalogCachePath(): string {
-  return join(getBossmodeDir(), "pi-catalog-remote.json");
-}
-
-function readRemoteCatalogCacheFromDisk(): any[] | null {
-  try {
-    const path = piCatalogCachePath();
-    if (!existsSync(path)) return null;
-    const data = JSON.parse(readFileSync(path, "utf-8"));
-    if (!Array.isArray(data?.models) || data.models.length === 0) return null;
-    return data.models;
-  } catch {
-    return null;
-  }
-}
-
-function writeRemoteCatalogCacheToDisk(models: any[]): void {
-  try {
-    ensureBossmodeDir();
-    writePrivateJson(piCatalogCachePath(), { models, updatedAt: new Date().toISOString() });
-  } catch {
-    /* best-effort cache */
-  }
-}
-
 function loadBundledCatalogSync(): any[] {
   if (!catalogRegistrySync) return [];
   try {
@@ -1113,6 +1087,20 @@ function loadBundledCatalogSync(): any[] {
     return [];
   }
 }
+
+// Wire CatalogStore bundled loader once (idempotent overwrite is fine).
+setBundledCatalogLoader(loadBundledCatalogSync);
+
+/** Pre-warm the credential-less catalog cache so the synchronous readers below have data
+ * immediately. Call once at server startup; safe to call multiple times (memoized).
+ * Startup stays offline (packaged catalog only) — remote refresh is explicit via Refresh models. */
+export async function ensurePiCatalogWarm(): Promise<void> {
+  try { await ensureCatalogRegistry(); } catch { /* leave cache cold; sync readers fall back gracefully */ }
+  // Offline: rehydrate last successful pi.dev overlay from disk (no network).
+  hydrateCatalogFromDisk();
+}
+
+const PI_DEV_CATALOG_BASE = "https://pi.dev";
 
 function thinkingMapSignature(model: any): string {
   const map = model?.thinkingLevelMap;
@@ -1165,22 +1153,19 @@ async function fetchPiDevProviderModels(providerId: string, signal?: AbortSignal
 /**
  * Explicitly pull pi.dev provider catalogs (manual Stage 2).
  *
- * Why we don't use ModelRuntime.refresh(allowModelNetwork):
- * pi 0.80.10 skips provider.refreshModels unless a credential resolves for that
- * provider, and modelsPath:null forces InMemory store (modelsStorePath ignored).
- * QA proved create/refresh can return OK while remote maps never overlay.
- *
- * Instead we fetch pi.dev provider shards directly, merge over the packaged
- * catalog, and only report source:"remote" when the merged set carries evidence
- * the bundled catalog lacks (e.g. k3 thinkingLevelMap gains low/high).
+ * CatalogStore is the only write path for the remote overlay:
+ * success → commitRemoteCatalog (atomic disk + memory);
+ * failure → retainLastGoodCatalog (never null out).
  */
 export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number }): Promise<{
   source: CatalogRefreshSource;
   error?: string;
+  fetchedAt?: number | null;
 }> {
   // Test injection short-circuits network so unit tests can control the catalog.
-  if (catalogNetworkRefreshForTests) return catalogNetworkRefreshForTests();
-  if (piCatalogModelsForTests) return { source: "remote" };
+  const networkHook = getCatalogNetworkRefreshForTests();
+  if (networkHook) return networkHook();
+  if (piCatalogModelsForTests) return { source: "remote", fetchedAt: getCatalog().fetchedAt };
   const timeoutMs = options?.timeoutMs ?? 15_000;
 
   try {
@@ -1188,7 +1173,8 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     await ensureCatalogRegistry(); // pure bundled registry (offline)
     const bundled = loadBundledCatalogSync();
     if (bundled.length === 0) {
-      return { source: "bundled", error: "Packaged model catalog is empty" };
+      const kept = retainLastGoodCatalog("bundled_empty");
+      return { source: kept.source, error: "Packaged model catalog is empty", fetchedAt: kept.fetchedAt };
     }
 
     const providerIds = new Set<string>();
@@ -1222,41 +1208,44 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     const candidate = Array.from(merged.values());
 
     if (providersFetched === 0) {
-      // No provider shard applied — do not claim remote (pi allSettled-style silent skip).
-      remoteCatalogModels = null;
+      // No provider shard applied — keep last-good (never clear).
+      const kept = retainLastGoodCatalog(
+        "no_provider_data",
+        lastError || "Remote catalog fetch did not return any provider data",
+      );
       return {
-        source: "bundled",
+        source: kept.source,
         error: lastError || "Remote catalog fetch did not return any provider data",
+        fetchedAt: kept.fetchedAt,
       };
     }
 
-    // Require evidence the packaged catalog lacks (e.g. k3 gains low/high), OR accept
-    // remote-as-current when fetch succeeded but metadata already matched packaged
-    // (after a prior successful refresh the disk cache may already equal remote).
+    const fetchedAt = Date.now();
+    // Commit whenever remote data arrived — even if identical to bundled — so freshness advances.
+    // Evidence gate only affects logging; content is still the merged candidate.
     const hasEvidence = catalogHasRemoteEvidence(bundled, candidate);
+    commitRemoteCatalog(candidate, fetchedAt);
     if (!hasEvidence) {
-      // Fetch returned data but it is identical to bundled — still a successful remote
-      // contact; keep overlay cleared so materialize uses packaged (same content).
-      remoteCatalogModels = null;
-      return { source: "remote" };
+      logger.info("catalog", "remote refresh matched bundled metadata; overlay still committed for freshness", {
+        modelCount: candidate.length,
+      });
     }
-
-    remoteCatalogModels = candidate;
-    writeRemoteCatalogCacheToDisk(candidate);
-    return { source: "remote" };
+    return { source: "remote", fetchedAt };
   } catch (err) {
-    remoteCatalogModels = null;
+    const message = err instanceof Error ? err.message : String(err);
+    const kept = retainLastGoodCatalog("refresh_exception", message);
     try { await ensurePiCatalogWarm(); } catch { /* ignore */ }
     return {
-      source: "bundled",
-      error: err instanceof Error ? err.message : String(err),
+      source: kept.source,
+      error: message,
+      fetchedAt: kept.fetchedAt,
     };
   }
 }
 
 async function loadPiCatalogModels(): Promise<any[]> {
-  if (piCatalogModelsForTests) return piCatalogModelsForTests;
-  if (remoteCatalogModels) return remoteCatalogModels;
+  const models = getCatalogModels();
+  if (models.length > 0) return models;
   try {
     const registry = await ensureCatalogRegistry();
     return typeof registry.getAll === "function" ? registry.getAll() : [];
@@ -1266,9 +1255,13 @@ async function loadPiCatalogModels(): Promise<any[]> {
 }
 
 function loadPiCatalogModelsSync(): any[] {
-  if (piCatalogModelsForTests) return piCatalogModelsForTests;
-  if (remoteCatalogModels) return remoteCatalogModels;
-  return loadBundledCatalogSync();
+  return getCatalogModels();
+}
+
+/** Public catalog status for Settings freshness display. */
+export function getCatalogStatus(): CatalogSnapshot & { freshnessLabel: string } {
+  const snap = getCatalog();
+  return { ...snap, freshnessLabel: formatCatalogFreshness(snap) };
 }
 
 function displayNameForProvider(providerSlug: string): string {
@@ -1468,12 +1461,19 @@ export async function refreshModelCredentialProfileModels(id: string): Promise<R
   const refreshed = refreshBuiltinProviderProfile(profile);
   const next = profiles.map((p) => p.id === id ? refreshed : p);
   writeStore(next);
+  const status = getCatalogStatus();
+  let catalogMessage: string | undefined;
+  if (catalog.error) {
+    catalogMessage = status.source === "remote" && status.fetchedAtIso
+      ? `Remote refresh failed; kept catalog from ${status.fetchedAtIso}. ${catalog.error}`
+      : `Remote model catalog unavailable; refreshed from the packaged catalog. ${catalog.error}`;
+  } else if (catalog.source === "bundled") {
+    catalogMessage = "Remote model catalog unavailable; refreshed from the packaged catalog.";
+  }
   return {
     profile: sanitizeProfile(refreshed),
     catalogSource: catalog.source,
-    catalogMessage: catalog.source === "bundled"
-      ? "Remote model catalog unavailable; refreshed from the packaged catalog."
-      : undefined,
+    catalogMessage,
   };
 }
 
@@ -1528,6 +1528,19 @@ function applyPiCatalogFallback(model: ModelDefinitionConfig, providerSlug: stri
 
 export async function discoverModelCredentialModels(input: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
   const existing = input.id ? getModelCredentialProfile(input.id) : null;
+  const profileKind = input.profileKind || existing?.profileKind;
+  const providerSlug = input.providerSlug || existing?.providerSlug || "";
+
+  // Built-in providers: serve CatalogStore directly — no live provider /models fetch.
+  // (custom_endpoint still hits the endpoint below.)
+  const treatAsBuiltin = profileKind === "builtin_provider"
+    || (!profileKind && !!providerSlug && !!getBuiltinProvider(providerSlug) && !input.baseUrl);
+  if (treatAsBuiltin && providerSlug) {
+    await ensurePiCatalogWarm();
+    const models = modelsForBuiltinProvider(providerSlug, input.baseUrl || existing?.baseUrl);
+    return { models, partial: false, warnings: [] };
+  }
+
   const protocol = input.protocol || existing?.protocol;
   if (!protocol || !DISCOVERY_SUPPORTED_PROTOCOLS.includes(protocol)) {
     throw new Error(`unsupported protocol for model discovery: ${protocol || "unknown"}`);
@@ -1558,7 +1571,6 @@ export async function discoverModelCredentialModels(input: Partial<ModelCredenti
 
   const items = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : null;
   if (!items) throw new Error("invalid models response: expected data[] or models[]");
-  const providerSlug = input.providerSlug || existing?.providerSlug || "";
   const catalog = await loadPiCatalogModels();
   const models = (items.map(coerceDiscoveredModel).filter(Boolean) as ModelDefinitionConfig[])
     .map((m) => applyPiCatalogFallback(m, providerSlug, catalog));
@@ -1711,9 +1723,39 @@ export function resolveCredentialProfileForModel(args: { modelRef: string; crede
   if (!profile) return null;
   const modelId = args.modelRef.includes("/") ? args.modelRef.split("/").slice(1).join("/") : args.modelRef;
   if (!profile.models.some((m) => m.id === modelId)) {
+    const status = getCatalogStatus();
+    logger.warn("catalog", "credential profile does not include model", {
+      modelRef: args.modelRef,
+      modelId,
+      profileId: profile.id,
+      profileName: profile.name,
+      profileModelCount: profile.models.length,
+      catalogSource: status.source,
+      catalogFetchedAt: status.fetchedAtIso,
+      catalogModelCount: status.modelCount,
+    });
     throw new Error(`Credential profile ${profile.name} does not include model ${modelId}`);
   }
   return profile;
+}
+
+/** Shared availability check used by member picker, PATCH validation, and setModel. */
+export function isModelAvailable(modelRef: string): boolean {
+  return listAvailableModels().some((m) => m.ref === modelRef);
+}
+
+export function assertModelAvailable(modelRef: string, context: string): void {
+  if (isModelAvailable(modelRef)) return;
+  const status = getCatalogStatus();
+  logger.warn("catalog", "model not available", {
+    context,
+    modelRef,
+    catalogSource: status.source,
+    catalogFetchedAt: status.fetchedAtIso,
+    catalogModelCount: status.modelCount,
+    availableCount: listAvailableModels().length,
+  });
+  throw new Error(`Model is not available or credential is missing: ${modelRef}`);
 }
 
 /** Provider entry for models.json — endpoint + model metadata only, no secrets.

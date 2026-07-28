@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse } from "../api/client";
+import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus } from "../api/client";
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
@@ -13,6 +13,7 @@ import {
   updateModelCredentialProfile,
   deleteModelCredentialProfile,
   refreshModelCredentialProfileModels,
+  getModelCatalogStatus,
   discoverModelCredentialModels,
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
@@ -668,10 +669,21 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
   onCustom: () => void;
   onEdit: (profile: PublicModelCredentialProfile) => void;
   onDelete: (profile: PublicModelCredentialProfile) => void;
-  onRefreshModels: (profile: PublicModelCredentialProfile) => void;
+  onRefreshModels: (profile: PublicModelCredentialProfile) => void | Promise<void>;
 }) {
   const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
   const [expandedModelLists, setExpandedModelLists] = useState<Set<string>>(new Set());
+  const [catalogStatus, setCatalogStatus] = useState<ModelCatalogStatus | null>(null);
+
+  const refreshCatalogStatus = () => {
+    getModelCatalogStatus().then(setCatalogStatus).catch(() => setCatalogStatus(null));
+  };
+  useEffect(() => { refreshCatalogStatus(); }, []);
+
+  const handleRefreshModels = async (profile: PublicModelCredentialProfile) => {
+    await onRefreshModels(profile);
+    refreshCatalogStatus();
+  };
 
   const toggleProfile = (id: string) => setExpandedProfiles((prev) => {
     const next = new Set(prev);
@@ -690,6 +702,12 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
         <div>
           <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider">Model providers</h2>
           <p className="text-xs text-ink-3 mt-1">Connect a provider, then choose its available models for each member.</p>
+          {catalogStatus && (
+            <p className="text-[11px] text-ink-4 mt-1" title={catalogStatus.fetchedAtIso || undefined}>
+              {catalogStatus.freshnessLabel}
+              {catalogStatus.modelCount > 0 ? ` · ${catalogStatus.modelCount} models in catalog` : ""}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onCustom} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">
@@ -734,7 +752,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                   </button>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => toggleProfile(profile.id)} className="px-2 py-1 text-xs text-ink-3 hover:text-ink-1 cursor-pointer" title={expanded ? "Collapse" : "Expand"}>{expanded ? "Collapse" : "Expand"}</button>
-                    {profile.profileKind === "builtin_provider" && <button onClick={() => onRefreshModels(profile)} className="text-ink-4 hover:text-accent-ink cursor-pointer" title="Refresh models"><RefreshCw size={14} /></button>}
+                    {profile.profileKind === "builtin_provider" && <button onClick={() => { void handleRefreshModels(profile); }} className="text-ink-4 hover:text-accent-ink cursor-pointer" title="Refresh models"><RefreshCw size={14} /></button>}
                     <button onClick={() => onEdit(profile)} className="text-ink-4 hover:text-ink-1 cursor-pointer" title="Edit"><Pencil size={14} /></button>
                     <button onClick={() => onDelete(profile)} className="text-ink-4 hover:text-blocked cursor-pointer" title="Delete"><Trash2 size={14} /></button>
                   </div>
@@ -754,7 +772,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                       </div>
                     </div>
                     <div className="flex justify-end gap-2 mt-3">
-                      {profile.profileKind === "builtin_provider" && <button onClick={() => onRefreshModels(profile)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer"><RefreshCw size={12} /> Refresh models</button>}
+                      {profile.profileKind === "builtin_provider" && <button onClick={() => { void handleRefreshModels(profile); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer"><RefreshCw size={12} /> Refresh models</button>}
                       <button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer">Edit</button>
                     </div>
                   </>

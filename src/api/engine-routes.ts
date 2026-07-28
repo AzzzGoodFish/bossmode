@@ -13,6 +13,7 @@ import {
   listAvailableModels,
   listBuiltinModelProviders,
   listPublicModelCredentialProfiles,
+  getCatalogStatus,
   refreshModelCredentialProfileModels,
   saveModelCredentialProfile,
   startNativeOAuthConnection,
@@ -190,6 +191,18 @@ addRoute("GET", "/api/available-models", async (_req, res) => {
 // GET /api/models — backward-compatible alias
 addRoute("GET", "/api/models", async (_req, res) => {
   sendJson(res, 200, listAvailableModels());
+});
+
+// GET /api/model-catalog/status — CatalogStore freshness (Settings display)
+addRoute("GET", "/api/model-catalog/status", async (_req, res) => {
+  const status = getCatalogStatus();
+  sendJson(res, 200, {
+    source: status.source,
+    fetchedAt: status.fetchedAt,
+    fetchedAtIso: status.fetchedAtIso,
+    modelCount: status.modelCount,
+    freshnessLabel: status.freshnessLabel,
+  });
 });
 
 const VALID_PI_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);

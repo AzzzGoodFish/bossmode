@@ -527,6 +527,18 @@ export async function refreshModelCredentialProfileModels(id: string): Promise<R
   return apiFetch(`/api/model-credential-profiles/${id}/refresh-models`, { method: "POST" });
 }
 
+export interface ModelCatalogStatus {
+  source: "remote" | "bundled";
+  fetchedAt: number | null;
+  fetchedAtIso: string | null;
+  modelCount: number;
+  freshnessLabel: string;
+}
+
+export async function getModelCatalogStatus(): Promise<ModelCatalogStatus> {
+  return apiFetch("/api/model-catalog/status");
+}
+
 export async function deleteModelCredentialProfile(id: string): Promise<void> {
   await apiFetch(`/api/model-credential-profiles/${id}`, { method: "DELETE" });
 }

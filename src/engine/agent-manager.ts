@@ -34,7 +34,7 @@ import {
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
-import { exportPiConfigForMember, listAvailableModels, normalizeModelRef } from "./model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "./model-credentials.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -828,8 +828,7 @@ export async function switchMemberModel(roomId: string, memberRef: string, model
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const normalizedModel = normalizeSwitchModelRef(model);
-  const available = listAvailableModels().some((m) => m.ref === normalizedModel);
-  if (!available) throw new Error(`Model is not available or credential is missing: ${normalizedModel}`);
+  assertModelAvailable(normalizedModel, "switchMemberModel");
   // Persist first so MemberCredentialStore live-reads the new binding on the next request.
   if (persistRoomOverride) roomStore.updateRoomMemberOverride(roomId, memberId, { model: normalizedModel, credentialId: credentialId || null });
 
