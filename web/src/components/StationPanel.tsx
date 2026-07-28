@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Square, ChevronDown, Pencil, X } from "lucide-react";
+import { Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
@@ -1156,8 +1156,7 @@ function MemberConfigPanel({
 
         {tab === "session" && (
           <div className="space-y-4 pb-6">
-            <ActiveToolsSection roomId={roomId} memberRef={member.id || member.name} status={status} reloadKey={activeToolsReloadKey} />
-
+            {/* 1. Context & Session — always first, always expanded */}
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1228,14 +1227,16 @@ function MemberConfigPanel({
               </details>
             </section>
 
-            <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-ink-1">Extensions</div>
-                  <div className="text-xs text-ink-4 mt-0.5">Enable installed extensions for this member. Use Reload after changing.</div>
-                </div>
+            {/* 2–4. Tool sections — accordion, collapsed by default */}
+            <ActiveToolsSection roomId={roomId} memberRef={member.id || member.name} status={status} reloadKey={activeToolsReloadKey} />
+
+            <SessionSectionAccordion
+              title="Extensions"
+              summary={extensionsAccordionSummary(extensionsLoadStatus, installedExtensions, member.extensions || [])}
+              action={
                 <button type="button" onClick={() => onOpenExtensionsSettings?.()} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Install…</button>
-              </div>
+              }
+            >
               {extensionsLoadStatus === "loading" ? (
                 <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading extensions…</div>
               ) : extensionsLoadStatus === "error" ? (
@@ -1282,16 +1283,15 @@ function MemberConfigPanel({
                   })}
                 </div>
               )}
-            </section>
+            </SessionSectionAccordion>
 
-            <section className="rounded-xl border border-line bg-inset/50 p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-ink-1">Tools</div>
-                  <div className="text-xs text-ink-4 mt-0.5">Assign MCP servers to this member in this room. Use Reload after changing tools.</div>
-                </div>
-                <button onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Manage servers</button>
-              </div>
+            <SessionSectionAccordion
+              title="Tools"
+              summary={mcpAccordionSummary(mcpDisplayState, mcpServers, member.mcpServers || [])}
+              action={
+                <button type="button" onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Manage servers</button>
+              }
+            >
               {mcpDisplayState === "loading" ? (
                 <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading MCP servers…</div>
               ) : mcpDisplayState === "error" ? (
@@ -1337,7 +1337,7 @@ function MemberConfigPanel({
                   );
                 })}
               </div>}
-            </section>
+            </SessionSectionAccordion>
           </div>
         )}
       </div>
@@ -1684,7 +1684,113 @@ export function ThinkingPop({
   );
 }
 
-// ── Active tools (Session & tools top) ──────────────────────────────────────
+// ── Session & tools accordion helpers ───────────────────────────────────────
+
+/** Collapsed-by-default section shell. Action buttons stay reachable when closed. */
+function SessionSectionAccordion({
+  title,
+  summary,
+  action,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  summary: string;
+  action?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-xl border border-line bg-inset/50">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+      >
+        <ChevronRight size={14} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
+        <div className="min-w-0 flex-1">
+          <div className={`text-sm font-semibold ${open ? "text-ink-1" : "text-ink-2"}`}>{title}</div>
+          <div className="text-xs text-ink-4 mt-0.5 truncate">{summary}</div>
+        </div>
+        {action && (
+          <div className="shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            {action}
+          </div>
+        )}
+      </div>
+      {open && <div className="px-4 pb-4 space-y-2.5">{children}</div>}
+    </section>
+  );
+}
+
+function isExtensionEnabledForMember(ext: ExtensionRecord, enabledIds: string[]): boolean {
+  return enabledIds.some((id) => id === ext.name || id === ext.id || id === `npm:${ext.name}` || ext.id.endsWith(id));
+}
+
+function extensionsAccordionSummary(
+  status: "loading" | "ready" | "error",
+  installed: ExtensionRecord[],
+  enabledIds: string[],
+): string {
+  if (status === "loading") return "Loading…";
+  if (status === "error") return "Couldn’t load";
+  if (installed.length === 0) return "None installed";
+  const enabled = installed.filter((ext) => isExtensionEnabledForMember(ext, enabledIds));
+  const names = enabled.map((e) => e.name).slice(0, 3).join(", ");
+  const base = `${enabled.length} of ${installed.length} enabled`;
+  return names ? `${base} · ${names}` : base;
+}
+
+function mcpAccordionSummary(
+  displayState: ReturnType<typeof memberMcpDisplayState>,
+  servers: McpServerSummary[],
+  enabledNames: string[],
+): string {
+  if (displayState === "loading") return "Loading…";
+  if (displayState === "error") return "Couldn’t load";
+  if (displayState === "disabled") return "MCP turned off";
+  if (displayState === "empty") return "None configured";
+  const on = servers.filter((s) => enabledNames.includes(s.name));
+  const names = on.map((s) => s.name).slice(0, 3).join(", ");
+  const base = `${on.length} of ${servers.length} MCP servers on`;
+  return names ? `${base} · ${names}` : base;
+}
+
+function activeToolsAccordionSummary(
+  loading: boolean,
+  error: boolean,
+  sessionActive: boolean,
+  tools: MemberActiveTool[],
+  message?: string,
+): string {
+  if (loading) return "Loading…";
+  if (error) return "Couldn’t load";
+  if (!sessionActive) return message || "No active session";
+  if (tools.length === 0) return "0 live";
+  let builtin = 0;
+  let bossmode = 0;
+  let extension = 0;
+  let mcp = 0;
+  for (const t of tools) {
+    const kind = toolSourceKind(t.source);
+    if (kind === "builtin") builtin += 1;
+    else if (kind === "bossmode") bossmode += 1;
+    else if (kind === "extension") extension += 1;
+    else if (kind === "mcp") mcp += 1;
+  }
+  const parts = [`${tools.length} live`];
+  if (bossmode) parts.push(`bossmode ${bossmode}`);
+  if (builtin) parts.push(`built-in ${builtin}`);
+  if (extension) parts.push(`extension ${extension}`);
+  if (mcp) parts.push(`MCP ${mcp}`);
+  return parts.join(" · ");
+}
+
+// ── Active tools (Session & tools) ──────────────────────────────────────────
 
 type ToolFilter = "all" | "builtin" | "bossmode" | "extension" | "mcp";
 
@@ -1797,18 +1903,13 @@ function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
     return t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
   });
   const groups = groupToolsBySource(filtered);
+  const summary = activeToolsAccordionSummary(loading, error, sessionActive, tools, message);
 
   return (
-    <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-ink-1">Active tools</div>
-          <div className="text-xs text-ink-4 mt-0.5">
-            {sessionActive
-              ? `${tools.length} tool${tools.length === 1 ? "" : "s"} live on this session`
-              : "Tools are read from the running session — we don’t guess from config."}
-          </div>
-        </div>
+    <SessionSectionAccordion
+      title="Active tools"
+      summary={summary}
+      action={
         <button
           type="button"
           onClick={() => void load()}
@@ -1816,8 +1917,8 @@ function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
         >
           Refresh
         </button>
-      </div>
-
+      }
+    >
       {loading ? (
         <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-3">Loading tools…</div>
       ) : error ? (
@@ -1935,6 +2036,6 @@ function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
           )}
         </>
       )}
-    </section>
+    </SessionSectionAccordion>
   );
 }
