@@ -1,26 +1,36 @@
-// Usage — token consumption by identity, room and time (v3 minimal).
+// Usage — token consumption by identity, room and time (v4 split).
 //
-// Rendered inside Settings → Usage, full-width. One unified filter bar
-// (Room · Agent · Days) is the single source of truth; the donut and table
-// rows also drill as shortcuts and sync back to the filter state.
+// Two views behind a Total | Trend switch (different jobs, different time
+// semantics):
+//   Total — overall statistics across ANY span (7/30/90d · All time · Custom);
+//           share donut + detail table side by side, no chart.
+//   Trend — consumption over a BOUNDED range (quick 7/14/30d · custom dates
+//           within 180d); full-width agent-stacked columns; >60 days groups
+//           weekly for readability.
 //
-// Breakdown dimension is unambiguous:
+// Filter bar layout (fish): Room · Agent on row one; range/dates on row two.
+//
+// Breakdown dimension stays unambiguous:
 //   room selected            → By member
 //   agent selected, no room  → By room
 //   neither                  → By agent
-//
-// No by-model view (historical attribution reverted; model still stamped on new
-// data for a future revisit). The trend is colored by agent. Spend is a table
-// column + the filter readout, not a separate view.
 import { useEffect, useMemo, useState } from "react";
 import {
   getPlatformUsage,
   getRoomUsage,
   type UsageResponse,
-  type UsageSeriesPoint,
 } from "../api/client";
-
-type RangeDays = 7 | 14 | 30;
+import {
+  bucketSeries,
+  isoDaysAgo,
+  minTrendDate,
+  resolveTotalQuery,
+  resolveTrendQuery,
+  tickIndices,
+  todayIso,
+  type TotalPreset,
+  type TrendQuick,
+} from "../utils/usage-view";
 
 // Agent identity → chart color (theme-aware product tokens).
 const AGENT_COLOR: Record<string, string> = {
@@ -52,11 +62,6 @@ function fmtTokens(n: number): string {
 function fmtCost(n: number): string {
   return "$" + (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2));
 }
-function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - (days - 1));
-  return d.toISOString().slice(0, 10);
-}
 function tokensOf(row: { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }): number {
   return row.inputTokens + row.outputTokens + row.cacheRead + row.cacheWrite;
 }
@@ -69,24 +74,59 @@ interface UsagePageProps {
   roomId?: string;
 }
 
+type UsageTab = "total" | "trend";
+
+const TAB_DESC: Record<UsageTab, string> = {
+  total: "Overall statistics across any time span — share by identity, drill to room and member.",
+  trend: "Consumption trend over a bounded date range — pick any start and end date.",
+};
+
 export function UsagePage({ roomId }: UsagePageProps) {
-  const [range, setRange] = useState<RangeDays>(7);
-  const [agentFilter, setAgentFilter] = useState<string | null>(null);
-  const [roomFilter, setRoomFilter] = useState<string | null>(roomId ?? null);
+  const [tab, setTab] = useState<UsageTab>("total");
+  return (
+    <div className="w-full">
+      <div className="inline-flex gap-1 rounded-xl border border-line-soft bg-inset p-1 mb-2">
+        {(["total", "trend"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`rounded-lg px-4 py-1.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              tab === key ? "bg-surface-1 text-ink-1 border border-line-soft shadow-sm" : "text-ink-3 hover:text-ink-1 border border-transparent"
+            }`}
+          >
+            {key === "total" ? "Total" : "Trend"}
+          </button>
+        ))}
+      </div>
+      <p className="text-[12.5px] text-ink-3 mb-4">{TAB_DESC[tab]}</p>
+      {tab === "total" ? <TotalView roomId={roomId} /> : <TrendView roomId={roomId} />}
+    </div>
+  );
+}
+
+// -- Shared data plumbing --
+
+interface UsageQuery {
+  from?: string;
+  to?: string;
+  agent?: string;
+}
+
+function useUsageData(roomId: string | undefined, roomFilter: string | null, query: UsageQuery | null) {
   const [data, setData] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const effectiveRoom = roomId ?? roomFilter;
 
   useEffect(() => {
+    if (!query) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const from = isoDaysAgo(range);
     const req = effectiveRoom
-      ? getRoomUsage(effectiveRoom, { from, agent: agentFilter || undefined })
-      : getPlatformUsage({ from, agent: agentFilter || undefined });
+      ? getRoomUsage(effectiveRoom, { from: query.from, to: query.to, agent: query.agent })
+      : getPlatformUsage({ from: query.from, to: query.to, agent: query.agent });
     req
       .then((res) => {
         if (!cancelled) setData(res);
@@ -100,131 +140,266 @@ export function UsagePage({ roomId }: UsagePageProps) {
     return () => {
       cancelled = true;
     };
-  }, [range, roomFilter, agentFilter, roomId, effectiveRoom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query?.from, query?.to, query?.agent, effectiveRoom, roomId]);
 
-  // Filter options from a stable platform fetch (entities with data).
+  return { data, loading, error, effectiveRoom };
+}
+
+/** Filter options from a stable all-time platform fetch (entities with data). */
+function useFilterOptions(roomId: string | undefined) {
   const [agentOptions, setAgentOptions] = useState<string[]>([]);
   const [roomOptions, setRoomOptions] = useState<Array<{ roomId: string; roomName?: string }>>([]);
   useEffect(() => {
     if (roomId) return;
-    getPlatformUsage({ from: isoDaysAgo(30) })
+    getPlatformUsage()
       .then((res) => {
         setAgentOptions(res.byAgent.map((a) => a.agent));
         setRoomOptions((res.byRoom || []).map((r) => ({ roomId: r.roomId, roomName: r.roomName })));
       })
       .catch(() => {});
   }, [roomId]);
+  return { agentOptions, roomOptions };
+}
 
+// -- Total view --
+
+function TotalView({ roomId }: UsagePageProps) {
+  const [preset, setPreset] = useState<TotalPreset>(30);
+  const [customFrom, setCustomFrom] = useState(() => isoDaysAgo(30));
+  const [customTo, setCustomTo] = useState(() => todayIso());
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const [roomFilter, setRoomFilter] = useState<string | null>(roomId ?? null);
+  const { agentOptions, roomOptions } = useFilterOptions(roomId);
+
+  const query = useMemo<UsageQuery | null>(() => {
+    if (preset === -1 && (!customFrom || !customTo)) return null;
+    const q = resolveTotalQuery(preset, customFrom, customTo);
+    return { from: q.from, to: q.to, agent: agentFilter || undefined };
+  }, [preset, customFrom, customTo, agentFilter]);
+  const rangeLabel = useMemo(() => resolveTotalQuery(preset, customFrom, customTo).label, [preset, customFrom, customTo]);
+
+  const { data, loading, error, effectiveRoom } = useUsageData(roomId, roomFilter, query);
   const backfilling = data?.backfillStatus === "running";
-
-  // Scope totals for the filter readout.
-  const totals = useMemo(() => {
-    if (!data) return { tokens: 0, cost: 0, hit: 0 };
-    const k = data.kpis;
-    return {
-      tokens: k.inputTokens + k.outputTokens + k.cacheRead + k.cacheWrite,
-      cost: k.cost,
-      hit: k.cacheHitRate,
-    };
-  }, [data]);
-
   const roomLabel = roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms";
 
+  const totals = useMemo(() => {
+    if (!data) return null;
+    const k = data.kpis;
+    return { tokens: k.inputTokens + k.outputTokens + k.cacheRead + k.cacheWrite, cost: k.cost, hit: k.cacheHitRate };
+  }, [data]);
+
   return (
-    <div className="w-full">
-      {/* Unified filter bar: Room · Agent · Days */}
-      <div className="bg-surface-1 border border-line rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        {!roomId && (
-          <FilterGroup
-            label="Room"
-            options={[{ id: null, label: "All rooms" }, ...roomOptions.map((r) => ({ id: r.roomId, label: r.roomName || r.roomId }))]}
-            value={roomFilter}
-            onChange={setRoomFilter}
-          />
-        )}
-        <FilterGroup
-          label="Agent"
-          options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
-          value={agentFilter}
-          onChange={setAgentFilter}
-        />
-        <FilterGroup
-          label="Days"
-          options={([7, 14, 30] as RangeDays[]).map((n) => ({ id: String(n), label: `${n}d` }))}
-          value={String(range)}
-          onChange={(v) => setRange((Number(v) || 7) as RangeDays)}
-          allowNull={false}
-        />
-        <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
-          {roomLabel} · {agentFilter || "All agents"} · {range}d
-          {data && (
-            <>
-              {"  —  "}
-              {fmtTokens(totals.tokens)} · {fmtCost(totals.cost)} · {Math.round(totals.hit * 100)}% cache hit
-            </>
+    <div>
+      {/* Filter bar: row 1 Room · Agent; row 2 Range (+ readout) */}
+      <div className="bg-surface-1 border border-line rounded-lg px-4 py-3 mb-4 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          {!roomId && (
+            <FilterGroup
+              label="Room"
+              options={[{ id: null, label: "All rooms" }, ...roomOptions.map((r) => ({ id: r.roomId, label: r.roomName || r.roomId }))]}
+              value={roomFilter}
+              onChange={setRoomFilter}
+            />
           )}
+          <FilterGroup
+            label="Agent"
+            options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
+            value={agentFilter}
+            onChange={setAgentFilter}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line-soft pt-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold w-12">Range</span>
+            <FilterChips
+              options={[
+                { id: "7", label: "7d" },
+                { id: "30", label: "30d" },
+                { id: "90", label: "90d" },
+                { id: "0", label: "All time" },
+                { id: "-1", label: "Custom" },
+              ]}
+              value={String(preset)}
+              onChange={(v) => setPreset(Number(v) as TotalPreset)}
+            />
+            {preset === -1 && (
+              <DateRangeInputs from={customFrom} to={customTo} max={todayIso()} onFrom={setCustomFrom} onTo={setCustomTo} />
+            )}
+          </div>
+          <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
+            {roomLabel} · {agentFilter || "All agents"} · {rangeLabel}
+            {totals && (
+              <>
+                {"  —  "}
+                {fmtTokens(totals.tokens)} · {fmtCost(totals.cost)} · {Math.round(totals.hit * 100)}% cache hit
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {backfilling && (
-        <div className="text-[12px] text-ink-3 mb-3">Building usage index… numbers will fill in shortly.</div>
-      )}
-      {error && <div className="text-[12px] text-blocked mb-3">Failed to load usage: {error}</div>}
-
-      {loading && !data ? (
-        <div className="text-sm text-ink-3 py-12 text-center">Loading…</div>
-      ) : data && data.byAgent.length === 0 && data.breakdown.length === 0 ? (
-        <EmptyState backfilling={backfilling} />
-      ) : data ? (
-        <UsageBody
-          data={data}
-          effectiveRoom={effectiveRoom}
-          agentFilter={agentFilter}
-          onPickAgent={setAgentFilter}
-          onPickRoom={setRoomFilter}
-        />
-      ) : null}
+      <UsageStates data={data} loading={loading} error={error} backfilling={backfilling}>
+        {data && (
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+            <ShareDonut
+              data={data}
+              kind={breakdownKind(effectiveRoom, agentFilter)}
+              rangeLabel={rangeLabel}
+              onPickAgent={setAgentFilter}
+              onPickRoom={setRoomFilter}
+            />
+            <DrillTable
+              data={data}
+              kind={breakdownKind(effectiveRoom, agentFilter)}
+              agentFilter={agentFilter}
+              roomLabel={roomFilter ? roomLabel : null}
+              onPickAgent={setAgentFilter}
+              onPickRoom={setRoomFilter}
+            />
+          </div>
+        )}
+      </UsageStates>
     </div>
   );
 }
 
-function FilterGroup({
-  label,
-  options,
-  value,
-  onChange,
-  allowNull = true,
+// -- Trend view --
+
+function TrendView({ roomId }: UsagePageProps) {
+  const [quick, setQuick] = useState<TrendQuick>(7);
+  const [customFrom, setCustomFrom] = useState(() => isoDaysAgo(7));
+  const [customTo, setCustomTo] = useState(() => todayIso());
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const [roomFilter, setRoomFilter] = useState<string | null>(roomId ?? null);
+  const { agentOptions, roomOptions } = useFilterOptions(roomId);
+
+  const query = useMemo<UsageQuery | null>(() => {
+    if (quick === 0 && (!customFrom || !customTo)) return null;
+    const q = resolveTrendQuery(quick, customFrom, customTo);
+    return { from: q.from, to: q.to, agent: agentFilter || undefined };
+  }, [quick, customFrom, customTo, agentFilter]);
+  const span = useMemo(() => resolveTrendQuery(quick, customFrom, customTo), [quick, customFrom, customTo]);
+
+  const { data, loading, error, effectiveRoom } = useUsageData(roomId, roomFilter, query);
+  const backfilling = data?.backfillStatus === "running";
+  const roomLabel = roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms";
+
+  const totals = useMemo(() => {
+    if (!data) return null;
+    const k = data.kpis;
+    return { tokens: k.inputTokens + k.outputTokens + k.cacheRead + k.cacheWrite, cost: k.cost };
+  }, [data]);
+
+  return (
+    <div>
+      {/* Filter bar: row 1 Room · Agent; row 2 Dates (+ readout) */}
+      <div className="bg-surface-1 border border-line rounded-lg px-4 py-3 mb-4 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          {!roomId && (
+            <FilterGroup
+              label="Room"
+              options={[{ id: null, label: "All rooms" }, ...roomOptions.map((r) => ({ id: r.roomId, label: r.roomName || r.roomId }))]}
+              value={roomFilter}
+              onChange={setRoomFilter}
+            />
+          )}
+          <FilterGroup
+            label="Agent"
+            options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
+            value={agentFilter}
+            onChange={setAgentFilter}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line-soft pt-2.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold w-12">Dates</span>
+            <FilterChips
+              options={[
+                { id: "7", label: "7d" },
+                { id: "14", label: "14d" },
+                { id: "30", label: "30d" },
+                { id: "0", label: "Custom" },
+              ]}
+              value={String(quick)}
+              onChange={(v) => {
+                const n = Number(v) as TrendQuick;
+                setQuick(n);
+                if (n !== 0) {
+                  setCustomFrom(isoDaysAgo(n));
+                  setCustomTo(todayIso());
+                }
+              }}
+            />
+            <DateRangeInputs
+              from={quick === 0 ? customFrom : span.from}
+              to={quick === 0 ? customTo : span.to}
+              min={minTrendDate()}
+              max={todayIso()}
+              onFrom={(v) => {
+                setQuick(0);
+                setCustomFrom(v);
+              }}
+              onTo={(v) => {
+                setQuick(0);
+                setCustomTo(v);
+              }}
+            />
+          </div>
+          <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
+            {roomLabel} · {agentFilter || "All agents"} · {span.from} → {span.to}
+            {totals && (
+              <>
+                {"  —  "}
+                {fmtTokens(totals.tokens)} · {fmtCost(totals.cost)}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <UsageStates data={data} loading={loading} error={error} backfilling={backfilling}>
+        {data && <TrendChart data={data} agentFilter={agentFilter} />}
+      </UsageStates>
+    </div>
+  );
+}
+
+// -- Shared UI pieces --
+
+type BreakdownKind = "agent" | "room" | "member";
+
+function breakdownKind(effectiveRoom: string | null | undefined, agentFilter: string | null): BreakdownKind {
+  return effectiveRoom ? "member" : agentFilter ? "room" : "agent";
+}
+
+function UsageStates({
+  data,
+  loading,
+  error,
+  backfilling,
+  children,
 }: {
-  label: string;
-  options: Array<{ id: string | null; label: string; color?: string }>;
-  value: string | null;
-  onChange: (v: string | null) => void;
-  allowNull?: boolean;
+  data: UsageResponse | null;
+  loading: boolean;
+  error: string | null;
+  backfilling: boolean;
+  children?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold w-12">{label}</span>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {options.map((o) => {
-          const on = value === o.id;
-          return (
-            <button
-              key={o.id ?? "__all"}
-              onClick={() => {
-                if (!allowNull && o.id === null) return;
-                onChange(o.id);
-              }}
-              className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
-                on ? "text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
-              }`}
-              style={on ? { background: o.color || "var(--accent)", borderColor: o.color || "var(--accent)" } : undefined}
-            >
-              {o.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <>
+      {backfilling && (
+        <div className="text-[12px] text-ink-3 mb-3">Building usage index… numbers will fill in shortly.</div>
+      )}
+      {error && <div className="text-[12px] text-blocked mb-3">Failed to load usage: {error}</div>}
+      {loading && !data ? (
+        <div className="text-sm text-ink-3 py-12 text-center">Loading…</div>
+      ) : data && data.byAgent.length === 0 && data.breakdown.length === 0 ? (
+        <EmptyState backfilling={backfilling} />
+      ) : (
+        children
+      )}
+    </>
   );
 }
 
@@ -241,33 +416,98 @@ function EmptyState({ backfilling }: { backfilling: boolean }) {
   );
 }
 
-type BreakdownKind = "agent" | "room" | "member";
-
-function UsageBody({
-  data,
-  effectiveRoom,
-  agentFilter,
-  onPickAgent,
-  onPickRoom,
+function FilterChips({
+  options,
+  value,
+  onChange,
 }: {
-  data: UsageResponse;
-  effectiveRoom: string | null | undefined;
-  agentFilter: string | null;
-  onPickAgent: (a: string | null) => void;
-  onPickRoom: (r: string) => void;
+  options: Array<{ id: string; label: string; color?: string }>;
+  value: string;
+  onChange: (v: string) => void;
 }) {
-  const kind: BreakdownKind = effectiveRoom ? "member" : agentFilter ? "room" : "agent";
-
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-        <ShareDonut data={data} kind={kind} onPickAgent={onPickAgent} onPickRoom={onPickRoom} />
-        <TrendChart series={data.series} agentFilter={agentFilter} />
-      </div>
-      <DrillTable data={data} kind={kind} onPickAgent={onPickAgent} onPickRoom={onPickRoom} />
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {options.map((o) => {
+        const on = value === o.id;
+        return (
+          <button
+            key={o.id}
+            onClick={() => onChange(o.id)}
+            className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+              on ? "text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
+            }`}
+            style={on ? { background: o.color || "var(--accent)", borderColor: o.color || "var(--accent)" } : undefined}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
+
+function FilterGroup({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<{ id: string | null; label: string; color?: string }>;
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] uppercase tracking-wide text-ink-4 font-semibold w-12">{label}</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {options.map((o) => {
+          const on = value === o.id;
+          return (
+            <button
+              key={o.id ?? "__all"}
+              onClick={() => onChange(o.id)}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+                on ? "text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
+              }`}
+              style={on ? { background: o.color || "var(--accent)", borderColor: o.color || "var(--accent)" } : undefined}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DateRangeInputs({
+  from,
+  to,
+  min,
+  max,
+  onFrom,
+  onTo,
+}: {
+  from: string;
+  to: string;
+  min?: string;
+  max?: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+}) {
+  const cls =
+    "bg-surface-2 border border-line rounded-md text-ink-2 text-xs px-2 py-1 outline-none focus:border-accent focus:text-ink-1 [color-scheme:light] dark:[color-scheme:dark]";
+  return (
+    <span className="flex items-center gap-1.5">
+      <input type="date" className={cls} value={from} min={min} max={max} onChange={(e) => onFrom(e.target.value)} />
+      <span className="text-ink-4 text-[11px]">→</span>
+      <input type="date" className={cls} value={to} min={min} max={max} onChange={(e) => onTo(e.target.value)} />
+    </span>
+  );
+}
+
+// -- Total pieces --
 
 interface Slice {
   id: string;
@@ -280,7 +520,7 @@ interface Slice {
 function buildSlices(data: UsageResponse, kind: BreakdownKind): Slice[] {
   const slices: Slice[] = [];
   if (kind === "member") {
-    // member × model rows → aggregate to member (v3 table is per-member, no model col)
+    // member × model rows → aggregate to member (table is per-member, no model col)
     const byMember = new Map<string, { label: string; agent: string; value: number }>();
     for (const b of data.breakdown) {
       const cur = byMember.get(b.memberId) || { label: b.memberName || b.memberId, agent: b.agent || "", value: 0 };
@@ -301,11 +541,13 @@ function buildSlices(data: UsageResponse, kind: BreakdownKind): Slice[] {
 function ShareDonut({
   data,
   kind,
+  rangeLabel,
   onPickAgent,
   onPickRoom,
 }: {
   data: UsageResponse;
   kind: BreakdownKind;
+  rangeLabel: string;
   onPickAgent: (a: string | null) => void;
   onPickRoom: (r: string) => void;
 }) {
@@ -322,13 +564,13 @@ function ShareDonut({
   };
 
   return (
-    <div className="bg-surface-1 border border-line rounded-lg p-5">
+    <div className="bg-surface-1 border border-line rounded-lg p-5 self-start">
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-[13px] font-semibold text-ink-1">{title}</h3>
-        <span className="text-[11px] text-ink-4">{fmtTokens(total)} tokens</span>
+        <span className="text-[11px] text-ink-4">{rangeLabel} share</span>
       </div>
       <div className="flex items-center gap-5">
-        <svg width="140" height="140" viewBox="0 0 42 42" className="shrink-0 -rotate-90">
+        <svg width="150" height="150" viewBox="0 0 42 42" className="shrink-0 -rotate-90">
           {slices.map((s) => {
             const pct = (s.value / total) * 100;
             if (pct < 0.4) return null;
@@ -350,6 +592,12 @@ function ShareDonut({
             acc += pct;
             return seg;
           })}
+          <text x="21" y="20" textAnchor="middle" fill="var(--ink-1)" fontSize="4.6" fontWeight="700" transform="rotate(90 21 21)" className="tabular-nums">
+            {fmtTokens(total)}
+          </text>
+          <text x="21" y="24.5" textAnchor="middle" fill="var(--ink-3)" fontSize="2.4" transform="rotate(90 21 21)">
+            tokens
+          </text>
         </svg>
         <div className="min-w-0 flex-1 space-y-1.5 text-[12.5px]">
           {slices.map((s) => {
@@ -376,104 +624,19 @@ function ShareDonut({
   );
 }
 
-/** Daily stacked columns colored by agent (no model dimension). */
-function TrendChart({ series, agentFilter }: { series: UsageSeriesPoint[]; agentFilter: string | null }) {
-  // Agents present across the range, for stable stacking + legend.
-  const agents = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of series) for (const a of Object.keys(p.byAgent || {})) set.add(a);
-    const list = [...set];
-    return agentFilter ? list.filter((a) => a === agentFilter) : list.sort();
-  }, [series, agentFilter]);
-
-  const W = Math.max(460, series.length * 30);
-  const H = 190;
-  const pad = 6;
-  const dayTotal = (p: UsageSeriesPoint) => agents.reduce((s, a) => s + (p.byAgent?.[a] || 0), 0);
-  const max = Math.max(...series.map(dayTotal), 1);
-  const step = series.length ? (W - pad * 2) / series.length : 0;
-  const bw = Math.min(20, step * 0.64);
-
-  // X ticks: step back from the last day so the most recent date is always
-  // labeled, even spacing (≤8 ticks), no collision.
-  const interval = Math.max(1, Math.ceil(series.length / 8));
-  const tickIdx: number[] = [];
-  for (let i = series.length - 1; i >= 0; i -= interval) tickIdx.unshift(i);
-
-  return (
-    <div className="bg-surface-1 border border-line rounded-lg p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-[13px] font-semibold text-ink-1">History</h3>
-        <span className="text-[11px] text-ink-4">tokens per day</span>
-      </div>
-      {series.length === 0 ? (
-        <div className="text-[12px] text-ink-3 py-8 text-center">No data in this range.</div>
-      ) : (
-        <>
-          <div className="overflow-x-auto">
-            <svg height={H} viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px]" preserveAspectRatio="none">
-              {series.map((p, i) => {
-                let y = H;
-                const x = pad + i * step + (step - bw) / 2;
-                return agents.map((a) => {
-                  const v = p.byAgent?.[a] || 0;
-                  const h = (v / max) * (H - 14);
-                  y -= h;
-                  if (h <= 0) return null;
-                  return (
-                    <rect
-                      key={`${p.date}-${a}`}
-                      x={x.toFixed(1)}
-                      y={y.toFixed(1)}
-                      width={bw.toFixed(1)}
-                      height={h.toFixed(1)}
-                      rx={2}
-                      fill={agentColor(a)}
-                    >
-                      <title>{`${p.date} · ${a}: ${fmtTokens(v)}`}</title>
-                    </rect>
-                  );
-                });
-              })}
-            </svg>
-          </div>
-          <div className="relative h-4 mt-1" style={{ minWidth: 420 }}>
-            {tickIdx.map((i) => {
-              const leftPct = ((pad + i * step + step / 2) / W) * 100;
-              return (
-                <span
-                  key={series[i].date}
-                  className="absolute text-[10.5px] text-ink-4 -translate-x-1/2 whitespace-nowrap"
-                  style={{ left: `${leftPct}%` }}
-                >
-                  {series[i].date.slice(5)}
-                </span>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11.5px] text-ink-3">
-            {agents.map((a) => (
-              <span key={a} className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: agentColor(a) }} />
-                {a}
-              </span>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** 4-column detail table (identity / Tokens / Spend / Cache hit) + Total row. */
 function DrillTable({
   data,
   kind,
+  agentFilter,
+  roomLabel,
   onPickAgent,
   onPickRoom,
 }: {
   data: UsageResponse;
   kind: BreakdownKind;
+  agentFilter: string | null;
+  roomLabel: string | null;
   onPickAgent: (a: string | null) => void;
   onPickRoom: (r: string) => void;
 }) {
@@ -539,7 +702,7 @@ function DrillTable({
   rows.sort((a, b) => b.tokens - a.tokens);
 
   const idHead = kind === "agent" ? "Agent" : kind === "room" ? "Room" : "Member";
-  const title = kind === "agent" ? "Agents" : kind === "room" ? "By room" : "Members";
+  const title = kind === "agent" ? "Agents" : kind === "room" ? `${agentFilter} — by room` : `${roomLabel} — members`;
   const totalTokens = rows.reduce((s, r) => s + r.tokens, 0);
   const totalCost = rows.reduce((s, r) => s + r.cost, 0);
   const totalHit = data.kpis.cacheHitRate;
@@ -551,7 +714,7 @@ function DrillTable({
   };
 
   return (
-    <div className="bg-surface-1 border border-line rounded-lg">
+    <div className="bg-surface-1 border border-line rounded-lg self-start">
       <div className="flex items-baseline justify-between px-5 pt-4 pb-1">
         <h3 className="text-[13px] font-semibold text-ink-1">{title}</h3>
         {kind !== "member" && <span className="text-[11px] text-ink-4">click a row to filter</span>}
@@ -593,6 +756,98 @@ function DrillTable({
           </tr>
         </tfoot>
       </table>
+    </div>
+  );
+}
+
+// -- Trend pieces --
+
+/** Full-width stacked columns colored by agent; weekly grouping beyond 60 days. */
+function TrendChart({ data, agentFilter }: { data: UsageResponse; agentFilter: string | null }) {
+  const series = data.series;
+  const agents = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of series) for (const a of Object.keys(p.byAgent || {})) set.add(a);
+    const list = [...set];
+    return agentFilter ? list.filter((a) => a === agentFilter) : list.sort();
+  }, [series, agentFilter]);
+
+  const { rows, weekly } = useMemo(() => bucketSeries(series, agents), [series, agents]);
+  const dayCount = series.length;
+
+  const W = Math.max(560, rows.length * (weekly ? 34 : 26));
+  const H = 220;
+  const pad = 6;
+  const bucketTotal = (r: { per: Record<string, number> }) => agents.reduce((s, a) => s + (r.per[a] || 0), 0);
+  const max = Math.max(...rows.map(bucketTotal), 1);
+  const step = rows.length ? (W - pad * 2) / rows.length : 0;
+  const bw = Math.min(20, step * 0.64);
+  const ticks = tickIndices(rows.length);
+
+  return (
+    <div className="bg-surface-1 border border-line rounded-lg p-5">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="text-[13px] font-semibold text-ink-1">History</h3>
+        <span className="text-[11px] text-ink-4">{weekly ? "tokens per week" : "tokens per day"}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-[12px] text-ink-3 py-8 text-center">No data in this range.</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <svg height={H} viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px]" preserveAspectRatio="none">
+              {rows.map((r, i) => {
+                let y = H;
+                const x = pad + i * step + (step - bw) / 2;
+                return agents.map((a) => {
+                  const v = r.per[a] || 0;
+                  const h = (v / max) * (H - 14);
+                  y -= h;
+                  if (h <= 0) return null;
+                  return (
+                    <rect
+                      key={`${r.label}-${a}`}
+                      x={x.toFixed(1)}
+                      y={y.toFixed(1)}
+                      width={bw.toFixed(1)}
+                      height={h.toFixed(1)}
+                      rx={2}
+                      fill={agentColor(a)}
+                    >
+                      <title>{`${r.label}${weekly ? " (week)" : ""} · ${a}: ${fmtTokens(v)}`}</title>
+                    </rect>
+                  );
+                });
+              })}
+            </svg>
+          </div>
+          <div className="relative h-4 mt-1" style={{ minWidth: 560 }}>
+            {ticks.map((i) => {
+              const leftPct = ((pad + i * step + step / 2) / W) * 100;
+              return (
+                <span
+                  key={rows[i].label}
+                  className="absolute text-[10.5px] text-ink-4 -translate-x-1/2 whitespace-nowrap"
+                  style={{ left: `${leftPct}%` }}
+                >
+                  {rows[i].label.slice(5)}
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between mt-3 gap-4 flex-wrap">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-3">
+              {agents.map((a) => (
+                <span key={a} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: agentColor(a) }} />
+                  {a}
+                </span>
+              ))}
+            </div>
+            {weekly && <div className="text-[11px] text-ink-4">{dayCount} days · grouped weekly for readability</div>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
