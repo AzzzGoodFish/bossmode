@@ -217,9 +217,61 @@ function sessionModelDiffers(sessionManager: SessionManager, provider: string, m
 interface CompactionWatchdogRun {
   maxTokens: number;
   threshold: number;
+  /** Mid-run action line: threshold − WATCHDOG_SAFETY_MARGIN. */
+  actionThreshold: number;
   contextWindow: number;
   model: string;
   compactionEventSeen: boolean;
+  /** Watchdog aborted this run for compaction (mid-run crossing with pending tool calls). */
+  interventionRequested: boolean;
+  /** Assistant stop with empty text and ≤1 output token (max_tokens clamp fault or transient). */
+  emptyStopSeen: boolean;
+}
+
+interface WatchdogTurnState {
+  interventions: number;
+  emptyRetries: number;
+}
+
+/**
+ * Buffer below the SDK compaction threshold for mid-run action. The SDK only
+ * checks compaction at run boundaries; a single tool result can add tens of
+ * thousands of tokens mid-run, so the watchdog acts earlier (2026-07-29 k3
+ * empty-response loop: max_tokens clamped to 1 → empty reply → poisoned usage
+ * blinded the boundary check).
+ */
+const WATCHDOG_SAFETY_MARGIN = 32768;
+
+/**
+ * Action line = threshold − SAFETY_MARGIN, floored at 50% of the window: the
+ * bare formula degenerates for small windows (reserveTokens + margin ≈ the
+ * whole window), which would compact nearly every turn. The floor only affects
+ * windows ≲114k; k3-class windows are unchanged (450848 for a 500k window).
+ */
+function watchdogActionThreshold(contextWindow: number, reserveTokens: number): number {
+  return Math.max(contextWindow - reserveTokens - WATCHDOG_SAFETY_MARGIN, Math.floor(contextWindow / 2));
+}
+
+/** Continue instruction after a watchdog compaction (full prompt path, so the
+ * SDK's post-run handling — boundary compaction check, queue drain — stays intact). */
+const WATCHDOG_CONTINUE_PROMPT =
+  "⚠ Context was automatically compacted to stay within the model's context window. Continue your work from where you stopped.";
+
+/** One verbatim retry nudge for an empty response at LOW usage (transient
+ * provider behavior — compaction is never triggered by response shape). */
+const WATCHDOG_EMPTY_RETRY_PROMPT =
+  "⚠ Your previous response came back empty (no content). Repeat your previous response.";
+
+function assistantTextOf(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c: any) => c?.type === "text")
+    .map((c: any) => c.text || "")
+    .join("");
+}
+
+function assistantHasToolCalls(message: any): boolean {
+  return Array.isArray(message?.content) && message.content.some((c: any) => c?.type === "toolCall");
 }
 
 class PiSdkAgentHandle implements AgentHandle {
@@ -229,6 +281,7 @@ class PiSdkAgentHandle implements AgentHandle {
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
+  private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
   private destroyed = false;
 
@@ -276,9 +329,12 @@ class PiSdkAgentHandle implements AgentHandle {
     this.compactionWatchdogRun = {
       maxTokens: 0,
       threshold: contextWindow - reserveTokens,
+      actionThreshold: watchdogActionThreshold(contextWindow, reserveTokens),
       contextWindow,
       model: model?.provider && model?.id ? `${model.provider}/${model.id}` : (this.runtimeParams.model || "unknown"),
       compactionEventSeen: false,
+      interventionRequested: false,
+      emptyStopSeen: false,
     };
   }
 
@@ -289,24 +345,179 @@ class PiSdkAgentHandle implements AgentHandle {
       run.compactionEventSeen = true;
       return;
     }
+    // The run ended right after a watchdog abort: repair dangling tool calls
+    // NOW (synchronously), before the SDK's own post-run compaction check
+    // summarizes the branch — a tool_use without tool_result breaks that request.
+    if (raw?.type === "agent_end" && run.interventionRequested) {
+      this.synthesizeDanglingToolResults("watchdog-abort");
+      return;
+    }
     if (raw?.type !== "message_end" || raw.message?.role !== "assistant") return;
     if (raw.message.stopReason === "error" || raw.message.stopReason === "aborted") return;
     const usage = raw.message.usage;
     if (!usage) return;
     const tokens = Number(usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)));
     if (Number.isFinite(tokens) && tokens > run.maxTokens) run.maxTokens = tokens;
+
+    const hasToolCalls = assistantHasToolCalls(raw.message);
+    if (
+      raw.message.stopReason === "stop" &&
+      !hasToolCalls &&
+      assistantTextOf(raw.message.content).trim().length === 0 &&
+      Number(usage.output ?? 0) <= 1
+    ) {
+      run.emptyStopSeen = true;
+    }
+
+    // Mid-run action: real usage crossed the action line and the turn continues
+    // (tool calls pending). The SDK has no checkpoint until the run boundary, so
+    // without this the next request can be clamped to max_tokens=1 (empty reply).
+    if (
+      !run.interventionRequested &&
+      this.watchdogTurn && this.watchdogTurn.interventions === 0 &&
+      run.actionThreshold > 0 &&
+      run.maxTokens > run.actionThreshold &&
+      hasToolCalls
+    ) {
+      run.interventionRequested = true;
+      logger.warn("runtime:pi-sdk", "compaction watchdog: mid-run crossing, aborting for compaction", {
+        model: run.model,
+        maxTokens: run.maxTokens,
+        actionThreshold: run.actionThreshold,
+        contextWindow: run.contextWindow,
+      });
+      void this.session.abort().catch((err) => {
+        logger.error("runtime:pi-sdk", "compaction watchdog: abort failed", { error: String(err) });
+      });
+    }
   }
 
-  private finishCompactionWatchdogRun(): void {
+  /**
+   * Append failure tool results for tool calls the aborted run never executed
+   * (the agent loop's abort path only finalizes in-flight calls). Mirrors the
+   * SDK's failToolCallsFromTruncatedMessage precedent. Writes both the session
+   * branch (summarization input) and live agent state (next request input).
+   */
+  private synthesizeDanglingToolResults(trigger: string): number {
+    try {
+      const messages = (this.session as any).state?.messages as any[] | undefined;
+      const sessionManager = (this.session as any).sessionManager;
+      if (!Array.isArray(messages) || typeof sessionManager?.appendMessage !== "function") return 0;
+      let assistantIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const role = messages[i]?.role;
+        if (role === "assistant") { assistantIdx = i; break; }
+        if (role === "user") break; // turn boundary — nothing dangling from this turn
+      }
+      if (assistantIdx < 0) return 0;
+      const assistant = messages[assistantIdx];
+      const toolCalls = Array.isArray(assistant.content) ? assistant.content.filter((c: any) => c?.type === "toolCall") : [];
+      if (toolCalls.length === 0) return 0;
+      const answered = new Set<string>();
+      for (let i = assistantIdx + 1; i < messages.length; i++) {
+        const m = messages[i];
+        if (m?.role === "toolResult" && m.toolCallId) answered.add(m.toolCallId);
+      }
+      let synthesized = 0;
+      for (const tc of toolCalls) {
+        if (!tc?.id || answered.has(tc.id)) continue;
+        const resultMessage = {
+          role: "toolResult",
+          toolCallId: tc.id,
+          toolName: tc.name,
+          content: [{ type: "text", text: `Tool call "${tc.name}" was not executed: the turn was interrupted for automatic context compaction. Re-issue the tool call.` }],
+          isError: true,
+          timestamp: Date.now(),
+        };
+        sessionManager.appendMessage(resultMessage);
+        messages.push(resultMessage);
+        synthesized++;
+      }
+      if (synthesized > 0) {
+        logger.warn("runtime:pi-sdk", "compaction watchdog: synthesized failure results for dangling tool calls", { count: synthesized, trigger });
+      }
+      return synthesized;
+    } catch (err) {
+      logger.error("runtime:pi-sdk", "compaction watchdog: dangling tool result synthesis failed", { error: String(err) });
+      return 0;
+    }
+  }
+
+  private finishCompactionWatchdogRun(): CompactionWatchdogRun | null {
     const run = this.compactionWatchdogRun;
     this.compactionWatchdogRun = null;
-    if (!run || run.compactionEventSeen || run.maxTokens <= 0 || run.maxTokens <= run.threshold) return;
-    logger.warn("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", {
-      model: run.model,
-      maxTokens: run.maxTokens,
-      contextWindow: run.contextWindow,
-      threshold: run.threshold,
-    });
+    if (!run) return null;
+    if (!run.compactionEventSeen && !run.interventionRequested && run.maxTokens > 0 && run.maxTokens > run.threshold) {
+      logger.warn("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", {
+        model: run.model,
+        maxTokens: run.maxTokens,
+        contextWindow: run.contextWindow,
+        threshold: run.threshold,
+      });
+    }
+    return run;
+  }
+
+  /**
+   * Post-run watchdog decisions. Returns the next prompt to run (continue after
+   * compaction / one empty-response retry), or null to settle the turn.
+   */
+  private async afterWatchdogRun(run: CompactionWatchdogRun | null): Promise<string | null> {
+    const turn = this.watchdogTurn;
+    if (!run || !turn || this.destroyed) return null;
+
+    // A: mid-run intervention — the abort already happened; compact (unless the
+    // SDK's own boundary check beat us to it), then continue the turn.
+    if (run.interventionRequested && turn.interventions === 0) {
+      turn.interventions++;
+      await this.compactForWatchdog(run, "mid-run threshold crossing");
+      return WATCHDOG_CONTINUE_PROMPT;
+    }
+
+    // B: empty assistant response (stop + no text + ≤1 output token).
+    if (run.emptyStopSeen) {
+      // Fault mode (usage near the clamp zone): compaction is decided by token
+      // usage, never by response shape (fish 2026-07-29). The band is only armed
+      // when it is positive — degenerate small windows fall through to the
+      // generic retry below.
+      const faultBandStart = run.actionThreshold - WATCHDOG_SAFETY_MARGIN;
+      if (turn.interventions === 0 && faultBandStart > 0 && run.maxTokens > faultBandStart) {
+        turn.interventions++;
+        await this.compactForWatchdog(run, "empty response near context limit");
+        return WATCHDOG_CONTINUE_PROMPT;
+      }
+      // Generic transient (low usage): one verbatim retry, then a visible error.
+      if (turn.emptyRetries === 0) {
+        turn.emptyRetries++;
+        logger.warn("runtime:pi-sdk", "empty assistant response, retrying once", { model: run.model });
+        return WATCHDOG_EMPTY_RETRY_PROMPT;
+      }
+      throw new Error("Model returned an empty response twice in a row. Try again, or compact/reset the session if it persists.");
+    }
+    return null;
+  }
+
+  private async compactForWatchdog(run: CompactionWatchdogRun, reason: string): Promise<void> {
+    if (run.compactionEventSeen) {
+      // The SDK's own post-run check already compacted after our abort.
+      logger.info("runtime:pi-sdk", "compaction watchdog: SDK compaction already handled", { model: run.model, reason });
+      return;
+    }
+    try {
+      logger.warn("runtime:pi-sdk", "compaction watchdog: compacting", {
+        model: run.model,
+        reason,
+        maxTokens: run.maxTokens,
+        actionThreshold: run.actionThreshold,
+      });
+      await this.session.compact();
+    } catch (err: any) {
+      const message = err?.message || String(err);
+      // Raced with an SDK compaction (or nothing worth compacting) — fine.
+      if (/already compacted|nothing to compact/i.test(message)) return;
+      // No automatic retry (avoid retry storms): surface the failure instead.
+      throw new Error(`Automatic context compaction failed: ${message}`);
+    }
   }
 
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
@@ -316,16 +527,29 @@ class PiSdkAgentHandle implements AgentHandle {
 
   async prompt(message: string): Promise<void> {
     if (message === "/compact") return this.compact();
-    this.startCompactionWatchdogRun();
-    const run = this.session.prompt(message, { source: "external" as any }).catch((err) => {
-      this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
-      throw err;
-    }).finally(() => {
-      this.finishCompactionWatchdogRun();
-      if (this.currentRun === run) this.currentRun = null;
-    });
-    this.currentRun = run;
-    await run;
+    this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
+    try {
+      let next: string | null = message;
+      while (next !== null) {
+        this.startCompactionWatchdogRun();
+        const run = this.session.prompt(next, { source: "external" as any }).catch((err) => {
+          this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
+          throw err;
+        }).finally(() => {
+          if (this.currentRun === run) this.currentRun = null;
+        });
+        this.currentRun = run;
+        let settled: CompactionWatchdogRun | null = null;
+        try {
+          await run;
+        } finally {
+          settled = this.finishCompactionWatchdogRun();
+        }
+        next = await this.afterWatchdogRun(settled);
+      }
+    } finally {
+      this.watchdogTurn = null;
+    }
   }
 
   steer(message: string): void {

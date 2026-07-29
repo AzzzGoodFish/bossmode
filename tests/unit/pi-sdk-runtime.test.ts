@@ -675,3 +675,220 @@ describe("PiSdkRuntime", () => {
   });
 
 });
+
+// -- Compaction watchdog action (2026-07-29 k3 empty-response loop fix) --
+
+interface WatchdogMock {
+  session: any;
+  calls: string[];
+  messages: any[];
+  appended: any[];
+  emit: (e: any) => void;
+}
+
+function makeWatchdogSession(opts: {
+  contextWindow: number;
+  reserveTokens: number;
+  onPrompt: (m: WatchdogMock) => Promise<void>;
+}): WatchdogMock {
+  const mock: WatchdogMock = {
+    calls: [],
+    messages: [],
+    appended: [],
+    session: null,
+    emit: () => {},
+  };
+  let listener: ((event: any) => void) | undefined;
+  mock.emit = (e) => listener?.(e);
+  settingsGetCompactionSettings.mockReturnValue({ enabled: true, reserveTokens: opts.reserveTokens, keepRecentTokens: 20000 });
+  mock.session = {
+    subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
+    prompt: vi.fn(async (text: string) => { mock.calls.push(text); await opts.onPrompt(mock); }),
+    steer: vi.fn(),
+    abort: vi.fn(async () => {}),
+    abortCompaction: vi.fn(),
+    abortBranchSummary: vi.fn(),
+    dispose: vi.fn(),
+    reload: vi.fn(),
+    compact: vi.fn(async () => ({ summary: "s", firstKeptEntryId: "x", tokensBefore: 1 })),
+    setModel: vi.fn(),
+    setThinkingLevel: vi.fn(),
+    setActiveToolsByName: vi.fn(),
+    getActiveToolNames: vi.fn(() => []),
+    getAllTools: vi.fn(() => []),
+    bindExtensions: sessionBindExtensions,
+    extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
+    sessionId: "session-a",
+    sessionFile: join(dir, "session.json"),
+    thinkingLevel: "off",
+    settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+    model: { provider: "kimi-coding", id: "k3", contextWindow: opts.contextWindow },
+    state: { messages: mock.messages },
+    sessionManager: { appendMessage: vi.fn((m: any) => { mock.appended.push(m); return "id"; }) },
+  };
+  return mock;
+}
+
+function assistantMsg(totalTokens: number, content: any[], stopReason = "toolUse") {
+  return { role: "assistant", stopReason, usage: { input: totalTokens, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens }, content, timestamp: Date.now() };
+}
+
+describe("PiSdkAgentHandle compaction watchdog action", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-watchdog-"));
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    bossmodeConfig = { runtime: { sessionResume: false }, mcp: { enabled: false } };
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("mid-run crossing with pending tool calls: aborts, repairs dangling calls, compacts once, continues", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000, // threshold 49000, action line max(16232, 25000) = 25000
+      onPrompt: async (m) => {
+        if (m.calls.length > 1) return; // continuation run: idle
+        const assistant = assistantMsg(30000, [
+          { type: "toolCall", id: "tc1", name: "read", arguments: {} },
+          { type: "toolCall", id: "tc2", name: "bash", arguments: {} },
+        ]);
+        m.messages.push(assistant);
+        m.messages.push({ role: "toolResult", toolCallId: "tc1", toolName: "read", content: [{ type: "text", text: "Operation aborted" }], isError: true, timestamp: Date.now() });
+        m.emit({ type: "message_end", message: assistant });
+        m.emit({ type: "agent_end", messages: [] });
+      },
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await handle.prompt("do work");
+
+    expect(mock.session.abort).toHaveBeenCalledTimes(1); // watchdog aborted the run
+    expect(mock.session.compact).toHaveBeenCalledTimes(1); // exactly one compaction
+    expect(mock.calls).toHaveLength(2);
+    expect(mock.calls[1]).toContain("automatically compacted"); // continue instruction
+    // Dangling tc2 repaired into both the session branch and live state; tc1 untouched.
+    expect(mock.appended).toHaveLength(1);
+    expect(mock.appended[0]).toMatchObject({ role: "toolResult", toolCallId: "tc2", isError: true });
+    expect(mock.messages.filter((m) => m.role === "toolResult" && m.toolCallId === "tc2")).toHaveLength(1);
+    expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "compaction watchdog: mid-run crossing, aborting for compaction", expect.any(Object));
+  });
+
+  it("crossing at a natural run end (no tool calls): watchdog does not act (SDK boundary check owns it)", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000,
+      onPrompt: async (m) => {
+        m.emit({ type: "message_end", message: assistantMsg(30000, [{ type: "text", text: "done" }], "stop") });
+        m.emit({ type: "agent_end", messages: [] });
+      },
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await handle.prompt("do work");
+
+    expect(mock.session.abort).not.toHaveBeenCalled();
+    expect(mock.session.compact).not.toHaveBeenCalled();
+    expect(mock.calls).toEqual(["do work"]);
+  });
+
+  it("empty response at low usage: one verbatim retry, then a visible error (no compaction)", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000,
+      onPrompt: async () => {},
+    });
+    // Every run ends on an empty assistant response (stop + no text + 1 output token).
+    mock.session.prompt = vi.fn(async (text: string) => {
+      mock.calls.push(text);
+      mock.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: { input: 100, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 100 }, content: [], timestamp: Date.now() } });
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await expect(handle.prompt("do work")).rejects.toThrow(/empty response twice/);
+
+    expect(mock.calls).toHaveLength(2); // original + one retry
+    expect(mock.calls[1]).toContain("came back empty");
+    expect(mock.session.compact).not.toHaveBeenCalled();
+    expect(mock.session.abort).not.toHaveBeenCalled();
+  });
+
+  it("empty response with usage near the clamp zone: compaction + continue (usage-driven, not shape-driven)", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 200000,
+      reserveTokens: 16384, // threshold 183616, action 150848, fault band start 118080
+      onPrompt: async () => {},
+    });
+    mock.session.prompt = vi.fn(async (text: string) => {
+      mock.calls.push(text);
+      if (mock.calls.length > 1) return; // continuation: idle
+      mock.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: { input: 120000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 120000 }, content: [], timestamp: Date.now() } });
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await handle.prompt("do work");
+
+    expect(mock.session.compact).toHaveBeenCalledTimes(1);
+    expect(mock.calls).toHaveLength(2);
+    expect(mock.calls[1]).toContain("automatically compacted"); // continue, not the empty-retry nudge
+  });
+
+  it("compaction failure: visible error, no automatic retry", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000,
+      onPrompt: async (m) => {
+        if (m.calls.length > 1) return;
+        const assistant = assistantMsg(30000, [{ type: "toolCall", id: "tc1", name: "read", arguments: {} }]);
+        m.messages.push(assistant);
+        m.emit({ type: "message_end", message: assistant });
+        m.emit({ type: "agent_end", messages: [] });
+      },
+    });
+    mock.session.compact = vi.fn(async () => { throw new Error("summary request failed"); });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await expect(handle.prompt("do work")).rejects.toThrow(/Automatic context compaction failed: summary request failed/);
+
+    expect(mock.session.compact).toHaveBeenCalledTimes(1); // no retry
+    expect(mock.calls).toEqual(["do work"]); // no continuation after failure
+  });
+
+  it("skips our own compact when the SDK already compacted after the abort", async () => {
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000,
+      onPrompt: async (m) => {
+        if (m.calls.length > 1) return;
+        const assistant = assistantMsg(30000, [{ type: "toolCall", id: "tc1", name: "read", arguments: {} }]);
+        m.messages.push(assistant);
+        m.emit({ type: "message_end", message: assistant });
+        // SDK's own post-run check fires after our abort: compaction events arrive.
+        m.emit({ type: "agent_end", messages: [] });
+        m.emit({ type: "compaction_start", reason: "threshold" });
+        m.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+      },
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+
+    await handle.prompt("do work");
+
+    expect(mock.session.compact).not.toHaveBeenCalled(); // SDK handled it
+    expect(mock.calls).toHaveLength(2); // still continues the turn
+    expect(mock.calls[1]).toContain("automatically compacted");
+  });
+});
