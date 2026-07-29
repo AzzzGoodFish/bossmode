@@ -53,6 +53,36 @@ describe("watch-trigger", () => {
     unsubscribe();
   });
 
+  it("fire posts a room system note (consumed)", async () => {
+    const { unsubscribe, addWatch, postMessage } = await setup();
+    const { getMessages } = await import("../../src/workspace/message-store.js");
+    addWatch(roomId, ids.pm, ids.qa);
+
+    postMessage(roomId, "qa", "QA report ready", [], { senderMemberId: ids.qa });
+
+    const notes = getMessages(roomId).filter((m) => m.sender === "system").map((m) => m.content);
+    expect(notes).toContain("pm's watch on qa fired (consumed).");
+    unsubscribe();
+  });
+
+  it("expired watches surface as room system notes while the room is active", async () => {
+    const { onTrigger, unsubscribe, postMessage } = await setup();
+    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const now = Date.now();
+    writeFileSync(join(tmpDir, "rooms", roomId, "watches.json"), JSON.stringify([
+      { id: "watch-stale", watcherMemberId: ids.pm, targetMemberId: ids.qa, createdAt: now - 8 * 24 * 3600_000, expiresAt: now - 1000 },
+    ]), "utf-8");
+
+    postMessage(roomId, "developer", "any member message", [], { senderMemberId: ids.developer });
+
+    const notes = getMessages(roomId).filter((m) => m.sender === "system").map((m) => m.content);
+    expect(notes).toContain("pm's watch on qa expired.");
+    expect(onTrigger).not.toHaveBeenCalled(); // expired ≠ fired
+    unsubscribe();
+  });
+
   it("user and system messages never trigger", async () => {
     const { onTrigger, unsubscribe, addWatch, postMessage } = await setup();
     addWatch(roomId, ids.pm, ids.qa);

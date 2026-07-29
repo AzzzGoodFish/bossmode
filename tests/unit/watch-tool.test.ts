@@ -50,6 +50,18 @@ describe("watch tool — execution gate + actions", () => {
     expect(empty.watches).toHaveLength(0);
   });
 
+  it("subscribe and unsubscribe post room system notes", async () => {
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { getMessages } = await import("../../src/workspace/message-store.js");
+
+    await handleToolCallback("watch", roomId, "pm", { action: "subscribe", member: "qa" });
+    await handleToolCallback("watch", roomId, "pm", { action: "unsubscribe", member: "qa" });
+
+    const notes = getMessages(roomId).filter((m) => m.sender === "system").map((m) => m.content);
+    expect(notes).toContain("pm watched qa (one-shot, expires in 7 days).");
+    expect(notes).toContain("pm unwatched qa.");
+  });
+
   it("re-subscribing replaces (still one watch)", async () => {
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     await handleToolCallback("watch", roomId, "pm", { action: "subscribe", member: "qa" });

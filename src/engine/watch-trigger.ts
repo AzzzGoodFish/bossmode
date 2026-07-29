@@ -6,10 +6,14 @@
 // present — user/system messages never do); a watch on the sender's own id is
 // skipped; consume-before-activate (先销后激活) — no retry on activation failure.
 
-import { onMessage } from "../communication/message-bus.js";
+import { onMessage, postMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
-import { findWatchesForTarget, consumeWatch } from "../workspace/watch-store.js";
+import { findWatchesForTarget, consumeWatch, sweepExpired } from "../workspace/watch-store.js";
 import { findRoomMemberById } from "../workspace/room-store.js";
+
+function memberLabel(roomId: string, memberId: string): string {
+  return findRoomMemberById(roomId, memberId)?.name || memberId;
+}
 
 /** Initialize watch trigger: subscribe to message-bus, invoke callback per hit watch. */
 export function initWatchTrigger(
@@ -17,6 +21,13 @@ export function initWatchTrigger(
 ): () => void {
   return onMessage((roomId, message) => {
     if (!message.senderMemberId) return; // user/system messages never trigger
+
+    // Lazy TTL: surface expirations while the room is active (system-note style,
+    // same rendering as the reply-debt warning). Re-entrant-safe: system notes
+    // have no senderMemberId, so they early-return in this same listener.
+    for (const w of sweepExpired(roomId)) {
+      postMessage(roomId, "system", `${memberLabel(roomId, w.watcherMemberId)}'s watch on ${memberLabel(roomId, w.targetMemberId)} expired.`);
+    }
 
     const hits = findWatchesForTarget(roomId, message.senderMemberId)
       .filter((w) => w.watcherMemberId !== message.senderMemberId);
@@ -34,6 +45,8 @@ export function initWatchTrigger(
         continue;
       }
       logger.info("watch", "trigger", { roomId, watchId: watch.id, watcher: watcher.name, target: targetName, msgId: message.id });
+      // Room-visible note before activation (deterministic stream order).
+      postMessage(roomId, "system", `${watcher.name}'s watch on ${targetName} fired (consumed).`);
       onTrigger(roomId, watch.watcherMemberId, targetName);
     }
   });

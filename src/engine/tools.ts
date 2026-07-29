@@ -436,7 +436,14 @@ export async function handleToolCallback(
       if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; watch is unavailable" };
       if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can manage watches" };
 
-      const { addWatch, removeWatch, listWatches } = await import("../workspace/watch-store.js");
+      const { addWatch, removeWatch, listWatches, sweepExpired } = await import("../workspace/watch-store.js");
+      // Lazy TTL: surface expirations as room system notes (same style as the
+      // reply-debt warning) before handling the action.
+      for (const w of sweepExpired(roomId)) {
+        const wName = (roomStore as any).findRoomMemberById(roomId, w.watcherMemberId)?.name || w.watcherMemberId;
+        const tName = (roomStore as any).findRoomMemberById(roomId, w.targetMemberId)?.name || w.targetMemberId;
+        postMessage(roomId, "system", `${wName}'s watch on ${tName} expired.`);
+      }
       const action = String(params?.action || "").trim();
       const resolveTarget = () => {
         const ref = String(params?.member || "").trim();
@@ -460,12 +467,15 @@ export async function handleToolCallback(
         if ("error" in r) return { ok: false, error: r.error };
         if (r.target.id === actor.id) return { ok: false, error: "Cannot watch yourself" };
         const rec = addWatch(roomId, actor.id, r.target.id);
+        postMessage(roomId, "system", `${actor.name} watched ${r.target.name} (one-shot, expires in 7 days).`);
         return { ok: true, watch: present(rec) };
       }
       if (action === "unsubscribe") {
         const r = resolveTarget();
         if ("error" in r) return { ok: false, error: r.error };
-        return { ok: true, removed: removeWatch(roomId, actor.id, r.target.id), target: r.target.name };
+        const removed = removeWatch(roomId, actor.id, r.target.id);
+        if (removed) postMessage(roomId, "system", `${actor.name} unwatched ${r.target.name}.`);
+        return { ok: true, removed, target: r.target.name };
       }
       return { ok: false, error: "action must be 'subscribe', 'list', or 'unsubscribe'" };
     }

@@ -45,6 +45,20 @@ function sweep(roomId: string): WatchRecord[] {
   return live;
 }
 
+/**
+ * Drop expired records and RETURN the dropped ones, so callers can post a
+ * room-visible expiry note. Pure storage: no message posting here — callers
+ * (watch tool actions, watch trigger) own notification.
+ */
+export function sweepExpired(roomId: string): WatchRecord[] {
+  const now = Date.now();
+  const all = readRaw(roomId);
+  const dropped = all.filter((w) => w.expiresAt <= now);
+  if (dropped.length === 0) return [];
+  writeRaw(roomId, all.filter((w) => w.expiresAt > now));
+  return dropped;
+}
+
 /** One live watch per (watcher, target); re-subscribe replaces. Returns the stored record. */
 export function addWatch(roomId: string, watcherMemberId: string, targetMemberId: string): WatchRecord {
   const live = sweep(roomId).filter((w) => !(w.watcherMemberId === watcherMemberId && w.targetMemberId === targetMemberId));

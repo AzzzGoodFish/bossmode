@@ -91,6 +91,20 @@ describe("watch-store", () => {
     expect(store.listWatches("room-a")).toEqual([]);
   });
 
+  it("sweepExpired returns dropped records once and rewrites the file", async () => {
+    const store = await import("../../src/workspace/watch-store.js");
+    const path = join(tmpDir, "rooms", "room-a", "watches.json");
+    const now = Date.now();
+    writeFileSync(path, JSON.stringify([
+      { id: "watch-old", watcherMemberId: "rm_pm", targetMemberId: "rm_qa", createdAt: now - 8 * 24 * 3600_000, expiresAt: now - 1000 },
+      { id: "watch-new", watcherMemberId: "rm_pm", targetMemberId: "rm_dev", createdAt: now, expiresAt: now + 1000 },
+    ]), "utf-8");
+    const dropped = store.sweepExpired("room-a");
+    expect(dropped.map((w) => w.id)).toEqual(["watch-old"]);
+    expect(store.sweepExpired("room-a")).toEqual([]); // already swept — notify once
+    expect(store.listWatches("room-a").map((w) => w.id)).toEqual(["watch-new"]);
+  });
+
   it("persists across module re-import (restart survival)", async () => {
     let store = await import("../../src/workspace/watch-store.js");
     store.addWatch("room-a", "rm_pm", "rm_qa");
