@@ -177,7 +177,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpe
         toast(`${member.name} model updated. It applies on the next turn.`, "success");
       } catch (err) {
         console.error("Failed to update member model", err);
-        toast("Couldn’t update the model. Check the connection in Settings → Models, then try again.", "error");
+        const detail = err instanceof Error && err.message ? err.message : "Check the connection in Settings → Models, then try again.";
+        toast(`Couldn’t update the model. ${detail}`, "error");
       }
     },
     [roomId, toast],

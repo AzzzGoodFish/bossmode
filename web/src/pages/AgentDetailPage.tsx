@@ -128,7 +128,8 @@ export function AgentDetailPage({ name, onBack, isCreate, onCreated, onOpenMobil
       loadDuty();
     } catch (err) {
       console.error("Failed to update member model", err);
-      toast("Couldn’t update the model. Check the connection in Settings → Models, then try again.", "error");
+      const detail = err instanceof Error && err.message ? err.message : "Check the connection in Settings → Models, then try again.";
+      toast(`Couldn’t update the model. ${detail}`, "error");
     }
   };
 

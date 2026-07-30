@@ -583,18 +583,38 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     result.taskReferencesUpdated = taskStore.renameParticipant(params.id, { memberId: renamed.member.id, oldName, newName: renamed.member.name });
   }
 
-  if (hasModel || hasCredential || hasThinking || hasMcpServers || hasExtensions) {
-    roomStore.updateRoomMemberOverride(params.id, currentMemberRef, patch);
+  if (hasThinking || hasMcpServers || hasExtensions) {
+    // Non-model fields commit immediately. Model/credential go through
+    // switchMemberModel so the live instance is updated before room.json.
+    const nonModelPatch: { thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null } = {};
+    if (hasThinking) nonModelPatch.thinkingLevel = patch.thinkingLevel;
+    if (hasMcpServers) nonModelPatch.mcpServers = patch.mcpServers;
+    if (hasExtensions) nonModelPatch.extensions = patch.extensions;
+    roomStore.updateRoomMemberOverride(params.id, currentMemberRef, nonModelPatch);
   }
-  const effective = resolveRoomMember(params.id, currentMemberRef);
-  result.member = effective;
   try {
-    if (hasModel && effective?.model) result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, effective.model, effective.credentialId);
-    if (hasThinking && effective?.thinkingLevel) result.thinkingSwitch = await switchMemberThinkingLevel(params.id, currentMemberRef, effective.thinkingLevel);
+    if (hasModel || hasCredential) {
+      const current = resolveRoomMember(params.id, currentMemberRef);
+      const targetModel = hasModel ? (patch.model ?? null) : (current?.model ?? null);
+      const targetCred = hasCredential ? (patch.credentialId ?? null) : (current?.credentialId ?? null);
+      if (targetModel) {
+        result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, targetModel, targetCred);
+      } else {
+        // Clearing the model binding — no live switch to apply.
+        roomStore.updateRoomMemberOverride(params.id, currentMemberRef, { model: null, credentialId: null });
+      }
+    }
+    if (hasThinking) {
+      const effectiveThinking = resolveRoomMember(params.id, currentMemberRef);
+      if (effectiveThinking?.thinkingLevel) {
+        result.thinkingSwitch = await switchMemberThinkingLevel(params.id, currentMemberRef, effectiveThinking.thinkingLevel);
+      }
+    }
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
     return;
   }
+  result.member = resolveRoomMember(params.id, currentMemberRef);
   sendJson(res, 200, result);
 });
 

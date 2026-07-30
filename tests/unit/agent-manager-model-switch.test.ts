@@ -392,7 +392,9 @@ describe("agent-manager model hot switch", () => {
 
     const result = await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
 
-    expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: true, pending: false }]);
+    // profileUpdated returns immediately; refresh runs in the background.
+    expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: false, pending: true }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(handles).toHaveLength(1);
     expect(handles[0].refreshCalls).toBe(1);
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-a"]);
@@ -442,7 +444,7 @@ describe("agent-manager model hot switch", () => {
     expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
   });
 
-  it("drops an idle active agent when refresh/rebind fails", async () => {
+  it("drops an idle active agent when refresh/rebind fails with a non-transient error", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");
@@ -450,10 +452,66 @@ describe("agent-manager model hot switch", () => {
     first.failSetModel = true;
 
     await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(first.destroyed).toBe(true);
     expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
     expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+  });
+
+  it("does not drop the instance when credential refresh hits a transient network error", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const bus = await import("../../src/communication/message-bus.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.failRefresh = true;
+    // Make the refresh error look like a network failure.
+    first.refreshModelRegistry = async () => { throw new Error("fetch failed: ECONNREFUSED"); };
+
+    await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.destroyed).toBe(false);
+    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    expect(bus.postMessage).not.toHaveBeenCalledWith(
+      "room",
+      "system",
+      expect.stringContaining("model credential is no longer available"),
+    );
+  });
+
+  it("does not commit the room binding when setModel fails", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.failSetModel = true;
+    const overridesBefore = (roomStore.updateRoomMemberOverride as any).mock.calls.length;
+
+    await expect(manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a")).rejects.toThrow(/setModel failed/);
+
+    // Binding write happens only after a successful apply — no new override call.
+    expect((roomStore.updateRoomMemberOverride as any).mock.calls.length).toBe(overridesBefore);
+    expect(member.model).toBe("anthropic/claude-a"); // unchanged
+  });
+
+  it("commits the room binding only after a successful live apply", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    await manager.activateAgent("room", "pm");
+
+    await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a");
+
+    expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
+    expect(roomStore.updateRoomMemberOverride).toHaveBeenCalledWith(
+      "room",
+      "pm",
+      expect.objectContaining({ model: "anthropic/claude-b", credentialId: "cred-a" }),
+    );
+    // setModel was called before the override write (apply-then-commit).
+    const setModelOrder = handles[0].setModelCalls.length; // already 1
+    expect(setModelOrder).toBe(1);
+    expect(member.model).toBe("anthropic/claude-b");
   });
 
   it("filters all member runtime failure system messages from activation prompts", async () => {
