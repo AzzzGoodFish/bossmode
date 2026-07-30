@@ -34,7 +34,7 @@ import {
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
-import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "./model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -300,7 +300,11 @@ function normalizeSwitchModelRef(model: string): string {
 
 /** Apply model/credential switch immediately via setModel + models.json refresh.
  * Credentials are live-read per request (MemberCredentialStore), so no session
- * recreate and no end-of-turn queue — next model call uses the new binding. */
+ * recreate and no end-of-turn queue — next model call uses the new binding.
+ *
+ * Cross-provider: setModel auth-checks the *new* provider before room.json is
+ * updated, so we install an instance-level credential override first. On failure
+ * the override is rolled back and the room binding is never touched. */
 async function applyModelSwitchToInstance(
   instance: AgentInstance,
   pending: { model: string; credentialId?: string },
@@ -316,12 +320,24 @@ async function applyModelSwitchToInstance(
   });
   if (!exported) throw new Error(`No model credentials configured for ${model}`);
   const resolvedCredentialId = exported.profile?.id || credentialId;
+  if (!resolvedCredentialId) throw new Error(`No model credentials configured for ${model}`);
 
   if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
-  if (instance.handle.refreshModelRegistry) {
-    await Promise.resolve(instance.handle.refreshModelRegistry());
+
+  // Pin the target credential so setModel's checkAuth(newProvider) resolves
+  // before room.json commits the binding (2026-07-30 QA cross-provider block).
+  const previousOverride = getMemberActiveCredentialOverride(instance.roomId, instance.memberId);
+  setMemberActiveCredentialOverride(instance.roomId, instance.memberId, resolvedCredentialId);
+  try {
+    if (instance.handle.refreshModelRegistry) {
+      await Promise.resolve(instance.handle.refreshModelRegistry());
+    }
+    await instance.handle.setModel(model);
+  } catch (err) {
+    setMemberActiveCredentialOverride(instance.roomId, instance.memberId, previousOverride ?? null);
+    throw err;
   }
-  await instance.handle.setModel(model);
+
   if (instance.handle.runtimeParams) {
     instance.handle.runtimeParams.model = model;
     instance.handle.runtimeParams.credentialId = resolvedCredentialId;
@@ -391,6 +407,7 @@ function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason:
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
   contextCompactionWarningCache.delete(key);
+  setMemberActiveCredentialOverride(instance.roomId, instance.memberId, null);
   try { instance.unsubscribe(); } catch {}
   try { instance.handle.destroy(); } catch {}
   instance.status = "inactive";
@@ -447,6 +464,9 @@ async function applyCredentialRefreshToInstance(instance: AgentInstance, pending
       instance.handle.runtimeParams.credentialName = exported.profile?.name;
     }
     instance.appliedCredentialId = exported.profile?.id || instance.appliedCredentialId;
+    if (instance.appliedCredentialId) {
+      setMemberActiveCredentialOverride(instance.roomId, instance.memberId, instance.appliedCredentialId);
+    }
     logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: instance.roomId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
   } catch (err) {
     // Profile gone / export empty already dropped above. Network/timeouts must NOT
@@ -1330,6 +1350,8 @@ export function destroyInstance(roomId: string, memberRef: string): void {
   const memberName = resolved?.name || memberRef;
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
+  // Drop any live credential override so a recreated instance starts from room binding.
+  setMemberActiveCredentialOverride(roomId, memberId, null);
   if (instance) {
     instance.handle.abort();
     instance.handle.destroy();

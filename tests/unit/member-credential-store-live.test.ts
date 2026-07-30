@@ -68,6 +68,35 @@ describe("member credential store live-read", () => {
     expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
   });
 
+  it("serves the instance-level active credential override before room binding (cross-provider switch)", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-a", name: "Claude A", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, input: ["text"] },
+      { provider: "openai", id: "gpt-x", name: "GPT X", api: "openai-completions", baseUrl: "https://api.openai.com/v1", contextWindow: 128000, input: ["text"] },
+    ]);
+    const anthropic = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", name: "Anthropic" });
+    const openai = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-oai", name: "OpenAI" });
+
+    // Room still bound to anthropic (pre-commit of a live switch).
+    boundMember = { id: "rm_dev", name: "dev", credentialId: anthropic.id };
+    const store = mod.createMemberCredentialStore("room-1", "rm_dev");
+    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
+    expect(await store.read("openai")).toBeUndefined();
+
+    // Switch path pins the target credential before setModel / room.json write.
+    mod.setMemberActiveCredentialOverride("room-1", "rm_dev", openai.id);
+    expect(await store.read("openai")).toEqual({ type: "api_key", key: "sk-oai" });
+    // Override fully replaces room binding for resolution — old provider no longer served.
+    expect(await store.read("anthropic")).toBeUndefined();
+
+    // Rollback on failed setModel clears the override → room binding again.
+    mod.setMemberActiveCredentialOverride("room-1", "rm_dev", null);
+    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
+    expect(await store.read("openai")).toBeUndefined();
+    mod.setPiCatalogModelsForTests(null);
+  });
+
   it("materializes all enabled providers into models.json without secrets", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const openrouter = mod.saveModelCredentialProfile({

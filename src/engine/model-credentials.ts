@@ -368,11 +368,37 @@ class ProfileCredentialStore implements CredentialStore {
 }
 
 /**
- * Per-request credential resolution for a live room member.
- * Holds (roomId, memberId) and re-reads the member's current binding on every
- * `read(providerId)` so a mid-session credential switch takes effect on the
- * next model call — no session recreate, no end-of-turn queue (pi-aligned).
- * Never guesses a different profile: if the bound profile's provider does not
+ * Instance-level active credential override for a room member.
+ * Used during live model switches: setModel's auth check runs BEFORE room.json
+ * is updated, so the store must temporarily serve the *target* credential or
+ * cross-provider switches fail with "No API key for <new-provider>".
+ * Keyed by roomId + memberId; cleared on instance destroy / switch rollback.
+ */
+const memberActiveCredentialOverrides = new Map<string, string>();
+
+function memberCredentialKey(roomId: string, memberId: string): string {
+  return `${roomId}\0${memberId}`;
+}
+
+/** Set (or clear with null/undefined) the live credential override for a member instance. */
+export function setMemberActiveCredentialOverride(
+  roomId: string,
+  memberId: string,
+  credentialId: string | null | undefined,
+): void {
+  const key = memberCredentialKey(roomId, memberId);
+  if (credentialId) memberActiveCredentialOverrides.set(key, credentialId);
+  else memberActiveCredentialOverrides.delete(key);
+}
+
+export function getMemberActiveCredentialOverride(roomId: string, memberId: string): string | undefined {
+  return memberActiveCredentialOverrides.get(memberCredentialKey(roomId, memberId));
+}
+
+/**
+ * Member-scoped store — live-reads the room member's current credential binding
+ * per request, with an optional instance-level override (see setMemberActiveCredentialOverride).
+ * Never guesses a different profile: if the resolved profile's provider does not
  * match the requested providerId, returns undefined.
  */
 class MemberCredentialStore implements CredentialStore {
@@ -381,6 +407,12 @@ class MemberCredentialStore implements CredentialStore {
   /** Lazy import keeps model-credentials free of a hard edge into room-member-resolver
    * (avoids pulling agent-store into modules that only partially mock config). */
   private async resolveBoundProfile(): Promise<ModelCredentialProfile | null> {
+    // Instance override wins (set during live model switch before room.json commits).
+    const overrideId = memberActiveCredentialOverrides.get(memberCredentialKey(this.roomId, this.memberId));
+    if (overrideId) {
+      const overrideProfile = getModelCredentialProfile(overrideId);
+      if (overrideProfile?.enabled) return overrideProfile;
+    }
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const member = resolveRoomMember(this.roomId, this.memberId);
     if (!member?.credentialId) return null;

@@ -136,7 +136,12 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
       throw new Error(`Model is not available or credential is missing: ${model}`);
     }
   }),
-  exportPiConfigForMember: vi.fn((args: any) => { exportedCalls.push(args); return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [] }; }),
+  exportPiConfigForMember: vi.fn((args: any) => {
+    exportedCalls.push(args);
+    return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [], profile: { id: args.credentialId || "cred-a", name: "test" } };
+  }),
+  setMemberActiveCredentialOverride: vi.fn(),
+  getMemberActiveCredentialOverride: vi.fn(() => undefined),
 }));
 
 vi.mock("../../src/shared/config.js", () => ({
@@ -512,6 +517,35 @@ describe("agent-manager model hot switch", () => {
     const setModelOrder = handles[0].setModelCalls.length; // already 1
     expect(setModelOrder).toBe(1);
     expect(member.model).toBe("anthropic/claude-b");
+  });
+
+  it("pins the target credential override before setModel so cross-provider auth can resolve", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const creds = await import("../../src/engine/model-credentials.js");
+    await manager.activateAgent("room", "pm");
+
+    await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
+
+    // Override must be installed with the *target* credential before setModel runs.
+    expect(creds.setMemberActiveCredentialOverride).toHaveBeenCalledWith("room", "pm", "cred-proxy");
+    const setOverrideOrder = (creds.setMemberActiveCredentialOverride as any).mock.invocationCallOrder[0];
+    // setModel is on the handle; we only assert override was called (apply path).
+    expect(handles[0].setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
+    expect(setOverrideOrder).toBeTypeOf("number");
+  });
+
+  it("rolls back the credential override when setModel fails", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const creds = await import("../../src/engine/model-credentials.js");
+    await manager.activateAgent("room", "pm");
+    handles[0].failSetModel = true;
+    (creds.getMemberActiveCredentialOverride as any).mockReturnValueOnce(undefined);
+
+    await expect(manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy")).rejects.toThrow(/setModel failed/);
+
+    // First call pins target; second call rolls back (null clears).
+    expect(creds.setMemberActiveCredentialOverride).toHaveBeenCalledWith("room", "pm", "cred-proxy");
+    expect(creds.setMemberActiveCredentialOverride).toHaveBeenLastCalledWith("room", "pm", null);
   });
 
   it("filters all member runtime failure system messages from activation prompts", async () => {
