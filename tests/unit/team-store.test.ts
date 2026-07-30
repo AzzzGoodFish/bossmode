@@ -33,7 +33,7 @@ describe("team-store", () => {
     expect(dev!.builtIn).toBe(true);
     expect(dev!.leader).toBe("pm");
     expect(dev!.agentNames[0]).toBe("pm"); // leader first
-    expect(dev!.agentNames).toEqual(expect.arrayContaining(["pm", "architect", "developer", "qa", "designer", "dev-ben"]));
+    expect(dev!.agentNames).toEqual(expect.arrayContaining(["pm", "architect", "developer", "qa", "designer"]));
 
     // get by display name (spaces) and by slug
     expect(mod.getTeamTemplate("Dev Team")?.slug).toBe("dev");
@@ -71,7 +71,7 @@ describe("team-store", () => {
     expect(existsSync(zipPath)).toBe(true);
     rmSync(join(dir, "teams"), { recursive: true, force: true });
     const imported = mod.importTeamFromZip(zipPath);
-    expect(imported.agents.length).toBeGreaterThanOrEqual(6);
+    expect(imported.agents.length).toBeGreaterThanOrEqual(5);
     expect(mod.listTeamTemplates().length).toBe(1);
   });
 

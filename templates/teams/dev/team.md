@@ -1,7 +1,7 @@
 ---
 name: Dev Team
-description: Full-stack product team — PM, Architect, Developer, QA, Designer, and a parallel developer stream
-version: 1.0.1
+description: Full-stack product team — PM, Architect, Developer, QA, Designer
+version: 1.0.2
 leader: pm
 type: builtin
 ---
@@ -17,7 +17,6 @@ Bossmode's built-in product development team. Instantiate into a Room to start w
 | **pm** | Requirements, priorities, acceptance, process ownership |
 | **architect** | System design, plans, merge |
 | **developer** | Implementation and tests |
-| **dev-ben** | Parallel implementation stream |
 | **designer** | UI/UX, prototypes, visual polish |
 | **qa** | Acceptance, regression, release gate |
 
