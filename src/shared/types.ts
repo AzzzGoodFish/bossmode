@@ -50,6 +50,11 @@ export interface BossmodeConfig {
   };
   runtime?: BossmodeRuntimeConfig;
   mcp?: BossmodeMcpConfig;
+  /** Model directory (pi.dev catalog) preferences. */
+  catalog?: {
+    /** Auto-refresh interval in days for the built-in provider catalog. Default 7. 0 = off. */
+    autoRefreshIntervalDays?: number;
+  };
   integrations?: {
     linear?: {
       apiKey?: string;

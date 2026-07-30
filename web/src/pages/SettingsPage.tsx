@@ -12,8 +12,9 @@ import {
   createModelCredentialProfile,
   updateModelCredentialProfile,
   deleteModelCredentialProfile,
-  refreshModelCredentialProfileModels,
   getModelCatalogStatus,
+  updateModelCatalogSettings,
+  refreshModelCatalog,
   discoverModelCredentialModels,
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
@@ -150,21 +151,18 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     catch (err) { console.error("Failed to delete model connection", err); toast(userActionError("delete this model connection"), "error"); }
   };
 
-  const handleRefreshProfileModels = async (profile: PublicModelCredentialProfile) => {
+  const handleSyncCatalog = async () => {
     try {
-      const result = await refreshModelCredentialProfileModels(profile.id);
+      const result = await refreshModelCatalog();
       await refreshProfiles();
-      const count = result.profile.models.length;
-      const base = `Refreshed ${count} model${count === 1 ? "" : "s"}`;
-      if (result.catalogMessage) {
-        // Remote catalog unavailable — honest bundled fallback (spec).
-        toast(`${base}. ${result.catalogMessage}`, "info");
+      if (result.error) {
+        toast(`Catalog sync finished with issues: ${result.error}`, "info");
       } else {
-        toast(`${base} from the online catalog.`, "success");
+        toast(`Catalog synced · ${result.modelCount} models · ${result.freshnessLabel}`, "success");
       }
     } catch (err) {
-      console.error("Failed to refresh models", err);
-      toast(userActionError("refresh models", "Check the provider connection, then try again."), "error");
+      console.error("Failed to sync catalog", err);
+      toast(userActionError("sync the model catalog"), "error");
     }
   };
 
@@ -196,7 +194,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           onCustom={() => { setEditingProfile(null); setShowProfileSheet(true); }}
           onEdit={(p) => { setEditingProfile(p); setShowProfileSheet(true); }}
           onDelete={handleDeleteProfile}
-          onRefreshModels={handleRefreshProfileModels}
+          onSyncCatalog={handleSyncCatalog}
         />
       )}
 
@@ -663,26 +661,55 @@ const PROTOCOLS: ModelProtocol[] = [
 ];
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
 
-function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, onRefreshModels }: {
+function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, onSyncCatalog }: {
   profiles: PublicModelCredentialProfile[];
   onAdd: () => void;
   onCustom: () => void;
   onEdit: (profile: PublicModelCredentialProfile) => void;
   onDelete: (profile: PublicModelCredentialProfile) => void;
-  onRefreshModels: (profile: PublicModelCredentialProfile) => void | Promise<void>;
+  onSyncCatalog: () => void | Promise<void>;
 }) {
+  const { toast } = useDialog();
   const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
   const [expandedModelLists, setExpandedModelLists] = useState<Set<string>>(new Set());
   const [catalogStatus, setCatalogStatus] = useState<ModelCatalogStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [savingInterval, setSavingInterval] = useState(false);
 
   const refreshCatalogStatus = () => {
     getModelCatalogStatus().then(setCatalogStatus).catch(() => setCatalogStatus(null));
   };
   useEffect(() => { refreshCatalogStatus(); }, []);
 
-  const handleRefreshModels = async (profile: PublicModelCredentialProfile) => {
-    await onRefreshModels(profile);
-    refreshCatalogStatus();
+  const handleSyncCatalog = async () => {
+    setSyncing(true);
+    try {
+      await onSyncCatalog();
+      refreshCatalogStatus();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleIntervalChange = async (days: number) => {
+    setSavingInterval(true);
+    try {
+      const next = await updateModelCatalogSettings({ autoRefreshIntervalDays: days });
+      setCatalogStatus({
+        ...next.status,
+        autoRefreshIntervalDays: next.autoRefreshIntervalDays,
+        refreshDue: next.refreshDue,
+      });
+      toast(
+        days <= 0 ? "Automatic catalog refresh turned off." : `Catalog will auto-refresh every ${days} day${days === 1 ? "" : "s"}.`,
+        "success",
+      );
+    } catch (err) {
+      console.error("Failed to update catalog settings", err);
+      toast(userActionError("update catalog settings"), "error");
+    } finally {
+      setSavingInterval(false);
+    }
   };
 
   const toggleProfile = (id: string) => setExpandedProfiles((prev) => {
@@ -696,10 +723,12 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
     return next;
   });
 
+  const intervalDays = catalogStatus?.autoRefreshIntervalDays ?? 7;
+
   return (
     <section className="mb-8">
-      <div className="flex items-center justify-between mb-4 gap-3">
-        <div>
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div className="min-w-0">
           <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider">Model providers</h2>
           <p className="text-xs text-ink-3 mt-1">Connect a provider, then choose its available models for each member.</p>
           {catalogStatus && (
@@ -708,8 +737,31 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
               {catalogStatus.modelCount > 0 ? ` · ${catalogStatus.modelCount} models in catalog` : ""}
             </p>
           )}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
+            <span>Auto-refresh built-in catalog</span>
+            <select
+              className="bg-inset border border-line rounded px-2 py-1 text-[11px] text-ink-2 cursor-pointer"
+              value={String(intervalDays)}
+              disabled={savingInterval}
+              onChange={(e) => { void handleIntervalChange(Number(e.target.value)); }}
+            >
+              <option value="0">Off</option>
+              <option value="1">Every day</option>
+              <option value="7">Every 7 days</option>
+              <option value="30">Every 30 days</option>
+            </select>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { void handleSyncCatalog(); }}
+            disabled={syncing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer disabled:opacity-50"
+            title="Sync the built-in provider catalog from pi.dev"
+          >
+            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+            {syncing ? "Syncing…" : "Sync catalog"}
+          </button>
           <button onClick={onCustom} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">
             Custom Endpoint
           </button>
@@ -732,6 +784,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
             const expanded = expandedProfiles.has(profile.id);
             const modelsExpanded = expandedModelLists.has(profile.id);
             const visibleModels = modelsExpanded ? profile.models : profile.models.slice(0, 3);
+            const kind = profile.profileKind ?? "custom_endpoint";
             return (
               <div key={profile.id} className="bg-surface-1 border border-line rounded-lg p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -743,7 +796,9 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                   >
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-semibold text-ink-1 truncate">{profile.name}</h3>
-                      {profile.isDefault && <Badge tone="success">Default</Badge>}
+                      <Badge tone={kind === "builtin_provider" ? "success" : "neutral"}>
+                        {kind === "builtin_provider" ? "Built-in" : "Custom"}
+                      </Badge>
                       {!profile.enabled && <Badge tone="neutral">Disabled</Badge>}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3">
@@ -752,7 +807,6 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                   </button>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => toggleProfile(profile.id)} className="px-2 py-1 text-xs text-ink-3 hover:text-ink-1 cursor-pointer" title={expanded ? "Collapse" : "Expand"}>{expanded ? "Collapse" : "Expand"}</button>
-                    {profile.profileKind === "builtin_provider" && <button onClick={() => { void handleRefreshModels(profile); }} className="text-ink-4 hover:text-accent-ink cursor-pointer" title="Refresh models"><RefreshCw size={14} /></button>}
                     <button onClick={() => onEdit(profile)} className="text-ink-4 hover:text-ink-1 cursor-pointer" title="Edit"><Pencil size={14} /></button>
                     <button onClick={() => onDelete(profile)} className="text-ink-4 hover:text-blocked cursor-pointer" title="Delete"><Trash2 size={14} /></button>
                   </div>
@@ -772,7 +826,6 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
                       </div>
                     </div>
                     <div className="flex justify-end gap-2 mt-3">
-                      {profile.profileKind === "builtin_provider" && <button onClick={() => { void handleRefreshModels(profile); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer"><RefreshCw size={12} /> Refresh models</button>}
                       <button onClick={() => onEdit(profile)} className="px-3 py-1.5 text-xs border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong cursor-pointer">Edit</button>
                     </div>
                   </>
@@ -1046,7 +1099,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     apiKey: "",
     requestProfile: profile?.requestProfile || "standard",
     enabled: profile?.enabled ?? true,
-    isDefault: profile?.isDefault ?? false,
+    isDefault: false,
     models: profile?.profileKind === "builtin_provider" && profile.catalogModels?.length ? profile.catalogModels : (profile?.models?.length ? profile.models : [{ id: "", metadataSource: "unknown" }]),
     modelCustomizations: profile?.modelCustomizations,
   }));

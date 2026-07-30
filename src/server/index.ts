@@ -16,7 +16,7 @@ import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backf
 import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
 import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
-import { ensurePiCatalogWarm } from "../engine/model-credentials.js";
+import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAgentForWatch, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
 import { initWatchTrigger } from "../engine/watch-trigger.js";
@@ -136,6 +136,8 @@ export function startServer(opts: ServerOptions): Promise<void> {
   // synchronous readers (Settings → Model Credentials, provider validation) have data
   // immediately instead of the cold-cache empty fallback on first request.
   void ensurePiCatalogWarm();
+  // Built-in catalog auto-refresh (default every 7 days; checks daily).
+  startCatalogAutoRefreshScheduler();
 
   // Initialize runtime registry
   const registry = new RuntimeRegistry();

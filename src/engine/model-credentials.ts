@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { getBossmodeDir, ensureBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir, ensureBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import {
   setBundledCatalogLoader,
@@ -1320,6 +1320,123 @@ function loadPiCatalogModelsSync(): any[] {
 export function getCatalogStatus(): CatalogSnapshot & { freshnessLabel: string } {
   const snap = getCatalog();
   return { ...snap, freshnessLabel: formatCatalogFreshness(snap) };
+}
+
+// -- Catalog auto-refresh (built-in pi.dev directory only) --
+
+export const DEFAULT_CATALOG_AUTO_REFRESH_DAYS = 7;
+const CATALOG_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+let catalogRefreshInFlight: Promise<CatalogManualRefreshResult> | null = null;
+let catalogSchedulerTimer: ReturnType<typeof setInterval> | null = null;
+
+export function getCatalogAutoRefreshIntervalDays(): number {
+  try {
+    const cfg = readConfig();
+    const v = cfg.catalog?.autoRefreshIntervalDays;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
+  } catch { /* no config yet */ }
+  return DEFAULT_CATALOG_AUTO_REFRESH_DAYS;
+}
+
+export function setCatalogAutoRefreshIntervalDays(days: number): number {
+  const n = Math.max(0, Math.floor(Number(days) || 0));
+  const cfg = readConfig();
+  cfg.catalog = { ...(cfg.catalog || {}), autoRefreshIntervalDays: n };
+  writeConfig(cfg);
+  return n;
+}
+
+export function isCatalogRefreshDue(now = Date.now()): boolean {
+  const days = getCatalogAutoRefreshIntervalDays();
+  if (days <= 0) return false;
+  const snap = getCatalog();
+  // Never successfully pulled remote → due.
+  if (snap.fetchedAt == null) return true;
+  return now - snap.fetchedAt >= days * 24 * 60 * 60 * 1000;
+}
+
+export interface CatalogManualRefreshResult {
+  source: CatalogRefreshSource;
+  error?: string;
+  fetchedAt?: number | null;
+  freshnessLabel: string;
+  modelCount: number;
+  triggered: boolean;
+  reason: string;
+}
+
+/**
+ * Pull pi.dev catalog (built-in only) and rematerialize builtin provider profiles.
+ * Coalesces concurrent callers onto one in-flight refresh.
+ */
+export async function refreshBuiltinCatalog(reason: string): Promise<CatalogManualRefreshResult> {
+  if (catalogRefreshInFlight) return catalogRefreshInFlight;
+  catalogRefreshInFlight = (async () => {
+    logger.info("catalog", "builtin catalog refresh start", { reason });
+    const catalog = await refreshPiCatalogFromNetwork();
+    try {
+      refreshBuiltinProviderProfilesFromStore({ persist: true });
+    } catch (err) {
+      logger.warn("catalog", "rematerialize builtin profiles failed", { error: String(err) });
+    }
+    const status = getCatalogStatus();
+    const result: CatalogManualRefreshResult = {
+      source: catalog.source,
+      error: catalog.error,
+      fetchedAt: catalog.fetchedAt ?? status.fetchedAt,
+      freshnessLabel: status.freshnessLabel,
+      modelCount: status.modelCount,
+      triggered: true,
+      reason,
+    };
+    logger.info("catalog", "builtin catalog refresh done", {
+      reason,
+      source: result.source,
+      modelCount: result.modelCount,
+      error: result.error,
+    });
+    return result;
+  })().finally(() => {
+    catalogRefreshInFlight = null;
+  });
+  return catalogRefreshInFlight;
+}
+
+/** Fire-and-forget: refresh only if the interval has elapsed. */
+export function maybeRefreshCatalogInBackground(reason: string): void {
+  if (!isCatalogRefreshDue()) return;
+  void refreshBuiltinCatalog(reason).catch((err) => {
+    logger.warn("catalog", "background refresh failed", { reason, error: String(err) });
+  });
+}
+
+/** Daemon startup + 24h tick. Safe to call once. */
+export function startCatalogAutoRefreshScheduler(): void {
+  if (catalogSchedulerTimer) return;
+  // Short delay so startup isn't competing with other warm paths.
+  setTimeout(() => maybeRefreshCatalogInBackground("startup"), 8_000);
+  catalogSchedulerTimer = setInterval(() => maybeRefreshCatalogInBackground("daily-check"), CATALOG_CHECK_INTERVAL_MS);
+  // Don't keep the process alive solely for this timer.
+  if (typeof catalogSchedulerTimer === "object" && catalogSchedulerTimer && "unref" in catalogSchedulerTimer) {
+    try { (catalogSchedulerTimer as NodeJS.Timeout).unref(); } catch { /* ignore */ }
+  }
+  logger.info("catalog", "auto-refresh scheduler started", {
+    intervalDays: getCatalogAutoRefreshIntervalDays(),
+    checkEveryHours: 24,
+  });
+}
+
+export function getCatalogSettingsPublic(): {
+  autoRefreshIntervalDays: number;
+  refreshDue: boolean;
+  status: CatalogSnapshot & { freshnessLabel: string };
+} {
+  return {
+    autoRefreshIntervalDays: getCatalogAutoRefreshIntervalDays(),
+    refreshDue: isCatalogRefreshDue(),
+    status: getCatalogStatus(),
+  };
 }
 
 function displayNameForProvider(providerSlug: string): string {

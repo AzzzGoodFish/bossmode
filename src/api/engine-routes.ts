@@ -1,6 +1,9 @@
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./index.js";
-import { getRegistry, invalidateModelCredentialProfile } from "../engine/agent-manager.js";
+import {
+  getRegistry,
+  invalidateModelCredentialProfile,
+} from "../engine/agent-manager.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 import type { PiTransportSetting } from "../shared/types.js";
 import {
@@ -14,6 +17,10 @@ import {
   listBuiltinModelProviders,
   listPublicModelCredentialProfiles,
   getCatalogStatus,
+  getCatalogSettingsPublic,
+  getCatalogAutoRefreshIntervalDays,
+  setCatalogAutoRefreshIntervalDays,
+  refreshBuiltinCatalog,
   refreshModelCredentialProfileModels,
   saveModelCredentialProfile,
   startNativeOAuthConnection,
@@ -193,16 +200,48 @@ addRoute("GET", "/api/models", async (_req, res) => {
   sendJson(res, 200, listAvailableModels());
 });
 
-// GET /api/model-catalog/status — CatalogStore freshness (Settings display)
+// GET /api/model-catalog/status — CatalogStore freshness + auto-refresh settings
 addRoute("GET", "/api/model-catalog/status", async (_req, res) => {
-  const status = getCatalogStatus();
+  const settings = getCatalogSettingsPublic();
   sendJson(res, 200, {
-    source: status.source,
-    fetchedAt: status.fetchedAt,
-    fetchedAtIso: status.fetchedAtIso,
-    modelCount: status.modelCount,
-    freshnessLabel: status.freshnessLabel,
+    source: settings.status.source,
+    fetchedAt: settings.status.fetchedAt,
+    fetchedAtIso: settings.status.fetchedAtIso,
+    modelCount: settings.status.modelCount,
+    freshnessLabel: settings.status.freshnessLabel,
+    autoRefreshIntervalDays: settings.autoRefreshIntervalDays,
+    refreshDue: settings.refreshDue,
   });
+});
+
+// PUT /api/model-catalog/settings — update auto-refresh interval; changing triggers async refresh
+addRoute("PUT", "/api/model-catalog/settings", async (req, res) => {
+  try {
+    const body = (await parseBody(req)) as { autoRefreshIntervalDays?: number };
+    if (body.autoRefreshIntervalDays === undefined || body.autoRefreshIntervalDays === null) {
+      sendJson(res, 400, { error: "autoRefreshIntervalDays is required (number, 0 = off)" });
+      return;
+    }
+    const prev = getCatalogAutoRefreshIntervalDays();
+    const next = setCatalogAutoRefreshIntervalDays(Number(body.autoRefreshIntervalDays));
+    // Changing the interval (and any save while auto-refresh is on) kicks an async refresh.
+    if (next > 0 && next !== prev) {
+      void refreshBuiltinCatalog("settings-changed").catch(() => {});
+    }
+    sendJson(res, 200, getCatalogSettingsPublic());
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+  }
+});
+
+// POST /api/model-catalog/refresh — manual global sync of the built-in provider catalog
+addRoute("POST", "/api/model-catalog/refresh", async (_req, res) => {
+  try {
+    const result = await refreshBuiltinCatalog("manual");
+    sendJson(res, 200, result);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message || String(err) });
+  }
 });
 
 const VALID_PI_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);

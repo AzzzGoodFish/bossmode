@@ -533,10 +533,34 @@ export interface ModelCatalogStatus {
   fetchedAtIso: string | null;
   modelCount: number;
   freshnessLabel: string;
+  autoRefreshIntervalDays?: number;
+  refreshDue?: boolean;
 }
 
 export async function getModelCatalogStatus(): Promise<ModelCatalogStatus> {
   return apiFetch("/api/model-catalog/status");
+}
+
+export async function updateModelCatalogSettings(settings: {
+  autoRefreshIntervalDays: number;
+}): Promise<{
+  autoRefreshIntervalDays: number;
+  refreshDue: boolean;
+  status: ModelCatalogStatus;
+}> {
+  return apiFetch("/api/model-catalog/settings", { method: "PUT", body: JSON.stringify(settings) });
+}
+
+export async function refreshModelCatalog(): Promise<{
+  source: "remote" | "bundled";
+  error?: string;
+  fetchedAt?: number | null;
+  freshnessLabel: string;
+  modelCount: number;
+  triggered: boolean;
+  reason: string;
+}> {
+  return apiFetch("/api/model-catalog/refresh", { method: "POST" });
 }
 
 export async function deleteModelCredentialProfile(id: string): Promise<void> {
