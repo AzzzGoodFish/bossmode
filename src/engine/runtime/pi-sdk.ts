@@ -588,11 +588,16 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
-  async refreshModelRegistry(): Promise<void> {
+  async refreshModelRegistry(opts?: { allowNetwork?: boolean }): Promise<void> {
+    // Prefer a disk-only reload: models.json is written by exportPiConfigForMember
+    // right before switch, and network catalog fetches can hang (fish 2026-07-30).
+    const allowNetwork = opts?.allowNetwork ?? false;
+    const runtime = (this.modelRegistry as any).runtime;
+    if (runtime && typeof runtime.refresh === "function") {
+      await runtime.refresh({ allowNetwork });
+      return;
+    }
     await this.modelRegistry.refresh();
-    // Credentials are resolved live from the bossmode credential store on every read
-    // (no on-disk auth.json cache to invalidate), so edited API keys / rotated OAuth
-    // tokens take effect immediately — no separate reload step needed here.
   }
 
   async setModel(modelRef: string): Promise<void> {

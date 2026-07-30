@@ -59,8 +59,10 @@ function formatRuntimeErrorMessage(error: unknown): string {
     return "OAuth credential is invalid or expired. Reconnect it in Settings → Model Credentials.";
   }
   // Binding/session desync after a partial model switch (2026-07-30).
-  if (message.includes("Provider is not configured:")) {
-    return "Model switch did not finish applying (session and binding are out of sync). Retry the model switch, or Restart the member.";
+  // Keep the provider name — fish needs it to diagnose which side is stuck.
+  const providerMismatch = message.match(/Provider is not configured:\s*(\S+)/i);
+  if (providerMismatch) {
+    return `Model switch did not finish applying (session still needs provider "${providerMismatch[1]}" but the binding moved on). Retry the model switch, or Restart the member. Original: ${message}`;
   }
   return message;
 }
@@ -330,7 +332,25 @@ async function applyModelSwitchToInstance(
   setMemberActiveCredentialOverride(instance.roomId, instance.memberId, resolvedCredentialId);
   try {
     if (instance.handle.refreshModelRegistry) {
-      await Promise.resolve(instance.handle.refreshModelRegistry());
+      // models.json was just rewritten locally — reload disk only, never hang on network.
+      // Timeout is a hard backstop if the SDK availability pass stalls.
+      try {
+        await withTimeout(
+          Promise.resolve(instance.handle.refreshModelRegistry({ allowNetwork: false })),
+          CREDENTIAL_REFRESH_TIMEOUT_MS,
+          "model registry refresh",
+        );
+      } catch (refreshErr) {
+        logger.warn("agent", "modelSwitchRegistryRefreshDegraded", {
+          member: instance.agentName,
+          roomId: instance.roomId,
+          model,
+          error: refreshErr instanceof Error ? refreshErr.message : String(refreshErr),
+          trigger,
+        });
+        // Continue to setModel — the model may already be in the in-memory registry
+        // (export writes all enabled providers). If not, setModel will throw clearly.
+      }
     }
     await instance.handle.setModel(model);
   } catch (err) {

@@ -103,7 +103,7 @@ export interface AgentHandle {
 
   // Optional — check runtime.capabilities before calling
   setModel?(model: string): void | Promise<void>;
-  refreshModelRegistry?(): void | Promise<void>;
+  refreshModelRegistry?(opts?: { allowNetwork?: boolean }): void | Promise<void>;
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
   reloadResources?(opts: ReloadAgentResourcesOpts): Promise<void>;

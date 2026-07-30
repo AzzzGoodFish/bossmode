@@ -68,7 +68,7 @@ describe("member credential store live-read", () => {
     expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
   });
 
-  it("serves the instance-level active credential override before room binding (cross-provider switch)", async () => {
+  it("serves the instance-level active credential override as augment (both providers resolve mid-switch)", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     await mod.ensurePiCatalogWarm();
     mod.setPiCatalogModelsForTests([
@@ -84,13 +84,12 @@ describe("member credential store live-read", () => {
     expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
     expect(await store.read("openai")).toBeUndefined();
 
-    // Switch path pins the target credential before setModel / room.json write.
+    // Switch path pins the target credential — augment: new provider works AND old still works.
     mod.setMemberActiveCredentialOverride("room-1", "rm_dev", openai.id);
     expect(await store.read("openai")).toEqual({ type: "api_key", key: "sk-oai" });
-    // Override fully replaces room binding for resolution — old provider no longer served.
-    expect(await store.read("anthropic")).toBeUndefined();
+    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
 
-    // Rollback on failed setModel clears the override → room binding again.
+    // Rollback on failed setModel clears the override → room binding only.
     mod.setMemberActiveCredentialOverride("room-1", "rm_dev", null);
     expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-ant" });
     expect(await store.read("openai")).toBeUndefined();

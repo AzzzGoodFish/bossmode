@@ -398,21 +398,18 @@ export function getMemberActiveCredentialOverride(roomId: string, memberId: stri
 /**
  * Member-scoped store — live-reads the room member's current credential binding
  * per request, with an optional instance-level override (see setMemberActiveCredentialOverride).
- * Never guesses a different profile: if the resolved profile's provider does not
- * match the requested providerId, returns undefined.
+ *
+ * Override is **augment** semantics (2026-07-30 fish self-test): for a requested
+ * providerId, try the override profile first if its provider matches; otherwise
+ * fall back to the room binding. Mid-switch, the old session can still auth
+ * against the old provider while setModel auth-checks the new one.
  */
 class MemberCredentialStore implements CredentialStore {
   constructor(private readonly roomId: string, private readonly memberId: string) {}
 
   /** Lazy import keeps model-credentials free of a hard edge into room-member-resolver
    * (avoids pulling agent-store into modules that only partially mock config). */
-  private async resolveBoundProfile(): Promise<ModelCredentialProfile | null> {
-    // Instance override wins (set during live model switch before room.json commits).
-    const overrideId = memberActiveCredentialOverrides.get(memberCredentialKey(this.roomId, this.memberId));
-    if (overrideId) {
-      const overrideProfile = getModelCredentialProfile(overrideId);
-      if (overrideProfile?.enabled) return overrideProfile;
-    }
+  private async resolveRoomBoundProfile(): Promise<ModelCredentialProfile | null> {
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const member = resolveRoomMember(this.roomId, this.memberId);
     if (!member?.credentialId) return null;
@@ -421,22 +418,51 @@ class MemberCredentialStore implements CredentialStore {
     return profile;
   }
 
+  private resolveOverrideProfile(): ModelCredentialProfile | null {
+    const overrideId = memberActiveCredentialOverrides.get(memberCredentialKey(this.roomId, this.memberId));
+    if (!overrideId) return null;
+    const profile = getModelCredentialProfile(overrideId);
+    if (!profile || !profile.enabled) return null;
+    return profile;
+  }
+
+  /** Resolve the profile that should answer for `providerId` (override-if-match, else room). */
+  private async resolveProfileForProvider(providerId: string): Promise<ModelCredentialProfile | null> {
+    const override = this.resolveOverrideProfile();
+    if (override && override.providerSlug === providerId) return override;
+    const room = await this.resolveRoomBoundProfile();
+    if (room && room.providerSlug === providerId) return room;
+    return null;
+  }
+
   async read(providerId: string): Promise<Credential | undefined> {
-    const profile = await this.resolveBoundProfile();
-    if (!profile || profile.providerSlug !== providerId) return undefined;
+    const profile = await this.resolveProfileForProvider(providerId);
+    if (!profile) return undefined;
     return authEntry(profile) as Credential | undefined;
   }
 
   async list(): Promise<readonly CredentialInfo[]> {
-    const profile = await this.resolveBoundProfile();
-    if (!profile) return [];
-    const credential = await this.read(profile.providerSlug);
-    return credential ? [{ providerId: profile.providerSlug, type: credential.type }] : [];
+    const out: CredentialInfo[] = [];
+    const seen = new Set<string>();
+    const override = this.resolveOverrideProfile();
+    if (override) {
+      const credential = await this.read(override.providerSlug);
+      if (credential) {
+        out.push({ providerId: override.providerSlug, type: credential.type });
+        seen.add(override.providerSlug);
+      }
+    }
+    const room = await this.resolveRoomBoundProfile();
+    if (room && !seen.has(room.providerSlug)) {
+      const credential = authEntry(room) as Credential | undefined;
+      if (credential) out.push({ providerId: room.providerSlug, type: credential.type });
+    }
+    return out;
   }
 
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
-    const profile = await this.resolveBoundProfile();
-    if (!profile || profile.providerSlug !== providerId) return fn(undefined);
+    const profile = await this.resolveProfileForProvider(providerId);
+    if (!profile) return fn(undefined);
     const current = await this.read(providerId);
     const next = await fn(current);
     if (next?.type === "oauth") {
