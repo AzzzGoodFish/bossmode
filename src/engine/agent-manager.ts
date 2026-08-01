@@ -480,7 +480,8 @@ async function applyCredentialRefreshToInstance(instance: AgentInstance, pending
     }
 
     await withTimeout(
-      Promise.resolve(instance.handle.refreshModelRegistry()),
+      // Credential profile changed locally — reload disk registry only; never hang on network.
+      Promise.resolve(instance.handle.refreshModelRegistry({ allowNetwork: false })),
       CREDENTIAL_REFRESH_TIMEOUT_MS,
       "credential registry refresh",
     );

@@ -5,7 +5,7 @@ import { useUpload } from "../hooks/useUpload";
 import { AttachmentUploader } from "./AttachmentUploader";
 
 interface MessageInputProps {
-  onSend: (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => void;
+  onSend: (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => void | Promise<void>;
   members: string[];
   memberHints?: Record<string, string>;
   disabled?: boolean;
@@ -84,9 +84,17 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       upload.clearSuccessful();
     }
 
-    if (content || attachments.length > 0) onSend(content, attachments.length > 0 ? attachments : undefined);
-    clearDraft();
-    setShowMentions(false);
+    if (!content && attachments.length === 0) return;
+
+    // Only clear the draft after a successful send. If auth expired / network
+    // failed mid-send, keep localStorage draft so re-login restores the text.
+    try {
+      await onSend(content, attachments.length > 0 ? attachments : undefined);
+      clearDraft();
+      setShowMentions(false);
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleChange = (text: string) => {
