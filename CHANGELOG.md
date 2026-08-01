@@ -4,6 +4,13 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.19.5-rc.2] — 2026-08-01
+
+### Fixed
+- Onboarding spotlight stays aligned on Connect Provider after async Models profile cards reflow (stable rect wait + sticky follow).
+
+---
+
 ## [0.19.5-rc.1] — 2026-08-01
 
 ### Added
