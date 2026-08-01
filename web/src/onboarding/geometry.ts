@@ -57,3 +57,43 @@ export function centerBubble(
     top: Math.max(12, viewportH / 2 - bubbleH / 2),
   };
 }
+
+/** Pixel tolerance for "same" rect — sub-pixel layout noise. */
+export function rectsEqual(a: RectLike | null, b: RectLike | null, eps = 0.5): boolean {
+  if (!a || !b) return a === b;
+  return (
+    Math.abs(a.left - b.left) <= eps &&
+    Math.abs(a.top - b.top) <= eps &&
+    Math.abs(a.width - b.width) <= eps &&
+    Math.abs(a.height - b.height) <= eps
+  );
+}
+
+/**
+ * Poll element rect until N consecutive samples match (layout settled),
+ * or until maxWaitMs elapses. Returns the last measured rect.
+ */
+export async function waitForStableRect(
+  measure: () => RectLike | null,
+  opts: { stableFrames?: number; maxWaitMs?: number; intervalMs?: number } = {},
+): Promise<RectLike | null> {
+  const stableFrames = opts.stableFrames ?? 2;
+  const maxWaitMs = opts.maxWaitMs ?? 800;
+  const intervalMs = opts.intervalMs ?? 32;
+  const start = Date.now();
+  let last: RectLike | null = null;
+  let streak = 0;
+
+  while (Date.now() - start < maxWaitMs) {
+    const cur = measure();
+    if (cur && rectsEqual(cur, last)) {
+      streak += 1;
+      if (streak >= stableFrames) return cur;
+    } else {
+      last = cur;
+      streak = cur ? 1 : 0;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return measure() ?? last;
+}

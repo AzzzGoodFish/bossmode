@@ -7,7 +7,7 @@ import {
   markOnboardingDone,
 } from "../../web/src/onboarding/storage";
 import { TOUR_STEPS, TOUR_STEP_COUNT } from "../../web/src/onboarding/steps";
-import { centerBubble, padRect, placeBubble } from "../../web/src/onboarding/geometry";
+import { centerBubble, padRect, placeBubble, rectsEqual, waitForStableRect } from "../../web/src/onboarding/geometry";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -87,6 +87,33 @@ describe("onboarding geometry", () => {
     expect(center.left).toBe(340);
     expect(center.top).toBe(300);
   });
+
+  it("rectsEqual tolerates sub-pixel noise",
+    () => {
+      const a = { left: 10, top: 20, width: 100, height: 40, right: 110, bottom: 60 };
+      const b = { ...a, left: 10.3, top: 20.2 };
+      expect(rectsEqual(a, b)).toBe(true);
+      expect(rectsEqual(a, { ...a, top: 30 })).toBe(false);
+    },
+  );
+
+  it("waitForStableRect resolves after consecutive matching samples",
+    async () => {
+      let n = 0;
+      const rect = { left: 1, top: 2, width: 3, height: 4, right: 4, bottom: 6 };
+      const got = await waitForStableRect(
+        () => {
+          n += 1;
+          // first sample drifts, then settles
+          if (n === 1) return { ...rect, top: 8 };
+          return rect;
+        },
+        { stableFrames: 2, maxWaitMs: 500, intervalMs: 5 },
+      );
+      expect(got).toEqual(rect);
+      expect(n).toBeGreaterThanOrEqual(3);
+    },
+  );
 });
 
 describe("onboarding product anchors (source)", () => {
@@ -112,5 +139,10 @@ describe("onboarding product anchors (source)", () => {
     expect(help).toContain("Replay product tour");
     expect(help).toContain("Documentation");
     expect(help).toContain("About Bossmode");
+
+    const tour = source("web/src/components/OnboardingTour.tsx");
+    expect(tour).toContain("waitForStableRect");
+    expect(tour).toContain("ResizeObserver");
+    expect(tour).toContain("remeasureTarget");
   });
 });

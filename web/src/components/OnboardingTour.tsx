@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TOUR_STEPS, type TourStep } from "../onboarding/steps";
 import { markOnboardingDone } from "../onboarding/storage";
-import { centerBubble, padRect, placeBubble, type RectLike } from "../onboarding/geometry";
+import {
+  centerBubble,
+  padRect,
+  placeBubble,
+  rectsEqual,
+  waitForStableRect,
+  type RectLike,
+} from "../onboarding/geometry";
 import type { ActivePage } from "./Sidebar";
 
 export interface OnboardingTourProps {
@@ -15,7 +22,13 @@ export interface OnboardingTourProps {
 }
 
 function queryTourTarget(id: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-tour="${id}"]`);
+  // Prefer the first *visible* match (Connect Provider appears in toolbar + empty state).
+  const nodes = document.querySelectorAll<HTMLElement>(`[data-tour="${id}"]`);
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return el;
+  }
+  return nodes[0] ?? null;
 }
 
 function toRect(el: HTMLElement): RectLike {
@@ -23,7 +36,7 @@ function toRect(el: HTMLElement): RectLike {
   return { left: r.left, top: r.top, width: r.width, height: r.height, right: r.right, bottom: r.bottom };
 }
 
-async function waitForTarget(id: string, attempts = 20, delayMs = 50): Promise<HTMLElement | null> {
+async function waitForTarget(id: string, attempts = 30, delayMs = 50): Promise<HTMLElement | null> {
   for (let i = 0; i < attempts; i++) {
     const el = queryTourTarget(id);
     if (el) {
@@ -40,14 +53,54 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
   const [spot, setSpot] = useState<RectLike | null>(null);
   const [bubblePos, setBubblePos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const targetElRef = useRef<HTMLElement | null>(null);
+  const stepRef = useRef<TourStep>(TOUR_STEPS[0]);
+  const spotRef = useRef<RectLike | null>(null);
+  const genRef = useRef(0); // invalidate in-flight layout when step changes
   const step = TOUR_STEPS[stepIdx] ?? TOUR_STEPS[0];
+  stepRef.current = step;
 
   const finish = useCallback((done: boolean) => {
     markOnboardingDone(done ? "finished" : "skipped");
     setStepIdx(0);
     setSpot(null);
+    spotRef.current = null;
+    targetElRef.current = null;
     onClose();
   }, [onClose]);
+
+  const applyTargetRect = useCallback((rect: RectLike | null, s: TourStep) => {
+    if (!rect) {
+      setSpot(null);
+      spotRef.current = null;
+      const bw = s.wide ? 380 : 320;
+      const bh = bubbleRef.current?.offsetHeight || 220;
+      setBubblePos(centerBubble(bw, bh, window.innerWidth, window.innerHeight));
+      return;
+    }
+    const padded = padRect(rect, 6);
+    if (!rectsEqual(spotRef.current, padded)) {
+      spotRef.current = padded;
+      setSpot(padded);
+    }
+    const bw = bubbleRef.current?.offsetWidth || (s.wide ? 380 : 320);
+    const bh = bubbleRef.current?.offsetHeight || 220;
+    setBubblePos(
+      placeBubble(rect, s.place ?? "right", bw, bh, window.innerWidth, window.innerHeight),
+    );
+  }, []);
+
+  /** Remeasure current target without re-navigating (sticky follow). */
+  const remeasureTarget = useCallback(() => {
+    const s = stepRef.current;
+    if (s.center || !s.target) return;
+    const el = targetElRef.current && document.contains(targetElRef.current)
+      ? targetElRef.current
+      : (s.target ? queryTourTarget(s.target) : null);
+    if (!el) return;
+    targetElRef.current = el;
+    applyTargetRect(toRect(el), s);
+  }, [applyTargetRect]);
 
   const prepareStep = useCallback(async (s: TourStep) => {
     ensureSidebarOpen();
@@ -55,7 +108,6 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
     if (prep === "settings-models") {
       onNavigate({ type: "settings", section: "models" });
     } else if (prep === "rooms-panel") {
-      // Land on home if no room; rooms panel is always available via rail domain.
       if (roomIds.length > 0) onNavigate({ type: "room", id: roomIds[0] });
       else onNavigate(null);
     } else if (prep === "first-room") {
@@ -66,40 +118,48 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   }, [ensureSidebarOpen, onNavigate, roomIds]);
 
-  const layoutStep = useCallback(async (s: TourStep) => {
+  const layoutStep = useCallback(async (s: TourStep, gen: number) => {
     await prepareStep(s);
+    if (gen !== genRef.current) return;
 
     if (s.center || !s.target) {
-      setSpot(null);
-      const bw = s.wide ? 380 : 320;
-      const bh = bubbleRef.current?.offsetHeight || 220;
-      setBubblePos(centerBubble(bw, bh, window.innerWidth, window.innerHeight));
+      targetElRef.current = null;
+      applyTargetRect(null, s);
       return;
     }
 
     const el = await waitForTarget(s.target);
+    if (gen !== genRef.current) return;
     if (!el) {
-      // Target missing (e.g. no room → no composer): fall back to centered card with same copy.
-      setSpot(null);
-      const bw = s.wide ? 380 : 320;
-      const bh = bubbleRef.current?.offsetHeight || 220;
-      setBubblePos(centerBubble(bw, bh, window.innerWidth, window.innerHeight));
+      targetElRef.current = null;
+      applyTargetRect(null, s);
       return;
     }
 
+    targetElRef.current = el;
     el.scrollIntoView({ block: "nearest", inline: "nearest" });
-    const rect = toRect(el);
-    const padded = padRect(rect, 6);
-    setSpot(padded);
 
-    // Measure bubble after content paint
-    await new Promise((r) => requestAnimationFrame(r));
-    const bw = bubbleRef.current?.offsetWidth || (s.wide ? 380 : 320);
-    const bh = bubbleRef.current?.offsetHeight || 220;
-    setBubblePos(
-      placeBubble(rect, s.place ?? "right", bw, bh, window.innerWidth, window.innerHeight),
+    // Wait until layout stops moving (async Models cards reflow after navigate).
+    const stable = await waitForStableRect(
+      () => {
+        const cur = targetElRef.current && document.contains(targetElRef.current)
+          ? targetElRef.current
+          : queryTourTarget(s.target!);
+        if (!cur) return null;
+        targetElRef.current = cur;
+        return toRect(cur);
+      },
+      { stableFrames: 2, maxWaitMs: 900, intervalMs: 32 },
     );
-  }, [prepareStep]);
+    if (gen !== genRef.current) return;
+    applyTargetRect(stable, s);
+
+    // Late async content (profile cards) may land after the stable window — one more pass.
+    window.setTimeout(() => {
+      if (gen !== genRef.current) return;
+      remeasureTarget();
+    }, 350);
+  }, [prepareStep, applyTargetRect, remeasureTarget]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,8 +168,58 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
 
   useLayoutEffect(() => {
     if (!open) return;
-    void layoutStep(step);
+    const gen = ++genRef.current;
+    void layoutStep(step, gen);
+    return () => { genRef.current += 1; }; // invalidate in-flight on step change
   }, [open, stepIdx, step, layoutStep]);
+
+  // Sticky follow: keep spotlight glued while Models cards / resize / scroll reflow the page.
+  useEffect(() => {
+    if (!open) return;
+    const s = step;
+    if (s.center || !s.target) return;
+
+    const onScrollOrResize = () => remeasureTarget();
+    window.addEventListener("resize", onScrollOrResize);
+    // capture phase catches scroll in any nested container (Settings main pane)
+    document.addEventListener("scroll", onScrollOrResize, true);
+
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => remeasureTarget())
+      : null;
+    const mo = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => remeasureTarget())
+      : null;
+
+    const attach = () => {
+      const el = targetElRef.current ?? queryTourTarget(s.target!);
+      if (!el) return;
+      targetElRef.current = el;
+      ro?.observe(el);
+      // Watch body for late-inserted profile cards that shove the button down.
+      mo?.observe(document.body, { childList: true, subtree: true, attributes: true });
+    };
+    attach();
+
+    // Re-attach periodically lightly in case target node is replaced by React
+    const tick = window.setInterval(() => {
+      const el = queryTourTarget(s.target!);
+      if (el && el !== targetElRef.current) {
+        ro?.disconnect();
+        targetElRef.current = el;
+        ro?.observe(el);
+        remeasureTarget();
+      }
+    }, 400);
+
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+      ro?.disconnect();
+      mo?.disconnect();
+      window.clearInterval(tick);
+    };
+  }, [open, stepIdx, step, remeasureTarget]);
 
   useEffect(() => {
     if (!open) return;
@@ -119,14 +229,9 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
         finish(false);
       }
     };
-    const onResize = () => { void layoutStep(step); };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [open, finish, layoutStep, step]);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, finish]);
 
   if (!open) return null;
 
@@ -135,19 +240,19 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
 
   return (
     <div className="contents" data-onboarding-tour="active" aria-modal="true" role="dialog" aria-label="Product tour">
-      {/* Full dim when no spotlight target */}
+      {/* Full dim when no spotlight target — no click-to-skip (avoid accidental dismiss). */}
       {!spot && (
         <div
           className="fixed inset-0 z-[55]"
           style={{ background: "rgba(15,18,25,0.55)" }}
-          onClick={() => finish(false)}
+          aria-hidden
         />
       )}
 
       {/* Spotlight cutout via huge box-shadow */}
       {spot && (
         <div
-          className="fixed z-[60] pointer-events-none rounded-xl transition-all duration-200"
+          className="fixed z-[60] pointer-events-none rounded-xl transition-[left,top,width,height] duration-150"
           style={{
             left: spot.left,
             top: spot.top,
@@ -164,7 +269,7 @@ export function OnboardingTour({ open, roomIds, onNavigate, ensureSidebarOpen, o
       {/* Bubble */}
       <div
         ref={bubbleRef}
-        className="fixed z-[70] bg-surface-1 border border-line rounded-xl p-4 transition-all duration-200"
+        className="fixed z-[70] bg-surface-1 border border-line rounded-xl p-4 transition-[left,top] duration-150"
         style={{
           left: bubblePos.left,
           top: bubblePos.top,
