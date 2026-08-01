@@ -15,6 +15,7 @@ vi.mock("../../src/shared/config.js", () => ({
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   listRooms: () => listRoomsMock(),
+  roomDir: (roomId: string) => `/tmp/bossmode-test-rooms/${roomId}`,
   getCursors: (roomId: string) => getCursorsMock(roomId),
   setCursor: (roomId: string, agentName: string, cursor: string | null) => setCursorMock(roomId, agentName, cursor),
 }));
@@ -28,6 +29,7 @@ vi.mock("../../src/engine/agent-manager.js", () => ({
   activateAll: vi.fn(async () => {}),
 }));
 vi.mock("../../src/communication/router.js", () => ({ initRouter: vi.fn(() => () => {}) }));
+vi.mock("../../src/communication/message-bus.js", () => ({ postMessage: vi.fn() }));
 vi.mock("../../src/engine/summarizer.js", () => ({ initAutoSummary: vi.fn(() => () => {}) }));
 vi.mock("../../src/communication/ws.js", () => ({
   createWebSocketServer: vi.fn(),

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
@@ -17,15 +17,15 @@ import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
 import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAgentForWatch, activateAll } from "../engine/agent-manager.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
-import { initWatchTrigger } from "../engine/watch-trigger.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import { seedBuiltinAssets } from "../workforce/team-updates.js";
+import { postMessage } from "../communication/message-bus.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -173,12 +173,25 @@ export function startServer(opts: ServerOptions): Promise<void> {
     },
   );
 
-  // Initialize watch trigger — one-shot self-activation for watchers (0.19.2)
-  const unsubscribeWatch = initWatchTrigger((roomId, watcherMemberId, targetName) => {
-    activateAgentForWatch(roomId, watcherMemberId, { targetName }).catch((err) => {
-      logger.error("watch", "activate failed", { roomId, watcherMemberId, error: String(err) });
-    });
-  });
+  // One-shot migration: drop legacy watches.json (async watch → blocking wait).
+  // No dual-mode / no fallback — leftover subscriptions are cleared with a room note.
+  let clearedWatches = 0;
+  for (const room of roomStore.listRooms()) {
+    const watchesPath = join(roomStore.roomDir(room.id), "watches.json");
+    if (!existsSync(watchesPath)) continue;
+    try {
+      unlinkSync(watchesPath);
+      clearedWatches += 1;
+      try {
+        postMessage(room.id, "system", "Legacy watch subscriptions were cleared — use the blocking `wait` tool instead of watch.");
+      } catch { /* room may not be fully ready */ }
+    } catch (err) {
+      logger.warn("server", "failed to clear watches.json", { roomId: room.id, error: String(err) });
+    }
+  }
+  if (clearedWatches > 0) {
+    logger.info("server", "cleared legacy watches.json files", { count: clearedWatches });
+  }
 
   return new Promise((resolve, reject) => {
     const webDistDir = join(import.meta.dirname, "../../web/dist");
@@ -250,7 +263,6 @@ export function startServer(opts: ServerOptions): Promise<void> {
     const shutdown = async (signal: string) => {
       logger.info("server", `shutdown signal: ${signal}`, { activeInstances: getActiveInstanceCount() });
       unsubscribeRouter();
-      unsubscribeWatch();
       await shutdownAgents();
       shutdownWebSocket();
       server.close(() => {

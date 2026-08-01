@@ -428,56 +428,44 @@ export async function handleToolCallback(
       });
       return { ok: true, provider, configured: config, projects };
     }
-    case "watch": {
-      // Leader-only (execution gate — the assembly gate in bossmode-sdk-tools is the first door).
+    case "wait": {
+      // Leader-only blocking wait (replaces the old one-shot watch subscription).
       const room = roomStore.getRoom(roomId);
       const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
-      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; watch is unavailable" };
-      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can manage watches" };
+      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; wait is unavailable" };
+      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can use wait" };
 
-      const { addWatch, removeWatch, listWatches, sweepExpired } = await import("../workspace/watch-store.js");
-      // Lazy TTL: surface expirations as room system notes (same style as the
-      // reply-debt warning) before handling the action.
-      for (const w of sweepExpired(roomId)) {
-        const wName = (roomStore as any).findRoomMemberById(roomId, w.watcherMemberId)?.name || w.watcherMemberId;
-        const tName = (roomStore as any).findRoomMemberById(roomId, w.targetMemberId)?.name || w.targetMemberId;
-        postMessage(roomId, "system", `${wName}'s watch on ${tName} expired.`);
-      }
-      const action = String(params?.action || "").trim();
-      const resolveTarget = () => {
-        const ref = String(params?.member || "").trim();
-        if (!ref) return { error: "member is required for this action" } as const;
-        const target = (roomStore as any).resolveRoomMemberRef(roomId, ref);
-        if (!target) return { error: `Member not found: ${ref}` } as const;
-        return { target } as const;
-      };
-      const present = (w: { id: string; targetMemberId: string; createdAt: number; expiresAt: number }) => ({
-        id: w.id,
-        target: (roomStore as any).findRoomMemberById(roomId, w.targetMemberId)?.name || w.targetMemberId,
-        createdAt: w.createdAt,
-        expiresAt: w.expiresAt,
+      const targetRef = String(params?.member || "").trim();
+      if (!targetRef) return { ok: false, error: "member is required" };
+      const target = (roomStore as any).resolveRoomMemberRef(roomId, targetRef);
+      if (!target) return { ok: false, error: `Member not found: ${targetRef}` };
+      if (target.id === actor.id) return { ok: false, error: "Cannot wait on yourself" };
+
+      const { waitForMember, WAIT_DEFAULT_TIMEOUT_MIN, WAIT_MAX_TIMEOUT_MIN } = await import("./wait-wait.js");
+      const { getAgentStatus, abortAgent } = await import("./agent-manager.js");
+      const targetStatus = getAgentStatus(roomId, target.id);
+      const timeoutMinutes = params?.timeoutMinutes !== undefined ? Number(params.timeoutMinutes) : undefined;
+
+      const outcome = await waitForMember({
+        roomId,
+        waiterMemberId: actor.id,
+        waiterName: actor.name,
+        targetMemberId: target.id,
+        targetName: target.name,
+        targetStatus,
+        timeoutMinutes,
       });
 
-      if (action === "list") {
-        return { ok: true, watches: listWatches(roomId, actor.id).map(present) };
+      // @-interrupt: abort the current turn so the mention can activate normally.
+      if (outcome.ok && outcome.reason === "mention_interrupt") {
+        try { abortAgent(roomId, actor.id); } catch { /* ignore */ }
       }
-      if (action === "subscribe") {
-        const r = resolveTarget();
-        if ("error" in r) return { ok: false, error: r.error };
-        if (r.target.id === actor.id) return { ok: false, error: "Cannot watch yourself" };
-        const rec = addWatch(roomId, actor.id, r.target.id);
-        postMessage(roomId, "system", `${actor.name} watched ${r.target.name} (one-shot, expires in 7 days).`);
-        return { ok: true, watch: present(rec) };
-      }
-      if (action === "unsubscribe") {
-        const r = resolveTarget();
-        if ("error" in r) return { ok: false, error: r.error };
-        const removed = removeWatch(roomId, actor.id, r.target.id);
-        if (removed) postMessage(roomId, "system", `${actor.name} unwatched ${r.target.name}.`);
-        return { ok: true, removed, target: r.target.name };
-      }
-      return { ok: false, error: "action must be 'subscribe', 'list', or 'unsubscribe'" };
+
+      return {
+        ...outcome,
+        defaults: { timeoutMinutes: WAIT_DEFAULT_TIMEOUT_MIN, maxTimeoutMinutes: WAIT_MAX_TIMEOUT_MIN },
+      };
     }
     default:
       throw new Error(`Unknown tool: ${tool}`);

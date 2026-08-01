@@ -1,4 +1,4 @@
-export type ActivationSource = "room_mention" | "private_instruction" | "self_start" | "system" | "watch";
+export type ActivationSource = "room_mention" | "private_instruction" | "self_start" | "system";
 
 const THIRTY_MIN_MS = 30 * 60_000;
 const latestActivation = new Map<string, { source: ActivationSource; at: number }>();

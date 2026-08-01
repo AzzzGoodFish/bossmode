@@ -143,6 +143,13 @@ function transition(
   instance.status = newStatus;
   logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
+  // Notify blocking wait() callers when a member becomes idle.
+  if (newStatus === "idle") {
+    try {
+      // Dynamic import avoids a static cycle (wait-wait → agent-manager for abort).
+      void import("./wait-wait.js").then((m) => m.notifyMemberIdle(roomId, instance.memberId));
+    } catch { /* ignore */ }
+  }
 }
 
 function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
@@ -860,26 +867,10 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
   return activateAgentInternal(roomId, memberRef, { source: "room_mention", replyDebt: true, trigger: "activate" });
 }
 
-/**
- * Watch-triggered activation (v1, leader-only): same delivery path as @mention
- * (cursor advance + new-message batch incl. the triggering message) with exactly
- * two differences — activation source is "watch", and NO pendingChatReply is
- * marked (a silent turn must not post "finished without replying": the
- * notification is for the watcher to read, replying is optional).
- */
-export async function activateAgentForWatch(roomId: string, memberRef: string, opts: { targetName: string }): Promise<void> {
-  return activateAgentInternal(roomId, memberRef, {
-    source: "watch",
-    replyDebt: false,
-    trigger: "activate:watch",
-    banner: `Watch notification: ${opts.targetName} posted in this room.`,
-  });
-}
-
 async function activateAgentInternal(
   roomId: string,
   memberRef: string,
-  opts: { source: "room_mention" | "watch"; replyDebt: boolean; trigger: string; banner?: string },
+  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string },
 ): Promise<void> {
   const member = resolveRoomMember(roomId, memberRef);
   const memberName = member?.name || memberRef;
@@ -915,7 +906,7 @@ async function activateAgentInternalContinue(
   memberId: string,
   member: ReturnType<typeof resolveRoomMember>,
   instance: AgentInstance,
-  opts: { source: "room_mention" | "watch"; replyDebt: boolean; trigger: string; banner?: string },
+  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string },
 ): Promise<void> {
   const cursors = roomStore.getCursors(roomId);
   const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
@@ -1261,6 +1252,11 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
+
+  // If blocked in wait(), settle it first so the tool call can return cleanly.
+  try {
+    void import("./wait-wait.js").then((m) => m.settleWaitOnAbort(roomId, memberId));
+  } catch { /* ignore */ }
 
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();

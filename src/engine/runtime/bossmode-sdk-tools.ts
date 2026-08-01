@@ -10,7 +10,7 @@ import {
   COMMENT_TASK_DESCRIPTION,
   QUERY_INTEGRATION_DESCRIPTION,
   CONFIGURE_INTEGRATION_DESCRIPTION,
-  WATCH_DESCRIPTION,
+  WAIT_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 import * as roomStore from "../../workspace/room-store.js";
@@ -30,7 +30,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
 
-  // Assembly gate: watch is leader-only (the callback re-checks at execution).
+  // Assembly gate: wait is leader-only (the callback re-checks at execution).
   const isRoomLeader = (() => {
     const room = roomStore.getRoom(opts.roomId);
     if (!room?.promptLeaderMemberId) return false;
@@ -223,22 +223,21 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
   // Leader-only tool (assembly gate). Callback re-validates at execution.
   if (isRoomLeader) {
     tools.push(defineTool({
-      name: "watch",
-      label: "Watch",
-      description: WATCH_DESCRIPTION,
+      name: "wait",
+      label: "Wait",
+      description: WAIT_DESCRIPTION,
       parameters: Type.Object({
-        action: Type.String({ description: "'subscribe' | 'list' | 'unsubscribe'" }),
-        member: Type.Optional(Type.String({ description: "Target member name (required for subscribe/unsubscribe)" })),
+        member: Type.String({ description: "Target member name to wait on" }),
+        timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
       }),
       execute: async (_id, params) => {
-        const data = await call("watch", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Watch failed");
-        if (Array.isArray(data?.watches)) {
-          if (data.watches.length === 0) return textResult("No active watches.");
-          return textResult(data.watches.map((w: any) => `${w.target} — created ${new Date(w.createdAt).toISOString()}, expires ${new Date(w.expiresAt).toISOString()} (id: ${w.id})`).join("\n"));
+        const data = await call("wait", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Wait failed");
+        if (data?.reason === "message") {
+          const body = typeof data.message === "string" ? data.message : "";
+          return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
         }
-        if (data?.watch) return textResult(`Watching ${data.watch.target} — you will be activated on their next room message (expires ${new Date(data.watch.expiresAt).toISOString()}).`);
-        if (data?.removed !== undefined) return textResult(data.removed ? `Watch removed: ${data.target}` : `No active watch on ${data.target}.`);
+        if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
         return textResult(truncate(JSON.stringify(data, null, 2)));
       },
     }));
