@@ -8,6 +8,8 @@ import {
   type Room,
 } from "../api/client";
 import { Sidebar, type ActivePage } from "../components/Sidebar";
+import { OnboardingTour } from "../components/OnboardingTour";
+import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
 import { TeamsPage } from "./TeamsPage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
@@ -58,7 +60,32 @@ export function Layout({ onLogout, username }: LayoutProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const isMobile = useIsMobile();
+
+  // First-launch product tour (once unless finished/skipped; Help can replay).
+  useEffect(() => {
+    if (isOnboardingDone()) return;
+    const t = window.setTimeout(() => setTourOpen(true), 600);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const startTour = useCallback(() => {
+    clearOnboardingDone();
+    setTourOpen(true);
+  }, []);
+
+  const ensureSidebarOpen = useCallback(() => {
+    if (isMobile) {
+      setMobileSidebarOpen(true);
+      return;
+    }
+    setSidebarCollapsed((prev) => {
+      if (!prev) return prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, "false");
+      return false;
+    });
+  }, [isMobile]);
 
   useEdgeSwipe({ side: "left", onTrigger: useCallback(() => setMobileSidebarOpen(true), []) });
 
@@ -226,6 +253,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
       liveRooms={rooms}
       collapsed={isMobile ? false : sidebarCollapsed}
       onToggle={toggleSidebar}
+      onReplayTour={startTour}
     />
   );
 
@@ -381,6 +409,14 @@ export function Layout({ onLogout, username }: LayoutProps) {
           />
         )}
       </div>
+
+      <OnboardingTour
+        open={tourOpen}
+        roomIds={rooms.map((r) => r.id)}
+        onNavigate={handleNavigate}
+        ensureSidebarOpen={ensureSidebarOpen}
+        onClose={() => setTourOpen(false)}
+      />
     </div>
   );
 }

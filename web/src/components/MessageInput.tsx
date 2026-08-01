@@ -167,6 +167,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
 
   return (
     <div
+      data-tour="composer"
       className={`relative border-t border-line-soft p-3 pb-[max(12px,env(safe-area-inset-bottom))] ${dragOver ? "bg-accent-dim border-accent" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

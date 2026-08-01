@@ -765,7 +765,11 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
           <button onClick={onCustom} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">
             Custom Endpoint
           </button>
-          <button onClick={onAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer">
+          <button
+            onClick={onAdd}
+            data-tour="connect-provider"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer"
+          >
             <PlugZap size={14} /> Connect Provider
           </button>
         </div>
@@ -775,7 +779,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
           <KeyRound size={22} className="mx-auto text-ink-4 mb-3" />
           <div className="text-sm font-medium text-ink-1">No model providers connected</div>
           <p className="text-xs text-ink-3 mt-1 max-w-md mx-auto">Connect an official provider, or add a custom endpoint for proxy/local models.</p>
-          <button onClick={onAdd} className="mt-4 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer">Connect Provider</button>
+          <button onClick={onAdd} data-tour="connect-provider" className="mt-4 px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-lg cursor-pointer">Connect Provider</button>
           <button onClick={onCustom} className="ml-2 mt-4 px-3 py-1.5 border border-line rounded-lg text-ink-2 hover:text-ink-1 hover:border-line-strong text-sm cursor-pointer">Custom Endpoint</button>
         </div>
       ) : (

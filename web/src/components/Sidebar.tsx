@@ -7,6 +7,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
 import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
+import { HelpMenu } from "./HelpMenu";
 
 export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
@@ -49,6 +50,8 @@ interface SidebarProps {
   liveRooms?: Room[];
   collapsed: boolean;
   onToggle: () => void;
+  /** Start / replay the product onboarding tour (Help menu). */
+  onReplayTour?: () => void;
 }
 
 const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string }> = [
@@ -86,6 +89,7 @@ function roomBeaconClass(state: RoomPresence): string {
 export function Sidebar({
   activePage, username, onNavigate, onLogout, refreshKey,
   unreadRoomIds, onRoomsLoaded, liveRooms, collapsed, onToggle,
+  onReplayTour,
 }: SidebarProps) {
   const isMobile = useIsMobile();
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -172,10 +176,17 @@ export function Sidebar({
         <Sun size={16} className="hidden dark:block" />
         <Moon size={16} className="block dark:hidden" />
       </button>
+      {onReplayTour && (
+        <HelpMenu
+          onReplayTour={onReplayTour}
+          onOpenDocs={() => onNavigate({ type: "knowledge" })}
+        />
+      )}
       <button
         onClick={() => setBrowseDomain("system")}
         title="Settings"
         aria-label="Settings"
+        data-tour="settings"
         className={railBtn(domain === "system")}
       >
         {domain === "system" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
@@ -213,6 +224,7 @@ export function Sidebar({
           <button
             onClick={() => onNavigate({ type: "room", id: "__new__" })}
             title="New room"
+            data-tour="new-room"
             className="w-6 h-6 border border-line rounded-md text-ink-3 hover:text-accent-ink hover:border-line-strong flex items-center justify-center cursor-pointer transition-colors"
           >
             <Plus size={13} />
