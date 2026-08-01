@@ -81,7 +81,12 @@ export function runMessageSeqMigration(): void {
     const content = readFileSync(messagesPath, "utf-8").trim();
     if (!content) continue;
     const lines = content.split("\n");
-    const messages: RoomMessage[] = lines.map((line) => JSON.parse(line));
+    const messages: RoomMessage[] = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try { messages.push(JSON.parse(line)); }
+      catch { /* skip corrupt lines during one-shot migration */ }
+    }
     const needsBackfill = messages.some((m) => typeof m.seq !== "number");
     if (!needsBackfill) {
       if (!marker.rooms[roomId]) {

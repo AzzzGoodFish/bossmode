@@ -717,14 +717,23 @@ export function addMember(roomId: string, agentName: string): boolean {
 function getLatestMessageIdInline(roomId: string): string | null {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return null;
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return null;
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return null;
+  // Walk backward so a truncated trailing line does not hide the real latest id.
   const lines = content.split("\n");
-  try {
-    const msg = JSON.parse(lines[lines.length - 1]);
-    return msg.id;
-  } catch (err) {
-    logger.error("room-store", "failed to parse last message", { roomId, error: String(err) });
-    return null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    try {
+      const msg = JSON.parse(line);
+      if (msg?.id) return msg.id;
+    } catch (err) {
+      logger.warn("room-store", "skipped corrupt jsonl line (latest-id scan)", {
+        roomId,
+        lineNo: i + 1,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+  return null;
 }

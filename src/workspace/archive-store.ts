@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { roomDir } from "./room-store.js";
 import { readAllMessages, overwriteMessages } from "./message-store.js";
 import type { RoomMessage } from "../shared/types.js";
+import { parseJsonlLines } from "../shared/jsonl.js";
 
 function archivesDir(roomId: string): string {
   return join(roomDir(roomId), "archives");
@@ -85,10 +86,13 @@ export function readArchiveMessages(roomId: string, timestamp: number): RoomMess
   const filePath = join(archivesDir(roomId), `${timestamp}.jsonl`);
   if (!existsSync(filePath)) return [];
 
-  const content = readFileSync(filePath, "utf-8").trim();
-  if (!content) return [];
+  const content = readFileSync(filePath, "utf-8");
+  if (!content.trim()) return [];
 
-  return content.split("\n").map((line) => JSON.parse(line));
+  return parseJsonlLines<RoomMessage>(content, {
+    category: "archive-store",
+    context: { roomId, timestamp },
+  });
 }
 
 export function readArchiveSummary(roomId: string, timestamp: number): {

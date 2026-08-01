@@ -10,6 +10,7 @@ import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
+import { parseJsonlLines } from "../shared/jsonl.js";
 import { recordTurnStart, recordTurnEnd, recordToolCall, recordTokenUsage } from "../workspace/member-stats-store.js";
 import { recordDailyUsage } from "../workspace/db/token-rollup.js";
 import { indexAppendedEvent } from "../workspace/db/activity-index.js";
@@ -84,9 +85,13 @@ export function resetEventSeqCache(): void {
 export function loadEventsFromDisk(roomId: string, agentRef: string): AgentHistoryEvent[] {
   const path = agentEventsPath(roomId, agentRef);
   if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return [];
-  return content.split("\n").map((line) => limitRuntimeErrorEvent(JSON.parse(line)));
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return [];
+  return parseJsonlLines<AgentHistoryEvent>(content, {
+    category: "event-handler",
+    context: { roomId, agentRef },
+    map: (value) => limitRuntimeErrorEvent(value),
+  });
 }
 
 /** Load events with tail-based pagination. Returns { events, total, hasMore }. */

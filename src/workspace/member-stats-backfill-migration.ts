@@ -53,7 +53,11 @@ function migrateRoom(roomId: string): number {
     try {
       const content = readFileSync(join(dir, file), "utf-8").trim();
       if (!content) continue;
-      const events = content.split("\n").map((line) => JSON.parse(line));
+      const events = content.split("\n").flatMap((line) => {
+        if (!line.trim()) return [];
+        try { return [JSON.parse(line)]; }
+        catch { return []; }
+      });
       const stats = computeStatsFromEvents(events);
       writeBackfilledStats(roomId, memberRef, stats);
       seeded += 1;

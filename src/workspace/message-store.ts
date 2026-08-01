@@ -5,6 +5,15 @@ import { roomDir } from "./room-store.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
+import { parseJsonlLines } from "../shared/jsonl.js";
+
+function parseRoomMessages(content: string, roomId: string): RoomMessage[] {
+  return parseJsonlLines<RoomMessage>(content, {
+    category: "message-store",
+    context: { roomId },
+    map: (value) => limitRuntimeFailureRoomMessage(value as RoomMessage),
+  });
+}
 
 function messagesPath(roomId: string): string {
   return join(roomDir(roomId), "messages.jsonl");
@@ -106,10 +115,10 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
 
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return [];
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return [];
 
-  let messages: RoomMessage[] = content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
+  let messages: RoomMessage[] = parseRoomMessages(content, roomId);
 
   // Merge summaries before pagination
   messages = mergeWithSummaries(messages);
@@ -147,10 +156,10 @@ export function getMessagesSince(roomId: string, cursorId: string | null): RoomM
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
 
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return [];
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return [];
 
-  const raw: RoomMessage[] = content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
+  const raw: RoomMessage[] = parseRoomMessages(content, roomId);
   const messages = mergeWithSummaries(raw);
 
   if (!cursorId) return messages;
@@ -165,18 +174,26 @@ export function getLatestMessageId(roomId: string): string | null {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return null;
 
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return null;
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return null;
 
+  // Walk backward so a truncated trailing line does not hide the real latest id.
   const lines = content.split("\n");
-  const lastLine = lines[lines.length - 1];
-  try {
-    const msg = JSON.parse(lastLine) as RoomMessage;
-    return msg.id;
-  } catch (err) {
-    logger.error("message-store", "failed to parse last message", { roomId, error: String(err) });
-    return null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    try {
+      const msg = JSON.parse(line) as RoomMessage;
+      if (msg?.id) return msg.id;
+    } catch (err) {
+      logger.warn("message-store", "skipped corrupt jsonl line (latest-id scan)", {
+        roomId,
+        lineNo: i + 1,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+  return null;
 }
 
 // Used by archive-store: overwrite messages file with kept messages
@@ -189,9 +206,9 @@ export function overwriteMessages(roomId: string, messages: RoomMessage[]): void
 export function readAllMessages(roomId: string): RoomMessage[] {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8").trim();
-  if (!content) return [];
-  return content.split("\n").map((line) => limitRuntimeFailureRoomMessage(JSON.parse(line)));
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) return [];
+  return parseRoomMessages(content, roomId);
 }
 
 // 2d: Get raw messages in a range (for expanding summaries — no merge)
