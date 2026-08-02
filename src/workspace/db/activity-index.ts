@@ -12,7 +12,7 @@
 // Same dedup/authority stance as backfill: files are the truth, the index is a
 // disposable projection. Every write is best-effort — a DB failure logs and the
 // agent turn continues on files alone.
-import { existsSync, openSync, readSync, closeSync } from "node:fs";
+import { existsSync, openSync, readSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getProjectionDb } from "./projection.js";
 import { getWatermark, setWatermark } from "./watermark.js";
@@ -201,7 +201,6 @@ export function catchUpActivityIndex(roomId: string, memberId: string): void {
     // (types filtered), so we compare the file's total line count via seq: read
     // the file, skip up to lastSeq lines, index the rest. For very large files
     // this is still a one-time cost after which live-index keeps pace.
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const content = readFileSync(filePath, "utf-8");
     if (!content) return;
     const lines = content.split("\n");
