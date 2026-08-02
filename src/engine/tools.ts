@@ -443,10 +443,12 @@ export async function handleToolCallback(
       if (target.id === actor.id) return { ok: false, error: "Cannot wait on yourself" };
 
       const { waitForMember, WAIT_DEFAULT_TIMEOUT_MIN, WAIT_MAX_TIMEOUT_MIN } = await import("./wait-wait.js");
-      const { getAgentStatus, abortAgent } = await import("./agent-manager.js");
+      const { getAgentStatus } = await import("./agent-manager.js");
       const targetStatus = getAgentStatus(roomId, target.id);
       const timeoutMinutes = params?.timeoutMinutes !== undefined ? Number(params.timeoutMinutes) : undefined;
 
+      // mention_interrupt does NOT abort — activation steers the @ message while working;
+      // wait only reports why it ended. Stop button is the sole abort path.
       const outcome = await waitForMember({
         roomId,
         waiterMemberId: actor.id,
@@ -456,11 +458,6 @@ export async function handleToolCallback(
         targetStatus,
         timeoutMinutes,
       });
-
-      // @-interrupt: abort the current turn so the mention can activate normally.
-      if (outcome.ok && outcome.reason === "mention_interrupt") {
-        try { abortAgent(roomId, actor.id); } catch { /* ignore */ }
-      }
 
       return {
         ...outcome,

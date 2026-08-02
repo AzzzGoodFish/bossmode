@@ -4,10 +4,15 @@
 // Resolves when ANY of:
 //   1. target posts an agent-authored room message
 //   2. target transitions to idle (or is already idle at call time)
-//   3. waiter is @-mentioned → abortAgent interrupts the turn (Stop-button path)
+//   3. waiter is @-mentioned → settle mention_interrupt (no abort; message arrives via steer)
 //   4. timeout (default 30 min, max 360)
+//   5. user Stop → abortAgent settles wait first, then aborts the turn
 //
 // One wait per waiter at a time. Cursor is NOT advanced — normal activation owns that.
+//
+// @-while-waiting (fish 0.19.6): standard activation steers the message first (cursor
+// advances once); wait settles mention_interrupt one tick later so the next model
+// request sees tool-result then steered user message. Wait never carries message body.
 
 import { onMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
@@ -78,7 +83,7 @@ function settle(wait: ActiveWait, outcome: WaitOutcome): void {
   wait.resolve(outcome);
 }
 
-/** Called from abortAgent — if this member is blocked in wait, settle as mention_interrupt. */
+/** Called from abortAgent (Stop) — settle wait before the turn is aborted. */
 export function settleWaitOnAbort(roomId: string, memberId: string): void {
   const wait = activeWaits.get(waitKey(roomId, memberId));
   if (!wait) return;
@@ -86,7 +91,7 @@ export function settleWaitOnAbort(roomId: string, memberId: string): void {
     ok: true,
     reason: "mention_interrupt",
     target: wait.targetName,
-    detail: `Wait interrupted — you were mentioned or stopped. Target was ${wait.targetName}.`,
+    detail: `Wait interrupted — stopped. Target was ${wait.targetName}.`,
   });
 }
 
@@ -184,21 +189,22 @@ export function waitForMember(args: {
     wait.unsubMessage = onMessage((msgRoomId: string, message: RoomMessage) => {
       if (msgRoomId !== roomId) return;
 
-      // Waiter was @-mentioned (by anyone including user) → interrupt.
+      // Waiter was @-mentioned (by anyone including user).
+      // Do NOT abort — standard activation steers the message while working;
+      // settle wait one tick later so steer is queued first (tool-result then user msg).
       const mentioned =
         (message.mentionMemberIds && message.mentionMemberIds.includes(waiterMemberId)) ||
         (Array.isArray(message.mentions) && message.mentions.includes(waiterName));
       if (mentioned && message.senderMemberId !== waiterMemberId) {
-        finish({
-          ok: true,
-          reason: "mention_interrupt",
-          target: targetName,
-          detail: `Wait interrupted — you were mentioned by ${message.sender}.`,
-        });
-        // Abort the waiter's turn so the @ can activate next (Stop-button path).
-        void import("./agent-manager.js").then((m) => {
-          try { m.abortAgent(roomId, waiterMemberId); } catch { /* ignore */ }
-        });
+        const sender = message.sender || "someone";
+        setTimeout(() => {
+          finish({
+            ok: true,
+            reason: "mention_interrupt",
+            target: targetName,
+            detail: `Wait interrupted — you were mentioned by ${sender}. The mention was delivered via the normal activation path; continue from that message.`,
+          });
+        }, 0);
         return;
       }
 

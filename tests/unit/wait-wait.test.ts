@@ -150,7 +150,7 @@ describe("waitForMember", () => {
     if (outcome.ok) expect(outcome.reason).toBe("idle");
   });
 
-  it("resolves on @mention of the waiter (mention_interrupt)", async () => {
+  it("resolves on @mention of the waiter (mention_interrupt) after one tick — no abort", async () => {
     const pending = waitForMember({
       roomId: "room-a",
       waiterMemberId: "rm_pm",
@@ -161,14 +161,35 @@ describe("waitForMember", () => {
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
+    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
 
     postMessage("room-a", "user", "@pm please look", ["pm"], {
       mentionMemberIds: ["rm_pm"],
     });
 
+    // Steer-first: still waiting on the same tick as the message (deferred settle).
+    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
-    if (outcome.ok) expect(outcome.reason).toBe("mention_interrupt");
+    if (outcome.ok) {
+      expect(outcome.reason).toBe("mention_interrupt");
+      expect(outcome.message).toBeUndefined(); // body is NOT on wait result
+      expect(outcome.detail).toMatch(/mentioned by user/i);
+    }
+    expect(isMemberWaiting("room-a", "rm_pm")).toBe(false);
+  });
+
+  it("mention path never calls abortAgent (steer owns delivery)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const src = readFileSync(resolve(process.cwd(), "src/engine/wait-wait.ts"), "utf8");
+    expect(src).not.toMatch(/import\(.*agent-manager/);
+    expect(src).not.toMatch(/\.abortAgent\s*\(/);
+    expect(src).toMatch(/setTimeout/);
+    const tools = readFileSync(resolve(process.cwd(), "src/engine/tools.ts"), "utf8");
+    // wait case must not abort after mention_interrupt
+    expect(tools).not.toMatch(/mention_interrupt[\s\S]{0,120}abortAgent/);
   });
 
   it("resolves on abort settle", async () => {

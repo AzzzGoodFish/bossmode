@@ -35,6 +35,7 @@ import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
+import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -145,10 +146,7 @@ function transition(
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
   // Notify blocking wait() callers when a member becomes idle.
   if (newStatus === "idle") {
-    try {
-      // Dynamic import avoids a static cycle (wait-wait → agent-manager for abort).
-      void import("./wait-wait.js").then((m) => m.notifyMemberIdle(roomId, instance.memberId));
-    } catch { /* ignore */ }
+    try { notifyMemberIdle(roomId, instance.memberId); } catch { /* ignore */ }
   }
 }
 
@@ -1254,10 +1252,9 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
 
-  // If blocked in wait(), settle it first so the tool call can return cleanly.
-  try {
-    void import("./wait-wait.js").then((m) => m.settleWaitOnAbort(roomId, memberId));
-  } catch { /* ignore */ }
+  // Stop is the sole abort entry. If blocked in wait(), settle it SYNCHRONOUSLY first
+  // so the tool call can return mention_interrupt before the turn is torn down.
+  try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
 
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();

@@ -88,4 +88,28 @@ describe("wait tool — gates + idle short-circuit", () => {
     expect(result.ok).toBe(true);
     expect(result.reason).toBe("idle");
   });
+
+  it("@ while waiting → mention_interrupt via tool path, no abort side-effect", async () => {
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { isMemberWaiting } = await import("../../src/engine/wait-wait.js");
+    const { postMessage } = await import("../../src/communication/message-bus.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const pm = roomStore.getRoomMembers(roomId).find((m) => m.name === "pm")!;
+
+    const pending = handleToolCallback("wait", roomId, "pm", { member: "qa", timeoutMinutes: 5 });
+    for (let i = 0; i < 50 && !isMemberWaiting(roomId, pm.id); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(isMemberWaiting(roomId, pm.id)).toBe(true);
+
+    postMessage(roomId, "user", "@pm please continue", ["pm"], {
+      mentionMemberIds: [pm.id],
+    });
+
+    const result = await pending as any;
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBe("mention_interrupt");
+    expect(result.message).toBeUndefined();
+    expect(result.detail).toMatch(/mentioned/i);
+  });
 });
