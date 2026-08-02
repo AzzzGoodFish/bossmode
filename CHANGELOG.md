@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.19.5] — 2026-08-02
+
+### Added
+- **wait tool (leader-only)**: blocking `wait(member, timeoutMinutes?)` replaces one-shot watch. Resolves on target message, target idle, waiter @/Stop interrupt, or timeout (default 30m, max 360). Legacy `watches.json` cleared on startup with a room note.
+- **Product onboarding tour + Help**: five-step spotlight tour (connect model → create room → chat) with real Settings→Models navigation; first-launch once via `onboarding.v1.done`; rail Help (Replay / Documentation / About). Sticky spotlight follows async Models reflow.
+- **Sliding session renewal**: authenticated requests with less than half TTL remaining extend the session another 24h so active users are not kicked mid-compose.
+
+### Fixed
+- **JSONL resilient reads**: corrupt message/event lines are skipped with a warning instead of failing the whole room (disk-full / power-loss safety).
+- **Draft keep-on-fail**: composer drafts stay in localStorage when send fails (including 401), so re-login can restore input.
+- Credential refresh on model switch stays offline (`allowNetwork: false`); switch-path registry refresh already timed out at 8s.
+
+---
+
 ## [0.19.5-rc.2] — 2026-08-01
 
 ### Fixed
