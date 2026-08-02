@@ -23,16 +23,15 @@ import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
-const BOSSMODE_TOOL_NAMES = new Set([
-  "chat", "query_room_messages",
-  "read_memory", "edit_memory", "write_memory",
-  "create_task", "update_task", "list_tasks", "get_task", "comment_task",
-  "query_integration", "configure_integration",
-]);
 
-function classifyToolSource(name: string, sourceInfo?: { path?: string; source?: string; baseDir?: string }): string {
+/** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
+function classifyToolSource(
+  name: string,
+  bossmodeToolNames: ReadonlySet<string>,
+  sourceInfo?: { path?: string; source?: string; baseDir?: string },
+): string {
   if (BUILTIN_TOOL_NAMES.has(name)) return "builtin";
-  if (BOSSMODE_TOOL_NAMES.has(name)) return "bossmode";
+  if (bossmodeToolNames.has(name)) return "bossmode";
   if (name === "mcp") return "mcp";
   const haystack = [sourceInfo?.path, sourceInfo?.baseDir, sourceInfo?.source].filter(Boolean).join(" ");
   if (haystack) {
@@ -284,6 +283,9 @@ class PiSdkAgentHandle implements AgentHandle {
   private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
   private destroyed = false;
+  /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
+  private bossmodeToolNames: Set<string>;
+  private toolAssembly: { roomId: string; agentName: string; roomMembers: string[] };
 
   constructor(
     private session: AgentSession,
@@ -292,8 +294,12 @@ class PiSdkAgentHandle implements AgentHandle {
     private baseExtensionPaths: string[],
     private baseToolNames: string[],
     runtimeParams: AgentRuntimeParams,
+    bossmodeToolNames: Iterable<string>,
+    toolAssembly: { roomId: string; agentName: string; roomMembers: string[] },
   ) {
     this.runtimeParams = runtimeParams;
+    this.bossmodeToolNames = new Set(bossmodeToolNames);
+    this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
       this.observeCompactionWatchdog(raw);
       const bridge = this.manualCompactionBridge;
@@ -652,7 +658,7 @@ class PiSdkAgentHandle implements AgentHandle {
           label: typeof def?.label === "string" ? def.label : t.name,
           description: t.description || "",
           parameters: t.parameters ?? { type: "object", properties: {} },
-          source: classifyToolSource(t.name, t.sourceInfo),
+          source: classifyToolSource(t.name, this.bossmodeToolNames, t.sourceInfo),
         });
       }
       return tools;
@@ -680,6 +686,18 @@ class PiSdkAgentHandle implements AgentHandle {
     if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
     else await this.resourceLoader.reload();
     if (mcpSettings.enabled) await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
+    // Refresh bossmode tool name set from the same factory that builds customTools (leader gate, new tools).
+    this.toolAssembly = {
+      roomId: opts.roomId,
+      agentName: opts.member.name,
+      roomMembers: this.toolAssembly.roomMembers,
+    };
+    const customTools = createBossmodeSdkTools({
+      roomId: opts.roomId,
+      agentName: opts.member.name,
+      roomMembers: this.toolAssembly.roomMembers,
+    });
+    this.bossmodeToolNames = new Set(customTools.map((t) => t.name));
     if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
       throw new Error("Runtime cannot verify active tools after reload.");
     }
@@ -913,7 +931,16 @@ export class PiSdkRuntime implements AgentRuntime {
       credentialId: piConfig.profile?.id,
       credentialName: piConfig.profile?.name,
     };
-    const handle = new PiSdkAgentHandle(session, modelRegistry, resourceLoader, extensionPaths, baseTools, runtimeParams);
+    const handle = new PiSdkAgentHandle(
+      session,
+      modelRegistry,
+      resourceLoader,
+      extensionPaths,
+      baseTools,
+      runtimeParams,
+      customTools.map((t) => t.name),
+      { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers },
+    );
     this.handles.add(handle);
     logger.info("runtime:pi-sdk", "createAgent", {
       agent: opts.member.name,

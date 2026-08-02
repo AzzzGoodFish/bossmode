@@ -54,8 +54,14 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   createMemberCredentialStore: (roomId: string, memberId: string) => ({ kind: "credentials", roomId, memberId }),
 }));
 
+// Live customTools factory — sole source for "bossmode" classification (no static name whitelist).
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
-  createBossmodeSdkTools: () => [],
+  createBossmodeSdkTools: () => [
+    { name: "chat" },
+    { name: "query_room_messages" },
+    { name: "wait" },
+    { name: "create_task" },
+  ],
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
@@ -637,7 +643,7 @@ describe("PiSdkRuntime", () => {
 
   it("getActiveTools returns intersection of registry and active names with source labels", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    activeToolNames = ["read", "bash", "chat", "web_search", "mcp"];
+    activeToolNames = ["read", "bash", "chat", "wait", "web_search", "mcp"];
     createAgentSession.mockResolvedValueOnce({
       session: {
         subscribe: vi.fn(() => vi.fn()),
@@ -649,6 +655,8 @@ describe("PiSdkRuntime", () => {
           { name: "read", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }, sourceInfo: { path: "builtin", source: "builtin" } },
           { name: "bash", description: "Run bash", parameters: { type: "object", properties: {} }, sourceInfo: { path: "builtin", source: "builtin" } },
           { name: "chat", description: "Post to room", parameters: { type: "object", properties: {} }, sourceInfo: { path: "bossmode", source: "custom" } },
+          // wait has no sourceInfo path — must classify via live customTools set, not static whitelist
+          { name: "wait", description: "Block until member event", parameters: { type: "object", properties: {} } },
           { name: "web_search", description: "Search the web", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, sourceInfo: { path: "/tmp/extensions/node_modules/pi-web-access/index.ts", source: "extension", baseDir: "/tmp/extensions/node_modules/pi-web-access" } },
           { name: "mcp", description: "MCP proxy", parameters: { type: "object", properties: {} }, sourceInfo: { path: "vendor/pi-mcp-adapter/index.ts", source: "extension" } },
           { name: "inactive_tool", description: "Should be filtered", parameters: {}, sourceInfo: { path: "x" } },
@@ -665,13 +673,21 @@ describe("PiSdkRuntime", () => {
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const tools = handle.getActiveTools!();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["bash", "chat", "mcp", "read", "web_search"]);
+    expect(names).toEqual(["bash", "chat", "mcp", "read", "wait", "web_search"]);
     expect(tools.find((t) => t.name === "read")?.source).toBe("builtin");
     expect(tools.find((t) => t.name === "chat")?.source).toBe("bossmode");
+    expect(tools.find((t) => t.name === "wait")?.source).toBe("bossmode");
     expect(tools.find((t) => t.name === "mcp")?.source).toBe("mcp");
     expect(tools.find((t) => t.name === "web_search")?.source).toMatch(/^extension:/);
     expect(tools.find((t) => t.name === "web_search")?.parameters).toMatchObject({ required: ["query"] });
     expect(tools.find((t) => t.name === "inactive_tool")).toBeUndefined();
+  });
+
+  it("classifies tools from createBossmodeSdkTools set — no static whitelist fallback", () => {
+    // Guard: static BOSSMODE_TOOL_NAMES must stay deleted.
+    const src = readFileSync(join(process.cwd(), "src/engine/runtime/pi-sdk.ts"), "utf8");
+    expect(src).not.toMatch(/BOSSMODE_TOOL_NAMES/);
+    expect(src).toMatch(/bossmodeToolNames/);
   });
 
 });
