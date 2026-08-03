@@ -11,6 +11,8 @@ import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { OnboardingTour } from "../components/OnboardingTour";
 import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
 import { TeamsPage } from "./TeamsPage";
+import { ContactsPage } from "./ContactsPage";
+import { DmPage } from "./DmPage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
@@ -313,6 +315,18 @@ export function Layout({ onLogout, username }: LayoutProps) {
         )}
 
         {/* Teams library (0.19 team layer) */}
+        {activePage?.type === "contacts" && (
+          <ContactsPage
+            onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
+          />
+        )}
+        {activePage?.type === "dm" && (
+          <DmPage
+            memberId={activePage.memberId}
+            onBack={() => handleNavigate({ type: "contacts" })}
+          />
+        )}
+
         {activePage?.type === "team" && workspaceResourceRouteMode(activePage.name) !== "detail" && (
           <TeamsPage
             onSelectTeam={(name) => setActivePage({ type: "team", name })}

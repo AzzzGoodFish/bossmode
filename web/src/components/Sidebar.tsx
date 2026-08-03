@@ -1,17 +1,20 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Users,
+  CheckSquare, Plus, Users, Contact,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
 import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
+import { MOCK_MEMBERS } from "../mock/contacts";
 
 export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
 export type ActivePage =
+  | { type: "contacts" }
+  | { type: "dm"; memberId: string }
   | { type: "room"; id: string }
   | { type: "team"; name: string | null }
   | { type: "agent"; name: string | null }
@@ -22,10 +25,13 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "rooms" | "team" | "library" | "system";
+type Domain = "contacts" | "rooms" | "team" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
+    case "contacts":
+    case "dm":
+      return "contacts";
     case "team":
     case "agent":
     case "skill":
@@ -158,6 +164,10 @@ export function Sidebar({
       >
         B
       </button>
+      <button onClick={() => { setBrowseDomain("contacts"); onNavigate({ type: "contacts" }); }} title="Contacts" aria-label="Contacts" className={railBtn(domain === "contacts")}>
+        {domain === "contacts" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Contact size={18} />
+      </button>
       <button onClick={() => setBrowseDomain("rooms")} title="Rooms" aria-label="Rooms" className={railBtn(domain === "rooms")}>
         {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <MessageSquare size={18} />
@@ -205,7 +215,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { contacts: "Contacts", rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -233,6 +243,28 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
+        {domain === "contacts" && (
+          <>
+            {MOCK_MEMBERS.map((m) => {
+              const active = activePage?.type === "dm" && activePage.memberId === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => onNavigate({ type: "dm", memberId: m.id })}
+                  className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+                >
+                  <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-[12.5px] font-medium truncate ${active ? "text-accent-ink" : "text-ink-2"}`}>{m.name}</div>
+                    <div className="text-[10.5px] text-ink-4 truncate">
+                      {m.status === "working" ? `Working${m.activeScope ? ` in ${m.activeScope}` : ""}` : m.template}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </>
+        )}
         {domain === "rooms" && (
           <>
             {displayRooms.map((r) => {

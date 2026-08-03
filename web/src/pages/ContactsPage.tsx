@@ -1,0 +1,151 @@
+/**
+ * ContactsPage — member directory (0.20 member-global model).
+ *
+ * Every member is a globally unique digital employee: one identity, many scopes
+ * (DM + rooms). Row shows live status with the scope it's working in, effective
+ * model, context usage and lifetime tokens. Click a row to open the DM.
+ *
+ * Data: mock/contacts (contract-shaped; swap for api/client when backend lands).
+ */
+import { useMemo, useState } from "react";
+import { Plus, Search, ChevronRight } from "lucide-react";
+import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
+import { MOCK_MEMBERS, formatTokens, type MemberContact } from "../mock/contacts";
+
+type StatusFilter = "all" | "working" | "idle" | "offline";
+
+export function ContactsPage({ onOpenDm, onCreateMember }: {
+  onOpenDm: (memberId: string) => void;
+  onCreateMember?: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<StatusFilter>("all");
+
+  const members = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return MOCK_MEMBERS.filter((m) => {
+      if (filter !== "all" && m.status !== filter) return false;
+      if (!q) return true;
+      return m.name.toLowerCase().includes(q) || m.template.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
+    });
+  }, [query, filter]);
+
+  const workingCount = MOCK_MEMBERS.filter((m) => m.status === "working").length;
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-surface-1">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
+        {/* header */}
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Contacts</h1>
+            <p className="text-[12.5px] text-ink-3 mt-1">
+              Your digital employees — one identity, every scope. {MOCK_MEMBERS.length} members · {workingCount} working now.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCreateMember}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast text-sm font-medium rounded-lg hover:opacity-90 cursor-pointer shrink-0"
+          >
+            <Plus size={15} /> New member
+          </button>
+        </div>
+
+        {/* search + filter */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search members…"
+              className="w-64 rounded-lg border border-line bg-inset pl-8 pr-3 py-1.5 text-[12.5px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            {(["all", "working", "idle", "offline"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+                  filter === f ? "bg-accent border-accent text-accent-contrast" : "border-line text-ink-3 hover:text-ink-1"
+                }`}
+              >
+                {f === "all" ? "All" : f[0].toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* member list */}
+        <div className="rounded-xl border border-line bg-inset/50 overflow-hidden">
+          {members.length === 0 ? (
+            <div className="py-14 text-center text-sm text-ink-3">No members match.</div>
+          ) : (
+            members.map((m, i) => (
+              <MemberRow key={m.id} member={m} last={i === members.length - 1} onOpen={() => onOpenDm(m.id)} />
+            ))
+          )}
+        </div>
+
+        <p className="text-[11px] text-ink-4 mt-3">
+          Members are global — the same identity works in DM and every room, with shared four-layer memory.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MemberRow({ member: m, last, onOpen }: { member: MemberContact; last: boolean; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`w-full flex items-center gap-4 px-4 py-3.5 text-left bg-surface-1 hover:bg-surface-2 transition-colors cursor-pointer ${last ? "" : "border-b border-line-soft"}`}
+    >
+      <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="md" />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[13.5px] font-semibold text-ink-1">{m.name}</span>
+          <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{m.template}</span>
+          {!m.unified.model && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-line-soft text-ink-4" title="Model config is per-scope (unified switch off)">
+              split config
+            </span>
+          )}
+        </div>
+        <div className="text-[12px] text-ink-3 mt-0.5 truncate">{m.description}</div>
+        <div className="text-[11px] mt-1">
+          {m.status === "working" ? (
+            <span className="text-onair font-medium">● Working{m.activeScope ? ` in ${m.activeScope}` : ""}</span>
+          ) : m.status === "idle" ? (
+            <span className="text-ink-4">Idle</span>
+          ) : (
+            <span className="text-ink-4">Offline</span>
+          )}
+        </div>
+      </div>
+
+      <div className="hidden md:flex items-center gap-6 shrink-0 text-right">
+        <Meta label="Model" value={m.model} mono />
+        <Meta label="Context" value={`${m.contextPct}%`} warn={m.contextPct >= 80} />
+        <Meta label="Tokens" value={formatTokens(m.tokenTotal)} mono />
+        <Meta label="Scopes" value={String(m.scopes.length)} />
+      </div>
+
+      <ChevronRight size={15} className="text-ink-4 shrink-0" />
+    </button>
+  );
+}
+
+function Meta({ label, value, mono, warn }: { label: string; value: string; mono?: boolean; warn?: boolean }) {
+  return (
+    <div className="min-w-[64px]">
+      <div className="text-[10px] uppercase tracking-wide text-ink-4">{label}</div>
+      <div className={`text-[12.5px] mt-0.5 ${mono ? "tabular-nums font-medium" : "font-medium"} ${warn ? "text-blocked" : "text-ink-2"}`}>{value}</div>
+    </div>
+  );
+}
