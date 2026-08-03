@@ -4,6 +4,18 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.19.6-rc.1] — 2026-08-03
+
+### Added
+- Browser tab favicon (teal rounded square + B) in SVG + 32px PNG + apple-touch-icon.
+
+### Fixed
+- **wait @-interrupt**: while blocked in wait, @mentions no longer abort the turn — message is steered via normal activation and wait settles `mention_interrupt` one tick later so the model continues in the same turn. Stop remains the sole abort path.
+- **wait tool source**: Active tools classifies bossmode tools from the live `createBossmodeSdkTools` set (no static whitelist), so `wait` appears under bossmode not extension.
+- **activity catch-up**: ESM-safe `readFileSync` import so member activity index catch-up actually runs.
+
+---
+
 ## [0.19.5] — 2026-08-02
 
 ### Added
