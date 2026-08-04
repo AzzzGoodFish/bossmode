@@ -19,6 +19,7 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../communicat
 import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt } from "./prompt-compiler.js";
+import { instanceKey as scopeInstanceKey, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
   wrapRoomContextMessage,
@@ -96,6 +97,9 @@ interface PendingCredentialRefresh {
 
 interface AgentInstance {
   handle: AgentHandle;
+  /** Conversation scope id: "room:<roomId>" | "dm:<memberId>". */
+  scopeId: ScopeId;
+  /** Room id when scope is room:*; empty string for dm. */
   roomId: string;
   memberId: string;
   agentName: string; // current member name snapshot for display/mentions
@@ -124,8 +128,17 @@ interface AgentInstance {
 const instances = new Map<string, AgentInstance>();
 const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
 
+/** Room-scope instance key — contract §5: instanceKey = scopeId + ":" + memberId. */
 function instanceKey(roomId: string, memberId: string): string {
-  return `${roomId}:${memberId}`;
+  return scopeInstanceKey(scopeIdOf({ kind: "room", roomId }), memberId);
+}
+
+function dmInstanceKey(memberId: string): string {
+  return scopeInstanceKey(scopeIdOf({ kind: "dm", memberId }), memberId);
+}
+
+function roomScopeId(roomId: string): ScopeId {
+  return scopeIdOf({ kind: "room", roomId });
 }
 
 function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
@@ -737,6 +750,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
       const instance: AgentInstance = {
         handle,
+        scopeId: roomScopeId(roomId),
         roomId,
         memberId,
         agentName: memberName,
