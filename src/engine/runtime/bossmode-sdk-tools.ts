@@ -13,8 +13,6 @@ import {
   WAIT_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
-import * as roomStore from "../../workspace/room-store.js";
-
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
 }
@@ -30,13 +28,7 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
 
-  // Assembly gate: wait is leader-only (the callback re-checks at execution).
-  const isRoomLeader = (() => {
-    const room = roomStore.getRoom(opts.roomId);
-    if (!room?.promptLeaderMemberId) return false;
-    return roomStore.getRoomMembers(opts.roomId).find((m) => m.name === opts.agentName)?.id === room.promptLeaderMemberId;
-  })();
-
+  // 0.20: wait is available to every room member (assembly + execution).
   const tools: ToolDefinition[] = [
     defineTool({
       name: "chat",
@@ -220,28 +212,26 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     }),
   ];
 
-  // Leader-only tool (assembly gate). Callback re-validates at execution.
-  if (isRoomLeader) {
-    tools.push(defineTool({
-      name: "wait",
-      label: "Wait",
-      description: WAIT_DESCRIPTION,
-      parameters: Type.Object({
-        member: Type.String({ description: "Target member name to wait on" }),
-        timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("wait", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Wait failed");
-        if (data?.reason === "message") {
-          const body = typeof data.message === "string" ? data.message : "";
-          return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
-        }
-        if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
-        return textResult(truncate(JSON.stringify(data, null, 2)));
-      },
-    }));
-  }
+  // 0.20: wait available to all room members (assembly + execution).
+  tools.push(defineTool({
+    name: "wait",
+    label: "Wait",
+    description: WAIT_DESCRIPTION,
+    parameters: Type.Object({
+      member: Type.String({ description: "Target member name to wait on" }),
+      timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
+    }),
+    execute: async (_id, params) => {
+      const data = await call("wait", params as any) as any;
+      if (data?.ok === false) throw new Error(data.error || "Wait failed");
+      if (data?.reason === "message") {
+        const body = typeof data.message === "string" ? data.message : "";
+        return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
+      }
+      if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
+      return textResult(truncate(JSON.stringify(data, null, 2)));
+    },
+  }));
 
   // Defensive normalization: TypeBox omits `required` when every property is
   // optional — valid JSON Schema (OpenAI/xAI accept it), but some

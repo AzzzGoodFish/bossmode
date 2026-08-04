@@ -429,12 +429,10 @@ export async function handleToolCallback(
       return { ok: true, provider, configured: config, projects };
     }
     case "wait": {
-      // Leader-only blocking wait (replaces the old one-shot watch subscription).
+      // 0.20: wait available to all room members (no longer leader-only).
       const room = roomStore.getRoom(roomId);
       const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
-      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; wait is unavailable" };
-      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can use wait" };
 
       const targetRef = String(params?.member || "").trim();
       if (!targetRef) return { ok: false, error: "member is required" };
