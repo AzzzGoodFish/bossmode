@@ -10,7 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -693,8 +693,9 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
       if (targetModel) {
         result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, targetModel, targetCred);
       } else {
-        // Clearing the model binding — no live switch to apply.
-        roomStore.updateRoomMemberOverride(params.id, currentMemberRef, { model: null, credentialId: null });
+        // Clearing the model binding — no live switch to apply. Same 0.20
+        // authority as switchMemberModel (registry for mem_*, F4).
+        clearMemberModelBinding(params.id, currentMemberRef);
       }
     }
     if (hasThinking) {
