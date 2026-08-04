@@ -175,10 +175,18 @@ export function repairRoomGlobalMemberStamps(): number {
       if (Array.isArray(room.globalMemberIds) && room.globalMemberIds.length > 0) continue;
       const roomMembers = roomStore.getRoomMembers(room.id);
       if (roomMembers.length === 0) continue; // genuinely empty room
-      const globalIds = roomMembers
-        .map((rm) => findMemberByName(rm.name)?.id)
-        .filter((id): id is string => !!id);
-      if (globalIds.length === 0) continue; // registry has no match — nothing safe to stamp
+      // All-or-nothing: stamping is an authoritative replace that drops
+      // roomMembers — a member that fails to resolve would be silently
+      // delisted. Skip and warn instead; the next startup (or a human) retries.
+      const unresolved = roomMembers.filter((rm) => !findMemberByName(rm.name));
+      if (unresolved.length > 0) {
+        logger.warn("migration", "room stamp repair skipped: unresolved member names", {
+          roomId: room.id,
+          unresolved: unresolved.map((rm) => rm.name),
+        });
+        continue;
+      }
+      const globalIds = roomMembers.map((rm) => findMemberByName(rm.name)!.id);
       const leaderName = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId)?.name;
       const leaderGlobalId = leaderName ? findMemberByName(leaderName)?.id : undefined;
       roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId);

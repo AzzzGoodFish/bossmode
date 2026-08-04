@@ -273,6 +273,33 @@ describe("member-global migration", () => {
     expect(JSON.stringify(roomStore.getRoom(roomId))).toBe(before);
   });
 
+  it("F1 repair is all-or-nothing: a room with an unresolvable member name is skipped, not partially stamped", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const reg = await import("../../src/workspace/member-registry.js");
+    reg.createMember({ name: "pm", agentTemplate: "pm" });
+    // "ghost" exists in the room but not in the registry (removed/renamed member).
+
+    const roomId = "room-partial";
+    const roomDir = join(state.dir, "rooms", roomId);
+    mkdirSync(roomDir, { recursive: true });
+    writeFileSync(
+      join(roomDir, "room.json"),
+      JSON.stringify({ id: roomId, name: "dev", cwd: state.dir, members: ["pm", "ghost"], createdAt: 1 }, null, 2),
+      "utf8",
+    );
+    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
+    // Marker done → only the every-startup repair runs (one-shot stays guarded).
+    mkdirSync(join(state.dir, ".migrations"), { recursive: true });
+    writeFileSync(join(state.dir, ".migrations", "member-global-v1.json"), JSON.stringify({ migration: "member-global-v1", done: true, at: 1 }), "utf8");
+
+    const mig = await import("../../src/workspace/member-global-migration.js");
+    mig.runMemberGlobalMigration();
+
+    // Not stamped: ghost must not be silently delisted by an authoritative replace.
+    const roomStore = await import("../../src/workspace/room-store.js");
+    expect(roomStore.getRoom(roomId)!.globalMemberIds ?? []).toHaveLength(0);
+  });
+
   it("moves per-room member mainline into (member, room) scope mainline", async () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const roomId = "room-mig-ml";
