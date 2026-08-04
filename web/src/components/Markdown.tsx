@@ -11,7 +11,9 @@ import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
 import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
 import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
 import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import { useMemo } from "react";
 import type { Components } from "react-markdown";
+import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
 
 SyntaxHighlighter.registerLanguage("tsx", tsx);
 SyntaxHighlighter.registerLanguage("typescript", typescript);
@@ -109,11 +111,78 @@ const components: Components = {
 
 interface MarkdownProps {
   content: string;
+  /** Persisted mention snapshot; only members the router activated tint. */
+  mentions?: string[];
+  /** `!name` urgent targets (persisted snapshot) → blocked-red tier. */
+  urgentMentions?: string[];
+  /** Room roster fallback when no snapshot exists. */
+  members?: string[];
+  /** Human user's login name → amber "@me" tier. */
+  loginName?: string | null;
 }
 
-export function Markdown({ content }: MarkdownProps) {
+interface MdNode {
+  type: string;
+  value?: string;
+  children?: MdNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, unknown>;
+    hChildren?: unknown[];
+  };
+}
+
+// Node types that never get mention tinting: code spans/blocks and links
+// (design v2: code 内、链接内不高亮).
+const SKIP_TYPES = new Set(["code", "inlineCode", "link", "linkReference", "definition", "html"]);
+
+/**
+ * remark plugin: split @/! mention tokens out of text nodes into pill spans.
+ * Works on the mdast text level, so markdown structure (and code) is untouched.
+ * The span is emitted via the mdast data.hName escape hatch (remark-rehype
+ * honors it on any node).
+ */
+export function remarkMentionPills(opts: { names: string[]; urgentNames: string[]; loginName?: string | null }) {
+  const walk = (node: MdNode): void => {
+    if (!node.children || SKIP_TYPES.has(node.type)) return;
+    const next: MdNode[] = [];
+    for (const child of node.children) {
+      if (child.type === "text" && child.value) {
+        const parts = splitMentionTokens(child.value, opts);
+        for (const part of parts) {
+          if (part.tier) {
+            next.push({
+              type: "text",
+              value: part.text,
+              data: {
+                hName: "span",
+                hProperties: { className: MENTION_PILL_CLASSES[part.tier], "data-mention-tier": part.tier },
+                hChildren: [{ type: "text", value: part.text }],
+              },
+            });
+          } else {
+            next.push({ type: "text", value: part.text });
+          }
+        }
+      } else {
+        walk(child);
+        next.push(child);
+      }
+    }
+    node.children = next;
+  };
+  return () => (tree: MdNode) => walk(tree);
+}
+
+export function Markdown({ content, mentions, urgentMentions, members, loginName }: MarkdownProps) {
+  const names = mentionNameSet(mentions, members, loginName);
+  const plugin = useMemo(
+    () => remarkMentionPills({ names, urgentNames: urgentMentions ?? [], loginName }),
+    // Names are stable per message render; join for a cheap memo key.
+    [names.join("\0"), (urgentMentions ?? []).join("\0"), loginName],
+  );
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, plugin]} components={components}>
       {content}
     </ReactMarkdown>
   );

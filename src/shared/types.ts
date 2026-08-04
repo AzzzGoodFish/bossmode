@@ -470,8 +470,11 @@ export interface RoomMessage {
   sender: string; // member name snapshot or "user" (legacy) or "system"
   senderMemberId?: string;
   content: string;
-  mentions: string[]; // member name snapshots
+  mentions: string[]; // member name snapshots (@ and ! targets alike — unread/highlight share one list)
   mentionMemberIds?: string[];
+  /** `!name` urgent-interrupt targets (subset of mentions). Name snapshots + ids, same dual as mentions/mentionMemberIds. */
+  urgentMentions?: string[];
+  urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event";
   task_event_meta?: TaskEventMeta;

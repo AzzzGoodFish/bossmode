@@ -16,7 +16,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
-import { parseMentions } from "../communication/router.js";
+import { parseMentions, parseUrgentMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
@@ -869,7 +869,7 @@ export async function activateAgent(roomId: string, memberRef: string): Promise<
 async function activateAgentInternal(
   roomId: string,
   memberRef: string,
-  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string },
+  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
 ): Promise<void> {
   const member = resolveRoomMember(roomId, memberRef);
   const memberName = member?.name || memberRef;
@@ -905,7 +905,7 @@ async function activateAgentInternalContinue(
   memberId: string,
   member: ReturnType<typeof resolveRoomMember>,
   instance: AgentInstance,
-  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string },
+  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
 ): Promise<void> {
   const cursors = roomStore.getCursors(roomId);
   const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
@@ -929,6 +929,15 @@ async function activateAgentInternalContinue(
 
   setActivationSource(roomId, memberId, opts.source);
   if (opts.replyDebt) markPendingChatReply(instance, opts.trigger);
+
+  // Urgent interrupt: never steer (that would queue behind the turn we just
+  // aborted) — park at the FRONT of the queue so the payload runs the moment
+  // the current dispatch settles (abort landing / compaction finishing).
+  if (opts.urgent && (instance.compacting || instance.status === "working" || instance.dispatchState !== "idle")) {
+    instance.queuedInputs.unshift(payload);
+    logger.info("agent", "urgentQueuedFront", { member: memberName, memberId, roomId, trigger: opts.trigger, queueDepth: instance.queuedInputs.length });
+    return;
+  }
 
   if (instance.compacting) {
     queueInput(instance, payload, opts.trigger);
@@ -1377,6 +1386,49 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   return { ok: true, action: "aborted" };
 }
 
+/**
+ * Urgent `!name` gesture (fish 2026-08-04): interrupt the target and deliver
+ * the message immediately as a new turn.
+ * - no live instance / fully idle → same straight-through as @ (nothing to
+ *   abort, no banner)
+ * - working → abort with Stop's primitive, but KEEP queued steered inputs
+ *   (interruption, not a full stop); the urgent payload goes to the FRONT of
+ *   the queue so it becomes the new turn the moment the aborted turn settles;
+ *   payload carries the interrupt banner so the member knows its turn was cut
+ *   (activation-source transparency — no illusion of continuing)
+ * - compacting / dispatch-busy → not safely abortable; queue front, no banner,
+ *   compaction is never hard-killed
+ * A sender=system room notice records every interrupt (user-visible; members
+ * never see system notices per the rc.5 filter).
+ */
+export async function interruptAgent(roomId: string, memberRef: string, urgentByName: string): Promise<{ ok: boolean; action: string }> {
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberId = member?.id || memberRef;
+  const memberName = member?.name || memberRef;
+  const key = instanceKey(roomId, memberId);
+  const instance = instances.get(key);
+
+  if (!instance || (instance.status !== "working" && instance.dispatchState === "idle")) {
+    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt" });
+    return { ok: true, action: "activated" };
+  }
+
+  if (instance.status === "working") {
+    const banner = `[INTERRUPTED] Your previous turn was aborted by an urgent message (!${memberName}) from ${urgentByName}. That turn may have left partial work — verify its state before building on it.`;
+    try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
+    instance.handle.abort();
+    updateDispatchState(instance, "aborting", "urgent_interrupt");
+    postMessage(roomId, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
+    logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId, urgentBy: urgentByName });
+    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt", banner, urgent: true });
+    return { ok: true, action: "interrupted" };
+  }
+
+  // Compacting or dispatch-busy (e.g. prompt settling): queue front, no abort.
+  await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt", urgent: true });
+  return { ok: true, action: "queued_front" };
+}
+
 // -- Instance management --
 
 export function getMemberInstances(memberName: string): Array<{
@@ -1589,9 +1641,20 @@ function wireInstanceEvents(
         const roomText = extractRoomMarkerText(event.text || "");
         if (roomText !== null) {
           const members = roomStore.getRoomMembers(roomId);
-          const mentions = parseMentions(roomText, members.map((m: any) => m.name));
-          const target = mentions.length === 1 ? roomStore.resolveRoomMemberRef(roomId, mentions[0]) : undefined;
-          postMessage(roomId, memberName, roomText, mentions, { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+          const memberNames = members.map((m: any) => m.name);
+          const urgentMentions = parseUrgentMentions(roomText, memberNames);
+          const mentions = [...new Set([...parseMentions(roomText, memberNames), ...urgentMentions])];
+          const mentionMemberIds = mentions
+            .map((name) => roomStore.resolveRoomMemberRef(roomId, name)?.id)
+            .filter((id): id is string => Boolean(id));
+          const urgentMentionMemberIds = urgentMentions
+            .map((name) => roomStore.resolveRoomMemberRef(roomId, name)?.id)
+            .filter((id): id is string => Boolean(id));
+          postMessage(roomId, memberName, roomText, mentions, {
+            senderMemberId: memberId,
+            mentionMemberIds,
+            ...(urgentMentions.length > 0 ? { urgentMentions, urgentMentionMemberIds } : {}),
+          });
           clearPendingChatReply(instance, "room_marker");
           logger.info("agent", "roomMarkerPosted", { member: memberName, roomId, memberId });
         }

@@ -14,7 +14,7 @@ import { getMember } from "../workspace/member-registry.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
-import { parseMentions } from "../communication/router.js";
+import { parseMentions, parseUrgentMentions } from "../communication/router.js";
 import { getActivationSource } from "./activation-context.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
@@ -40,11 +40,23 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
 
-function mentionIdsFromNames(message: string, roomMembers: Array<{ id: string; name: string }>): string[] {
+/** Mention parse for outgoing member messages: @ and ! targets alike merge into
+ * mentions/mentionMemberIds (unread/highlight/stats share one list); ! targets
+ * are additionally snapshotted as urgentMentions/urgentMentionMemberIds so the
+ * router can route them through the interrupt path. */
+function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; name: string }>): {
+  mentions: string[];
+  mentionMemberIds: string[];
+  urgentMentions: string[];
+  urgentMentionMemberIds: string[];
+} {
+  const names = roomMembers.map((member) => member.name);
   const byName = new Map(roomMembers.map((member) => [member.name, member.id]));
-  return parseMentions(message, roomMembers.map((member) => member.name))
-    .map((name) => byName.get(name))
-    .filter((id): id is string => Boolean(id));
+  const atNames = parseMentions(message, names);
+  const urgentMentions = parseUrgentMentions(message, names);
+  const mentions = [...new Set([...atNames, ...urgentMentions])];
+  const toIds = (list: string[]) => list.map((name) => byName.get(name)).filter((id): id is string => Boolean(id));
+  return { mentions, mentionMemberIds: toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
 }
 
 function resolveTaskAssignee(roomId: string, value: unknown): { name: string; memberId: string } | undefined {
@@ -74,12 +86,14 @@ function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): b
   return task.assignee === assigneeRef;
 }
 
-function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; mentions?: string[] }) {
-  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[] } = {};
+function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; mentions?: string[] }) {
+  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[] } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
   if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
   if (meta.mentionMemberIds?.length && meta.mentionMemberIds.join("\0") !== (meta.mentions || []).join("\0")) out.mentionMemberIds = meta.mentionMemberIds;
+  if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
+  if (meta.urgentMentionMemberIds?.length) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -148,12 +162,12 @@ export async function handleToolCallback(
       const room = roomStore.getRoom(roomId);
       const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
       const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
-      const mentions = room ? parseMentions(message, roomMembers.map((member: any) => member.name)) : [];
-      const mentionMemberIds = room ? mentionIdsFromNames(message, roomMembers) : [];
+      const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
+      const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, artifacts, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, mentions });
+      const meta = messageMeta({ attachments, artifacts, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions });
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
@@ -168,8 +182,9 @@ export async function handleToolCallback(
       const room = roomStore.getRoom(roomId);
       const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
       const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
-      const mentions = room ? parseMentions(content, roomMembers.map((member: any) => member.name)) : [];
-      const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds: room ? mentionIdsFromNames(content, roomMembers) : [], mentions });
+      const info = room ? mentionInfoFromText(content, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
+      const mentions = info.mentions;
+      const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds: info.mentionMemberIds, urgentMentions: info.urgentMentions, urgentMentionMemberIds: info.urgentMentionMemberIds, mentions });
       if (meta) postMessage(roomId, agentName, content, mentions, meta);
       else postMessage(roomId, agentName, content, mentions);
       return { ok: true };
