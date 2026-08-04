@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Users, Contact,
+  CheckSquare, Plus, Users, Contact, Hash,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
-import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
+import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams, getChats, type ChatEntry } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 import { MOCK_MEMBERS } from "../mock/contacts";
@@ -13,6 +13,7 @@ import { MOCK_MEMBERS } from "../mock/contacts";
 export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
 export type ActivePage =
+  | { type: "chats" }
   | { type: "contacts" }
   | { type: "dm"; memberId: string }
   | { type: "room"; id: string }
@@ -25,10 +26,12 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "contacts" | "rooms" | "team" | "library" | "system";
+type Domain = "chats" | "contacts" | "rooms" | "team" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
+    case "chats":
+      return "chats";
     case "contacts":
     case "dm":
       return "contacts";
@@ -164,14 +167,18 @@ export function Sidebar({
       >
         B
       </button>
+      <button onClick={() => { setBrowseDomain("chats"); onNavigate({ type: "chats" }); }} title="Chats" aria-label="Chats" className={railBtn(domain === "chats")}>
+        {domain === "chats" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <MessageSquare size={18} />
+        {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
+      </button>
       <button onClick={() => { setBrowseDomain("contacts"); onNavigate({ type: "contacts" }); }} title="Contacts" aria-label="Contacts" className={railBtn(domain === "contacts")}>
         {domain === "contacts" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Contact size={18} />
       </button>
       <button onClick={() => setBrowseDomain("rooms")} title="Rooms" aria-label="Rooms" className={railBtn(domain === "rooms")}>
         {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <MessageSquare size={18} />
-        {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
+        <Hash size={18} />
       </button>
       <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "team", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
         {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
@@ -215,7 +222,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { contacts: "Contacts", rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", contacts: "Contacts", rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -243,6 +250,7 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
+        {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
         {domain === "contacts" && (
           <>
             {MOCK_MEMBERS.map((m) => {
@@ -435,5 +443,64 @@ function SectionHead({ label, onCreate, onLabelClick, active }: {
         </button>
       )}
     </div>
+  );
+}
+
+/** Compact unified conversation list for the Chats panel domain. */
+function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const [chats, setChats] = useState<ChatEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => getChats().then((r) => { if (!cancelled) setChats(r.chats); }).catch(() => {});
+    load();
+    const t = window.setInterval(load, 10_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, []);
+  const sorted = useMemo(
+    () => [...(chats ?? [])].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0)),
+    [chats],
+  );
+  if (!chats) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
+  if (sorted.length === 0) return <div className="px-2 py-3 text-[11.5px] text-ink-4">No conversations yet.</div>;
+  return (
+    <>
+      {sorted.map((c) => {
+        const active =
+          (c.kind === "dm" && activePage?.type === "dm" && activePage.memberId === c.memberId) ||
+          (c.kind === "room" && activePage?.type === "room" && activePage.id === c.roomId);
+        return (
+          <button
+            key={c.scopeId}
+            onClick={() =>
+              c.kind === "dm" && c.memberId
+                ? onNavigate({ type: "dm", memberId: c.memberId })
+                : c.roomId
+                  ? onNavigate({ type: "room", id: c.roomId })
+                  : undefined
+            }
+            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+          >
+            {c.kind === "dm" ? (
+              <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
+            ) : (
+              <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
+                <Hash size={12} />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
+              <div className="text-[10.5px] text-ink-4 truncate">
+                {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
+              </div>
+            </div>
+            {c.unreadCount > 0 && (
+              <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
+                {c.unreadCount > 99 ? "99+" : c.unreadCount}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </>
   );
 }

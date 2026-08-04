@@ -13,6 +13,7 @@ import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
 import { TeamsPage } from "./TeamsPage";
 import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
+import { ChatsPage } from "./ChatsPage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
@@ -58,7 +59,7 @@ export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: strin
 }
 
 export function Layout({ onLogout, username }: LayoutProps) {
-  const [activePage, setActivePage] = useState<ActivePage>(null);
+  const [activePage, setActivePage] = useState<ActivePage>({ type: "chats" });
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -315,6 +316,12 @@ export function Layout({ onLogout, username }: LayoutProps) {
         )}
 
         {/* Teams library (0.19 team layer) */}
+        {activePage?.type === "chats" && (
+          <ChatsPage
+            onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
+            onOpenRoom={(roomId) => handleNavigate({ type: "room", id: roomId })}
+          />
+        )}
         {activePage?.type === "contacts" && (
           <ContactsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}

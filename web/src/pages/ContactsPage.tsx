@@ -2,35 +2,60 @@
  * ContactsPage — member directory (0.20 member-global model).
  *
  * Every member is a globally unique digital employee: one identity, many scopes
- * (DM + rooms). Row shows live status with the scope it's working in, effective
- * model, context usage and lifetime tokens. Click a row to open the DM.
- *
- * Data: mock/contacts (contract-shaped; swap for api/client when backend lands).
+ * (DM + rooms). Row shows live status, effective model, context usage and
+ * lifetime tokens. Click a row to open the DM. Data: GET /api/contacts.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Search, ChevronRight } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
-import { MOCK_MEMBERS, formatTokens, type MemberContact } from "../mock/contacts";
+import { getContacts, getRooms, type ContactEntry, type Room } from "../api/client";
 
-type StatusFilter = "all" | "working" | "idle" | "offline";
+type StatusFilter = "all" | "working" | "idle" | "error";
+
+export function formatTokenCount(n: number): string {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(0) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + "k";
+  return String(n);
+}
+
+function scopeLabel(scopeId: string, roomNames: Map<string, string>): string {
+  if (scopeId.startsWith("dm:")) return "DM";
+  const roomId = scopeId.replace(/^room:/, "");
+  return roomNames.get(roomId) ?? "room";
+}
 
 export function ContactsPage({ onOpenDm, onCreateMember }: {
   onOpenDm: (memberId: string) => void;
   onCreateMember?: () => void;
 }) {
+  const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
+  const [roomNames, setRoomNames] = useState<Map<string, string>>(new Map());
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
 
+  useEffect(() => {
+    let cancelled = false;
+    getContacts()
+      .then((res) => { if (!cancelled) setContacts(res.contacts); })
+      .catch((err) => { if (!cancelled) setError(String(err?.message || err)); });
+    getRooms()
+      .then((rooms: Room[]) => { if (!cancelled) setRoomNames(new Map(rooms.map((r) => [r.id, r.name]))); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const members = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_MEMBERS.filter((m) => {
+    return (contacts ?? []).filter((m) => {
       if (filter !== "all" && m.status !== filter) return false;
       if (!q) return true;
-      return m.name.toLowerCase().includes(q) || m.template.toLowerCase().includes(q) || m.description.toLowerCase().includes(q);
+      return m.name.toLowerCase().includes(q) || m.agentTemplate.toLowerCase().includes(q);
     });
-  }, [query, filter]);
+  }, [contacts, query, filter]);
 
-  const workingCount = MOCK_MEMBERS.filter((m) => m.status === "working").length;
+  const workingCount = (contacts ?? []).filter((m) => m.status === "working").length;
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
@@ -40,7 +65,8 @@ export function ContactsPage({ onOpenDm, onCreateMember }: {
           <div>
             <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Contacts</h1>
             <p className="text-[12.5px] text-ink-3 mt-1">
-              Your digital employees — one identity, every scope. {MOCK_MEMBERS.length} members · {workingCount} working now.
+              Your digital employees — one identity, every scope.
+              {contacts && ` ${contacts.length} members · ${workingCount} working now.`}
             </p>
           </div>
           <button
@@ -64,7 +90,7 @@ export function ContactsPage({ onOpenDm, onCreateMember }: {
             />
           </div>
           <div className="flex items-center gap-1.5">
-            {(["all", "working", "idle", "offline"] as const).map((f) => (
+            {(["all", "working", "idle", "error"] as const).map((f) => (
               <button
                 key={f}
                 type="button"
@@ -80,15 +106,25 @@ export function ContactsPage({ onOpenDm, onCreateMember }: {
         </div>
 
         {/* member list */}
-        <div className="rounded-xl border border-line bg-inset/50 overflow-hidden">
-          {members.length === 0 ? (
-            <div className="py-14 text-center text-sm text-ink-3">No members match.</div>
-          ) : (
-            members.map((m, i) => (
-              <MemberRow key={m.id} member={m} last={i === members.length - 1} onOpen={() => onOpenDm(m.id)} />
-            ))
-          )}
-        </div>
+        {error ? (
+          <div role="alert" className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-4 py-3 text-xs text-blocked">
+            Couldn’t load contacts. {error}
+          </div>
+        ) : !contacts ? (
+          <div className="py-14 text-center text-sm text-ink-3">Loading…</div>
+        ) : (
+          <div className="rounded-xl border border-line bg-inset/50 overflow-hidden">
+            {members.length === 0 ? (
+              <div className="py-14 text-center text-sm text-ink-3">
+                {contacts.length === 0 ? "No members yet — create your first digital employee." : "No members match."}
+              </div>
+            ) : (
+              members.map((m, i) => (
+                <MemberRow key={m.memberId} member={m} roomNames={roomNames} last={i === members.length - 1} onOpen={() => onOpenDm(m.memberId)} />
+              ))
+            )}
+          </div>
+        )}
 
         <p className="text-[11px] text-ink-4 mt-3">
           Members are global — the same identity works in DM and every room, with shared four-layer memory.
@@ -98,7 +134,7 @@ export function ContactsPage({ onOpenDm, onCreateMember }: {
   );
 }
 
-function MemberRow({ member: m, last, onOpen }: { member: MemberContact; last: boolean; onOpen: () => void }) {
+function MemberRow({ member: m, roomNames, last, onOpen }: { member: ContactEntry; roomNames: Map<string, string>; last: boolean; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -110,30 +146,32 @@ function MemberRow({ member: m, last, onOpen }: { member: MemberContact; last: b
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[13.5px] font-semibold text-ink-1">{m.name}</span>
-          <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{m.template}</span>
-          {!m.unified.model && (
+          <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{m.agentTemplate}</span>
+          {!m.unifiedModel && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-line-soft text-ink-4" title="Model config is per-scope (unified switch off)">
               split config
             </span>
           )}
         </div>
-        <div className="text-[12px] text-ink-3 mt-0.5 truncate">{m.description}</div>
-        <div className="text-[11px] mt-1">
+        <div className="text-[11px] mt-1 flex items-center gap-2 flex-wrap">
           {m.status === "working" ? (
-            <span className="text-onair font-medium">● Working{m.activeScope ? ` in ${m.activeScope}` : ""}</span>
-          ) : m.status === "idle" ? (
-            <span className="text-ink-4">Idle</span>
+            <span className="text-onair font-medium">● Working</span>
+          ) : m.status === "error" ? (
+            <span className="text-blocked font-medium">● Error</span>
           ) : (
-            <span className="text-ink-4">Offline</span>
+            <span className="text-ink-4">Idle</span>
           )}
+          <span className="text-ink-4 truncate">
+            {m.activeScopes.map((s) => scopeLabel(s, roomNames)).join(" · ")}
+          </span>
         </div>
       </div>
 
       <div className="hidden md:flex items-center gap-6 shrink-0 text-right">
-        <Meta label="Model" value={m.model} mono />
-        <Meta label="Context" value={`${m.contextPct}%`} warn={m.contextPct >= 80} />
-        <Meta label="Tokens" value={formatTokens(m.tokenTotal)} mono />
-        <Meta label="Scopes" value={String(m.scopes.length)} />
+        <Meta label="Model" value={m.model ?? "—"} mono />
+        <Meta label="Context" value={m.contextPct != null ? `${m.contextPct}%` : "—"} warn={(m.contextPct ?? 0) >= 80} />
+        <Meta label="Tokens" value={formatTokenCount(m.tokensTotal)} mono title={`${formatTokenCount(m.tokensToday)} today`} />
+        <Meta label="Scopes" value={String(m.activeScopes.length)} />
       </div>
 
       <ChevronRight size={15} className="text-ink-4 shrink-0" />
@@ -141,9 +179,9 @@ function MemberRow({ member: m, last, onOpen }: { member: MemberContact; last: b
   );
 }
 
-function Meta({ label, value, mono, warn }: { label: string; value: string; mono?: boolean; warn?: boolean }) {
+function Meta({ label, value, mono, warn, title }: { label: string; value: string; mono?: boolean; warn?: boolean; title?: string }) {
   return (
-    <div className="min-w-[64px]">
+    <div className="min-w-[64px]" title={title}>
       <div className="text-[10px] uppercase tracking-wide text-ink-4">{label}</div>
       <div className={`text-[12.5px] mt-0.5 ${mono ? "tabular-nums font-medium" : "font-medium"} ${warn ? "text-blocked" : "text-ink-2"}`}>{value}</div>
     </div>

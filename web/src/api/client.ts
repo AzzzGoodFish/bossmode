@@ -1471,3 +1471,91 @@ export interface FsListDirsResult {
 export async function listDirs(path: string): Promise<FsListDirsResult> {
   return apiFetch(`/api/fs/list-dirs?path=${encodeURIComponent(path)}`);
 }
+
+// -- 0.20: Contacts / Members / DM / Chats (member-global model) --
+
+export interface ContactEntry {
+  memberId: string;
+  name: string;
+  agentTemplate: string;
+  status: "idle" | "working" | "error";
+  activeScopes: string[];
+  model: string | null;
+  contextPct: number | null;
+  tokensToday: number;
+  tokensTotal: number;
+  unifiedModel: boolean;
+  unifiedExtensions: boolean;
+}
+
+export async function getContacts(): Promise<{ contacts: ContactEntry[] }> {
+  return apiFetch("/api/contacts");
+}
+
+export interface MemberDetail {
+  memberId: string;
+  name: string;
+  agentTemplate: string;
+  description?: string;
+  status: string;
+  model?: string | null;
+  credentialId?: string | null;
+  thinkingLevel?: string | null;
+  unifiedModel: boolean;
+  unifiedExtensions: boolean;
+  createdAt?: number;
+}
+
+export async function getMemberDetail(id: string): Promise<MemberDetail> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}`);
+}
+
+export interface DmMessage {
+  seq: number;
+  id?: string;
+  sender: "user" | "member" | string;
+  text: string;
+  ts: number;
+  attachments?: unknown;
+}
+
+export async function getDmMessages(memberId: string, params?: { before?: number; limit?: number }): Promise<{ messages: DmMessage[] }> {
+  const q = new URLSearchParams();
+  if (params?.before) q.set("before", String(params.before));
+  if (params?.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
+}
+
+export async function sendDmMessage(memberId: string, text: string): Promise<unknown> {
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export interface DmSession {
+  status: string;
+  contextPct?: number | null;
+  working?: boolean;
+}
+
+export async function getDmSession(memberId: string): Promise<DmSession> {
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/session`);
+}
+
+export interface ChatEntry {
+  scopeId: string;
+  kind: "dm" | "room";
+  title: string;
+  memberId?: string;
+  roomId?: string;
+  lastMessage?: { sender: string; text: string; ts: number } | null;
+  unreadCount: number;
+  mentioned: boolean;
+  status?: string;
+}
+
+export async function getChats(): Promise<{ chats: ChatEntry[] }> {
+  return apiFetch("/api/chats");
+}
