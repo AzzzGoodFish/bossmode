@@ -444,8 +444,6 @@ export interface Room {
   globalMemberIds?: string[];
   /** 0.20+: global member id of the room leader (mem_*), dual-written with promptLeaderMemberId. */
   promptLeaderGlobalMemberId?: string;
-  /** Provenance: which team template (and version) this room was instantiated from. */
-  template?: { name: string; version: string };
   createdAt: number;
   /**
    * Legacy selected document paths (relative to ~/.bossmode/knowledge/docs/).

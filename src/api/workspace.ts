@@ -54,7 +54,6 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
     docsPath?: string | null;
-    templateName?: string;
   };
 
   if (!body.name || !body.cwd) {
@@ -110,13 +109,11 @@ addRoute("POST", "/api/rooms", async (req, res) => {
       if (drafts.length === 0) {
         room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
           docsPath: body.docsPath,
-          templateName: typeof body.templateName === "string" ? body.templateName.trim() || undefined : undefined,
         });
       } else {
         room = roomStore.createRoom(body.name, body.cwd, drafts, body.ruleDocs, {
           promptLeaderMemberName: leaderName,
           docsPath: body.docsPath,
-          templateName: typeof body.templateName === "string" ? body.templateName.trim() || undefined : undefined,
         });
       }
 
@@ -179,7 +176,6 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
       promptLeaderMemberName,
       docsPath: body.docsPath,
-      templateName: typeof body.templateName === "string" ? body.templateName.trim() || undefined : undefined,
     });
     // Dual-write: stamp global ids when registry has matching names
     try {

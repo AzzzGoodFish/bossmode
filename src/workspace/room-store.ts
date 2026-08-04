@@ -203,8 +203,6 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
   promptLeaderMemberName?: string;
   promptLeaderMemberId?: string;
   docsPath?: string | null;
-  /** Instantiate from a team template (copies teams/<slug>/ → rooms/<id>/team/). */
-  templateName?: string;
 }): Room {
   const drafts = members.map((member) => {
     if (!member || typeof member.agent !== "string" || typeof member.name !== "string") {
@@ -248,10 +246,7 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
     mkdirSync(dir, { recursive: true });
     if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
 
-    // Provenance only — no room-local team/agents materialization (0.20 team layer removed).
-    if (opts?.templateName) {
-      room.template = { name: opts.templateName, version: "1.0.0" };
-    }
+    // 0.20: no room-local team/agents materialization; agents resolve from global pool at activation.
 
     writeRoom(room);
 

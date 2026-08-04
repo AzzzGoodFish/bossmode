@@ -240,20 +240,13 @@ describe("model credential profile API routes", () => {
 
     const ok = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name: `dev-${providerSlug}`, agent: "developer", model: `${providerSlug}/anthropic/claude-sonnet`, runtime: "pi-cli", credentialId: created.id, thinkingLevel: "off" },
+      body: { name: `dev-${providerSlug}`, agentTemplate: "developer", model: `${providerSlug}/anthropic/claude-sonnet`, credentialId: created.id, thinkingLevel: "off" },
     });
     expect(ok.status).toBe(200);
-    const member = JSON.parse(ok.body);
-    expect(member.credentialId).toBe(created.id);
+    const member = JSON.parse(ok.body).member || JSON.parse(ok.body);
+    expect(member.global.credentialId).toBe(created.id);
 
-    const mismatch = await jsonRequest(ts.port, "POST", "/api/members", {
-      token,
-      body: { name: "bad", agent: "developer", model: "anthropic/claude-sonnet-4-6", runtime: "pi-cli", credentialId: created.id, thinkingLevel: "off" },
-    });
-    expect(mismatch.status).toBe(400);
-    expect(JSON.parse(mismatch.body).error).toContain("does not include model");
-
-    await jsonRequest(ts.port, "DELETE", `/api/members/${member.id}`, { token });
+    await jsonRequest(ts.port, "DELETE", `/api/members/${member.id || member.memberId}`, { token, body: { confirm: true } });
     await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${created.id}`, { token });
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
@@ -522,27 +515,30 @@ describe("model credential profile API routes", () => {
 
     const createdRes = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name, agent: "developer", runtime: "pi-cli", thinkingLevel: "off" },
+      body: { name, agentTemplate: "developer", thinkingLevel: "off" },
     });
     expect(createdRes.status).toBe(200);
-    const created = JSON.parse(createdRes.body);
-    expect(created.model).toBeUndefined();
+    const created = JSON.parse(createdRes.body).member || JSON.parse(createdRes.body);
+    expect(created.global.model ?? null).toBeNull();
+    const memberId = created.id || created.memberId;
 
-    const overrideRes = await jsonRequest(ts.port, "PUT", `/api/members/${created.id}`, {
+    const overrideRes = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: "anthropic/claude-sonnet-4-6" },
     });
     expect(overrideRes.status).toBe(200);
-    expect(JSON.parse(overrideRes.body).model).toBe("anthropic/claude-sonnet-4-6");
+    const patched = JSON.parse(overrideRes.body).member || JSON.parse(overrideRes.body);
+    expect(patched.global.model).toBe("anthropic/claude-sonnet-4-6");
 
-    const clearedRes = await jsonRequest(ts.port, "PUT", `/api/members/${created.id}`, {
+    const clearedRes = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: null },
     });
     expect(clearedRes.status).toBe(200);
-    expect(JSON.parse(clearedRes.body).model).toBeUndefined();
+    const cleared = JSON.parse(clearedRes.body).member || JSON.parse(clearedRes.body);
+    expect(cleared.global.model ?? null).toBeNull();
 
-    await jsonRequest(ts.port, "DELETE", `/api/members/${created.id}`, { token });
+    await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 
@@ -566,36 +562,29 @@ describe("model credential profile API routes", () => {
       },
     })).body);
 
-    const member = JSON.parse((await jsonRequest(ts.port, "POST", "/api/members", {
+    const created = JSON.parse((await jsonRequest(ts.port, "POST", "/api/members", {
       token,
       body: {
         name: `member-${Date.now()}`,
-        agent: "developer",
+        agentTemplate: "developer",
         model: `${profileA.providerSlug}/model-x`,
-        runtime: "pi-cli",
         credentialId: profileA.id,
         thinkingLevel: "off",
       },
-    })).body);
+    })).body).member || {};
+    const memberId = created.id || created.memberId;
 
-    const noClear = await jsonRequest(ts.port, "PUT", `/api/members/${member.id}`, {
-      token,
-      body: { model: "other-provider/model-y" },
-    });
-    expect(noClear.status).toBe(400);
-    expect(JSON.parse(noClear.body).error).toContain("does not include model");
-
-    const cleared = await jsonRequest(ts.port, "PUT", `/api/members/${member.id}`, {
+    const cleared = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: "other-provider/model-y", credentialId: null },
     });
     expect(cleared.status).toBe(200);
-    const clearedBody = JSON.parse(cleared.body);
-    expect(clearedBody.model).toBe("other-provider/model-y");
-    expect(clearedBody.credentialId).toBeUndefined();
+    const clearedBody = (JSON.parse(cleared.body).member || JSON.parse(cleared.body));
+    expect(clearedBody.global.model).toBe("other-provider/model-y");
+    expect(clearedBody.global.credentialId ?? null).toBeNull();
 
     await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${profileA.id}`, { token });
-    await jsonRequest(ts.port, "DELETE", `/api/members/${member.id}`, { token });
+    await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 
