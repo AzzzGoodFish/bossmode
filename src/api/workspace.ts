@@ -10,7 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -677,13 +677,15 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
   }
 
   if (hasThinking || hasMcpServers || hasExtensions) {
-    // Non-model fields commit immediately. Model/credential go through
-    // switchMemberModel so the live instance is updated before room.json.
+    // Non-model fields commit immediately, on the same 0.20 authority as the
+    // model switch (registry for mem_* members, F4 same-root fix). Model/
+    // credential go through switchMemberModel so the live instance is updated
+    // before the binding commits.
     const nonModelPatch: { thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null } = {};
     if (hasThinking) nonModelPatch.thinkingLevel = patch.thinkingLevel;
     if (hasMcpServers) nonModelPatch.mcpServers = patch.mcpServers;
     if (hasExtensions) nonModelPatch.extensions = patch.extensions;
-    roomStore.updateRoomMemberOverride(params.id, currentMemberRef, nonModelPatch);
+    persistRoomMemberConfigPatch(params.id, currentMemberRef, nonModelPatch);
   }
   try {
     if (hasModel || hasCredential) {
@@ -693,8 +695,9 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
       if (targetModel) {
         result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, targetModel, targetCred);
       } else {
-        // Clearing the model binding — no live switch to apply.
-        roomStore.updateRoomMemberOverride(params.id, currentMemberRef, { model: null, credentialId: null });
+        // Clearing the model binding — no live switch to apply. Same 0.20
+        // authority as switchMemberModel (registry for mem_*, F4).
+        clearMemberModelBinding(params.id, currentMemberRef);
       }
     }
     if (hasThinking) {
