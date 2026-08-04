@@ -1432,12 +1432,15 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
   return res.member;
 }
 
+// DM messages share the RoomMessage shape (dm-message-store): sender is the
+// member name snapshot for member messages, "user" for the human.
 export interface DmMessage {
-  seq: number;
-  id?: string;
-  sender: "user" | "member" | string;
-  text: string;
+  id: string;
+  seq?: number;
+  sender: string;
+  content: string;
   ts: number;
+  mentions?: string[];
   attachments?: unknown;
 }
 
@@ -1449,11 +1452,12 @@ export async function getDmMessages(memberId: string, params?: { before?: number
   return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
 }
 
-export async function sendDmMessage(memberId: string, text: string): Promise<unknown> {
-  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
+export async function sendDmMessage(memberId: string, text: string): Promise<DmMessage> {
+  const res = await apiFetch<{ message: DmMessage }>(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
     method: "POST",
     body: JSON.stringify({ text }),
   });
+  return res.message;
 }
 
 export interface DmSession {

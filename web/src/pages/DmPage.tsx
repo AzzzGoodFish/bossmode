@@ -13,6 +13,7 @@ import {
   getMemberDetail, getDmMessages, getDmSession, sendDmMessage, postConversationRead,
   type MemberDetail, type DmMessage, type DmSession,
 } from "../api/client";
+import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
 import { formatTokenCount } from "./ContactsPage";
 
 export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string; onBack: () => void; onOpenSettings?: (memberId: string) => void }) {
@@ -42,6 +43,26 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
 
   useEffect(() => { void load(); }, [load]);
 
+  // Realtime: member replies arrive as room:message on the synthetic dm:<id> room.
+  const dmRoomId = `dm:${memberId}`;
+  const handleWsEvent = useCallback(
+    (event: WsEvent) => {
+      if (event.type === "room:message" && event.roomId === dmRoomId) {
+        const msg = event.message as DmMessage;
+        setMessages((prev) => {
+          if (prev?.some((m) => m.id === msg.id)) return prev;
+          return [...(prev ?? []), msg];
+        });
+      }
+    },
+    [dmRoomId],
+  );
+  const { subscribeRoom, unsubscribeRoom } = useWebSocket({ onEvent: handleWsEvent });
+  useEffect(() => {
+    subscribeRoom(dmRoomId);
+    return () => unsubscribeRoom(dmRoomId);
+  }, [dmRoomId, subscribeRoom, unsubscribeRoom]);
+
   // Report read position — clears the user-cursor unread badge (contract v1.3).
   useEffect(() => {
     if (!messages) return;
@@ -53,10 +74,12 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
     if (!text || sending) return;
     setSending(true);
     try {
-      await sendDmMessage(memberId, text);
+      const msg = await sendDmMessage(memberId, text);
       setDraft("");
-      // Optimistic append; server event/stream will reconcile when runtime lands.
-      setMessages((prev) => [...(prev ?? []), { seq: (prev?.[prev.length - 1]?.seq ?? 0) + 1, sender: "user", text, ts: Date.now() }]);
+      setMessages((prev) => {
+        if (prev?.some((m) => m.id === msg.id)) return prev;
+        return [...(prev ?? []), msg];
+      });
     } catch (err) {
       setError(`Couldn't send. ${String((err as Error)?.message || err)}`);
     } finally {
@@ -124,21 +147,24 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
               <div className="text-xs">Say something — everything here activates {member.name} directly.</div>
             </div>
           ) : (
-            messages.map((msg) => (
-              <div key={msg.seq} className="flex gap-2.5 py-2">
-                {msg.sender === "member" ? (
+            messages.map((msg) => {
+              const fromMember = msg.sender === member.name;
+              return (
+              <div key={msg.id} className="flex gap-2.5 py-2">
+                {fromMember ? (
                   <StaffBadge name={member.name} status={statusFromAgent(status)} size="xs" />
                 ) : (
                   <StaffBadge name="you" status="boss" size="xs" />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] text-ink-4 mb-0.5">
-                    {msg.sender === "member" ? member.name : "you"} · {formatTime(msg.ts)}
+                    {fromMember ? member.name : "you"} · {formatTime(msg.ts)}
                   </div>
-                  <div className="text-[13.5px] text-ink-1 leading-relaxed whitespace-pre-wrap">{msg.text}</div>
+                  <div className="text-[13.5px] text-ink-1 leading-relaxed whitespace-pre-wrap">{msg.content}</div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
 

@@ -1567,14 +1567,20 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         callbacks: {
           onChat: async (message: string) => {
             const { addDmMessage } = await import("../workspace/dm-message-store.js");
-            addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            const msg = addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            try {
+              broadcastToRoom(`dm:${memberId}`, { type: "room:message", roomId: `dm:${memberId}`, message: msg });
+            } catch { /* best-effort */ }
             const active = instances.get(key);
             if (active) clearPendingChatReply(active, "callback:chat-dm");
           },
           onMention: async (_target: string, message: string) => {
             // DM has no @ routing — treat as normal chat.
             const { addDmMessage } = await import("../workspace/dm-message-store.js");
-            addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            const msg = addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            try {
+              broadcastToRoom(`dm:${memberId}`, { type: "room:message", roomId: `dm:${memberId}`, message: msg });
+            } catch { /* best-effort */ }
             const active = instances.get(key);
             if (active) clearPendingChatReply(active, "callback:mention-dm");
           },
