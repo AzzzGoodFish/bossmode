@@ -28,7 +28,7 @@ export const CONFIGURE_INTEGRATION_DESCRIPTION = `Configure an external integrat
 
 For Linear v1, use this to bind the current room to a Linear team and optional project. Do not pass API keys; Linear API keys must be configured in Settings.`;
 
-export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, you are @-mentioned, or the timeout elapses (room leader only).
+export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, you are @-mentioned, or the timeout elapses.
 
 This is a synchronous wait — your turn stays open (status stays working) until one of those events. Returns the target's message body when they post, or a short status for idle/timeout/mention interrupt. Cursor is not advanced — @-mentions while waiting are delivered via the normal activation/steer path; wait only reports that it ended.
 
