@@ -28,7 +28,7 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "chats" | "contacts" | "rooms" | "templates" | "team" | "library" | "system";
+type Domain = "chats" | "contacts" | "templates" | "team" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
@@ -50,7 +50,7 @@ export function domainOf(page: ActivePage): Domain {
     case "settings":
       return "system";
     default:
-      return "rooms";
+      return "chats";
   }
 }
 
@@ -77,29 +77,7 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time" },
 ];
 
-type RoomPresence = "working" | "idle" | "offline";
 
-function roomPresence(room: Room): { state: RoomPresence; title: string } {
-  const memberStatuses = room.members.map((m) => room.agentStatuses?.[m] || "inactive");
-  const workingCount = memberStatuses.filter((s) => s === "working" || s === "thinking").length;
-  const idleCount = memberStatuses.filter((s) => s === "idle").length;
-  const memberCount = room.members.length;
-
-  if (workingCount > 0) return { state: "working", title: `${workingCount} working · ${memberCount} members` };
-  if (idleCount > 0) return { state: "idle", title: `${idleCount} idle · ${memberCount} members` };
-  return { state: "offline", title: `offline · ${memberCount} members` };
-}
-
-function roomBeaconClass(state: RoomPresence): string {
-  switch (state) {
-    case "working":
-      return "bg-onair shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_14%,transparent),0_0_12px_color-mix(in_srgb,var(--on-air)_46%,transparent)] animate-pulse";
-    case "idle":
-      return "bg-onair opacity-85 shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_10%,transparent)]";
-    default:
-      return "bg-idleg opacity-60 shadow-[0_0_0_3px_color-mix(in_srgb,var(--idle-g)_8%,transparent)]";
-  }
-}
 
 export function Sidebar({
   activePage, username, onNavigate, onLogout, refreshKey,
@@ -140,9 +118,7 @@ export function Sidebar({
     onRoomsLoaded?.(rooms);
   }, [rooms, onRoomsLoaded]);
 
-  const displayRooms = liveRooms ?? rooms;
 
-  const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
   const selectedTeamName = activePage?.type === "team" ? activePage.name : null;
   const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
@@ -182,10 +158,8 @@ export function Sidebar({
         {domain === "contacts" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Contact size={18} />
       </button>
-      <button onClick={() => setBrowseDomain("rooms")} title="Rooms" aria-label="Rooms" className={railBtn(domain === "rooms")}>
-        {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <Hash size={18} />
-      </button>
+      <div className="flex-1" />
+      <div className="w-5 h-px bg-line-soft my-1.5" />
       <button onClick={() => { setBrowseDomain("templates"); onNavigate({ type: "templates" }); }} title="Templates" aria-label="Templates" className={railBtn(domain === "templates")}>
         {domain === "templates" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Fingerprint size={18} />
@@ -198,7 +172,7 @@ export function Sidebar({
         {domain === "library" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <BookOpen size={18} />
       </button>
-      <div className="flex-1" />
+      <div className="w-5 h-px bg-line-soft my-1.5" />
       <button onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme" className={railBtn(false)}>
         <Sun size={16} className="hidden dark:block" />
         <Moon size={16} className="block dark:hidden" />
@@ -232,14 +206,10 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { chats: "Chats", contacts: "Contacts", rooms: "Rooms", templates: "Templates", team: "Team", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", contacts: "Contacts", templates: "Templates", team: "Team", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
-      active ? "bg-surface-2" : "hover:bg-surface-1"
-    }`;
-  const roomItemCls = (active: boolean) =>
-    `w-full text-left rounded-lg pl-2.5 pr-7 py-2 mb-px transition-colors cursor-pointer ${
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
 
@@ -247,7 +217,7 @@ export function Sidebar({
     <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
       <div className="h-12 shrink-0 flex items-center justify-between px-3.5 border-b border-line-soft">
         <h1 className="text-[13px] font-semibold text-ink-1">{panelTitle}</h1>
-        {domain === "rooms" && (
+        {domain === "chats" && (
           <button
             onClick={() => onNavigate({ type: "room", id: "__new__" })}
             title="New room"
@@ -263,42 +233,6 @@ export function Sidebar({
         {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
         {domain === "templates" && <TemplatesPanelList activePage={activePage} onNavigate={onNavigate} />}
         {domain === "contacts" && <ContactsPanelList activePage={activePage} onNavigate={onNavigate} />}
-        {domain === "rooms" && (
-          <>
-            {displayRooms.map((r) => {
-              const presence = roomPresence(r);
-              return (
-                <div key={r.id} className="group relative">
-                  <button
-                    onClick={() => onNavigate({ type: "room", id: r.id })}
-                    className={roomItemCls(selectedRoomId === r.id)}
-                    title={presence.title}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[12.5px] font-medium truncate flex-1 ${selectedRoomId === r.id ? "text-ink-1" : "text-ink-2"}`}>
-                        {r.name}
-                      </span>
-                      {unreadRoomIds?.has(r.id) && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                    </div>
-                    <div className="font-mono text-[10.5px] text-ink-4 truncate mt-px">
-                      ~{r.cwd.replace(/^\/home\/[^/]+/, "")}
-                    </div>
-                  </button>
-                  <span
-                    className="absolute right-3 top-[17px] w-3 h-3 grid place-items-center pointer-events-none"
-                    title={presence.title}
-                    aria-label={presence.title}
-                  >
-                    <span className={`w-[7px] h-[7px] rounded-full ${roomBeaconClass(presence.state)}`} />
-                  </span>
-                </div>
-              );
-            })}
-            {rooms.length === 0 && (
-              <p className="text-xs text-ink-4 px-2.5 py-2">No Rooms yet. Click + to create one.</p>
-            )}
-          </>
-        )}
 
         {domain === "team" && (
           <>
@@ -379,7 +313,7 @@ export function Sidebar({
         )}
       </div>
 
-      {domain === "rooms" && (
+      {domain === "chats" && (
         <div className="border-t border-line-soft shrink-0 p-2">
           <button
             onClick={() => onNavigate({ type: "all-tasks" })}

@@ -5,6 +5,7 @@ import {
   sendMessage as apiSendMessage,
   getRoom,
   getAgentContextUsage,
+  postConversationRead,
 } from "../api/client";
 import type { WsEvent } from "./useWebSocket";
 
@@ -80,6 +81,9 @@ export function useRoom(roomId: string | null) {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    // Report read position — clears the user-cursor unread badge (contract v1.3).
+    postConversationRead(`room:${roomId}`).catch(() => {});
   }, [roomId]);
 
   // Fetch context usage cache once after room is loaded

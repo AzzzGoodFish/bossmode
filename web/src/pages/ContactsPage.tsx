@@ -6,7 +6,7 @@
  * lifetime tokens. Click a row to open the DM. Data: GET /api/contacts.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, ChevronRight } from "lucide-react";
+import { Plus, Search, MessageSquare } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import { getContacts, getRooms, type ContactEntry, type Room } from "../api/client";
 
@@ -139,7 +139,7 @@ function MemberRow({ member: m, roomNames, last, onOpen }: { member: ContactEntr
     <button
       type="button"
       onClick={onOpen}
-      className={`w-full flex items-center gap-4 px-4 py-3.5 text-left bg-surface-1 hover:bg-surface-2 transition-colors cursor-pointer ${last ? "" : "border-b border-line-soft"}`}
+      className={`group w-full flex items-center gap-4 px-4 py-3.5 text-left bg-surface-1 hover:bg-surface-2 transition-colors cursor-pointer ${last ? "" : "border-b border-line-soft"}`}
     >
       <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="md" />
 
@@ -174,7 +174,9 @@ function MemberRow({ member: m, roomNames, last, onOpen }: { member: ContactEntr
         <Meta label="Scopes" value={String(m.activeScopes.length)} />
       </div>
 
-      <ChevronRight size={15} className="text-ink-4 shrink-0" />
+      <span title="Message" className="w-7 h-7 rounded-lg border border-line text-ink-3 group-hover:text-accent-ink group-hover:border-accent flex items-center justify-center shrink-0 transition-colors">
+        <MessageSquare size={14} />
+      </span>
     </button>
   );
 }

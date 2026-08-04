@@ -119,7 +119,7 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
   if (loadError) {
     return (
       <div className="flex-1 overflow-y-auto bg-surface-1">
-        <div className="w-full max-w-2xl mx-auto px-6 pt-7 pb-16">
+        <div className="w-full px-6 md:px-10 pt-7 pb-16">
           <BackLink label="Back" onClick={onBack} />
           <div role="alert" className="text-[12px] text-blocked">Couldn’t load member settings. {loadError}</div>
         </div>
@@ -132,7 +132,7 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-2xl mx-auto px-6 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <BackLink label="Back to conversation" onClick={onBack} />
 
         {/* header */}

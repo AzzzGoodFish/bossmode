@@ -1565,7 +1565,17 @@ export interface ChatEntry {
 }
 
 export async function getChats(): Promise<{ chats: ChatEntry[] }> {
-  return apiFetch("/api/chats");
+  const res = await apiFetch<{ chats: ChatEntry[] }>("/api/chats");
+  // Server sends only ConversationRef scopeId — derive memberId/roomId from it.
+  for (const c of res.chats) {
+    const idx = c.scopeId.indexOf(":");
+    if (idx > 0) {
+      const id = c.scopeId.slice(idx + 1);
+      if (c.kind === "dm") c.memberId = id;
+      else c.roomId = id;
+    }
+  }
+  return res;
 }
 
 // -- 0.20: member creation + archive import --
@@ -1650,4 +1660,8 @@ export async function getTemplates(): Promise<TemplateInfo[]> {
 
 export async function forceDeleteAgent(name: string): Promise<void> {
   await apiFetch(`/api/agents/${encodeURIComponent(name)}?force=true`, { method: "DELETE" });
+}
+
+export async function postConversationRead(scopeId: string): Promise<void> {
+  await apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/read`, { method: "POST" });
 }

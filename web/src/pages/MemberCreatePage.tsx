@@ -94,7 +94,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-2xl mx-auto px-6 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <BackLink label="Contacts" onClick={onBack} />
 
         <h1 className="text-[19px] font-bold tracking-tight text-ink-1">New member</h1>
@@ -109,7 +109,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
           {!templates ? (
             <div className="text-xs text-ink-4 py-3">Loading…</div>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
               {templates.map((t) => {
                 const on = template === t.name;
                 return (
@@ -153,7 +153,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
           <select
             value={modelRef}
             onChange={(e) => setModelRef(e.target.value)}
-            className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent cursor-pointer"
+            className="w-full max-w-lg rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent cursor-pointer"
           >
             <option value="">Configure later</option>
             {groupedModels.map(([group, items]) => (
@@ -172,7 +172,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
           type="button"
           onClick={() => void create()}
           disabled={!canCreate}
-          className="w-full py-2.5 rounded-lg bg-accent text-accent-contrast text-sm font-semibold hover:opacity-90 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full max-w-lg py-2.5 rounded-lg bg-accent text-accent-contrast text-sm font-semibold hover:opacity-90 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {busy && <Loader2 size={14} className="animate-spin" />}
           Create member

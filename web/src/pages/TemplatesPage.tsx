@@ -65,7 +65,7 @@ export function TemplatesPage({ selected, onSelect }: { selected?: string; onSel
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-3xl mx-auto px-6 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <div className="flex items-start justify-between gap-3 mb-1.5">
           <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Templates</h1>
           <button
@@ -181,7 +181,7 @@ function TemplateDetail({ name, builtin, referencedBy, onBack, onDeleted }: {
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-3xl mx-auto px-6 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <BackLink label="Templates" onClick={onBack} />
         <div className="flex items-center gap-2.5 mb-1">
           <h1 className="text-[19px] font-bold tracking-tight text-ink-1">{name}</h1>
@@ -324,7 +324,7 @@ function TemplateCreate({ onBack, onCreated }: { onBack: () => void; onCreated: 
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full max-w-3xl mx-auto px-6 pt-7 pb-16">
+      <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <BackLink label="Templates" onClick={onBack} />
         <h1 className="text-[19px] font-bold tracking-tight text-ink-1 mb-1">New template</h1>
         <p className="text-[12.5px] text-ink-3 mb-5">A reusable identity — members are hired from templates on the New member page.</p>

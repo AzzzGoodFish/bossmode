@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PanelRight, Send, Info, Settings2 } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import {
-  getMemberDetail, getDmMessages, getDmSession, sendDmMessage,
+  getMemberDetail, getDmMessages, getDmSession, sendDmMessage, postConversationRead,
   type MemberDetail, type DmMessage, type DmSession,
 } from "../api/client";
 import { formatTokenCount } from "./ContactsPage";
@@ -41,6 +41,12 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
   }, [memberId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Report read position — clears the user-cursor unread badge (contract v1.3).
+  useEffect(() => {
+    if (!messages) return;
+    postConversationRead(`dm:${memberId}`).catch(() => {});
+  }, [memberId, messages]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
