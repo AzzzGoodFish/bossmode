@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.20.0-rc.6] — 2026-08-04
+
+### Added
+- **Urgent `!name` gesture** (fish 2026-08-04): `@name` stays a queued steer (never interrupts); `!name` aborts the member's current turn and your message becomes the next turn immediately, carrying an `[INTERRUPTED]` banner so the member knows its turn was cut (partial work must be re-verified). Idle members activate straight through; compacting members are queued to the front, never hard-killed. Available to the user and all members; Core marks it emergency-only; every interrupt posts a user-visible system notice.
+- **Three-tier mention highlight** (design v2): `@member` accent pill, `@you` amber pill (same judgement as unread mentioned), `!member` blocked-red pill — in member markdown and user messages alike; code spans/blocks and links never tint; non-member names stay plain.
+- **`member_status` tool**: room members can query teammates' live idle/working status plus the scopes they are active in — same source as the member panel status lamp, read-only, activates nobody.
+
+### Fixed
+- **Code is literal text, never a command**: a backticked `!name` or `@name` (inline or fenced) no longer activates, interrupts, or tints — previously a `!pm` inside backticks in a design discussion actually fired an interrupt.
+
+### Changed
+- **memberOverrides residue cleanup migration** (`cleanup-member-overrides-v1`, fish-approved): stamped rooms no longer read room.json memberOverrides, so dead residue is cleared with a snapshot — F4-era mem_* keys (no legal write path post-F4), codex-era name keys (unavailable models / thinking levels the current model does not offer), and duplicates of the effective registry config. Anything that looks like live intent is kept with a warn.
+
+---
+
 ## [0.20.0-rc.5] — 2026-08-04
 
 ### Added
