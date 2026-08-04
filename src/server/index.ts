@@ -14,6 +14,7 @@ import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-renam
 import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { runDmPhantomMessagesMigration } from "../workspace/dm-phantom-messages-migration.js";
+import { runMemberOverridesCleanupMigration } from "../workspace/member-overrides-cleanup-migration.js";
 import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
@@ -126,6 +127,17 @@ export function startServer(opts: ServerOptions): Promise<void> {
     }
   } catch (err) {
     logger.error("server", "member-global-v1 migration failed", { error: String(err) });
+  }
+
+  // Runs after member-global-v1: cleanup needs rooms stamped (globalMemberIds)
+  // to know memberOverrides is no longer consulted.
+  try {
+    const result = runMemberOverridesCleanupMigration();
+    if (result.entriesRemoved > 0 || result.entriesKeptSuspicious > 0 || result.legacyRoomsSkipped > 0) {
+      logger.info("server", "cleanup-member-overrides-v1 migration applied", { ...result });
+    }
+  } catch (err) {
+    logger.error("server", "cleanup-member-overrides migration failed", { error: String(err) });
   }
 
   try {
