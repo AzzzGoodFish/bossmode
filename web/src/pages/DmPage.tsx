@@ -1,39 +1,47 @@
 /**
  * DmPage — direct-message conversation with a member (scope = dm).
- *
- * One member, one private scope. No @ needed — everything you say activates
- * them. Right panel is the member card: public zone (identity, global status,
- * effective model, tokens) + scope zone (this DM's context, memory layers).
- * Data: /api/members/:id, /api/dm/:memberId/{messages,session}.
+ * The chat surface is the room chat language instantiated for one member:
+ * MessageBubble + date separators + 5-min grouping + MessageInput (Chat &
+ * List Unification v1). Member panel on the right is DM-specific and kept.
+ * Data: /api/members/:id, /api/dm/:memberId/{messages,session}; realtime via
+ * WS room:message on dm:<memberId>.
  */
-import { useCallback, useEffect, useState } from "react";
-import { PanelRight, Send, Info, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PanelRight, Info, Settings2 } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
+import { MessageBubble } from "../components/MessageBubble";
+import { MessageInput } from "../components/MessageInput";
+import { DateSeparator, isGroupedWithPrev, shouldShowDateSeparator, MessageArtifactChips } from "../components/ChatArea";
 import {
   getMemberDetail, getDmMessages, getDmSession, sendDmMessage, postConversationRead,
   type MemberDetail, type DmMessage, type DmSession,
 } from "../api/client";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
-import { formatTokenCount } from "./ContactsPage";
+
+const PAGE_SIZE = 50;
+const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
 export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string; onBack: () => void; onOpenSettings?: (memberId: string) => void }) {
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [session, setSession] = useState<DmSession | null>(null);
   const [messages, setMessages] = useState<DmMessage[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
 
   const load = useCallback(async () => {
     try {
       const [m, msgs, sess] = await Promise.all([
         getMemberDetail(memberId),
-        getDmMessages(memberId, { limit: 50 }),
+        getDmMessages(memberId, { limit: PAGE_SIZE }),
         getDmSession(memberId).catch(() => null),
       ]);
       setMember(m);
       setMessages(msgs.messages);
+      setHasMore(msgs.messages.length >= PAGE_SIZE);
       setSession(sess);
       setError(null);
     } catch (err) {
@@ -69,23 +77,28 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
     postConversationRead(`dm:${memberId}`).catch(() => {});
   }, [memberId, messages]);
 
-  const send = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setSending(true);
-    try {
-      const msg = await sendDmMessage(memberId, text);
-      setDraft("");
+  // Stick to bottom on new messages while the user is near the bottom.
+  useEffect(() => {
+    if (nearBottom.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  const send = useCallback(
+    async (text: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => {
+      const msg = await sendDmMessage(memberId, text, attachments);
       setMessages((prev) => {
         if (prev?.some((m) => m.id === msg.id)) return prev;
         return [...(prev ?? []), msg];
       });
-    } catch (err) {
-      setError(`Couldn't send. ${String((err as Error)?.message || err)}`);
-    } finally {
-      setSending(false);
-    }
-  }, [draft, sending, memberId]);
+      nearBottom.current = true;
+    },
+    [memberId],
+  );
 
   if (error && !member) {
     return (
@@ -107,90 +120,86 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
     <div className="flex-1 flex min-h-0 bg-surface-1">
       {/* conversation column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* header */}
-        <div className="h-12 shrink-0 border-b border-line-soft flex items-center gap-3 px-4">
-          <StaffBadge name={member.name} status={statusFromAgent(status)} size="sm" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[13.5px] font-semibold text-ink-1">{member.name}</span>
-              <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{member.agentTemplate}</span>
-            </div>
+        {/* header — room chat header language */}
+        <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <StaffBadge name={member.name} status={statusFromAgent(status)} size="sm" />
+            <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{member.name}</h2>
+            <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{member.agentTemplate}</span>
+            <span className="text-[11px] text-ink-4">
+              {status === "working" ? <span className="text-onair font-medium">● Working</span> : "Idle"}
+            </span>
           </div>
-          <div className="text-[11.5px] text-ink-4">
-            {status === "working" ? <span className="text-onair font-medium">● Working</span> : "Idle"}
-          </div>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}
               title="Member panel"
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${panelOpen ? "bg-accent-dim text-accent-ink" : "text-ink-3 hover:bg-surface-2 hover:text-ink-1"}`}
+              className={`${toolBtn} ${panelOpen ? "bg-accent-dim text-accent-ink hover:bg-accent-dim hover:text-accent-ink" : ""}`}
             >
-              <PanelRight size={16} />
+              <PanelRight size={13} />
             </button>
           </div>
         </div>
 
-        {/* messages */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="flex items-center gap-3 my-2">
-            <span className="flex-1 h-px bg-line-soft" />
-            <span className="text-[10.5px] text-ink-4">Direct messages · memory is shared across every scope</span>
-            <span className="flex-1 h-px bg-line-soft" />
-          </div>
+        {/* messages — room chat message language */}
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-w-0 px-4 py-3">
+          {!hasMore && messages && messages.length > 0 && (
+            <div className="text-center text-xs text-ink-4 py-4">Beginning of conversation</div>
+          )}
           {error && <div role="alert" className="text-[12px] text-blocked mb-2">{error}</div>}
           {!messages ? (
             <div className="text-sm text-ink-3 py-8 text-center">Loading…</div>
           ) : messages.length === 0 ? (
-            <div className="text-center py-12 text-ink-3">
-              <div className="text-sm font-medium text-ink-2 mb-1">No messages yet</div>
-              <div className="text-xs">Say something — everything here activates {member.name} directly.</div>
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-ink-3 text-lg">{member.name}</p>
+                <p className="text-ink-4 text-sm mt-1">Say something — everything here activates {member.name} directly</p>
+              </div>
             </div>
           ) : (
-            messages.map((msg) => {
-              const fromMember = msg.sender === member.name;
-              return (
-              <div key={msg.id} className="flex gap-2.5 py-2">
-                {fromMember ? (
-                  <StaffBadge name={member.name} status={statusFromAgent(status)} size="xs" />
-                ) : (
-                  <StaffBadge name="you" status="boss" size="xs" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11px] text-ink-4 mb-0.5">
-                    {fromMember ? member.name : "you"} · {formatTime(msg.ts)}
+            <div>
+              {messages.map((msg, i) => {
+                const prev = i > 0 ? messages[i - 1] : null;
+                const showDateSep = shouldShowDateSeparator(prev, msg);
+                const grouped = isGroupedWithPrev(prev, msg);
+                const time = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                const fullTime = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                return (
+                  <div key={msg.id} data-message-id={msg.id}>
+                    {showDateSep && <DateSeparator ts={msg.ts} />}
+                    <MessageBubble
+                      sender={msg.sender}
+                      content={msg.content}
+                      time={time}
+                      fullTime={fullTime}
+                      grouped={grouped}
+                      isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
+                      mentions={msg.mentions}
+                      roomId={`dm:${memberId}`}
+                      messageId={msg.id}
+                      attachments={msg.attachments}
+                    />
+                    {msg.artifacts?.length ? (
+                      <MessageArtifactChips messageId={msg.id} artifacts={msg.artifacts} />
+                    ) : null}
                   </div>
-                  <div className="text-[13.5px] text-ink-1 leading-relaxed whitespace-pre-wrap">{msg.content}</div>
-                </div>
-              </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* composer */}
-        <div className="shrink-0 border-t border-line-soft p-3">
-          <div className="rounded-xl border border-line bg-surface-2/60 px-3.5 py-2.5 flex items-end gap-2 focus-within:border-accent transition-colors">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
-              rows={1}
-              placeholder={`Message ${member.name}… (no @ needed in DM)`}
-              className="flex-1 bg-transparent outline-none resize-none text-[13.5px] text-ink-1 placeholder:text-ink-4"
-            />
-            <button
-              type="button"
-              title="Send"
-              onClick={() => void send()}
-              className="w-8 h-8 rounded-lg bg-accent text-accent-contrast flex items-center justify-center hover:opacity-90 cursor-pointer shrink-0 disabled:opacity-40"
-              disabled={!draft.trim() || sending}
-            >
-              <Send size={15} />
-            </button>
-          </div>
-          <div className="text-[10.5px] text-ink-4 mt-1.5 px-1">Everything you say activates {member.name}. Scope: dm · tools differ by scope.</div>
-        </div>
+        {/* composer — room MessageInput; no @ in DM (everything activates the member) */}
+        <MessageInput
+          onSend={send}
+          members={[]}
+          draftKey={`dm:${memberId}`}
+          hideMentions
+          uploadScope={`dm:${memberId}`}
+          placeholder={`Message ${member.name}… (no @ needed in DM)`}
+          onError={(m) => setError(`Couldn't send. ${m}`)}
+        />
       </div>
 
       {/* member panel */}
@@ -262,8 +271,4 @@ function Zone({ label, value, mono }: { label: string; value: string; mono?: boo
       <div className={`text-[12px] mt-0.5 truncate ${mono ? "tabular-nums" : ""} text-ink-2 font-medium`} title={value}>{value}</div>
     </div>
   );
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

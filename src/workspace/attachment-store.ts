@@ -9,6 +9,7 @@ import {
 import { extname, basename, join } from "node:path";
 import type { Readable } from "node:stream";
 import * as roomStore from "./room-store.js";
+import { memberDir } from "./member-registry.js";
 import { logger } from "../foundation/logger.js";
 
 export const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
@@ -29,6 +30,13 @@ function getAttachDir(roomId: string): string {
   return dir;
 }
 
+/** DM attachments are member-owned (DM has no room cwd). */
+function getDmAttachDir(memberId: string): string {
+  const dir = join(memberDir(memberId), "dm-attachments");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function tempPath(): string {
   return join("/tmp", `bossmode-upload-${Date.now()}-${randomBytes(4).toString("hex")}`);
 }
@@ -44,6 +52,26 @@ export async function streamToAttachment(
   roomId: string,
   originalFilename: string,
   maxSize: number = MAX_UPLOAD_SIZE,
+): Promise<StoredAttachment> {
+  return streamToDir(source, getAttachDir(roomId), originalFilename, maxSize, { roomId });
+}
+
+/** DM upload variant — stores under members/<id>/dm-attachments/. */
+export async function streamToDmAttachment(
+  source: Readable,
+  memberId: string,
+  originalFilename: string,
+  maxSize: number = MAX_UPLOAD_SIZE,
+): Promise<StoredAttachment> {
+  return streamToDir(source, getDmAttachDir(memberId), originalFilename, maxSize, { memberId });
+}
+
+async function streamToDir(
+  source: Readable,
+  attachDir: string,
+  originalFilename: string,
+  maxSize: number,
+  logCtx: Record<string, string>,
 ): Promise<StoredAttachment> {
   const tmp = tempPath();
   const hash = createHash("sha256");
@@ -75,7 +103,7 @@ export async function streamToAttachment(
   const hex = hash.digest("hex").slice(0, 12);
   const ext = extname(originalFilename) || ".bin";
   const storedFilename = `${hex}${ext}`;
-  const absolutePath = join(getAttachDir(roomId), storedFilename);
+  const absolutePath = join(attachDir, storedFilename);
 
   if (existsSync(absolutePath)) {
     // Hash collision — file already exists, reuse
@@ -84,7 +112,7 @@ export async function streamToAttachment(
     renameSync(tmp, absolutePath);
   }
 
-  logger.info("attachment-store", "stored", { roomId, storedFilename, originalFilename, size: total });
+  logger.info("attachment-store", "stored", { ...logCtx, storedFilename, originalFilename, size: total });
   return { storedFilename, originalFilename, absolutePath, size: total };
 }
 
@@ -110,10 +138,28 @@ export function getAttachmentPath(roomId: string, storedFilename: string): strin
   return join(getAttachDir(roomId), safe);
 }
 
+/** DM variant of getAttachmentPath. */
+export function getDmAttachmentPath(memberId: string, storedFilename: string): string {
+  const safe = basename(storedFilename);
+  if (safe !== storedFilename || safe.includes("..")) {
+    throw new Error("Invalid filename");
+  }
+  return join(getDmAttachDir(memberId), safe);
+}
+
 /** Check if an attachment file exists. */
 export function attachmentExists(roomId: string, storedFilename: string): boolean {
   try {
     return existsSync(getAttachmentPath(roomId, storedFilename));
+  } catch {
+    return false;
+  }
+}
+
+/** DM variant of attachmentExists. */
+export function dmAttachmentExists(memberId: string, storedFilename: string): boolean {
+  try {
+    return existsSync(getDmAttachmentPath(memberId, storedFilename));
   } catch {
     return false;
   }

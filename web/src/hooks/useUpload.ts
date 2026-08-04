@@ -156,7 +156,7 @@ export function useUpload(onError?: (msg: string) => void, draftKey?: string | n
   }, [setItems]);
 
   /** Upload all pending items sequentially. Returns results for successful uploads. */
-  const uploadAll = useCallback(async (roomId: string): Promise<UploadResult[]> => {
+  const uploadAll = useCallback(async (scope: string): Promise<UploadResult[]> => {
     const pending = items.filter((i) => i.status === "pending");
     const results: UploadResult[] = [];
 
@@ -167,7 +167,7 @@ export function useUpload(onError?: (msg: string) => void, draftKey?: string | n
       setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, status: "uploading" as const } : i));
 
       try {
-        const result = await uploadWithProgress(roomId, item.file, {
+        const result = await uploadWithProgress(scope, item.file, {
           signal: ctrl.signal,
           onProgress: (loaded, total) => {
             setItems((prev) => prev.map((i) =>

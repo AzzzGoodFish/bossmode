@@ -618,10 +618,10 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <MobileTopBar title="Knowledge" onOpenSidebar={onOpenMobileSidebar || (() => {})} />
-      <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 shrink-0 border-b border-line-soft">
+      <div className="hidden md:flex items-center justify-between px-6 md:px-10 pt-7 pb-3 shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-ink-1">Library</h1>
-          <p className="text-xs text-ink-3 mt-0.5">
+          <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Library</h1>
+          <p className="text-[12.5px] text-ink-3 mt-0.5">
             Markdown documents organized by room. Edit source, save explicitly, and preview rendered output.
           </p>
         </div>
@@ -647,15 +647,15 @@ export function KnowledgePage({ initialPath, onOpenMobileSidebar }: KnowledgePag
                 }}
               />
               <button title="Upload PNG at root" onClick={() => pngUploadInputRef.current?.click()}
-                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
+                className="w-6 h-6 rounded-md flex items-center justify-center text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
                 <Upload size={14} />
               </button>
               <button title="New folder at root" onClick={() => handleCreateFolder("")}
-                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
+                className="w-6 h-6 rounded-md flex items-center justify-center text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
                 <FolderPlus size={14} />
               </button>
               <button title="New document at root" onClick={() => handleCreateDoc("")}
-                className="p-1 text-ink-3 hover:text-ink-1 cursor-pointer">
+                className="w-6 h-6 rounded-md flex items-center justify-center text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
                 <Plus size={14} />
               </button>
             </div>
@@ -1013,7 +1013,7 @@ function TreeNode({
     },
   });
 
-  const rowBase = "group relative flex items-center justify-between py-2.5 md:py-1 pr-1 cursor-pointer";
+  const rowBase = "group relative flex items-center justify-between py-2.5 md:py-1.5 pr-1 cursor-pointer";
   const rowSelect = openedSelected
     ? "bg-accent-dim text-accent-ink"
     : multiSelected
@@ -1070,7 +1070,7 @@ function TreeNode({
                 className="text-xs bg-transparent border border-accent rounded px-1 py-0.5 outline-none w-full min-w-0"
               />
             ) : (
-              <span className="font-medium text-xs truncate" onDoubleClick={() => onStartRename(node.path)}>{node.name}</span>
+              <span className="font-medium text-[12.5px] truncate" onDoubleClick={() => onStartRename(node.path)}>{node.name}</span>
             )}
           </span>
           <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
@@ -1164,7 +1164,7 @@ function TreeNode({
             />
           ) : (
             <>
-              <span className="text-xs truncate font-mono" title={`${node.path} · ${fileFormat.description}`} onDoubleClick={() => onStartRename(node.path)}>
+              <span className="text-[12.5px] truncate font-mono" title={`${node.path} · ${fileFormat.description}`} onDoubleClick={() => onStartRename(node.path)}>
                 {node.name}
               </span>
             </>

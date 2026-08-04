@@ -1413,17 +1413,10 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
   return res.member;
 }
 
-// DM messages share the RoomMessage shape (dm-message-store): sender is the
-// member name snapshot for member messages, "user" for the human.
-export interface DmMessage {
-  id: string;
-  seq?: number;
-  sender: string;
-  content: string;
-  ts: number;
-  mentions?: string[];
-  attachments?: unknown;
-}
+// DM messages share the exact RoomMessage shape (dm-message-store writes the same
+// structure): sender is the member name snapshot for member messages, "user" for
+// the human. One contract, no divergence.
+export type DmMessage = RoomMessage;
 
 export async function getDmMessages(memberId: string, params?: { before?: number; limit?: number }): Promise<{ messages: DmMessage[] }> {
   const q = new URLSearchParams();
@@ -1433,10 +1426,14 @@ export async function getDmMessages(memberId: string, params?: { before?: number
   return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
 }
 
-export async function sendDmMessage(memberId: string, text: string): Promise<DmMessage> {
+export async function sendDmMessage(
+  memberId: string,
+  text: string,
+  attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
+): Promise<DmMessage> {
   const res = await apiFetch<{ message: DmMessage }>(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}) }),
   });
   return res.message;
 }

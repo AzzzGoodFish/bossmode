@@ -41,9 +41,10 @@ function inferPreviewType(path: string): RoomMessageAttachment["previewType"] {
   return "download";
 }
 
-/** Build API URL for an attachment given roomId. Falls back to legacy roomId-from-path. */
+/** Build API URL for an attachment given roomId (or "dm:<memberId>" for DM scope). Falls back to legacy roomId-from-path. */
 function attachmentUrl(path: string, roomId?: string): string {
   const filename = path.split("/").pop() || "";
+  if (roomId?.startsWith("dm:")) return `/api/dm/${encodeURIComponent(roomId.slice(3))}/attachments/${filename}`;
   if (roomId) return `/api/rooms/${roomId}/attachments/${filename}`;
   const roomMatch = path.match(/\/rooms\/([^/]+)\//);
   if (roomMatch) return `/api/rooms/${roomMatch[1]}/attachments/${filename}`;

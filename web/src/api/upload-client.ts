@@ -29,13 +29,16 @@ export class UploadError extends Error {
 const TOKEN_KEY = "bossmode_token";
 
 export function uploadWithProgress(
-  roomId: string,
+  scope: string,
   file: File,
   opts: UploadOptions = {},
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const url = `/api/rooms/${roomId}/upload?filename=${encodeURIComponent(file.name)}`;
+    // scope = room id, or "dm:<memberId>" for DM uploads (member-owned storage)
+    const url = scope.startsWith("dm:")
+      ? `/api/dm/${encodeURIComponent(scope.slice(3))}/upload?filename=${encodeURIComponent(file.name)}`
+      : `/api/rooms/${scope}/upload?filename=${encodeURIComponent(file.name)}`;
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) opts.onProgress?.(e.loaded, e.total);
