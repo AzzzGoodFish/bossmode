@@ -39,8 +39,8 @@ const PROFILE = {
   enabled: true,
   isDefault: true,
   models: [
-    { id: "claude-a", contextWindow: 100000, maxTokens: 8000, input: ["text" as const] },
-    { id: "claude-b", contextWindow: 200000, maxTokens: 8000, input: ["text" as const] },
+    { id: "claude-a", contextWindow: 100000, maxTokens: 8000, input: ["text" as const], thinkingLevelMap: { low: "low", high: "high", max: "max" } },
+    { id: "claude-b", contextWindow: 200000, maxTokens: 8000, input: ["text" as const], thinkingLevelMap: { low: "low", high: "high", max: "max" } },
   ],
 };
 
@@ -167,6 +167,35 @@ describe("cleanup-member-overrides-v1", () => {
     expect(readOverrides(room.id)).toBeUndefined();
     // The restored scope override is untouched.
     expect(reg.getEffectiveConfig(member.id, `room:${room.id}`).mcpServers).toEqual(["playwright"]);
+  });
+
+  it("mem_* keys are definitional residue (no content check); thinking levels judged against the effective model", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const cred = await seedCredential();
+    const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const qa = reg.createMember({ name: "qa", agentTemplate: "qa", model: "testprov/claude-a", credentialId: cred.id });
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }, { agent: "qa", name: "qa" }], undefined);
+    roomStore.stampGlobalMemberIds(room.id, [pm.id, qa.id], pm.id);
+
+    writeOverrides(room.id, {
+      // Architect rehearsal finding: mem_* entry whose credentialId differs
+      // from the effective binding must NOT go through suspicious checks —
+      // post-F4 there is no legal write path for mem_* keys at all.
+      [pm.id]: { model: "testprov/claude-a", credentialId: "cred_stale" },
+      // codex-era thinking level the effective model does not offer (claude-a
+      // offers low/high/max only) → dead.
+      pm: { thinkingLevel: "xhigh" },
+      // A level the effective model DOES offer, differing from the registry —
+      // possible lost intent → kept + warned.
+      qa: { thinkingLevel: "low" },
+    });
+
+    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const result = migration.runMemberOverridesCleanupMigration();
+    expect(result.entriesRemoved).toBe(2);
+    expect(result.entriesKeptSuspicious).toBe(1);
+    expect(readOverrides(room.id)).toEqual({ qa: { thinkingLevel: "low" } });
   });
 
   it("legacy unstamped room: memberOverrides still authoritative → skipped entirely", async () => {

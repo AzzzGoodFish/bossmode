@@ -2,8 +2,10 @@
 // 0.20 moved room-member config authority from room.json memberOverrides to the
 // member registry (global bindings + scope overrides). The old location kept
 // three classes of residue (fish approved full cleanup 2026-08-04):
-//   1. mem_* entries from model switches made before F4 (re-switched since;
-//      the registry holds the real bindings)
+//   1. mem_* entries from model switches made before F4 — post-F4 there is
+//      NO legal write path that produces a mem_* memberOverrides key (F4
+//      writes the registry), so every mem_* key is definitional residue
+//      (re-switched since; the registry holds the real bindings)
 //   2. codex-era name-keyed dead config (models no longer available)
 //   3. entries whose live intent was already restored into the new authority
 //      (e.g. qa playwright, restored by fish)
@@ -21,7 +23,7 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import { getMember, getEffectiveConfig } from "./member-registry.js";
-import { isModelAvailable } from "../engine/model-credentials.js";
+import { isModelAvailable, listAvailableModels } from "../engine/model-credentials.js";
 import type { RoomMemberOverride } from "../shared/types.js";
 
 const MIGRATION_ID = "cleanup-member-overrides-v1";
@@ -53,6 +55,20 @@ function jsonEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+/**
+ * Is `level` offered by the given effective model? Judges against the
+ * model's thinkingLevelMap (same metadata the switch path uses).
+ * Conservative when there is nothing to judge against (no effective model,
+ * model not in the available list, or no level metadata) — unknown = keep.
+ */
+function thinkingLevelOfferedByEffectiveModel(effectiveModel: string | null | undefined, level: unknown): boolean {
+  if (typeof level !== "string" || !effectiveModel) return true;
+  const option = listAvailableModels().find((m) => m.ref === effectiveModel);
+  const map = option?.thinkingLevelMap;
+  if (!map || Object.keys(map).length === 0) return true;
+  return (map as Record<string, unknown>)[level] != null;
+}
+
 /** Resolve an override key (mem_* id or legacy member name) to a registry
  * member id within the room's stamped membership. Name matching stays inside
  * globalMemberIds (rename-safe, same rule as resolveGlobalMemberId). */
@@ -66,9 +82,10 @@ function resolveKeyToMemberId(key: string, globalMemberIds: string[]): string | 
 }
 
 /**
- * Decide whether an entry is dead residue. Returns null when dead, or a
- * human-readable reason when the entry looks like a live intent that the new
- * authority does not reflect (entry kept).
+ * Decide whether a NAME-keyed entry is dead residue. Returns null when
+ * dead, or a human-readable reason when the entry looks like a live intent
+ * that the new authority does not reflect (entry kept). mem_* keys never
+ * reach here (definitional residue, handled by the caller).
  */
 function suspiciousReason(entry: RoomMemberOverride, memberId: string, roomId: string): string | null {
   // An entry bound to an unavailable model is codex-era dead config as a
@@ -82,6 +99,7 @@ function suspiciousReason(entry: RoomMemberOverride, memberId: string, roomId: s
     if (jsonEqual(value, effective[field])) continue; // dead duplicate of the new authority
     if (field === "model" && typeof value === "string" && !isModelAvailable(value)) continue; // codex-era dead config
     if (field === "credentialId" && typeof entry.model === "string" && !isModelAvailable(entry.model)) continue; // credential of a dead model binding
+    if (field === "thinkingLevel" && !thinkingLevelOfferedByEffectiveModel(effective.model, value)) continue; // level the current model does not offer (e.g. codex xhigh on k3)
     reasons.push(`${field}=${JSON.stringify(value)} (effective: ${JSON.stringify(effective[field])})`);
   }
   if ("contextLimit" in entry && entry.contextLimit !== undefined) {
@@ -125,6 +143,12 @@ export function runMemberOverridesCleanupMigration(): OverrideCleanupResult {
     const kept: Record<string, RoomMemberOverride> = {};
     let removed = 0;
     for (const [key, entry] of Object.entries(overrides)) {
+      // mem_* keys are definitional residue: post-F4 no write path produces
+      // them, so whatever they contain was superseded by the registry.
+      if (key.startsWith("mem_")) {
+        removed++;
+        continue;
+      }
       const memberId = resolveKeyToMemberId(key, globalMemberIds);
       if (!memberId) {
         removed++; // ghost member — entry can never be read or intended
