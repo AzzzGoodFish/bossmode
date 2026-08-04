@@ -977,28 +977,58 @@ export async function activateAll(roomId: string): Promise<void> {
  * back". Legacy non-mem_ rooms still persist to memberOverrides — that is the
  * only authority their read side (name-keyed overrides) consults.
  */
-function persistModelBinding(roomId: string, memberId: string, model: string | null, credentialId: string | null): void {
+export interface RoomMemberConfigPatch {
+  model?: string | null;
+  credentialId?: string | null;
+  thinkingLevel?: string | null;
+  mcpServers?: string[] | null;
+  extensions?: string[] | null;
+}
+
+/**
+ * Persist a room-member config patch to the 0.20 authority — the member
+ * registry (F4, 2026-08-04). Routing follows the member's unified flags,
+ * same as getEffectiveConfig: model/credentialId/thinkingLevel go global when
+ * unifiedModel=true else this room's scope override; mcpServers/extensions go
+ * global when unifiedExtensions=true else scope override (mixed members split
+ * across both writes). The pre-0.20 room.json memberOverrides write is
+ * invisible to every read side for mem_* members (display / effective-config
+ * / activate-heal) — "applies once, display stale, heal rolls back". Legacy
+ * non-mem_ rooms keep memberOverrides (the only authority their read side
+ * consults).
+ */
+function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
   if (memberId.startsWith("mem_")) {
     const rec = getMember(memberId);
     if (!rec) {
-      logger.error("agent", "persistModelBinding: member not in registry", { memberId, roomId });
+      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId });
       return;
     }
-    if (rec.unifiedModel) {
-      updateMember(memberId, { global: { model, credentialId } });
-    } else {
-      patchScopeOverride(memberId, scopeIdOf({ kind: "room", roomId }), { model, credentialId });
+    const globalPatch: Record<string, unknown> = {};
+    const scopePatch: Record<string, unknown> = {};
+    for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
+      if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
     }
+    for (const key of ["mcpServers", "extensions"] as const) {
+      if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
+    }
+    if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
+    if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeIdOf({ kind: "room", roomId }), scopePatch);
     return;
   }
-  roomStore.updateRoomMemberOverride(roomId, memberId, { model, credentialId });
+  roomStore.updateRoomMemberOverride(roomId, memberId, patch);
 }
 
-/** Clear a member's model binding on the same authority as persistModelBinding. */
-export function clearMemberModelBinding(roomId: string, memberRef: string): void {
+/** Persist a config patch for a room member (resolves ref → member id, routes by authority). */
+export function persistRoomMemberConfigPatch(roomId: string, memberRef: string, patch: RoomMemberConfigPatch): void {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  persistModelBinding(roomId, memberId, null, null);
+  persistConfigPatch(roomId, memberId, patch);
+}
+
+/** Clear a member's model binding on the same authority as persistConfigPatch. */
+export function clearMemberModelBinding(roomId: string, memberRef: string): void {
+  persistRoomMemberConfigPatch(roomId, memberRef, { model: null, credentialId: null });
 }
 
 export async function switchMemberModel(roomId: string, memberRef: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
@@ -1027,7 +1057,7 @@ export async function switchMemberModel(roomId: string, memberRef: string, model
 
   // Commit binding only after a successful apply (or when no live instance needs applying).
   if (persistRoomOverride) {
-    persistModelBinding(roomId, memberId, normalizedModel, credentialId || null);
+    persistConfigPatch(roomId, memberId, { model: normalizedModel, credentialId: credentialId || null });
   }
 
   return { applied: Boolean(instance), pending: false, active: Boolean(instance), model: normalizedModel };

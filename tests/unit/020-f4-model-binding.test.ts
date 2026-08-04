@@ -75,6 +75,8 @@ describe("F4 model binding persists to the registry", () => {
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
     seedAgent("pm");
+    seedAgent("dev");
+    seedAgent("qa");
     broadcastToRoom.mockClear();
     vi.resetModules();
   });
@@ -123,6 +125,58 @@ describe("F4 model binding persists to the registry", () => {
     expect(reg.getEffectiveConfig(member.id, `room:${room.id}`).model).toBe("testprov/claude-b");
     // Other scopes still see the global.
     expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-a");
+  });
+
+  it("non-model patch (thinking/mcp/extensions) routes by the same unified flags", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const cred = await seedCredential();
+    const roomStore = await import("../../src/workspace/room-store.js");
+
+    // Fully unified member: everything goes global.
+    const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const room1 = await makeStampedRoom(unified.id);
+    const manager = await import("../../src/engine/agent-manager.js");
+    manager.persistRoomMemberConfigPatch(room1.id, unified.id, { thinkingLevel: "high", mcpServers: ["playwright"], extensions: ["ext-x"] });
+    let rec = reg.getMember(unified.id)!;
+    expect(rec.global.thinkingLevel).toBe("high");
+    expect(rec.global.mcpServers).toEqual(["playwright"]);
+    expect(rec.scopeOverrides[`room:${room1.id}`]).toBeUndefined();
+    expect(roomStore.getRoom(room1.id)!.memberOverrides).toBeUndefined();
+    // Read side agrees (this was the invisible-write bug).
+    const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
+    expect(resolveRoomMember(room1.id, unified.id)?.thinkingLevel).toBe("high");
+
+    // Fully scoped member: everything goes to this room's scope override.
+    const scoped = reg.createMember({
+      name: "dev",
+      agentTemplate: "pm",
+      model: "testprov/claude-a",
+      credentialId: cred.id,
+      unifiedModel: false,
+      unifiedExtensions: false,
+    });
+    const room2 = await makeStampedRoom(scoped.id, "dev");
+    manager.persistRoomMemberConfigPatch(room2.id, scoped.id, { thinkingLevel: "low", mcpServers: ["playwright"] });
+    rec = reg.getMember(scoped.id)!;
+    expect(rec.global.thinkingLevel).toBeNull();
+    expect(rec.scopeOverrides[`room:${room2.id}`]?.thinkingLevel).toBe("low");
+    expect(rec.scopeOverrides[`room:${room2.id}`]?.mcpServers).toEqual(["playwright"]);
+
+    // Mixed flags: thinking (unifiedModel) global, mcp (unifiedExtensions) scope.
+    const mixed = reg.createMember({
+      name: "qa",
+      agentTemplate: "pm",
+      model: "testprov/claude-a",
+      credentialId: cred.id,
+      unifiedModel: true,
+      unifiedExtensions: false,
+    });
+    const room3 = await makeStampedRoom(mixed.id, "qa");
+    manager.persistRoomMemberConfigPatch(room3.id, mixed.id, { thinkingLevel: "max", mcpServers: ["playwright"] });
+    rec = reg.getMember(mixed.id)!;
+    expect(rec.global.thinkingLevel).toBe("max");
+    expect(rec.scopeOverrides[`room:${room3.id}`]?.mcpServers).toEqual(["playwright"]);
+    expect(rec.scopeOverrides[`room:${room3.id}`]?.thinkingLevel).toBeUndefined();
   });
 
   it("clearMemberModelBinding clears on the same authority", async () => {
