@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.20.0-rc.4] — 2026-08-04
+
+### Fixed
+- **DM message rendering**: DmPage rendered empty message shells — it assumed a `text` field and a `"member"` sender marker while the API returns the RoomMessage shape (`content`, sender = member name). Messages now render with correct attribution, member replies arrive in real time (WS subscribe on `dm:<id>`), and the DM reply broadcast paths are unified.
+- **Memory tools silent data fork (P0)**: read/write/edit_memory still used the legacy room-keyed stores while the 0.20 prompt compiler reads the member-global store — every post-upgrade memory write never reached the compiled prompt. Tools now read/write the member-global store keyed by current scope (DM scope supported); room-scoped member asset APIs repointed; closed-loop regression guards (write → next compiled prompt contains it).
+- **Unread counts**: the read cursor only advanced when a room was opened. It now follows while viewing (debounced re-report on live append + window focus), and system notices / task / knowledge events no longer inflate unread or mention badges. Members no longer see runtime-failure notices when reading room history or in DM activation transcripts.
+
+---
+
 ## [0.20.0-rc.3] — 2026-08-04
 
 ### Added
