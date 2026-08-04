@@ -15,6 +15,7 @@ import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-engli
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { runTeamLayerMigration } from "../workspace/team-layer-migration.js";
 import { runTeamMetaCleanupMigration } from "../workspace/team-meta-cleanup-migration.js";
+import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
@@ -122,6 +123,15 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runTeamMetaCleanupMigration();
   } catch (err) {
     logger.error("server", "team meta cleanup migration failed", { error: String(err) });
+  }
+
+  try {
+    const result = runMemberGlobalMigration();
+    if (!result.skipped) {
+      logger.info("server", "member-global-v1 migration applied", result);
+    }
+  } catch (err) {
+    logger.error("server", "member-global-v1 migration failed", { error: String(err) });
   }
 
   // Initialize the SQLite projection (0.19.1). Non-blocking: a fresh DB

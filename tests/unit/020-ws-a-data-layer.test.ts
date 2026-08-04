@@ -169,3 +169,61 @@ describe("member-memory-store + dm-message-store", () => {
     expect(dm.getDmCursor(m.id).seq).toBe(2);
   });
 });
+
+describe("member-global migration", () => {
+  beforeEach(() => {
+    state.dir = mkdtempSync(join(tmpdir(), "bm-mig-"));
+  });
+  afterEach(() => {
+    rmSync(state.dir, { recursive: true, force: true });
+  });
+
+  it("snapshots rooms, creates global members by name, stamps globalMemberIds, is idempotent", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    // Minimal legacy room on disk (avoid agent-store module-level path capture).
+    const roomId = "room-test-1";
+    const roomDir = join(state.dir, "rooms", roomId);
+    mkdirSync(join(roomDir, "memory", "members", "rm_pm"), { recursive: true });
+    mkdirSync(join(roomDir, "memory", "members", "rm_dev"), { recursive: true });
+    writeFileSync(join(roomDir, "memory", "members", "rm_pm", "principles.md"), "## Rules\nLead well.\n", "utf8");
+    writeFileSync(
+      join(roomDir, "room.json"),
+      JSON.stringify({
+        id: roomId,
+        name: "dev",
+        cwd: state.dir,
+        members: ["pm", "developer"],
+        promptLeaderMemberId: "rm_pm",
+        roomMembers: [
+          { id: "rm_pm", roomId, name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 10 },
+          { id: "rm_dev", roomId, name: "developer", sourceAgent: "developer", createdAt: 1, updatedAt: 5 },
+        ],
+        createdAt: 1,
+      }, null, 2),
+      "utf8",
+    );
+    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
+
+    const mig = await import("../../src/workspace/member-global-migration.js");
+    const first = mig.runMemberGlobalMigration();
+    expect(first.skipped).toBe(false);
+    expect(first.createdMembers).toBe(2);
+    expect(first.roomsStamped).toBe(1);
+    expect(first.archivePath).toMatch(/legacy-0.19-/);
+
+    const reg = await import("../../src/workspace/member-registry.js");
+    const globalPm = reg.findMemberByName("pm");
+    expect(globalPm).toBeTruthy();
+    const mem = await import("../../src/workspace/member-memory-store.js");
+    expect(mem.readMemoryLayer(globalPm!.id, "persona").content).toMatch(/Lead well/);
+
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const stamped = roomStore.getRoom(roomId)!;
+    expect(stamped.globalMemberIds?.length).toBe(2);
+    expect(stamped.promptLeaderGlobalMemberId).toBe(globalPm!.id);
+
+    const second = mig.runMemberGlobalMigration();
+    expect(second.skipped).toBe(true);
+    expect(reg.listMembers()).toHaveLength(2);
+  });
+});

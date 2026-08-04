@@ -92,6 +92,7 @@ async function ensureRoutesRegistered(): Promise<void> {
 
   // Domain routes — dynamic import to avoid ESM hoisting issues
   await import("./workforce.js");
+  await import("./members.js");
   await import("./workspace.js");
   await import("./teams.js");
   await import("./extensions.js");

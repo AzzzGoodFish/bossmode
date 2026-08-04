@@ -281,6 +281,27 @@ export function getRoom(roomId: string): Room | null {
   return JSON.parse(readFileSync(path, "utf-8")) as Room;
 }
 
+/**
+ * 0.20 dual-write: stamp global member id references without removing roomMembers.
+ * Safe to call repeatedly (overwrite).
+ */
+export function stampGlobalMemberIds(
+  roomId: string,
+  globalMemberIds: string[],
+  promptLeaderGlobalMemberId?: string | null,
+): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  room.globalMemberIds = Array.from(new Set(globalMemberIds.filter(Boolean)));
+  if (promptLeaderGlobalMemberId) {
+    room.promptLeaderGlobalMemberId = promptLeaderGlobalMemberId;
+  } else if (promptLeaderGlobalMemberId === null) {
+    delete room.promptLeaderGlobalMemberId;
+  }
+  writeRoom(room);
+  return room;
+}
+
 export function deleteRoom(roomId: string): boolean {
   const dir = roomDir(roomId);
   if (!existsSync(dir)) return false;
