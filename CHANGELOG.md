@@ -4,6 +4,27 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.20.0-rc.5] — 2026-08-04
+
+### Added
+- **DM attachments**: paperclip in the DM composer — upload (`POST /api/dm/:id/upload`) + download routes with member-owned storage; artifact chips render in DM. Chat essentials now match the room surface (fish 2026-08-04).
+- **DM failure notices are user-visible**: turn failures, dead instances and unconfigured-member notices land in the DM message stream (previously invisible — the member silently went idle). DM instances get the same length-continuation / compaction handling as rooms.
+
+### Changed
+- **Chat & list unification (design v1)**: DmPage rewritten on the room chat surface (MessageBubble / MessageInput / date separators / 5-min grouping) — `DmMessage` is now literally `RoomMessage`, so contract forks like the rc.1–rc.3 blank-DM bug are structurally impossible. Templates/Skills share a row-list skeleton (Skills card grid → rows); Library metrics aligned; rail panels unified (LABEL·N heads, leading blocks, consistent active state, create in panel title).
+- **Model/thinking/MCP/extension switches persist to the registry authority**: switching a member's model previously wrote the retired room.json memberOverrides — the UI showed the old model and the next activation silently healed back. Switches now persist to global or room-scope overrides; DM instances heal on activation like rooms.
+- **System notices fully filtered from member perception** (fish 2026-08-04): all sender=system notices (not just runtime failures) are excluded from activation context, history queries and DM transcripts; they remain visible to the user and never badge unread.
+
+### Removed
+- **Summary feature removed end-to-end** (fish 2026-08-04): summarize was retired in 0.19; `summary-removal-v1` migration deletes derived summary rows (covered originals reappear in place — zero information loss, snapshot + idempotent), SummaryCard and all summary branches deleted.
+
+### Fixed
+- **Member-list first-boot poisoning (F1)**: member-global migration skip check trusted its marker blindly; room stamping is now data-state-driven on every boot (poisoned rooms self-heal on first start, all-or-nothing per room).
+- **DM attachment bytes 401**: the auth exemption for <img>/<a> (no Authorization header) now covers /api/dm/ download routes.
+- **Phantom dm directories**: `rooms/dm:<id>/messages.jsonl` artifacts merged into the member-owned DM store (migration, snapshot + idempotent).
+
+---
+
 ## [0.20.0-rc.4] — 2026-08-04
 
 ### Fixed
