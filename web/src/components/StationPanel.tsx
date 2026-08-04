@@ -1136,7 +1136,7 @@ function MemberConfigPanel({
               title="Room principles"
               tag={<AssetTag>shared · leader-written</AssetTag>}
               aside={<BudgetMeter budget={roomPrinciples?.budget} />}
-              hint="Team-wide working rules for this room, shared by all members."
+              hint="Room-wide working rules, shared by all members."
             >
               {roomPrinciples === null ? (
                 <div className="mt-2.5 text-xs text-ink-4">Loading…</div>

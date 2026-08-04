@@ -101,7 +101,6 @@ export async function getAgentTemplates(): Promise<AgentInfo[]> {
   return apiFetch("/api/agents/templates");
 }
 
-// -- Team templates (0.19 team layer) — shapes match backend team-store --
 
 export interface TeamAgentSummary {
   name: string;
@@ -118,65 +117,6 @@ export interface TeamSkillSummary {
   name: string;
   description?: string;
   usedBy: string[];
-}
-
-export interface TeamTemplateSummary {
-  slug: string;
-  name: string;
-  description: string;
-  version: string;
-  leader?: string;
-  agentNames: string[];
-  skillNames: string[];
-  usedInRoomCount: number;
-  builtIn?: boolean;
-}
-
-export interface TeamTemplateDetail {
-  slug: string;
-  meta: {
-    name: string;
-    description: string;
-    version: string;
-    leader?: string;
-    slug: string;
-    type?: "builtin" | "user";
-  };
-  teamMdBody: string;
-  agents: TeamAgentSummary[];
-  skills: TeamSkillSummary[];
-  otherResources: string[];
-  /** Derived convenience (may be filled by API or client). */
-  usedInRoomCount?: number;
-  builtIn?: boolean;
-}
-
-export async function getTeams(): Promise<TeamTemplateSummary[]> {
-  const data = await apiFetch<{ teams: TeamTemplateSummary[] } | TeamTemplateSummary[]>("/api/teams");
-  return Array.isArray(data) ? data : (data.teams ?? []);
-}
-
-export async function getTeam(name: string): Promise<TeamTemplateDetail> {
-  return apiFetch(`/api/teams/${encodeURIComponent(name)}`);
-}
-
-export async function importTeamZip(file: File): Promise<TeamTemplateDetail> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const body = new FormData();
-  body.append("file", file);
-  const res = await fetch(`${BASE_URL}/api/teams/import`, { method: "POST", headers, body });
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  return res.json();
 }
 
 // -- Extensions (bossmode-managed pi packages) --
@@ -206,23 +146,6 @@ export async function installExtension(pkg: string): Promise<ExtensionRecord> {
 
 export async function uninstallExtension(name: string): Promise<{ ok: true; id: string }> {
   return apiFetch(`/api/extensions/${encodeURIComponent(name)}`, { method: "DELETE" });
-}
-
-export async function exportTeamZip(name: string): Promise<Blob> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}/api/teams/${encodeURIComponent(name)}/export`, { headers });
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  return res.blob();
 }
 
 
@@ -859,8 +782,6 @@ export interface Room {
   globalMemberIds?: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
-  /** Provenance: team template this room was instantiated from. */
-  template?: { name: string; version: string };
   createdAt: number;
   /** Legacy. No longer injected into prompts or shown in Room Settings. */
   ruleDocs?: string[];
@@ -877,11 +798,10 @@ export async function createRoom(
   members: CreateRoomMemberInput[],
   ruleDocs?: string[],
   promptLeaderMemberName?: string,
-  templateName?: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName, templateName }),
+    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName }),
   });
 }
 

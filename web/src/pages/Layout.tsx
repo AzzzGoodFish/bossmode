@@ -10,17 +10,13 @@ import {
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { OnboardingTour } from "../components/OnboardingTour";
 import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
-import { TeamsPage } from "./TeamsPage";
 import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
 import { MemberSettingsPage } from "./MemberSettingsPage";
 import { TemplatesPage } from "./TemplatesPage";
-import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
-import { AgentProfilePage } from "./AgentProfilePage";
-import { AgentsPage } from "./AgentsPage";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsPage } from "./SkillsPage";
 import { KnowledgePage } from "./KnowledgePage";
@@ -318,7 +314,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
           />
         )}
 
-        {/* Teams library (0.19 team layer) */}
         {activePage?.type === "chats" && (
           <ChatsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
@@ -355,39 +350,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <TemplatesPage
             selected={activePage.name}
             onSelect={(name) => handleNavigate(name ? { type: "templates", name } : { type: "templates" })}
-          />
-        )}
-
-        {activePage?.type === "team" && workspaceResourceRouteMode(activePage.name) !== "detail" && (
-          <TeamsPage
-            onSelectTeam={(name) => setActivePage({ type: "team", name })}
-            onRefresh={refreshSidebar}
-          />
-        )}
-        {activePage?.type === "team" && workspaceResourceRouteMode(activePage.name) === "detail" && (
-          <TeamDetailPage
-            name={activePage.name || ""}
-            onBack={() => { setActivePage({ type: "team", name: null }); refreshSidebar(); }}
-          />
-        )}
-
-        {/* Team prototype v2 (GOO-138): two-section Team page (Agents + Skills); create = dialog over roster */}
-        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) !== "detail" && (
-          <AgentsPage
-            onSelectAgent={(name) => setActivePage({ type: "agent", name })}
-            onRefresh={refreshSidebar}
-            autoCreate={workspaceResourceRouteMode(activePage.name) === "create"}
-            onCloseCreate={() => setActivePage({ type: "agent", name: null })}
-            onSelectSkill={(name) => setActivePage({ type: "skill", name })}
-            onCreateSkill={() => setActivePage({ type: "skill", name: "__new__" })}
-          />
-        )}
-        {activePage?.type === "agent" && workspaceResourceRouteMode(activePage.name) === "detail" && (
-          <AgentProfilePage
-            name={activePage.name || ""}
-            onBack={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
-            onDeleted={() => { setActivePage({ type: "agent", name: null }); refreshSidebar(); }}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
 
