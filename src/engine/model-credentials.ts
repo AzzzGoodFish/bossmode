@@ -396,20 +396,42 @@ export function getMemberActiveCredentialOverride(roomId: string, memberId: stri
 }
 
 /**
- * Member-scoped store — live-reads the room member's current credential binding
+ * Member-scoped store — live-reads the member's current credential binding
  * per request, with an optional instance-level override (see setMemberActiveCredentialOverride).
+ *
+ * Scope-aware (0.20 G2):
+ * - roomId starting with `dm:` → resolve via member-registry getEffectiveConfig
+ * - otherwise → room member binding (resolveRoomMember), as before
  *
  * Override is **augment** semantics (2026-07-30 fish self-test): for a requested
  * providerId, try the override profile first if its provider matches; otherwise
- * fall back to the room binding. Mid-switch, the old session can still auth
+ * fall back to the scope binding. Mid-switch, the old session can still auth
  * against the old provider while setModel auth-checks the new one.
  */
 class MemberCredentialStore implements CredentialStore {
   constructor(private readonly roomId: string, private readonly memberId: string) {}
 
-  /** Lazy import keeps model-credentials free of a hard edge into room-member-resolver
-   * (avoids pulling agent-store into modules that only partially mock config). */
-  private async resolveRoomBoundProfile(): Promise<ModelCredentialProfile | null> {
+  private isDmScope(): boolean {
+    return typeof this.roomId === "string" && this.roomId.startsWith("dm:");
+  }
+
+  /** Lazy import keeps model-credentials free of hard edges into resolvers. */
+  private async resolveBoundProfile(): Promise<ModelCredentialProfile | null> {
+    if (this.isDmScope()) {
+      // DM: credential lives on global member (effective-config), not a room binding.
+      const scopeId = this.roomId; // "dm:<memberId>"
+      const memberId = this.memberId || scopeId.slice("dm:".length);
+      try {
+        const { getEffectiveConfig } = await import("../workspace/member-registry.js");
+        const eff = getEffectiveConfig(memberId, scopeId);
+        if (!eff.credentialId) return null;
+        const profile = getModelCredentialProfile(eff.credentialId);
+        if (!profile || !profile.enabled) return null;
+        return profile;
+      } catch {
+        return null;
+      }
+    }
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const member = resolveRoomMember(this.roomId, this.memberId);
     if (!member?.credentialId) return null;
@@ -426,12 +448,12 @@ class MemberCredentialStore implements CredentialStore {
     return profile;
   }
 
-  /** Resolve the profile that should answer for `providerId` (override-if-match, else room). */
+  /** Resolve the profile that should answer for `providerId` (override-if-match, else scope binding). */
   private async resolveProfileForProvider(providerId: string): Promise<ModelCredentialProfile | null> {
     const override = this.resolveOverrideProfile();
     if (override && override.providerSlug === providerId) return override;
-    const room = await this.resolveRoomBoundProfile();
-    if (room && room.providerSlug === providerId) return room;
+    const bound = await this.resolveBoundProfile();
+    if (bound && bound.providerSlug === providerId) return bound;
     return null;
   }
 
@@ -452,10 +474,10 @@ class MemberCredentialStore implements CredentialStore {
         seen.add(override.providerSlug);
       }
     }
-    const room = await this.resolveRoomBoundProfile();
-    if (room && !seen.has(room.providerSlug)) {
-      const credential = authEntry(room) as Credential | undefined;
-      if (credential) out.push({ providerId: room.providerSlug, type: credential.type });
+    const bound = await this.resolveBoundProfile();
+    if (bound && !seen.has(bound.providerSlug)) {
+      const credential = authEntry(bound) as Credential | undefined;
+      if (credential) out.push({ providerId: bound.providerSlug, type: credential.type });
     }
     return out;
   }
