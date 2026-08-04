@@ -110,10 +110,10 @@ describe("message seq assignment and migration", () => {
     const store = await import("../../src/workspace/message-store.js");
     mkdirSync(join(dir, "rooms", "room1"), { recursive: true });
     store.addMessage("room1", { sender: "user", content: "plain", mentions: [] });
-    store.addMessage("room1", { sender: "system", content: "summary", mentions: [], type: "summary" as any });
+    store.addMessage("room1", { sender: "system", content: "task created", mentions: [], type: "task_event" });
 
-    const result = store.searchMessages("room1", { type: "summary" });
+    const result = store.searchMessages("room1", { type: "task_event" });
     expect(result.messages).toHaveLength(1);
-    expect(result.messages[0].type).toBe("summary");
+    expect(result.messages[0].type).toBe("task_event");
   });
 });

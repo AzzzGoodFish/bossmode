@@ -459,20 +459,6 @@ export interface Room {
 
 // -- Message --
 
-export interface SummaryMeta {
-  title: string;
-  covered_range: {
-    from_id: string;
-    to_id: string;
-    count: number;
-  };
-  time_range: {
-    from: number; // timestamp
-    to: number;
-  };
-  participants: string[];
-}
-
 import type { RoomMessageAttachment } from "./attachments.js";
 
 export interface RoomMessage {
@@ -487,8 +473,7 @@ export interface RoomMessage {
   mentions: string[]; // member name snapshots
   mentionMemberIds?: string[];
   ts: number;
-  type?: "summary" | "task_event" | "knowledge_event";
-  summary_meta?: SummaryMeta;
+  type?: "task_event" | "knowledge_event";
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
   /** Message-level deliverable/document references previewable through artifact-preview. */
