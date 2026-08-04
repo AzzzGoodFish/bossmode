@@ -69,23 +69,23 @@ describe("prompt compiler", () => {
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     const prompt = compiled.fullPrompt;
     expect(prompt).toContain("## Room Principles");
-    expect(prompt).toContain("## Member Principles");
-    expect(prompt).toContain("## Member Mainline");
+    expect(prompt).toContain("## Scope Principles");
+    expect(prompt).toContain("## Scope Mainline");
     expect(prompt).not.toContain("Supplemental Prompt");
     // Capacity header format per plan: pct% — usage/limit
     expect(prompt).toMatch(/## Room Principles\n\n\d+% — \d+\/8,000\n/);
-    expect(prompt).toMatch(/## Member Principles\n\n\d+% — \d+\/4,000\n/);
-    expect(prompt).toMatch(/## Member Mainline\n\n\d+% — \d+\/4,000\n/);
+    expect(prompt).toMatch(/## Scope Principles\n\n\d+% — \d+\/4,000\n/);
+    expect(prompt).toMatch(/## Scope Mainline\n\n\d+% — \d+\/4,000\n/);
     // Section ids renamed + mainline added
     const ids = compiled.sections.map((s) => s.id);
-    expect(ids).toEqual(["source-agent", "bossmode-core", "member-principles", "member-mainline", "room-principles"]);
+    expect(ids).toEqual(["source-agent", "bossmode-core", "persona", "member-principles", "member-mainline", "room-principles"]);
     // Mainline index resolved at injection: dead task marked stale, never deleted
     expect(prompt).toContain("[stale] task:task-none");
     // Real injection order in the assembled text: Core -> Member Principles ->
     // Member Mainline -> Room Principles (fish's ruling: Room principles last).
     const coreIdx = prompt.indexOf("## Communication");
-    const memberPrinciplesIdx = prompt.indexOf("## Member Principles");
-    const mainlineIdx = prompt.indexOf("## Member Mainline");
+    const memberPrinciplesIdx = prompt.indexOf("## Scope Principles");
+    const mainlineIdx = prompt.indexOf("## Scope Mainline");
     const roomPrinciplesIdx = prompt.indexOf("## Room Principles");
     expect(coreIdx).toBeGreaterThan(-1);
     expect(coreIdx).toBeLessThan(memberPrinciplesIdx);
@@ -101,7 +101,7 @@ describe("prompt compiler", () => {
     mkdirSync(join(tmpDir, "rooms", "room-a", "memory", "members", "rm_qa"), { recursive: true });
     writeFileSync(join(tmpDir, "rooms", "room-a", "memory", "members", "rm_qa", "principles.md"), "x".repeat(5_000), "utf-8");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
-    expect(compiled.fullPrompt).toContain("## Member Principles");
+    expect(compiled.fullPrompt).toContain("## Scope Principles");
     expect(compiled.fullPrompt).toContain("125% — 5,000/4,000");
     expect(compiled.fullPrompt).toContain("pending curation");
     // Content is injected intact — grandfathered, not truncated
@@ -132,7 +132,7 @@ describe("prompt compiler", () => {
     const { writeMainline } = await import("../../src/workspace/mainline-store.js");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const empty = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
-    expect(empty.fullPrompt).not.toContain("## Member Mainline");
+    expect(empty.fullPrompt).not.toContain("## Scope Mainline");
     expect(empty.sections.find((s) => s.id === "member-mainline")?.included).toBe(false);
 
     writeMainline({ roomId: "room-a", memberId: "rm_qa", content: "## Focus\n\nF\n\n## Dynamic Index\n\n- docs/bossmode/later.md — 稍后建\n", actor: { type: "member", memberId: "rm_qa" }, reason: "pin" });

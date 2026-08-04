@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ArrowLeft, Trash2, ChevronDown, User, Circle, CircleDot, CheckCircle2, AlertCircle, AlertOctagon, Minus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority, TaskComment } from "../api/client";
-import { getTask, updateTask, deleteTaskApi, createTask, getRoom, commentTask } from "../api/client";
+import { getTask, updateTask, deleteTaskApi, createTask, getRoom, commentTask, getContacts } from "../api/client";
 import { Markdown } from "../components/Markdown";
 import { MarkdownField } from "../components/MarkdownField";
 import { useDialog } from "../components/dialogs";
@@ -73,7 +73,15 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
 
   // Load room (for name + members) and task
   useEffect(() => {
-    getRoom(roomId).then((r) => { setRoomName(r.name); setRoomMembers(r.members); }).catch(() => {});
+    // 0.20: member names from globalMemberIds + contacts (roomMembers removal — G3 debt ②)
+    Promise.all([getRoom(roomId), getContacts()])
+      .then(([r, c]) => {
+        setRoomName(r.name);
+        const byId = new Map(c.contacts.map((m) => [m.memberId, m.name]));
+        const names = (r.globalMemberIds?.length ? r.globalMemberIds.map((id) => byId.get(id) ?? id) : r.members);
+        setRoomMembers(names);
+      })
+      .catch(() => {});
   }, [roomId]);
 
   useEffect(() => {

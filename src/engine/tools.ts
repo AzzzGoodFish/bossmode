@@ -116,6 +116,28 @@ export async function handleToolCallback(
         }
       }
 
+      // 0.20 DM scope: post to dm-messages, not room bus.
+      if (typeof roomId === "string" && roomId.startsWith("dm:")) {
+        const memberId = roomId.slice("dm:".length);
+        const { addDmMessage } = await import("../workspace/dm-message-store.js");
+        const msg = addDmMessage(memberId, {
+          sender: agentName,
+          content: message,
+          mentions: [],
+          ...(attachments.length ? { attachments } as any : {}),
+          ...(artifacts.length ? { artifacts } as any : {}),
+        });
+        try {
+          // Reuse room:message shape until WS schema gains dm:message (contract §4).
+          broadcastToRoom(`dm:${memberId}`, {
+            type: "room:message",
+            roomId: `dm:${memberId}`,
+            message: msg as any,
+          } as any);
+        } catch { /* best-effort */ }
+        return { ok: true };
+      }
+
       const room = roomStore.getRoom(roomId);
       const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
       const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
@@ -429,12 +451,10 @@ export async function handleToolCallback(
       return { ok: true, provider, configured: config, projects };
     }
     case "wait": {
-      // Leader-only blocking wait (replaces the old one-shot watch subscription).
+      // 0.20: wait available to all room members (no longer leader-only).
       const room = roomStore.getRoom(roomId);
       const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
-      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; wait is unavailable" };
-      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can use wait" };
 
       const targetRef = String(params?.member || "").trim();
       if (!targetRef) return { ok: false, error: "member is required" };
@@ -462,6 +482,175 @@ export async function handleToolCallback(
       return {
         ...outcome,
         defaults: { timeoutMinutes: WAIT_DEFAULT_TIMEOUT_MIN, maxTimeoutMinutes: WAIT_MAX_TIMEOUT_MIN },
+      };
+    }
+    case "list_members": {
+      // Global member directory (DM tool surface). Returns id/name/template for invite flows.
+      const { listMembers } = await import("../workspace/member-registry.js");
+      const q = String(params?.query || "").trim().toLowerCase();
+      let members = listMembers().map((m) => ({
+        id: m.id,
+        name: m.name,
+        agentTemplate: m.agentTemplate,
+        model: m.global.model ?? null,
+      }));
+      if (q) {
+        members = members.filter((m) =>
+          m.name.toLowerCase().includes(q)
+          || m.id.toLowerCase().includes(q)
+          || m.agentTemplate.toLowerCase().includes(q),
+        );
+      }
+      return { ok: true, members, count: members.length };
+    }
+    case "create_room": {
+      // DM tool: creator becomes leader; invite by global member id.
+      const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
+      const creator = findMemberByName(agentName) || listMembers().find((m) => m.name === agentName);
+      if (!creator) return { ok: false, error: `Creator member not found: ${agentName}` };
+
+      const name = String(params?.name || "").trim();
+      if (!name) return { ok: false, error: "name is required" };
+      const cwd = String(params?.cwd || "").trim() || process.cwd();
+      const { existsSync } = await import("node:fs");
+      if (!existsSync(cwd)) return { ok: false, error: `Directory does not exist: ${cwd}` };
+
+      const inviteIds: string[] = Array.isArray(params?.memberIds)
+        ? params.memberIds.map(String).filter(Boolean)
+        : [];
+      // Creator always in the room.
+      const allIds = Array.from(new Set([creator.id, ...inviteIds]));
+      const invitees = allIds.map((id) => {
+        const m = getMember(id);
+        if (!m) throw new Error(`Unknown member id: ${id}`);
+        return m;
+      });
+
+      const drafts = invitees.map((m) => ({
+        agent: m.agentTemplate || "general",
+        name: m.name,
+      }));
+
+      let room;
+      try {
+        room = roomStore.createRoom(name, cwd, drafts, undefined, {
+          promptLeaderMemberName: creator.name,
+        });
+      } catch (err: any) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+
+      // Cutover: stamp globalMemberIds + migrate leader to mem_* + drop roomMembers.
+      roomStore.stampGlobalMemberIds(
+        room.id,
+        invitees.map((m) => m.id),
+        creator.id,
+      );
+
+      const principles = typeof params?.principles === "string" ? params.principles.trim() : "";
+      if (principles) {
+        try {
+          principlesStore.writePrinciples({
+            roomId: room.id,
+            scope: "room",
+            content: principles,
+            actor: { type: "member", memberId: creator.id, name: creator.name },
+            reason: "create_room initial principles",
+            operation: "write",
+          });
+        } catch (err: any) {
+          return {
+            ok: true,
+            roomId: room.id,
+            name: room.name,
+            leader: creator.name,
+            members: invitees.map((m) => ({ id: m.id, name: m.name })),
+            warning: `Room created but principles write failed: ${err?.message || err}`,
+          };
+        }
+      }
+
+      return {
+        ok: true,
+        roomId: room.id,
+        name: room.name,
+        cwd: room.cwd,
+        leader: creator.name,
+        leaderMemberId: creator.id,
+        members: invitees.map((m) => ({ id: m.id, name: m.name })),
+        scopeId: `room:${room.id}`,
+      };
+    }
+    case "edit_room": {
+      const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
+      const actorGlobal = findMemberByName(agentName) || listMembers().find((m) => m.name === agentName);
+      if (!actorGlobal) return { ok: false, error: `Member not found: ${agentName}` };
+
+      const targetRoomId = String(params?.roomId || roomId || "").trim();
+      if (!targetRoomId) return { ok: false, error: "roomId is required" };
+      const room = roomStore.getRoom(targetRoomId);
+      if (!room) return { ok: false, error: "Room not found" };
+
+      // Leader gate: promptLeaderGlobalMemberId / promptLeaderMemberId (mem_*) vs actor.
+      const actorLocal = roomStore.resolveRoomMemberRef(targetRoomId, agentName);
+      if (!actorLocal) {
+        return { ok: false, error: "not_room_leader", message: "Only the room leader can edit this room" };
+      }
+      const leaderId = room.promptLeaderGlobalMemberId || room.promptLeaderMemberId;
+      const actorGlobalId = roomStore.resolveGlobalMemberId(room, actorLocal) || actorLocal.id;
+      if (!leaderId || (leaderId !== actorLocal.id && leaderId !== actorGlobalId)) {
+        return { ok: false, error: "not_room_leader", message: "Only the room leader can edit this room" };
+      }
+
+      if (typeof params?.name === "string" && params.name.trim()) {
+        const renamed = roomStore.updateRoomName(targetRoomId, params.name.trim());
+        if (!renamed) return { ok: false, error: "Failed to rename room" };
+      }
+
+      if (typeof params?.principles === "string") {
+        principlesStore.writePrinciples({
+          roomId: targetRoomId,
+          scope: "room",
+          content: params.principles,
+          actor: { type: "member", memberId: actorLocal.id, name: actorLocal.name },
+          reason: String(params?.reason || "edit_room principles update"),
+          operation: "write",
+        });
+      }
+
+      // Invite additions
+      const addIds: string[] = Array.isArray(params?.addMemberIds) ? params.addMemberIds.map(String) : [];
+      const added: string[] = [];
+      for (const id of addIds) {
+        const g = getMember(id);
+        if (!g) continue;
+        const r = roomStore.inviteGlobalMember(targetRoomId, {
+          id: g.id,
+          name: g.name,
+          agentTemplate: g.agentTemplate || "general",
+        });
+        if (r.ok) added.push(g.name);
+      }
+
+      // Removals (keep scope memory assets — only membership)
+      const removeIds: string[] = Array.isArray(params?.removeMemberIds) ? params.removeMemberIds.map(String) : [];
+      const removed: string[] = [];
+      for (const id of removeIds) {
+        if (id === actorGlobal.id) continue; // don't remove self via this tool
+        const g = getMember(id);
+        if (!g) continue;
+        const r = roomStore.removeRoomMemberByRef(targetRoomId, g.name, { globalMemberId: g.id });
+        if (r.ok) removed.push(g.name);
+      }
+
+      const updated = roomStore.getRoom(targetRoomId);
+      return {
+        ok: true,
+        roomId: targetRoomId,
+        name: updated?.name || room.name,
+        added,
+        removed,
+        members: (updated?.members || room.members),
       };
     }
     default:

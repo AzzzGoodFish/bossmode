@@ -437,8 +437,13 @@ export interface Room {
   docsPath?: string;
   /** Authoritative room-local members for v0.14+. */
   roomMembers?: RoomMemberRecord[];
-  /** Provenance: which team template (and version) this room was instantiated from. */
-  template?: { name: string; version: string };
+  /**
+   * 0.20+: global member ids (mem_*) referenced by this room.
+   * Dual-written during migration alongside roomMembers; WS-B cutover reads this as source of truth.
+   */
+  globalMemberIds?: string[];
+  /** 0.20+: global member id of the room leader (mem_*), dual-written with promptLeaderMemberId. */
+  promptLeaderGlobalMemberId?: string;
   createdAt: number;
   /**
    * Legacy selected document paths (relative to ~/.bossmode/knowledge/docs/).

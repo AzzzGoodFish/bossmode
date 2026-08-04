@@ -18,7 +18,7 @@ import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, resolveCredentialProfileForModel, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
-import { ensureRoomTeamAgent } from "../workspace/team-store.js";
+import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
@@ -43,11 +43,17 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
 
 addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
-    name?: string; cwd?: string; members?: unknown;
+    name?: string;
+    cwd?: string;
+    /** 0.20 contract: global member ids */
+    memberIds?: unknown;
+    leaderMemberId?: string | null;
+    principles?: string;
+    /** Legacy until cutover */
+    members?: unknown;
     ruleDocs?: string[];
     promptLeaderMemberName?: string;
     docsPath?: string | null;
-    templateName?: string;
   };
 
   if (!body.name || !body.cwd) {
@@ -60,8 +66,84 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     return;
   }
 
+  // ── 0.20 contract shape: memberIds[] ──
+  if (Array.isArray(body.memberIds)) {
+    try {
+      const { resolveMemberRef, getMember } = await import("../workspace/member-registry.js");
+      const ids = body.memberIds.map((v) => String(v || "").trim()).filter(Boolean);
+      const globals = [];
+      for (const id of ids) {
+        const m = resolveMemberRef(id) || getMember(id);
+        if (!m) {
+          sendJson(res, 400, { error: "member_not_found", message: `Member not found: ${id}` });
+          return;
+        }
+        globals.push(m);
+      }
+      // Deduplicate by id
+      const seen = new Set<string>();
+      const unique = globals.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+
+      const { loadAgentDefinition } = await import("../workforce/agent-store.js");
+      const drafts: CreateRoomMemberInput[] = unique.map((m) => {
+        const preferred = (m.agentTemplate || "general").trim() || "general";
+        const agent = loadAgentDefinition(preferred) ? preferred : (loadAgentDefinition("general") ? "general" : preferred);
+        return { agent, name: m.name };
+      });
+
+      let leaderGlobalId =
+        typeof body.leaderMemberId === "string" && body.leaderMemberId.trim()
+          ? body.leaderMemberId.trim()
+          : undefined;
+      if (leaderGlobalId && !unique.some((m) => m.id === leaderGlobalId)) {
+        sendJson(res, 400, { error: "leader_not_in_members", message: "leaderMemberId must be one of memberIds" });
+        return;
+      }
+      const leaderName = leaderGlobalId
+        ? unique.find((m) => m.id === leaderGlobalId)!.name
+        : unique[0]?.name;
+
+      // createRoom works with zero members (user manual room) — no team package is materialized.
+      let room;
+      if (drafts.length === 0) {
+        room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
+          docsPath: body.docsPath,
+        });
+      } else {
+        room = roomStore.createRoom(body.name, body.cwd, drafts, body.ruleDocs, {
+          promptLeaderMemberName: leaderName,
+          docsPath: body.docsPath,
+        });
+      }
+
+      // Dual-write globalMemberIds (+ leader global id)
+      const globalIds = unique.map((m) => m.id);
+      if (!leaderGlobalId && unique[0]) leaderGlobalId = unique[0].id;
+      roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId || null);
+
+      if (typeof body.principles === "string" && body.principles.trim()) {
+        principlesStore.writePrinciples({
+          roomId: room.id,
+          scope: "room",
+          content: body.principles,
+          actor: { type: "user" },
+          reason: "create room",
+          operation: "write",
+        });
+      }
+
+      sendJson(res, 200, roomStore.getRoom(room.id));
+      return;
+    } catch (err: any) {
+      const message = String(err?.message || err);
+      sendJson(res, message.startsWith("Agent not found:") ? 404 : 400, { error: message });
+      return;
+    }
+  }
+
+  // ── Legacy shape: members:[{agent,name}] ──
   if (!Array.isArray(body.members)) {
-    sendJson(res, 400, { error: "members must be an array" });
+    sendJson(res, 400, { error: "memberIds or members array is required" });
     return;
   }
   if (!body.members.every((member) => member && typeof member === "object" && !Array.isArray(member))) {
@@ -93,9 +175,17 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
       promptLeaderMemberName,
       docsPath: body.docsPath,
-      templateName: typeof body.templateName === "string" ? body.templateName.trim() || undefined : undefined,
     });
-    sendJson(res, 200, room);
+    // Dual-write: stamp global ids when registry has matching names
+    try {
+      const { findMemberByName } = await import("../workspace/member-registry.js");
+      const gids = members
+        .map((m) => findMemberByName(m.name)?.id)
+        .filter((id): id is string => !!id);
+      const leaderG = findMemberByName(promptLeaderMemberName)?.id;
+      if (gids.length) roomStore.stampGlobalMemberIds(room.id, gids, leaderG || null);
+    } catch { /* ignore */ }
+    sendJson(res, 200, roomStore.getRoom(room.id) || room);
   } catch (err: any) {
     const message = String(err?.message || err);
     sendJson(res, message.startsWith("Agent not found:") ? 404 : 400, { error: message });
@@ -281,9 +371,9 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, re
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const agentDef = ensureRoomTeamAgent(params.id, member.agent);
+  const agentDef = loadAgentDefinition(member.agent);
   if (!agentDef) {
-    sendJson(res, 404, { error: "Room team agent definition not found for this member" });
+    sendJson(res, 404, { error: "Agent definition not found for this member" });
     return;
   }
   const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
@@ -625,9 +715,43 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { agent?: string; name?: string; config?: Partial<RoomMemberConfig> };
+  const body = (await parseBody(req)) as {
+    memberId?: string;
+    agent?: string;
+    name?: string;
+    config?: Partial<RoomMemberConfig>;
+  };
+
+  // 0.20: invite by global memberId (preferred)
+  if (typeof body.memberId === "string" && body.memberId.trim()) {
+    try {
+      const { resolveMemberRef } = await import("../workspace/member-registry.js");
+      const global = resolveMemberRef(body.memberId.trim());
+      if (!global) {
+        sendJson(res, 404, { error: "Member not found" });
+        return;
+      }
+      const added = roomStore.inviteGlobalMember(params.id, {
+        id: global.id,
+        name: global.name,
+        agentTemplate: global.agentTemplate,
+        config: body.config,
+      });
+      if (!added.ok) {
+        sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, { error: added.error });
+        return;
+      }
+      sendJson(res, 200, roomStore.getRoom(params.id));
+      return;
+    } catch (err: any) {
+      sendJson(res, 400, { error: err?.message || String(err) });
+      return;
+    }
+  }
+
+  // Legacy: invite by agent template + local member name
   if (!body.agent) {
-    sendJson(res, 400, { error: "agent name is required" });
+    sendJson(res, 400, { error: "memberId or agent name is required" });
     return;
   }
   if (typeof body.name !== "string" || !body.name.trim()) {
@@ -641,8 +765,43 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     return;
   }
 
+  // Dual-write: if a global member with this name exists, stamp id
+  try {
+    const { findMemberByName } = await import("../workspace/member-registry.js");
+    const g = findMemberByName(body.name);
+    if (g) roomStore.addGlobalMemberId(params.id, g.id);
+  } catch { /* ignore */ }
+
   const updatedRoom = roomStore.getRoom(params.id);
   sendJson(res, 200, updatedRoom);
+});
+
+// 0.20: remove member from room (keeps their scope memory assets)
+addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  let globalMemberId: string | undefined;
+  try {
+    const { resolveMemberRef, findMemberByName } = await import("../workspace/member-registry.js");
+    if (params.memberRef.startsWith("mem_")) {
+      globalMemberId = params.memberRef;
+    } else {
+      const g = resolveMemberRef(params.memberRef) || findMemberByName(params.memberRef);
+      globalMemberId = g?.id;
+    }
+  } catch { /* ignore */ }
+
+  const removed = roomStore.removeRoomMemberByRef(params.id, params.memberRef, { globalMemberId });
+  if (!removed.ok) {
+    sendJson(res, 404, { error: removed.error });
+    return;
+  }
+  // Ensure global id cleared even if ref was room-local id
+  if (globalMemberId) roomStore.removeGlobalMemberId(params.id, globalMemberId);
+  sendJson(res, 200, roomStore.getRoom(params.id));
 });
 
 // ── Agent Events & Steer ──

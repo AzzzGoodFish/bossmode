@@ -108,6 +108,19 @@ export function loadSkillsByNames(names: string[]): SkillDefinition[] {
   return skills;
 }
 
+/**
+ * 0.20: resolve skill directory paths from the global skills pool only
+ * (no room team/skills fallback — team layer removed).
+ */
+export function resolveGlobalSkillPaths(skillNames: string[]): string[] {
+  ensureSkillsDir();
+  return skillNames.map((name) => {
+    const global = join(PRIMARY_SKILLS_DIR, name);
+    if (existsSync(join(global, "SKILL.md"))) return global;
+    return global; // path for error reporting even if missing
+  });
+}
+
 export function saveSkillDefinition(name: string, markdownContent: string): SkillDefinition {
   ensureSkillsDir();
   const skillDir = join(PRIMARY_SKILLS_DIR, name);

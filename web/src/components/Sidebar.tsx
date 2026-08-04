@@ -1,20 +1,24 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Users,
+  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
-import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
-import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams } from "../api/client";
+import type { Room, SkillInfo, KnowledgeTreeNode } from "../api/client";
+import { getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type ChatEntry, type TemplateInfo } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
 export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
 export type ActivePage =
+  | { type: "chats" }
+  | { type: "contacts" }
+  | { type: "dm"; memberId: string }
+  | { type: "member-create" }
+  | { type: "member-settings"; memberId: string }
+  | { type: "templates"; name?: string }
   | { type: "room"; id: string }
-  | { type: "team"; name: string | null }
-  | { type: "agent"; name: string | null }
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
   | { type: "settings"; section?: SettingsSection }
@@ -22,20 +26,27 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "rooms" | "team" | "library" | "system";
+type Domain = "chats" | "templates" | "skills" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
-    case "team":
-    case "agent":
+    case "chats":
+      return "chats";
+    case "contacts":
+    case "dm":
+    case "member-create":
+    case "member-settings":
+      return "chats";
+    case "templates":
+      return "templates";
     case "skill":
-      return "team";
+      return "skills";
     case "knowledge":
       return "library";
     case "settings":
       return "system";
     default:
-      return "rooms";
+      return "chats";
   }
 }
 
@@ -62,29 +73,7 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time" },
 ];
 
-type RoomPresence = "working" | "idle" | "offline";
 
-function roomPresence(room: Room): { state: RoomPresence; title: string } {
-  const memberStatuses = room.members.map((m) => room.agentStatuses?.[m] || "inactive");
-  const workingCount = memberStatuses.filter((s) => s === "working" || s === "thinking").length;
-  const idleCount = memberStatuses.filter((s) => s === "idle").length;
-  const memberCount = room.members.length;
-
-  if (workingCount > 0) return { state: "working", title: `${workingCount} working · ${memberCount} members` };
-  if (idleCount > 0) return { state: "idle", title: `${idleCount} idle · ${memberCount} members` };
-  return { state: "offline", title: `offline · ${memberCount} members` };
-}
-
-function roomBeaconClass(state: RoomPresence): string {
-  switch (state) {
-    case "working":
-      return "bg-onair shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_14%,transparent),0_0_12px_color-mix(in_srgb,var(--on-air)_46%,transparent)] animate-pulse";
-    case "idle":
-      return "bg-onair opacity-85 shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_10%,transparent)]";
-    default:
-      return "bg-idleg opacity-60 shadow-[0_0_0_3px_color-mix(in_srgb,var(--idle-g)_8%,transparent)]";
-  }
-}
 
 export function Sidebar({
   activePage, username, onNavigate, onLogout, refreshKey,
@@ -93,8 +82,6 @@ export function Sidebar({
 }: SidebarProps) {
   const isMobile = useIsMobile();
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [teams, setTeams] = useState<TeamTemplateSummary[]>([]);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
 
@@ -106,8 +93,6 @@ export function Sidebar({
 
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
-    getTeams().then(setTeams).catch(() => setTeams([]));
-    getAgents().then(setAgents).catch(console.error);
     getSkills().then(setSkills).catch(console.error);
     getKnowledgeTree()
       .then((root) => {
@@ -125,11 +110,7 @@ export function Sidebar({
     onRoomsLoaded?.(rooms);
   }, [rooms, onRoomsLoaded]);
 
-  const displayRooms = liveRooms ?? rooms;
 
-  const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
-  const selectedTeamName = activePage?.type === "team" ? activePage.name : null;
-  const selectedAgentName = activePage?.type === "agent" ? activePage.name : null;
   const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
   const selectedKnowledgeFolder =
     activePage?.type === "knowledge" && activePage.path ? activePage.path.split("/")[0] : null;
@@ -158,20 +139,26 @@ export function Sidebar({
       >
         B
       </button>
-      <button onClick={() => setBrowseDomain("rooms")} title="Rooms" aria-label="Rooms" className={railBtn(domain === "rooms")}>
-        {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+      <button onClick={() => { setBrowseDomain("chats"); onNavigate({ type: "chats" }); }} title="Chats" aria-label="Chats" className={railBtn(domain === "chats")}>
+        {domain === "chats" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <MessageSquare size={18} />
         {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
       </button>
-      <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "team", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
-        {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <Users size={18} />
+      <div className="flex-1" />
+      <div className="w-5 h-px bg-line-soft my-1.5" />
+      <button onClick={() => { setBrowseDomain("templates"); onNavigate({ type: "templates" }); }} title="Templates" aria-label="Templates" className={railBtn(domain === "templates")}>
+        {domain === "templates" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Fingerprint size={18} />
       </button>
-      <button onClick={() => setBrowseDomain("library")} title="Library" aria-label="Library" className={railBtn(domain === "library")}>
+      <button onClick={() => { setBrowseDomain("skills"); onNavigate({ type: "skill", name: null }); }} title="Skills" aria-label="Skills" className={railBtn(domain === "skills")}>
+        {domain === "skills" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Puzzle size={18} />
+      </button>
+      <button onClick={() => { setBrowseDomain("library"); onNavigate({ type: "knowledge" }); }} title="Library" aria-label="Library" className={railBtn(domain === "library")}>
         {domain === "library" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <BookOpen size={18} />
       </button>
-      <div className="flex-1" />
+      <div className="w-5 h-px bg-line-soft my-1.5" />
       <button onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme" className={railBtn(false)}>
         <Sun size={16} className="hidden dark:block" />
         <Moon size={16} className="block dark:hidden" />
@@ -183,7 +170,7 @@ export function Sidebar({
         />
       )}
       <button
-        onClick={() => setBrowseDomain("system")}
+        onClick={() => { setBrowseDomain("system"); onNavigate({ type: "settings" }); }}
         title="Settings"
         aria-label="Settings"
         data-tour="settings"
@@ -205,14 +192,10 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", templates: "Templates", skills: "Skills", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
-      active ? "bg-surface-2" : "hover:bg-surface-1"
-    }`;
-  const roomItemCls = (active: boolean) =>
-    `w-full text-left rounded-lg pl-2.5 pr-7 py-2 mb-px transition-colors cursor-pointer ${
       active ? "bg-surface-2" : "hover:bg-surface-1"
     }`;
 
@@ -220,7 +203,7 @@ export function Sidebar({
     <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
       <div className="h-12 shrink-0 flex items-center justify-between px-3.5 border-b border-line-soft">
         <h1 className="text-[13px] font-semibold text-ink-1">{panelTitle}</h1>
-        {domain === "rooms" && (
+        {domain === "chats" && (
           <button
             onClick={() => onNavigate({ type: "room", id: "__new__" })}
             title="New room"
@@ -233,76 +216,11 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
-        {domain === "rooms" && (
-          <>
-            {displayRooms.map((r) => {
-              const presence = roomPresence(r);
-              return (
-                <div key={r.id} className="group relative">
-                  <button
-                    onClick={() => onNavigate({ type: "room", id: r.id })}
-                    className={roomItemCls(selectedRoomId === r.id)}
-                    title={presence.title}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[12.5px] font-medium truncate flex-1 ${selectedRoomId === r.id ? "text-ink-1" : "text-ink-2"}`}>
-                        {r.name}
-                      </span>
-                      {unreadRoomIds?.has(r.id) && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                    </div>
-                    <div className="font-mono text-[10.5px] text-ink-4 truncate mt-px">
-                      ~{r.cwd.replace(/^\/home\/[^/]+/, "")}
-                    </div>
-                  </button>
-                  <span
-                    className="absolute right-3 top-[17px] w-3 h-3 grid place-items-center pointer-events-none"
-                    title={presence.title}
-                    aria-label={presence.title}
-                  >
-                    <span className={`w-[7px] h-[7px] rounded-full ${roomBeaconClass(presence.state)}`} />
-                  </span>
-                </div>
-              );
-            })}
-            {rooms.length === 0 && (
-              <p className="text-xs text-ink-4 px-2.5 py-2">No Rooms yet. Click + to create one.</p>
-            )}
-          </>
-        )}
+        {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
+        {domain === "templates" && <TemplatesPanelList activePage={activePage} onNavigate={onNavigate} />}
 
-        {domain === "team" && (
+        {domain === "skills" && (
           <>
-            <SectionHead
-              label={`TEAMS · ${teams.length}`}
-              onLabelClick={() => onNavigate({ type: "team", name: null })}
-              active={activePage?.type === "team" && activePage.name === null}
-            />
-            {teams.map((t) => (
-              <button key={t.slug || t.name} onClick={() => onNavigate({ type: "team", name: t.slug || t.name })} className={itemCls(selectedTeamName === (t.slug || t.name))}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center text-[10px] font-bold shrink-0">{(t.name[0] || "?").toUpperCase()}</span>
-                  <div className="min-w-0 flex-1">
-                    <span className={`block text-[12.5px] font-medium truncate ${selectedTeamName === (t.slug || t.name) ? "text-ink-1" : "text-ink-2"}`}>{t.name}{t.builtIn ? " · builtin" : ""}</span>
-                    <span className="block text-[10px] text-ink-4 truncate">{(t.agentNames ?? []).length} agents · {t.version}</span>
-                  </div>
-                </div>
-              </button>
-            ))}
-            <div className="h-3" />
-            <SectionHead
-              label={`AGENTS · ${agents.length}`}
-              onLabelClick={() => onNavigate({ type: "agent", name: null })}
-              active={activePage?.type === "agent" && activePage.name === null}
-            />
-            {agents.map((a) => (
-              <button key={a.name} onClick={() => onNavigate({ type: "agent", name: a.name })} className={itemCls(selectedAgentName === a.name)}>
-                <div className="flex items-center gap-2.5">
-                  <StaffBadge name={a.name} avatar={a.avatar} status="idle" size="sm" />
-                  <span className={`text-[12.5px] font-medium truncate ${selectedAgentName === a.name ? "text-ink-1" : "text-ink-2"}`}>{a.name}</span>
-                </div>
-              </button>
-            ))}
-            <div className="h-3" />
             <SectionHead
               label={`SKILLS · ${skills.length}`}
               onLabelClick={() => onNavigate({ type: "skill", name: null })}
@@ -318,6 +236,7 @@ export function Sidebar({
             ))}
           </>
         )}
+
 
         {domain === "library" && (
           <>
@@ -349,8 +268,19 @@ export function Sidebar({
         )}
       </div>
 
-      {domain === "rooms" && (
-        <div className="border-t border-line-soft shrink-0 p-2">
+      {domain === "chats" && (
+        <div className="border-t border-line-soft shrink-0 p-2 space-y-px">
+          <button
+            onClick={() => onNavigate({ type: "contacts" })}
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
+              activePage?.type === "contacts" || activePage?.type === "member-create"
+                ? "bg-surface-2 text-ink-1"
+                : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
+            }`}
+          >
+            <Contact size={14} />
+            <span>Contacts</span>
+          </button>
           <button
             onClick={() => onNavigate({ type: "all-tasks" })}
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
@@ -379,7 +309,7 @@ export function Sidebar({
 function SectionHead({ label, onCreate, onLabelClick, active }: {
   label: string;
   onCreate?: () => void;
-  /** Click section label to open gallery (Teams / Agents / Skills). */
+  /** Click section label to open the domain page. */
   onLabelClick?: () => void;
   active?: boolean;
 }) {
@@ -403,5 +333,130 @@ function SectionHead({ label, onCreate, onLabelClick, active }: {
         </button>
       )}
     </div>
+  );
+}
+
+/** Compact unified conversation list for the Chats panel domain. */
+function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const [chats, setChats] = useState<ChatEntry[] | null>(null);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => getChats().then((r) => { if (!cancelled) setChats(r.chats); }).catch(() => {});
+    load();
+    const t = window.setInterval(load, 10_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, []);
+  const sorted = useMemo(
+    () => [...(chats ?? [])].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0)),
+    [chats],
+  );
+  const q = query.trim().toLowerCase();
+  const filtered = q ? sorted.filter((c) => c.title.toLowerCase().includes(q)) : sorted;
+  const unread = filtered.filter((c) => c.unreadCount > 0 || c.mentioned);
+  const rest = filtered.filter((c) => !(c.unreadCount > 0 || c.mentioned));
+
+  if (!chats) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
+  return (
+    <>
+      {/* search */}
+      <div className="px-1.5 pb-2">
+        <div className="flex items-center gap-1.5 rounded-lg border border-line bg-inset px-2.5 py-1.5 focus-within:border-accent transition-colors">
+          <Search size={12} className="text-ink-4 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search conversations"
+            className="w-full bg-transparent outline-none text-[12px] text-ink-1 placeholder:text-ink-4"
+          />
+        </div>
+      </div>
+
+      {sorted.length === 0 && <div className="px-2 py-3 text-[11.5px] text-ink-4">No conversations yet.</div>}
+      {sorted.length > 0 && filtered.length === 0 && (
+        <div className="px-2 py-3 text-[11.5px] text-ink-4">No matches for “{query.trim()}”.</div>
+      )}
+
+      {unread.length > 0 && (
+        <>
+          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">UNREAD · {unread.length}</div>
+          {unread.map((c) => <ChatRow key={c.scopeId} c={c} activePage={activePage} onNavigate={onNavigate} />)}
+          <div className="h-2.5" />
+        </>
+      )}
+      {rest.length > 0 && (
+        <>
+          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">CHATS</div>
+          {rest.map((c) => <ChatRow key={c.scopeId} c={c} activePage={activePage} onNavigate={onNavigate} />)}
+        </>
+      )}
+    </>
+  );
+}
+
+function ChatRow({ c, activePage, onNavigate }: { c: ChatEntry; activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const active =
+    (c.kind === "dm" && activePage?.type === "dm" && activePage.memberId === c.memberId) ||
+    (c.kind === "room" && activePage?.type === "room" && activePage.id === c.roomId);
+  return (
+    <button
+      onClick={() =>
+        c.kind === "dm" && c.memberId
+          ? onNavigate({ type: "dm", memberId: c.memberId })
+          : c.roomId
+            ? onNavigate({ type: "room", id: c.roomId })
+            : undefined
+      }
+      className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+    >
+      {c.kind === "dm" ? (
+        <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
+      ) : (
+        <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
+          <Hash size={12} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
+        <div className="text-[10.5px] text-ink-4 truncate">
+          {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
+        </div>
+      </div>
+      {c.mentioned && (
+        <span className="shrink-0 w-[18px] h-[18px] rounded-full bg-blocked text-white text-[10px] font-bold flex items-center justify-center">@</span>
+      )}
+      {c.unreadCount > 0 && (
+        <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
+          {c.unreadCount > 99 ? "99+" : c.unreadCount}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function TemplatesPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getTemplates().then((r) => { if (!cancelled) setTemplates(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (!templates) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
+  return (
+    <>
+      {templates.map((t) => {
+        const active = activePage?.type === "templates" && activePage.name === t.name;
+        return (
+          <button
+            key={t.name}
+            onClick={() => onNavigate({ type: "templates", name: t.name })}
+            className={`w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${active ? "bg-surface-2" : "hover:bg-surface-1"}`}
+          >
+            <div className={`text-[12.5px] font-medium truncate ${active ? "text-ink-1" : "text-ink-2"}`}>{t.name}</div>
+            <div className="text-[10.5px] text-ink-4 truncate">{t.builtin ? "built-in" : `${t.referencedBy.length} member${t.referencedBy.length === 1 ? "" : "s"}`}</div>
+          </button>
+        );
+      })}
+    </>
   );
 }

@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
-import { ensureRoomTeamAgent, resolveRoomSkillPaths } from "../workspace/team-store.js";
+import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { resolveMemberExtensionSkillPaths } from "../workspace/extension-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
@@ -18,7 +18,10 @@ import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
 import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
-import { compileMemberPrompt } from "./prompt-compiler.js";
+import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
+import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { getMember, getEffectiveConfig } from "../workspace/member-registry.js";
+import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
   wrapRoomContextMessage,
@@ -96,6 +99,9 @@ interface PendingCredentialRefresh {
 
 interface AgentInstance {
   handle: AgentHandle;
+  /** Conversation scope id: "room:<roomId>" | "dm:<memberId>". */
+  scopeId: ScopeId;
+  /** Room id when scope is room:*; empty string for dm. */
   roomId: string;
   memberId: string;
   agentName: string; // current member name snapshot for display/mentions
@@ -124,8 +130,76 @@ interface AgentInstance {
 const instances = new Map<string, AgentInstance>();
 const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
 
-function instanceKey(roomId: string, memberId: string): string {
-  return `${roomId}:${memberId}`;
+/**
+ * Resolve instance map key from a roomId-or-scopeId + memberId.
+ * - room uuid → room:<uuid>:<memberId>
+ * - already "dm:…" / "room:…" scopeId → scopeId:memberId
+ * Contract §5.
+ */
+function instanceKey(roomIdOrScope: string, memberId: string): string {
+  if (typeof roomIdOrScope === "string" && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:"))) {
+    return scopeInstanceKey(roomIdOrScope, memberId);
+  }
+  return scopeInstanceKey(scopeIdOf({ kind: "room", roomId: roomIdOrScope }), memberId);
+}
+
+function dmInstanceKey(memberId: string): string {
+  return scopeInstanceKey(scopeIdOf({ kind: "dm", memberId }), memberId);
+}
+
+function roomScopeId(roomId: string): ScopeId {
+  return scopeIdOf({ kind: "room", roomId });
+}
+
+/** Aggregate live status for a conversation scope (chats list / working-set). */
+export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inactive" {
+  const ref = parseScopeId(scopeId);
+  if (!ref) return "inactive";
+  if (ref.kind === "dm") {
+    const st = getAgentStatus(scopeId, ref.memberId);
+    if (st === "working") return "working";
+    if (st === "inactive") return "inactive";
+    return "idle";
+  }
+  // Room: any member working → working; else idle if any live instance else inactive
+  let sawInstance = false;
+  for (const m of roomStore.getRoomMembers(ref.roomId)) {
+    const st = getAgentStatus(ref.roomId, m.id);
+    if (st === "inactive") continue;
+    sawInstance = true;
+    if (st === "working") return "working";
+  }
+  const room = roomStore.getRoom(ref.roomId);
+  for (const gid of room?.globalMemberIds || []) {
+    const st = getAgentStatus(ref.roomId, gid);
+    if (st === "working") return "working";
+    if (st !== "inactive") sawInstance = true;
+  }
+  if (sawInstance) return "idle";
+  return "inactive";
+}
+
+/** Working-set for contacts: which scopes a global member is currently active in. */
+export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
+  const out: ScopeId[] = [];
+  for (const inst of instances.values()) {
+    if (inst.status !== "working" && inst.dispatchState === "idle") continue;
+    // Match by global id (DM) or by sourceMemberId / name for room locals
+    if (inst.scopeId.startsWith("dm:")) {
+      if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) {
+        out.push(inst.scopeId);
+      }
+      continue;
+    }
+    const roomUuid = inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId;
+    const r = roomStore.getRoom(roomUuid);
+    if (!r) continue;
+    const local = roomStore.getRoomMembers(r.id).find((m) => m.id === inst.memberId || m.name === inst.agentName);
+    if (!local) continue;
+    const gid = roomStore.resolveGlobalMemberId(r, local);
+    if (gid === globalMemberId) out.push(scopeIdOf({ kind: "room", roomId: r.id }));
+  }
+  return Array.from(new Set(out));
 }
 
 function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
@@ -629,10 +703,29 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     return null;
   }
 
-  const member = resolveRoomMember(roomId, memberRef);
+  let member = resolveRoomMember(roomId, memberRef);
   if (!member) {
     logger.error("agent", "no member or agent definition found", { name: memberRef });
     return null;
+  }
+  // 0.20 G3 cutover: overlay global effective-config via ID link (sourceMemberId / globalMemberIds),
+  // never free find-by-name (rename-safe). Unified switches + scope overrides live on the registry.
+  try {
+    const globalId = roomStore.resolveGlobalMemberId(room, member);
+    if (globalId) {
+      const eff = getEffectiveConfig(globalId, roomScopeId(roomId));
+      member = {
+        ...member,
+        model: eff.model || member.model,
+        credentialId: eff.credentialId || member.credentialId,
+        thinkingLevel: (eff.thinkingLevel as string) || member.thinkingLevel,
+        skills: eff.skills?.length ? eff.skills : member.skills,
+        extensions: eff.extensions?.length ? eff.extensions : member.extensions,
+        mcpServers: eff.mcpServers?.length ? eff.mcpServers : member.mcpServers,
+      };
+    }
+  } catch (err) {
+    logger.warn("agent", "effective-config overlay skipped", { member: member.name, error: String(err) });
   }
   if (!isMemberConfigured(member)) {
     logger.error("agent", "member unconfigured", { member: member.name, memberId: member.id });
@@ -656,10 +749,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     logger.info("agent", "getOrCreate", { member: memberName, memberId, roomId, found: false });
     logger.info("agent", "loadMember", { member: memberName, memberId, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
 
-    // Room-local only: agent definition from rooms/<id>/team/agents/ (no global fallback).
-    const agentDef = ensureRoomTeamAgent(roomId, member.agent);
+    // 0.20: agent definition from global pool (templates/agents + ~/.bossmode/agents), live read.
+    const agentDef = loadAgentDefinition(member.agent);
     if (!agentDef) {
-      logger.error("agent", "room team agent definition not found", { member: memberName, agent: member.agent, roomId });
+      logger.error("agent", "agent definition not found", { member: memberName, agent: member.agent, roomId });
       return null;
     }
 
@@ -672,10 +765,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
     const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
 
-    // Resolve skills: member config takes precedence over agent definition; prefer room team skills/
+    // Resolve skills: member config takes precedence over agent definition; global skills pool only.
     const skills = resolveSkills(member, agentDef);
     const skillPaths = [
-      ...resolveRoomSkillPaths(roomId, skills),
+      ...resolveGlobalSkillPaths(skills),
       ...resolveMemberExtensionSkillPaths(member.extensions),
     ];
 
@@ -737,6 +830,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
       const instance: AgentInstance = {
         handle,
+        scopeId: roomScopeId(roomId),
         roomId,
         memberId,
         agentName: memberName,
@@ -1311,13 +1405,13 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   }
   if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
 
-  const agentDef = ensureRoomTeamAgent(roomId, member.agent);
-  if (!agentDef) throw new Error(`Room team agent definition not found: ${member.agent}`);
+  const agentDef = loadAgentDefinition(member.agent);
+  if (!agentDef) throw new Error(`Agent definition not found: ${member.agent}`);
   const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
   const skills = resolveSkills(member, agentDef);
   const skillPaths = [
-    ...resolveRoomSkillPaths(roomId, skills),
+    ...resolveGlobalSkillPaths(skills),
     ...resolveMemberExtensionSkillPaths(member.extensions),
   ];
 
@@ -1381,6 +1475,233 @@ export function destroyInstance(roomId: string, memberRef: string): void {
 
 export function getActiveInstanceCount(): number {
   return instances.size;
+}
+
+// -- DM activation (0.20, no @ required) -------------------------------------
+
+function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
+  const rec = getMember(memberId);
+  if (!rec) return null;
+  const scopeId = scopeIdOf({ kind: "dm", memberId });
+  const eff = getEffectiveConfig(memberId, scopeId);
+  return {
+    id: rec.id,
+    name: rec.name,
+    type: "agent",
+    agent: rec.agentTemplate || "general",
+    runtime: "pi-cli",
+    model: eff.model || undefined,
+    credentialId: eff.credentialId || undefined,
+    thinkingLevel: (eff.thinkingLevel as string) || "off",
+    skills: eff.skills || [],
+    extensions: eff.extensions || [],
+    mcpServers: eff.mcpServers || [],
+  };
+}
+
+async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
+  const scopeId = scopeIdOf({ kind: "dm", memberId });
+  const key = dmInstanceKey(memberId);
+  const existing = instances.get(key);
+  if (existing) return existing;
+
+  const pending = pendingCreations.get(key);
+  if (pending) return pending;
+
+  const creation = (async (): Promise<AgentInstance | null> => {
+    if (!registry) {
+      logger.error("agent", "runtime registry not initialized");
+      return null;
+    }
+    const member = memberRecordToConfig(memberId);
+    if (!member) {
+      logger.error("agent", "dm member not found", { memberId });
+      return null;
+    }
+    if (!isMemberConfigured(member)) {
+      logger.error("agent", "dm member unconfigured", { member: member.name, memberId });
+      return null;
+    }
+
+    const agentDef = loadAgentDefinition(member.agent) || {
+      name: member.agent,
+      description: member.agent,
+      systemPrompt: `You are ${member.name}.`,
+      tags: [],
+      skills: [],
+    };
+
+    const runtime = registry.get(member.runtime);
+    if (!runtime) {
+      logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
+      return null;
+    }
+
+    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    const compiled = compileMemberPromptForScope({
+      scopeId,
+      memberId,
+      memberName: member.name,
+      agentDef,
+      room: null,
+      docsRoot: docsRootPath,
+      activeScopes: [scopeId],
+    });
+
+    const skills = resolveSkills(member, agentDef);
+    const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
+
+    const syntheticRoomId = scopeId; // "dm:<memberId>" — tools/chat branch on this prefix
+
+    try {
+      const handle = await runtime.createAgent({
+        cwd: process.cwd(),
+        roomId: syntheticRoomId,
+        member,
+        agentPrompt: compiled.agentPrompt,
+        envPrompt: compiled.envPrompt,
+        appendSystemPrompt: compiled.appendSystemPrompt,
+        skillPaths,
+        skillNames: skills,
+        roomMembers: [member.name],
+        callbacks: {
+          onChat: async (message: string) => {
+            const { addDmMessage } = await import("../workspace/dm-message-store.js");
+            addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:chat-dm");
+          },
+          onMention: async (_target: string, message: string) => {
+            // DM has no @ routing — treat as normal chat.
+            const { addDmMessage } = await import("../workspace/dm-message-store.js");
+            addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:mention-dm");
+          },
+        },
+      });
+
+      const instance: AgentInstance = {
+        handle,
+        scopeId,
+        roomId: syntheticRoomId,
+        memberId,
+        agentName: member.name,
+        sourceAgent: member.agent,
+        status: "idle",
+        dispatchState: "idle",
+        promptInFlight: false,
+        queuedInputs: [],
+        pendingChatReply: false,
+        hadErrorInTurn: false,
+        lastMessageEndWasLength: false,
+        lengthContinuationPending: false,
+        lengthContinuationAttempted: false,
+        compacting: false,
+        turnActive: false,
+        unsubscribe: () => {},
+        eventBuffer: [],
+        appliedModel: member.model || "",
+        appliedCredentialId: member.credentialId,
+      };
+
+      const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
+        const newStatus = processEvent(
+          syntheticRoomId,
+          member.name,
+          key,
+          event,
+          instance.eventBuffer,
+          memberId,
+          instance.appliedModel,
+        );
+        if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
+          clearPendingChatReply(instance, `tool:${event.toolName}`);
+        }
+        if (event.type === "agent_start") {
+          instance.turnActive = true;
+          updateDispatchState(instance, "running", event.type);
+          flushQueuedInputs(instance, event.type);
+        } else if (event.type === "agent_end") {
+          instance.turnActive = false;
+        }
+        if (newStatus && newStatus !== instance.status) {
+          transition(instance, syntheticRoomId, member.name, newStatus, event.type);
+        }
+      });
+      instance.unsubscribe = unsubscribe;
+
+      instances.set(key, instance);
+      logger.info("agent", "dmAgentCreated", { member: member.name, memberId, scopeId });
+      return instance;
+    } catch (err: any) {
+      logger.error("agent", "failed to create dm agent", {
+        member: member.name,
+        memberId,
+        error: formatRuntimeErrorMessage(err),
+      });
+      return null;
+    }
+  })();
+
+  pendingCreations.set(key, creation);
+  try {
+    return await creation;
+  } finally {
+    if (pendingCreations.get(key) === creation) pendingCreations.delete(key);
+  }
+}
+
+/**
+ * Activate a member in their DM scope (user message path — no @ required).
+ * Builds context from recent DM messages and prompts the runtime.
+ */
+export async function activateDmMember(memberId: string): Promise<void> {
+  const rec = getMember(memberId);
+  if (!rec) {
+    logger.error("agent", "activateDmMember: not found", { memberId });
+    return;
+  }
+  const member = memberRecordToConfig(memberId);
+  if (!member || !isMemberConfigured(member)) {
+    logger.warn("agent", "activateDmMember: unconfigured", { memberId, name: rec.name });
+    return;
+  }
+
+  const instance = await getOrCreateDm(memberId);
+  if (!instance) return;
+
+  const scopeId = instance.scopeId;
+  setActivationSource(scopeId, member.name, "private_instruction");
+
+  try {
+    const recent = readAllDmMessages(memberId).slice(-40);
+    const transcript = recent
+      .map((m) => {
+        const who = m.sender === "user" ? "User" : m.sender;
+        return `[${who}] ${m.content}`;
+      })
+      .join("\n\n");
+
+    const prompt = transcript
+      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message via the chat tool.`
+      : `You are in a private chat with the user. They just opened the conversation. Greet briefly via the chat tool if appropriate, or wait for their request.`;
+
+    if (instance.dispatchState !== "idle" || instance.promptInFlight) {
+      queueInput(instance, prompt, "dm-activate");
+      return;
+    }
+
+    markPendingChatReply(instance, "dm-activate");
+    await runPrompt(instance, prompt, "dm-activate", (err) => {
+      logger.error("agent", "dm prompt failed", {
+        memberId,
+        error: formatRuntimeErrorMessage(err),
+      });
+    });
+  } finally {
+    clearActivationSource(scopeId, member.name);
+  }
 }
 
 // -- Shutdown --

@@ -84,10 +84,15 @@ addRoute("POST", "/api/agents", async (req, res) => {
 });
 
 addRoute("PUT", "/api/agents/:name", async (req, res, params) => {
-  // Guard: builtin agents cannot be edited
+  const { isImmutableTemplate } = await import("../workforce/template-lifecycle.js");
+  // Guard: general + builtin immutable
+  if (isImmutableTemplate(params.name)) {
+    sendJson(res, 403, { error: "immutable", message: "Built-in / general templates cannot be edited" });
+    return;
+  }
   const existing = loadAgentDefinition(params.name);
-  if (existing?.tags.includes("builtin")) {
-    sendJson(res, 403, { error: "Built-in agents cannot be edited" });
+  if (!existing) {
+    sendJson(res, 404, { error: "Agent not found" });
     return;
   }
   const body = (await parseBody(req)) as { content?: string };
@@ -99,19 +104,95 @@ addRoute("PUT", "/api/agents/:name", async (req, res, params) => {
   sendJson(res, 200, agent);
 });
 
-addRoute("DELETE", "/api/agents/:name", async (_req, res, params) => {
-  // Guard: builtin agents cannot be deleted
-  const agent = loadAgentDefinition(params.name);
-  if (agent?.tags.includes("builtin")) {
-    sendJson(res, 403, { error: "Built-in agents cannot be deleted" });
+addRoute("DELETE", "/api/agents/:name", async (req, res, params) => {
+  const { isImmutableTemplate, membersReferencingTemplate, fallbackMembersToGeneral } =
+    await import("../workforce/template-lifecycle.js");
+  if (isImmutableTemplate(params.name)) {
+    sendJson(res, 403, { error: "immutable", message: "Built-in / general templates cannot be deleted" });
     return;
   }
+  const agent = loadAgentDefinition(params.name);
+  if (!agent) {
+    sendJson(res, 404, { error: "Agent not found" });
+    return;
+  }
+
+  const url = new URL(req.url || "", "http://localhost");
+  const force = url.searchParams.get("force") === "true" || url.searchParams.get("force") === "1";
+  const refs = membersReferencingTemplate(params.name);
+  if (refs.length > 0 && !force) {
+    // Spec: forbid delete while referenced unless force — then fallback to general + warn
+    sendJson(res, 409, {
+      error: "referenced",
+      message: `Template is referenced by ${refs.length} member(s). Pass force=true to delete and rebind them to general.`,
+      referencedBy: refs.map((m) => m.id),
+    });
+    return;
+  }
+
+  // Force path or unreferenced: delete file then rebind any stragglers
   const deleted = deleteAgentDefinition(params.name);
   if (!deleted) {
     sendJson(res, 404, { error: "Agent not found" });
     return;
   }
-  sendJson(res, 200, { ok: true });
+  const fallback = refs.length > 0 ? fallbackMembersToGeneral(params.name) : { updatedMemberIds: [], warningsPosted: 0 };
+  sendJson(res, 200, {
+    ok: true,
+    reboundToGeneral: fallback.updatedMemberIds,
+    warningsPosted: fallback.warningsPosted,
+  });
+});
+
+// ── 0.20 /api/templates aliases (contract §2.4) ──
+
+addRoute("GET", "/api/templates", async (_req, res) => {
+  try {
+    const { listMembers } = await import("../workspace/member-registry.js");
+    const agents = loadAgentDefinitions();
+    const members = listMembers();
+    const { listFactoryTemplateNames } = await import("../workforce/agent-store.js");
+    const factory = new Set(listFactoryTemplateNames());
+    const templates = agents.map((a) => ({
+      name: a.name,
+      description: a.description || "",
+      builtin: a.name === "general" || factory.has(a.name) || (a.tags || []).includes("builtin"),
+      referencedBy: members.filter((m) => m.agentTemplate === a.name).map((m) => m.id),
+    }));
+    sendJson(res, 200, { templates });
+  } catch (err) {
+    sendJson(res, 500, { error: "internal", message: String(err) });
+  }
+});
+
+addRoute("DELETE", "/api/templates/:name", async (req, res, params) => {
+  // Delegate to agents delete handler logic via internal fetch pattern — call same code path
+  // by rewriting URL and reusing DELETE /api/agents/:name
+  const url = new URL(req.url || "", "http://localhost");
+  const force = url.searchParams.get("force");
+  // Re-run through shared lifecycle (duplicate thin wrapper)
+  const { isImmutableTemplate, membersReferencingTemplate, fallbackMembersToGeneral } =
+    await import("../workforce/template-lifecycle.js");
+  if (isImmutableTemplate(params.name)) {
+    sendJson(res, 403, { error: "immutable", message: "Built-in / general templates cannot be deleted" });
+    return;
+  }
+  if (!loadAgentDefinition(params.name)) {
+    sendJson(res, 404, { error: "not_found", message: "Template not found" });
+    return;
+  }
+  const refs = membersReferencingTemplate(params.name);
+  if (refs.length > 0 && force !== "true" && force !== "1") {
+    sendJson(res, 409, {
+      error: "referenced",
+      message: `Template is referenced by ${refs.length} member(s). Pass force=true to delete and rebind them to general.`,
+      referencedBy: refs.map((m) => m.id),
+    });
+    return;
+  }
+  deleteAgentDefinition(params.name);
+  const fallback = refs.length > 0 ? fallbackMembersToGeneral(params.name) : { updatedMemberIds: [], warningsPosted: 0 };
+  sendJson(res, 200, { ok: true, reboundToGeneral: fallback.updatedMemberIds, warningsPosted: fallback.warningsPosted });
 });
 
 // ── Skill CRUD ──

@@ -150,22 +150,8 @@ vi.mock("../../src/shared/config.js", () => ({
 }));
 
 
-vi.mock("../../src/workspace/team-store.js", () => ({
-  ensureRoomTeamAgent: (_roomId: string, agent: string) => ({
-    name: agent,
-    description: agent,
-    systemPrompt: "test",
-    tags: [],
-    skills: [],
-  }),
-  loadRoomTeamAgent: (_roomId: string, agent: string) => ({
-    name: agent,
-    description: agent,
-    systemPrompt: "test",
-    tags: [],
-    skills: [],
-  }),
-  resolveRoomSkillPaths: (_roomId: string, skills: string[]) => skills.map((s: string) => "/tmp/skills/" + s),
+vi.mock("../../src/workforce/skill-store.js", () => ({
+  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
 }));
 
 const runtime = {
@@ -583,7 +569,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
     expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), agentPrompt: "test", skillNames: ["review"] });
-    expect(first.reloadCalls[0].skillPaths[0]).toContain("/tmp/skills/review");
+    expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
   });
 
   it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {

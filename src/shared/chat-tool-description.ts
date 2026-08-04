@@ -1,7 +1,7 @@
 // Canonical description for the `chat` tool used by agent tool definitions.
 // Centralizing this keeps the @mention contract in a single source of truth.
 // Description scope: capability + mechanical facts only (no usage guidance —
-// that belongs to Room/Member Principles, Core, and team rules).
+// that belongs to Room/Member Principles and Core).
 
 export function buildChatToolDescription(memberList: string): string {
   return `Post a message to the room.

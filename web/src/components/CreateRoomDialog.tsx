@@ -12,7 +12,6 @@ interface DraftRoomMember {
   id: string;
   name: string;
   agent: string;
-  source?: "template" | "agent";
 }
 
 interface DraftEditorState {
@@ -29,7 +28,7 @@ export function agentAuthorityDisplayState(status: AgentLoadStatus, agentCount: 
 
 interface CreateRoomDialogProps {
   onClose: () => void;
-  onSubmit: (name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string, templateName?: string) => Promise<void>;
+  onSubmit: (name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string) => Promise<void>;
 }
 
 function displayAgentName(agentName: string): string {
@@ -76,7 +75,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [leaderName, setLeaderName] = useState("");
   const [editor, setEditor] = useState<DraftEditorState | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [templateName, setTemplateName] = useState<string | undefined>(undefined);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -120,13 +118,10 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     setSubmitError(null);
   };
 
-  const applyPickedDrafts = (picked: PickedMemberDraft[], fromTemplate?: string) => {
-    // Instantiating a template replaces the draft roster (prototype semantics).
-    // Adding a single agent appends onto existing drafts.
-    const base = fromTemplate ? [] : [...drafts];
-    const existing = new Set(base.map((d) => d.name.toLowerCase()));
-    const nextDrafts: DraftRoomMember[] = [...base];
-    let nextLeader = fromTemplate ? "" : leaderName;
+  const applyPickedDrafts = (picked: PickedMemberDraft[]) => {
+    const existing = new Set(drafts.map((d) => d.name.toLowerCase()));
+    const nextDrafts: DraftRoomMember[] = [...drafts];
+    let nextLeader = leaderName;
     for (const p of picked) {
       let name = p.name.trim();
       if (existing.has(name.toLowerCase())) {
@@ -137,7 +132,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name,
         agent: p.agent,
-        source: p.source,
       };
       nextDrafts.push(draft);
       if (p.leader) nextLeader = name;
@@ -145,7 +139,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     }
     setDrafts(nextDrafts);
     setLeaderName(nextLeader);
-    if (fromTemplate) setTemplateName(fromTemplate);
     setSubmitError(null);
   };
 
@@ -164,7 +157,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      await onSubmit(name.trim(), cwd.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName, templateName);
+      await onSubmit(name.trim(), cwd.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName);
       onClose();
     } catch (error: any) {
       setSubmitError(error?.message || "Couldn’t create the Room. Your draft is still here.");
@@ -249,7 +242,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                 <div className="flex min-h-40 flex-col items-center justify-center px-4 py-6 text-center">
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-2 text-ink-4"><Users size={19} /></div>
                   <p className="text-sm font-medium text-ink-2">No members yet</p>
-                  <p className="mt-1 max-w-sm text-xs leading-5 text-ink-4">Add an agent as a named member — or instantiate a whole team template at once.</p>
+                  <p className="mt-1 max-w-sm text-xs leading-5 text-ink-4">Add members from templates — rename or trim before creating.</p>
                   <button type="button" onClick={() => setPickerOpen(true)} className="mt-4 flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90">
                     <Plus size={14} /> Add member
                   </button>
@@ -267,7 +260,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                           <span className="truncate text-xs text-ink-4">{displayAgentName(draft.agent)}</span>
                         </div>
                         <div className="mt-0.5 text-[11px] text-ink-4">
-                          {draft.source === "template" ? "from template · " : ""}Defaults for model, thinking, and tools
+                          Defaults for model, thinking, and tools
                         </div>
                       </div>
                       {leaderName === draft.name && (
@@ -326,7 +319,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
       <MemberPickerDialog
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPickTemplate={(picked, tplName) => applyPickedDrafts(picked, tplName)}
         onPickAgent={(picked) => applyPickedDrafts([picked])}
       />
 

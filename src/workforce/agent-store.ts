@@ -79,8 +79,22 @@ export function deleteAgentDefinition(name: string): boolean {
   return true;
 }
 
+/** Package factory agents directory (shipped with the npm package). */
+export function getFactoryAgentsDir(): string {
+  return join(import.meta.dirname, "../../templates/agents");
+}
+
+/** Names of factory-shipped agent templates (immutable set for 0.20). */
+export function listFactoryTemplateNames(): string[] {
+  const templatesDir = getFactoryAgentsDir();
+  if (!existsSync(templatesDir)) return [];
+  return readdirSync(templatesDir)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.replace(/\.md$/, ""));
+}
+
 export function loadAgentTemplates(): AgentDefinition[] {
-  const templatesDir = join(import.meta.dirname, "../../templates/agents");
+  const templatesDir = getFactoryAgentsDir();
   if (!existsSync(templatesDir)) return [];
 
   const files = readdirSync(templatesDir).filter((f) => f.endsWith(".md"));
