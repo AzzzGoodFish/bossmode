@@ -67,6 +67,9 @@ describe("020 memory tool wiring (member-global store)", () => {
       reason: "test closed loop",
     })) as any;
     expect(write.ok).toBe(true);
+    // Receipt wording must match reality (M1): running sessions keep the
+    // already-compiled prompt; the write lands on Reload / fresh session.
+    expect(write.message).toMatch(/Applies on Reload or a fresh session/);
 
     // 1. File landed at the NEW member-global path, not rooms/<id>/memory/members/.
     const newPath = join(dir, "members", member.id, "memory", "scopes", `room-${room.id}`, "mainline.md");

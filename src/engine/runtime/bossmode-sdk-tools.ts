@@ -102,7 +102,7 @@ export function createBossmodeSdkTools(opts: {
       execute: async (_id, params) => {
         const data = await call("edit_memory", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "Edit memory failed");
-        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). Applies on next member activation or Reload.`);
+        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). ${data.message ?? "Applies on Reload or a fresh session."}`);
       },
     }),
     defineTool({
@@ -118,7 +118,7 @@ export function createBossmodeSdkTools(opts: {
       execute: async (_id, params) => {
         const data = await call("write_memory", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "Write memory failed");
-        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). Applies on next member activation or Reload.`);
+        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). ${data.message ?? "Applies on Reload or a fresh session."}`);
       },
     }),
     defineTool({
