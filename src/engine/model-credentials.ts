@@ -434,9 +434,10 @@ class MemberCredentialStore implements CredentialStore {
     }
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const member = resolveRoomMember(this.roomId, this.memberId);
-    // Prefer room-local credentialId; else G3 ID-link via sourceMemberId / globalMemberIds.
-    let credentialId = member?.credentialId || null;
-    if (!credentialId && member) {
+    // G3: when ID-linked to a global member, effective-config is authority (global over room shadow).
+    // Room-local credentialId only used when no global link exists (legacy rooms).
+    let credentialId: string | null = null;
+    if (member) {
       try {
         const roomStore = await import("../workspace/room-store.js");
         const room = roomStore.getRoom(this.roomId);
@@ -450,6 +451,7 @@ class MemberCredentialStore implements CredentialStore {
       } catch {
         /* fall through */
       }
+      if (!credentialId) credentialId = member.credentialId || null;
     }
     if (!credentialId) return null;
     const profile = getModelCredentialProfile(credentialId);

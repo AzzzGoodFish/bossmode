@@ -122,6 +122,14 @@ addRoute("GET", "/api/chats", async (_req, res) => {
       status: string;
     }> = [];
 
+    let getScopeLiveStatus: ((scopeId: string) => string) | null = null;
+    try {
+      const am = await import("../engine/agent-manager.js");
+      getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
+    } catch {
+      getScopeLiveStatus = () => "idle";
+    }
+
     for (const m of members) {
       const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
       const msgs = readAllDmMessages(m.id);
@@ -133,6 +141,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         cursor?.seq ?? null,
         login,
       );
+      const live = getScopeLiveStatus?.(scopeId) || "idle";
       chats.push({
         scopeId,
         kind: "dm",
@@ -140,7 +149,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         lastMessage: summarizeMessage(last),
         unreadCount,
         mentioned,
-        status: "idle",
+        status: live === "inactive" ? "idle" : live,
       });
     }
 
@@ -155,6 +164,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         cursor?.seq ?? null,
         login,
       );
+      const live = getScopeLiveStatus?.(scopeId) || "idle";
       chats.push({
         scopeId,
         kind: "room",
@@ -162,7 +172,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         lastMessage: summarizeMessage(last),
         unreadCount,
         mentioned,
-        status: "idle",
+        status: live === "inactive" ? "idle" : live,
       });
     }
 
@@ -213,22 +223,36 @@ addRoute("POST", "/api/conversations/:scope/read", async (req, res, params) => {
 addRoute("GET", "/api/contacts", async (_req, res) => {
   try {
     const rooms = roomStore.listRooms();
+    let getMemberActiveScopes: ((id: string) => string[]) | null = null;
+    let getScopeLiveStatus: ((sid: string) => string) | null = null;
+    try {
+      const am = await import("../engine/agent-manager.js");
+      getMemberActiveScopes = (id) => am.getMemberActiveScopes(id);
+      getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
+    } catch { /* runtime cold */ }
+
     const contacts = listMembers().map((m) => {
-      const activeScopes: string[] = [];
-      // Scope membership from room.globalMemberIds (0.20) or name match in roomMembers (legacy)
+      const membershipScopes: string[] = [];
+      // Membership from globalMemberIds (authority); legacy name match only if no global ids on room
       for (const room of rooms) {
         const inGlobal = room.globalMemberIds?.includes(m.id);
-        const inLegacy = roomStore.getRoomMembers(room.id).some((rm) => rm.name === m.name);
-        if (inGlobal || inLegacy) activeScopes.push(scopeIdOf({ kind: "room", roomId: room.id }));
+        const inLegacy = (!room.globalMemberIds || room.globalMemberIds.length === 0)
+          && roomStore.getRoomMembers(room.id).some((rm) => rm.name === m.name || rm.sourceMemberId === m.id);
+        if (inGlobal || inLegacy) membershipScopes.push(scopeIdOf({ kind: "room", roomId: room.id }));
       }
-      // Always include dm scope identity
-      activeScopes.unshift(scopeIdOf({ kind: "dm", memberId: m.id }));
+      membershipScopes.unshift(scopeIdOf({ kind: "dm", memberId: m.id }));
+
+      const workingScopes = getMemberActiveScopes?.(m.id) || [];
+      const dmStatus = getScopeLiveStatus?.(scopeIdOf({ kind: "dm", memberId: m.id })) || "idle";
+      const status = workingScopes.length > 0 || dmStatus === "working" ? "working" : "idle";
+
       return {
         memberId: m.id,
         name: m.name,
         agentTemplate: m.agentTemplate,
-        status: "idle" as const, // WS-B fills live status
-        activeScopes,
+        status,
+        activeScopes: membershipScopes,
+        workingScopes,
         model: m.global.model ?? null,
         contextPct: null as number | null,
         tokensToday: 0,

@@ -19,7 +19,7 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../communicat
 import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
-import { instanceKey as scopeInstanceKey, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { getMember, getEffectiveConfig } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
@@ -130,9 +130,17 @@ interface AgentInstance {
 const instances = new Map<string, AgentInstance>();
 const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
 
-/** Room-scope instance key — contract §5: instanceKey = scopeId + ":" + memberId. */
-function instanceKey(roomId: string, memberId: string): string {
-  return scopeInstanceKey(scopeIdOf({ kind: "room", roomId }), memberId);
+/**
+ * Resolve instance map key from a roomId-or-scopeId + memberId.
+ * - room uuid → room:<uuid>:<memberId>
+ * - already "dm:…" / "room:…" scopeId → scopeId:memberId
+ * Contract §5.
+ */
+function instanceKey(roomIdOrScope: string, memberId: string): string {
+  if (typeof roomIdOrScope === "string" && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:"))) {
+    return scopeInstanceKey(roomIdOrScope, memberId);
+  }
+  return scopeInstanceKey(scopeIdOf({ kind: "room", roomId: roomIdOrScope }), memberId);
 }
 
 function dmInstanceKey(memberId: string): string {
@@ -141,6 +149,57 @@ function dmInstanceKey(memberId: string): string {
 
 function roomScopeId(roomId: string): ScopeId {
   return scopeIdOf({ kind: "room", roomId });
+}
+
+/** Aggregate live status for a conversation scope (chats list / working-set). */
+export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inactive" {
+  const ref = parseScopeId(scopeId);
+  if (!ref) return "inactive";
+  if (ref.kind === "dm") {
+    const st = getAgentStatus(scopeId, ref.memberId);
+    if (st === "working") return "working";
+    if (st === "inactive") return "inactive";
+    return "idle";
+  }
+  // Room: any member working → working; else idle if any live instance else inactive
+  let sawInstance = false;
+  for (const m of roomStore.getRoomMembers(ref.roomId)) {
+    const st = getAgentStatus(ref.roomId, m.id);
+    if (st === "inactive") continue;
+    sawInstance = true;
+    if (st === "working") return "working";
+  }
+  const room = roomStore.getRoom(ref.roomId);
+  for (const gid of room?.globalMemberIds || []) {
+    const st = getAgentStatus(ref.roomId, gid);
+    if (st === "working") return "working";
+    if (st !== "inactive") sawInstance = true;
+  }
+  if (sawInstance) return "idle";
+  return "inactive";
+}
+
+/** Working-set for contacts: which scopes a global member is currently active in. */
+export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
+  const out: ScopeId[] = [];
+  for (const inst of instances.values()) {
+    if (inst.status !== "working" && inst.dispatchState === "idle") continue;
+    // Match by global id (DM) or by sourceMemberId / name for room locals
+    if (inst.scopeId.startsWith("dm:")) {
+      if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) {
+        out.push(inst.scopeId);
+      }
+      continue;
+    }
+    const roomUuid = inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId;
+    const r = roomStore.getRoom(roomUuid);
+    if (!r) continue;
+    const local = roomStore.getRoomMembers(r.id).find((m) => m.id === inst.memberId || m.name === inst.agentName);
+    if (!local) continue;
+    const gid = roomStore.resolveGlobalMemberId(r, local);
+    if (gid === globalMemberId) out.push(scopeIdOf({ kind: "room", roomId: r.id }));
+  }
+  return Array.from(new Set(out));
 }
 
 function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
