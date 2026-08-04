@@ -20,7 +20,7 @@ import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
-import { getMember, getEffectiveConfig } from "../workspace/member-registry.js";
+import { getMember, getEffectiveConfig, findMemberByName } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
@@ -644,10 +644,29 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     return null;
   }
 
-  const member = resolveRoomMember(roomId, memberRef);
+  let member = resolveRoomMember(roomId, memberRef);
   if (!member) {
     logger.error("agent", "no member or agent definition found", { name: memberRef });
     return null;
+  }
+  // 0.20: overlay global effective-config when a global member is linked (by name).
+  // Unified switches + scope overrides live on the global registry; room shadow holds legacy fields.
+  try {
+    const global = findMemberByName(member.name);
+    if (global) {
+      const eff = getEffectiveConfig(global.id, roomScopeId(roomId));
+      member = {
+        ...member,
+        model: eff.model || member.model,
+        credentialId: eff.credentialId || member.credentialId,
+        thinkingLevel: (eff.thinkingLevel as string) || member.thinkingLevel,
+        skills: eff.skills?.length ? eff.skills : member.skills,
+        extensions: eff.extensions?.length ? eff.extensions : member.extensions,
+        mcpServers: eff.mcpServers?.length ? eff.mcpServers : member.mcpServers,
+      };
+    }
+  } catch (err) {
+    logger.warn("agent", "effective-config overlay skipped", { member: member.name, error: String(err) });
   }
   if (!isMemberConfigured(member)) {
     logger.error("agent", "member unconfigured", { member: member.name, memberId: member.id });

@@ -546,11 +546,20 @@ addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
     sendJson(res, 404, { error: "not_found", message: "Member not found" });
     return;
   }
+  const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
+  let status: string = "idle";
+  let contextPct: number | null = null;
+  try {
+    const { getAgentStatus, getAgentContextUsage } = await import("../engine/agent-manager.js");
+    status = getAgentStatus(scopeId, m.id) || "idle";
+    const usage = getAgentContextUsage(scopeId, m.id);
+    if (usage && typeof (usage as any).percentage === "number") contextPct = (usage as any).percentage;
+  } catch { /* runtime not ready */ }
   sendJson(res, 200, {
     memberId: m.id,
-    scopeId: scopeIdOf({ kind: "dm", memberId: m.id }),
-    status: "idle",
-    contextPct: null,
+    scopeId,
+    status,
+    contextPct,
     latestSeq: getLatestDmSeq(m.id),
   });
 });
