@@ -510,6 +510,16 @@ export async function handleToolCallback(
       });
       return { ok: true, provider, configured: config, projects };
     }
+    case "member_status": {
+      // Room-scope read-only live status (same source as the member panel lamp).
+      const room = roomStore.getRoom(roomId);
+      if (!room) return { ok: false, error: "Room not found" };
+      const { getRoomMemberStatusReport } = await import("./agent-manager.js");
+      const memberRef = params?.member !== undefined ? String(params.member).trim() : "";
+      const report = getRoomMemberStatusReport(roomId, memberRef || undefined);
+      if (!report) return { ok: false, error: `Member not found: ${memberRef}` };
+      return { ok: true, members: report };
+    }
     case "wait": {
       // 0.20: wait available to all room members (no longer leader-only).
       const room = roomStore.getRoom(roomId);

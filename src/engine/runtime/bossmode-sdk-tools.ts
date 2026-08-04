@@ -239,6 +239,25 @@ export function createBossmodeSdkTools(opts: {
         return textResult(truncate(JSON.stringify(data, null, 2)));
       },
     }));
+
+    tools.push(defineTool({
+      name: "member_status",
+      label: "Member Status",
+      description: "Query live runtime status of room members. Returns each member's aggregated status — working / idle / inactive (inactive = no live runtime instance) — plus, for members with live instances, the scopes they are live in with per-scope status. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
+      parameters: Type.Object({
+        member: Type.Optional(Type.String({ description: "Member name; omit for all room members" })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("member_status", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Member status failed");
+        const members = (data.members ?? []) as Array<{ name: string; status: string; activeScopes: Array<{ scope: string; status: string }> }>;
+        const lines = members.map((m) => {
+          const scopes = m.activeScopes.map((s) => `${s.scope} (${s.status})`).join(", ");
+          return `- ${m.name}: ${m.status}${scopes ? ` — ${scopes}` : ""}`;
+        });
+        return textResult(lines.length ? lines.join("\n") : "No room members.");
+      },
+    }));
   } else {
     // DM: member directory + create/edit room (no wait/tasks in DM).
     tools.push(

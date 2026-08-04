@@ -1121,6 +1121,56 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
   return result;
 }
 
+// -- Member status report (member_status tool) --
+
+export interface MemberStatusEntry {
+  name: string;
+  memberId: string;
+  /** Aggregated across live instances: working > idle > inactive (no live instance). */
+  status: AgentStatus;
+  /** Live instances only: which scopes this member is active in, with per-scope status. */
+  activeScopes: Array<{ scope: string; status: AgentStatus }>;
+}
+
+/**
+ * Live status report for room members — same source as the member panel
+ * status lamp (the runtime instance registry). Read-only.
+ */
+export function getRoomMemberStatusReport(roomId: string, memberRef?: string): MemberStatusEntry[] | null {
+  const members = memberRef
+    ? (() => { const m = resolveRoomMember(roomId, memberRef); return m ? [m] : null; })()
+    : roomStore.getRoomMembers(roomId);
+  if (!members) return null;
+  const thisRoom = roomStore.getRoom(roomId);
+  if (!thisRoom) return null;
+  return members.map((m) => {
+    const gid = (thisRoom ? roomStore.resolveGlobalMemberId(thisRoom, m) : null) || m.id;
+    const activeScopes: Array<{ scope: string; status: AgentStatus }> = [];
+    let status: AgentStatus = "inactive";
+    for (const inst of instances.values()) {
+      // Match by global id (DM scopes) or by room-local id/name (room scopes)
+      let match = false;
+      let scopeLabel: string;
+      if (inst.scopeId.startsWith("dm:")) {
+        match = inst.memberId === m.id || inst.memberId === gid || inst.scopeId === `dm:${gid}`;
+        scopeLabel = "dm";
+      } else {
+        const r = roomStore.getRoom(inst.roomId);
+        if (!r) continue;
+        const local = roomStore.getRoomMembers(r.id).find((rm) => rm.id === inst.memberId || rm.name === inst.agentName);
+        if (!local) continue;
+        match = roomStore.resolveGlobalMemberId(r, local) === gid || inst.memberId === m.id;
+        scopeLabel = r.id === roomId && thisRoom ? `room: ${thisRoom.name}` : `room: ${r.name}`;
+      }
+      if (!match) continue;
+      activeScopes.push({ scope: scopeLabel, status: inst.status });
+      if (inst.status === "working") status = "working";
+      else if (status === "inactive") status = "idle";
+    }
+    return { name: m.name, memberId: m.id, status, activeScopes };
+  });
+}
+
 // -- Context usage (cache-only API + idle refresh push) --
 
 const contextUsageCache = new Map<string, ContextUsage>();
