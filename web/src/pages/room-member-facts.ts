@@ -48,7 +48,7 @@ export function projectRoomMemberFacts(
   })));
 }
 
-/** Load the real room-local member projection used by Team pages. */
+/** Load the real room-local member projection. */
 export async function loadRoomMemberFacts(): Promise<RoomMemberFact[]> {
   const rooms = await getRooms();
   const membersByRoom = new Map(await Promise.all(rooms.map(async (room) => [room.id, await getRoomMembers(room.id)] as const)));

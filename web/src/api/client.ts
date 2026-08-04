@@ -101,7 +101,6 @@ export async function getAgentTemplates(): Promise<AgentInfo[]> {
   return apiFetch("/api/agents/templates");
 }
 
-// -- Team templates (0.19 team layer) — shapes match backend team-store --
 
 export interface TeamAgentSummary {
   name: string;
@@ -118,65 +117,6 @@ export interface TeamSkillSummary {
   name: string;
   description?: string;
   usedBy: string[];
-}
-
-export interface TeamTemplateSummary {
-  slug: string;
-  name: string;
-  description: string;
-  version: string;
-  leader?: string;
-  agentNames: string[];
-  skillNames: string[];
-  usedInRoomCount: number;
-  builtIn?: boolean;
-}
-
-export interface TeamTemplateDetail {
-  slug: string;
-  meta: {
-    name: string;
-    description: string;
-    version: string;
-    leader?: string;
-    slug: string;
-    type?: "builtin" | "user";
-  };
-  teamMdBody: string;
-  agents: TeamAgentSummary[];
-  skills: TeamSkillSummary[];
-  otherResources: string[];
-  /** Derived convenience (may be filled by API or client). */
-  usedInRoomCount?: number;
-  builtIn?: boolean;
-}
-
-export async function getTeams(): Promise<TeamTemplateSummary[]> {
-  const data = await apiFetch<{ teams: TeamTemplateSummary[] } | TeamTemplateSummary[]>("/api/teams");
-  return Array.isArray(data) ? data : (data.teams ?? []);
-}
-
-export async function getTeam(name: string): Promise<TeamTemplateDetail> {
-  return apiFetch(`/api/teams/${encodeURIComponent(name)}`);
-}
-
-export async function importTeamZip(file: File): Promise<TeamTemplateDetail> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const body = new FormData();
-  body.append("file", file);
-  const res = await fetch(`${BASE_URL}/api/teams/import`, { method: "POST", headers, body });
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  return res.json();
 }
 
 // -- Extensions (bossmode-managed pi packages) --
@@ -206,23 +146,6 @@ export async function installExtension(pkg: string): Promise<ExtensionRecord> {
 
 export async function uninstallExtension(name: string): Promise<{ ok: true; id: string }> {
   return apiFetch(`/api/extensions/${encodeURIComponent(name)}`, { method: "DELETE" });
-}
-
-export async function exportTeamZip(name: string): Promise<Blob> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}/api/teams/${encodeURIComponent(name)}/export`, { headers });
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  return res.blob();
 }
 
 
@@ -855,11 +778,10 @@ export interface Room {
   name: string;
   cwd: string;
   members: string[];
+  /** 0.20: authoritative member composition — join via useGlobalMembers(). */
+  globalMemberIds?: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
-  roomMembers?: RoomMemberRecord[];
-  /** Provenance: team template this room was instantiated from. */
-  template?: { name: string; version: string };
   createdAt: number;
   /** Legacy. No longer injected into prompts or shown in Room Settings. */
   ruleDocs?: string[];
@@ -876,11 +798,10 @@ export async function createRoom(
   members: CreateRoomMemberInput[],
   ruleDocs?: string[],
   promptLeaderMemberName?: string,
-  templateName?: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName, templateName }),
+    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName }),
   });
 }
 
@@ -1470,4 +1391,198 @@ export interface FsListDirsResult {
 
 export async function listDirs(path: string): Promise<FsListDirsResult> {
   return apiFetch(`/api/fs/list-dirs?path=${encodeURIComponent(path)}`);
+}
+
+// -- 0.20: Contacts / Members / DM / Chats (member-global model) --
+
+export interface ContactEntry {
+  memberId: string;
+  name: string;
+  agentTemplate: string;
+  status: "idle" | "working" | "error";
+  activeScopes: string[];
+  model: string | null;
+  contextPct: number | null;
+  tokensToday: number;
+  tokensTotal: number;
+  unifiedModel: boolean;
+  unifiedExtensions: boolean;
+}
+
+export async function getContacts(): Promise<{ contacts: ContactEntry[] }> {
+  return apiFetch("/api/contacts");
+}
+
+export interface MemberGlobalConfig {
+  model: string | null;
+  credentialId: string | null;
+  thinkingLevel: string | null;
+  skills: string[];
+  extensions: string[];
+  mcpServers: string[];
+}
+
+export interface MemberDetail {
+  memberId: string;
+  name: string;
+  agentTemplate: string;
+  unifiedModel: boolean;
+  unifiedExtensions: boolean;
+  global?: MemberGlobalConfig;
+  scopeOverrides?: Record<string, Record<string, unknown>>;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export async function getMemberDetail(id: string): Promise<MemberDetail> {
+  const res = await apiFetch<{ member: MemberDetail }>(`/api/members/${encodeURIComponent(id)}`);
+  return res.member;
+}
+
+export interface DmMessage {
+  seq: number;
+  id?: string;
+  sender: "user" | "member" | string;
+  text: string;
+  ts: number;
+  attachments?: unknown;
+}
+
+export async function getDmMessages(memberId: string, params?: { before?: number; limit?: number }): Promise<{ messages: DmMessage[] }> {
+  const q = new URLSearchParams();
+  if (params?.before) q.set("before", String(params.before));
+  if (params?.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
+}
+
+export async function sendDmMessage(memberId: string, text: string): Promise<unknown> {
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export interface DmSession {
+  status: string;
+  contextPct?: number | null;
+  working?: boolean;
+}
+
+export async function getDmSession(memberId: string): Promise<DmSession> {
+  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/session`);
+}
+
+export interface ChatEntry {
+  scopeId: string;
+  kind: "dm" | "room";
+  title: string;
+  memberId?: string;
+  roomId?: string;
+  lastMessage?: { sender: string; text: string; ts: number } | null;
+  unreadCount: number;
+  mentioned: boolean;
+  status?: string;
+}
+
+export async function getChats(): Promise<{ chats: ChatEntry[] }> {
+  const res = await apiFetch<{ chats: ChatEntry[] }>("/api/chats");
+  // Server sends only ConversationRef scopeId — derive memberId/roomId from it.
+  for (const c of res.chats) {
+    const idx = c.scopeId.indexOf(":");
+    if (idx > 0) {
+      const id = c.scopeId.slice(idx + 1);
+      if (c.kind === "dm") c.memberId = id;
+      else c.roomId = id;
+    }
+  }
+  return res;
+}
+
+// -- 0.20: member creation + archive import --
+
+export interface CreateMemberInput {
+  name: string;
+  agentTemplate: string;
+  model?: string;
+  credentialId?: string;
+  thinkingLevel?: string;
+  unifiedModel?: boolean;
+  unifiedExtensions?: boolean;
+  importFromArchive?: string;
+}
+
+export async function createGlobalMember(input: CreateMemberInput): Promise<{ member: MemberDetail }> {
+  return apiFetch("/api/members", { method: "POST", body: JSON.stringify(input) });
+}
+
+export interface ArchiveEntry {
+  name: string;
+  template: string;
+  hasPersona: boolean;
+  roomScopes: Array<{ room: string; hasPrinciples: boolean; hasMainline: boolean }>;
+  archivePath: string;
+  credentialHint?: string;
+  kind: "legacy" | "fired";
+}
+
+export async function getMemberArchiveList(): Promise<{ archives: ArchiveEntry[] }> {
+  return apiFetch("/api/members/archive-list");
+}
+
+// -- 0.20: member scopes + fire --
+
+export interface MemberScopeInfo {
+  scopeId: string;
+  kind: "dm" | "room";
+  label: string;
+  status: string;
+  lastActiveAt: number | null;
+}
+
+export async function getMemberScopes(id: string): Promise<{ scopes: MemberScopeInfo[] }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/scopes`);
+}
+
+export async function deleteGlobalMember(id: string): Promise<void> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+export async function patchMemberScopeConfig(id: string, scope: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/config?scope=${encodeURIComponent(scope)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function patchGlobalMember(id: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+// -- 0.20: templates --
+
+export interface TemplateInfo {
+  name: string;
+  description: string;
+  builtin: boolean;
+  referencedBy: string[];
+}
+
+export async function getTemplates(): Promise<TemplateInfo[]> {
+  const res = await apiFetch<{ templates: TemplateInfo[] } | TemplateInfo[]>("/api/templates");
+  return Array.isArray(res) ? res : res.templates;
+}
+
+export async function forceDeleteAgent(name: string): Promise<void> {
+  await apiFetch(`/api/agents/${encodeURIComponent(name)}?force=true`, { method: "DELETE" });
+}
+
+export async function postConversationRead(scopeId: string): Promise<void> {
+  await apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/read`, { method: "POST" });
 }

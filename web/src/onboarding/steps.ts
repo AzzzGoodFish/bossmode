@@ -33,7 +33,7 @@ export const TOUR_STEPS: TourStep[] = [
     key: "welcome",
     title: "Welcome to Bossmode",
     paragraphs: [
-      "Bossmode is a platform where you run work with an agent team — like a real team: roles, chat, tasks and shared memory.",
+      "Bossmode is where you run work with your member team — like a real team: roles, chat, tasks and shared memory.",
       "Two things to get started: connect a model, then create a room and chat.",
     ],
     primary: "Start tour",
@@ -75,7 +75,7 @@ export const TOUR_STEPS: TourStep[] = [
     title: "2 · Create a room",
     paragraphs: [
       "A room is your team's workspace: conversations, tasks and memory live here.",
-      "Click +, pick a team (Dev Team ships built-in), name it, done.",
+      "Click +, add members from templates, name it, done.",
     ],
     primary: "Next",
     place: "right",
@@ -98,7 +98,7 @@ export const TOUR_STEPS: TourStep[] = [
     key: "done",
     title: "You're all set",
     paragraphs: [
-      "That's the whole loop: model → room → chat. Everything else (teams, skills, usage stats) layers on top when you need it.",
+      "That's the whole loop: model → room → chat. Everything else (templates, skills, usage stats) layers on top when you need it.",
       "Replay this tour anytime: Help (?) → Replay product tour.",
     ],
     primary: "Finish",

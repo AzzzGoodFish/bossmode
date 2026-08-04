@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 /**
- * Shared back control for Team / Agent / Skill detail pages.
+ * Shared back control for detail pages.
  * Always renders as its own block (own row) — do not nest inside title/action flex rows.
  * Visual baseline: Skills (ArrowLeft 18, ink-4 → hover ink-1, ≥32px hit target).
  */

@@ -203,8 +203,8 @@ function TotalView({ roomId }: UsagePageProps) {
             />
           )}
           <FilterGroup
-            label="Agent"
-            options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
+            label="Member"
+            options={[{ id: null, label: "All members" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
             value={agentFilter}
             onChange={setAgentFilter}
           />
@@ -228,7 +228,7 @@ function TotalView({ roomId }: UsagePageProps) {
             )}
           </div>
           <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
-            {roomLabel} · {agentFilter || "All agents"} · {rangeLabel}
+            {roomLabel} · {agentFilter || "All members"} · {rangeLabel}
             {totals && (
               <>
                 {"  —  "}
@@ -305,8 +305,8 @@ function TrendView({ roomId }: UsagePageProps) {
             />
           )}
           <FilterGroup
-            label="Agent"
-            options={[{ id: null, label: "All agents" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
+            label="Member"
+            options={[{ id: null, label: "All members" }, ...agentOptions.map((a) => ({ id: a, label: a, color: agentColor(a) }))]}
             value={agentFilter}
             onChange={setAgentFilter}
           />
@@ -347,7 +347,7 @@ function TrendView({ roomId }: UsagePageProps) {
             />
           </div>
           <div className="ml-auto text-[11.5px] text-ink-4 tabular-nums">
-            {roomLabel} · {agentFilter || "All agents"} · {span.from} → {span.to}
+            {roomLabel} · {agentFilter || "All members"} · {span.from} → {span.to}
             {totals && (
               <>
                 {"  —  "}
@@ -553,7 +553,7 @@ function ShareDonut({
 }) {
   const slices = buildSlices(data, kind);
   const total = slices.reduce((acc, s) => acc + s.value, 0) || 1;
-  const title = kind === "agent" ? "By agent" : kind === "room" ? "By room" : "By member";
+  const title = kind === "agent" ? "By member" : kind === "room" ? "By room" : "By member";
   const R = 15.915;
   let acc = 0;
 
@@ -701,8 +701,8 @@ function DrillTable({
   }
   rows.sort((a, b) => b.tokens - a.tokens);
 
-  const idHead = kind === "agent" ? "Agent" : kind === "room" ? "Room" : "Member";
-  const title = kind === "agent" ? "Agents" : kind === "room" ? `${agentFilter} — by room` : `${roomLabel} — members`;
+  const idHead = kind === "agent" ? "Member" : kind === "room" ? "Room" : "Member";
+  const title = kind === "agent" ? "Members" : kind === "room" ? `${agentFilter} — by room` : `${roomLabel} — members`;
   const totalTokens = rows.reduce((s, r) => s + r.tokens, 0);
   const totalCost = rows.reduce((s, r) => s + r.cost, 0);
   const totalHit = data.kpis.cacheHitRate;
