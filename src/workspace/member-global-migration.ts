@@ -1,8 +1,9 @@
 /**
  * 0.19 → 0.20 member-global migration (one-shot, idempotent).
- * Spec §十一 / fish: NO automatic member creation — only archive + manifest.
- * Users rebuild via Contacts → import from archive.
- * Contract §7.
+ * fish-confirmed (2026-08-04, msg 14161/14167): FULL automatic migration —
+ * global members are created (name-aggregated), rooms stamped usable,
+ * memory re-homed. Archive snapshot stays as non-destructive fallback;
+ * "import from archive" remains the recovery path.
  */
 import {
   existsSync,
@@ -16,6 +17,9 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "./room-store.js";
+import { createMember, findMemberByName } from "./member-registry.js";
+import { ensureMemorySkeleton, writeMemoryLayer } from "./member-memory-store.js";
+import { scopeIdOf } from "../shared/conversation-ref.js";
 
 const MIGRATION_ID = "member-global-v1";
 
@@ -132,24 +136,47 @@ function pickCanonical(instances: ManifestMember[]): ManifestMember {
   return [...instances].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || (b.principlesMtime || 0) - (a.principlesMtime || 0))[0];
 }
 
+function newestPrinciplesContent(instances: ManifestMember[]): string {
+  const withPrin = instances
+    .filter((i) => i.principlesPath && existsSync(i.principlesPath))
+    .sort((a, b) => (b.principlesMtime || 0) - (a.principlesMtime || 0));
+  if (withPrin.length === 0) return "";
+  try {
+    return readFileSync(withPrin[0].principlesPath!, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function readIfExists(path?: string): string {
+  if (!path || !existsSync(path)) return "";
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Run once per bossmode dir. Safe to call every startup.
  */
 export function runMemberGlobalMigration(): {
   skipped: boolean;
   archivePath?: string;
-  archivedMembers: number;
-  archivedRooms: number;
+  createdMembers: number;
+  roomsStamped: number;
+  mainlinesMoved: number;
+  conflicts: number;
 } {
   const existing = readMarker();
   if (existing?.done) {
-    return { skipped: true, archivePath: existing.archivePath, archivedMembers: 0, archivedRooms: 0 };
+    return { skipped: true, archivePath: existing.archivePath, createdMembers: 0, roomsStamped: 0, mainlinesMoved: 0, conflicts: 0 };
   }
 
   const boss = getBossmodeDir();
   if (!existsSync(boss)) {
     writeMarker({ done: true, at: Date.now(), note: "no bossmode dir" });
-    return { skipped: true, archivedMembers: 0, archivedRooms: 0 };
+    return { skipped: true, createdMembers: 0, roomsStamped: 0, mainlinesMoved: 0, conflicts: 0 };
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -157,11 +184,12 @@ export function runMemberGlobalMigration(): {
   const archiveAbs = join(boss, archiveRel);
   mkdirSync(archiveAbs, { recursive: true });
 
-  // Snapshot only — do not write members/ or mutate room.json (fish: manual rebuild).
+  // 1) Non-destructive snapshot (fallback path — never touched again).
   copyIfExists(join(boss, "rooms"), join(archiveAbs, "rooms"));
   copyIfExists(join(boss, "pi-agent", "runtime"), join(archiveAbs, "pi-agent-runtime"));
   copyIfExists(join(boss, "agents"), join(archiveAbs, "agents"));
 
+  // 2) Manifest (by-name aggregation + conflicts).
   const manifest = collectManifest();
   const byName = new Map<string, ManifestMember[]>();
   for (const m of manifest.members) {
@@ -175,7 +203,6 @@ export function runMemberGlobalMigration(): {
       name,
       sourceAgent: canon.sourceAgent,
       credentialId: canon.config?.credentialId,
-      // Newest principles path for import wizard persona seed
       principlesPath: [...instances]
         .filter((i) => i.principlesPath)
         .sort((a, b) => (b.principlesMtime || 0) - (a.principlesMtime || 0))[0]?.principlesPath,
@@ -197,7 +224,7 @@ export function runMemberGlobalMigration(): {
         members: archiveMembers,
         conflicts: manifest.conflicts,
         rawInstances: manifest.members,
-        note: "Archive only — import via Contacts. No automatic member creation.",
+        note: "Snapshot + manifest. Members were auto-created on upgrade; archive kept for recovery.",
       },
       null,
       2,
@@ -205,26 +232,99 @@ export function runMemberGlobalMigration(): {
     "utf-8",
   );
 
+  // 3) Auto-create global members (name aggregation, credential binding, persona seed).
+  let createdMembers = 0;
+  let mainlinesMoved = 0;
+  const nameToGlobalId = new Map<string, string>();
+  for (const [name, instances] of byName) {
+    const canon = pickCanonical(instances);
+    let rec = findMemberByName(name);
+    if (!rec) {
+      try {
+        rec = createMember({
+          name,
+          agentTemplate: canon.sourceAgent || "general",
+          model: canon.config?.model ?? null,
+          credentialId: canon.config?.credentialId ?? null,
+          thinkingLevel: canon.config?.thinkingLevel ?? null,
+        });
+        createdMembers += 1;
+      } catch (err) {
+        logger.error("migration", "failed to create global member", { name, error: String(err) });
+        continue;
+      }
+    }
+    nameToGlobalId.set(name, rec.id);
+
+    // Persona seed: newest member principles across this name's instances.
+    try {
+      const persona = newestPrinciplesContent(instances);
+      ensureMemorySkeleton(rec.id);
+      if (persona.trim()) {
+        writeMemoryLayer(rec.id, "persona", persona, { type: "user" }, { reason: "member-global-v1 migration" });
+      }
+    } catch (err) {
+      logger.error("migration", "persona seed failed", { name, error: String(err) });
+    }
+
+    // Per-room member mainline → (member, room) scope mainline.
+    for (const inst of instances) {
+      const content = readIfExists(inst.mainlinePath);
+      if (!content.trim()) continue;
+      try {
+        const scopeId = scopeIdOf({ kind: "room", roomId: inst.roomId });
+        ensureMemorySkeleton(rec.id, scopeId);
+        writeMemoryLayer(rec.id, "mainline", content, { type: "user" }, { scopeId, reason: "member-global-v1 migration" });
+        mainlinesMoved += 1;
+      } catch (err) {
+        logger.error("migration", "scope mainline move failed", { name, roomId: inst.roomId, error: String(err) });
+      }
+    }
+  }
+
+  // 4) Stamp rooms (globalMemberIds + leader + sourceMemberId links + cursor rekey via store helper).
+  let roomsStamped = 0;
+  for (const room of roomStore.listRooms()) {
+    try {
+      const roomMembers = roomStore.getRoomMembers(room.id);
+      const globalIds = roomMembers
+        .map((rm) => nameToGlobalId.get(rm.name))
+        .filter((id): id is string => !!id);
+      if (globalIds.length === 0) continue;
+      const leaderName = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId)?.name;
+      const leaderGlobalId = leaderName ? nameToGlobalId.get(leaderName) : undefined;
+      roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId);
+      roomsStamped += 1;
+    } catch (err) {
+      logger.error("migration", "failed to stamp room", { roomId: room.id, error: String(err) });
+    }
+  }
+
   writeMarker({
     done: true,
     at: Date.now(),
     archivePath: archiveRel,
-    archivedMembers: archiveMembers.length,
-    archivedRooms: manifest.rooms.length,
+    createdMembers,
+    roomsStamped,
+    mainlinesMoved,
+    conflicts: manifest.conflicts.length,
   });
 
-  logger.info("migration", "member-global-v1 archive complete (no auto member create)", {
+  logger.info("migration", "member-global-v1 complete", {
     archivePath: archiveRel,
-    archivedMembers: archiveMembers.length,
-    archivedRooms: manifest.rooms.length,
+    createdMembers,
+    roomsStamped,
+    mainlinesMoved,
     conflicts: manifest.conflicts.length,
   });
 
   return {
     skipped: false,
     archivePath: archiveRel,
-    archivedMembers: archiveMembers.length,
-    archivedRooms: manifest.rooms.length,
+    createdMembers,
+    roomsStamped,
+    mainlinesMoved,
+    conflicts: manifest.conflicts.length,
   };
 }
 

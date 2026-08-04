@@ -178,7 +178,7 @@ describe("member-global migration", () => {
     rmSync(state.dir, { recursive: true, force: true });
   });
 
-  it("archives only — no auto member create; manifest lists names; idempotent", async () => {
+  it("full auto-migration: members created, persona seeded, rooms stamped; idempotent", async () => {
     const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
     const roomId = "room-test-1";
     const roomDir = join(state.dir, "rooms", roomId);
@@ -206,22 +206,67 @@ describe("member-global migration", () => {
     const mig = await import("../../src/workspace/member-global-migration.js");
     const first = mig.runMemberGlobalMigration();
     expect(first.skipped).toBe(false);
-    expect(first.archivedMembers).toBe(2);
-    expect(first.archivedRooms).toBe(1);
+    expect(first.createdMembers).toBe(2);
+    expect(first.roomsStamped).toBe(1);
     expect(first.archivePath).toMatch(/legacy-0.19-/);
     expect(existsSync(join(state.dir, first.archivePath!, "manifest.json"))).toBe(true);
 
-    // No automatic member creation (spec §十一)
+    // Full auto-migration (fish-confirmed 2026-08-04): members created, rooms stamped.
     const reg = await import("../../src/workspace/member-registry.js");
-    expect(reg.listMembers()).toHaveLength(0);
+    expect(reg.listMembers()).toHaveLength(2);
+    const globalPm = reg.findMemberByName("pm")!;
+    expect(globalPm.agentTemplate).toBe("pm");
+
+    // persona seeded from member principles
+    const mem = await import("../../src/workspace/member-memory-store.js");
+    expect(mem.readMemoryLayer(globalPm.id, "persona").content).toMatch(/Lead well/);
+
+    // room stamped: globalMemberIds + leader
     const roomStore = await import("../../src/workspace/room-store.js");
-    expect(roomStore.getRoom(roomId)!.globalMemberIds).toBeUndefined();
+    const stamped = roomStore.getRoom(roomId)!;
+    expect(stamped.globalMemberIds?.length).toBe(2);
+    expect(stamped.promptLeaderGlobalMemberId).toBe(globalPm.id);
 
     const manifest = JSON.parse(readFileSync(join(state.dir, first.archivePath!, "manifest.json"), "utf8"));
     expect(manifest.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);
 
     const second = mig.runMemberGlobalMigration();
     expect(second.skipped).toBe(true);
+  });
+
+  it("moves per-room member mainline into (member, room) scope mainline", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const roomId = "room-mig-ml";
+    const roomDir = join(state.dir, "rooms", roomId);
+    mkdirSync(join(roomDir, "memory", "members", "rm_pm"), { recursive: true });
+    writeFileSync(join(roomDir, "memory", "members", "rm_pm", "mainline.md"), "## Focus\n\nShip 0.19\n", "utf8");
+    writeFileSync(
+      join(roomDir, "room.json"),
+      JSON.stringify({
+        id: roomId,
+        name: "ml-room",
+        cwd: state.dir,
+        members: ["pm"],
+        promptLeaderMemberId: "rm_pm",
+        roomMembers: [{ id: "rm_pm", roomId, name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 10 }],
+        createdAt: 1,
+      }, null, 2),
+      "utf8",
+    );
+    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
+
+    const mig = await import("../../src/workspace/member-global-migration.js");
+    const res = mig.runMemberGlobalMigration();
+    expect(res.createdMembers).toBe(1);
+    expect(res.mainlinesMoved).toBe(1);
+
+    const reg = await import("../../src/workspace/member-registry.js");
+    const pm = reg.findMemberByName("pm")!;
+    const mem = await import("../../src/workspace/member-memory-store.js");
+    const scoped = mem.readMemoryLayer(pm.id, "mainline", `room:${roomId}`);
+    expect(scoped.content).toMatch(/Ship 0.19/);
+    // persona empty (no principles file)
+    expect(mem.readMemoryLayer(pm.id, "persona").content.trim()).toBe("");
   });
 });
 
