@@ -977,13 +977,6 @@ export async function sendMessage(
   });
 }
 
-export async function addMember(roomId: string, agent: string, name?: string): Promise<Room> {
-  return apiFetch(`/api/rooms/${roomId}/members`, {
-    method: "POST",
-    body: JSON.stringify({ agent, ...(name ? { name } : {}) }),
-  });
-}
-
 // -- Private Chat / Steer --
 
 export async function steerAgent(
@@ -1585,4 +1578,17 @@ export async function forceDeleteAgent(name: string): Promise<void> {
 
 export async function postConversationRead(scopeId: string): Promise<void> {
   await apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/read`, { method: "POST" });
+}
+
+// -- 0.20: room membership management (memberId form) --
+
+export async function inviteRoomMember(roomId: string, memberId: string): Promise<Room> {
+  return apiFetch(`/api/rooms/${roomId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ memberId }),
+  });
+}
+
+export async function removeRoomMember(roomId: string, memberRef: string): Promise<Room> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}`, { method: "DELETE" });
 }
