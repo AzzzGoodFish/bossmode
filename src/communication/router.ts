@@ -4,18 +4,22 @@
 import { onMessage } from "./message-bus.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMemberRecord } from "../shared/types.js";
+import { stripCodeSegments } from "../shared/mention-text.js";
 
 /** Parse @mentions from message content */
 export function parseMentions(content: string, roomMembers: string[]): string[] {
+  // Code is literal text, never a command — strip code segments first so
+  // `@name` inside backticks never activates (architect ruling 2026-08-04).
+  const plain = stripCodeSegments(content);
   const mentions: string[] = [];
 
-  if (/@all\b/.test(content)) {
+  if (/@all\b/.test(plain)) {
     return ["all"];
   }
 
   const atPattern = /@([\w.-]+)/g;
   let match;
-  while ((match = atPattern.exec(content)) !== null) {
+  while ((match = atPattern.exec(plain)) !== null) {
     const name = match[1];
     if (roomMembers.includes(name)) {
       mentions.push(name);
@@ -43,10 +47,13 @@ export function parseMentionMemberIds(content: string, roomMembers: RoomMemberRe
  * supported (interrupting the whole room is not a thing).
  */
 export function parseUrgentMentions(content: string, roomMembers: string[]): string[] {
+  // Same code-segment stripping as @ — a backticked `!name` is documentation,
+  // not an interrupt (designer alignment blocker: high-cost misfire).
+  const plain = stripCodeSegments(content);
   const pattern = /(?<![\w!])!([\w.-]+)/g;
   const out: string[] = [];
   let match;
-  while ((match = pattern.exec(content)) !== null) {
+  while ((match = pattern.exec(plain)) !== null) {
     const name = match[1];
     if (roomMembers.includes(name)) out.push(name);
   }
