@@ -1633,3 +1633,21 @@ export async function patchGlobalMember(id: string, patch: Record<string, unknow
     body: JSON.stringify(patch),
   });
 }
+
+// -- 0.20: templates --
+
+export interface TemplateInfo {
+  name: string;
+  description: string;
+  builtin: boolean;
+  referencedBy: string[];
+}
+
+export async function getTemplates(): Promise<TemplateInfo[]> {
+  const res = await apiFetch<{ templates: TemplateInfo[] } | TemplateInfo[]>("/api/templates");
+  return Array.isArray(res) ? res : res.templates;
+}
+
+export async function forceDeleteAgent(name: string): Promise<void> {
+  await apiFetch(`/api/agents/${encodeURIComponent(name)}?force=true`, { method: "DELETE" });
+}

@@ -1,14 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Users, Contact, Hash,
+  CheckSquare, Plus, Users, Contact, Hash, Fingerprint,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, AgentInfo, SkillInfo, KnowledgeTreeNode, TeamTemplateSummary } from "../api/client";
-import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams, getChats, type ChatEntry } from "../api/client";
+import { getRooms, getAgents, getSkills, getKnowledgeTree, getTeams, getChats, getContacts, getTemplates, type ChatEntry, type ContactEntry, type TemplateInfo } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
-import { MOCK_MEMBERS } from "../mock/contacts";
 
 export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
 
@@ -18,6 +17,7 @@ export type ActivePage =
   | { type: "dm"; memberId: string }
   | { type: "member-create" }
   | { type: "member-settings"; memberId: string }
+  | { type: "templates"; name?: string }
   | { type: "room"; id: string }
   | { type: "team"; name: string | null }
   | { type: "agent"; name: string | null }
@@ -28,7 +28,7 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "chats" | "contacts" | "rooms" | "team" | "library" | "system";
+type Domain = "chats" | "contacts" | "rooms" | "templates" | "team" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
@@ -39,6 +39,8 @@ export function domainOf(page: ActivePage): Domain {
     case "member-create":
     case "member-settings":
       return "contacts";
+    case "templates":
+      return "templates";
     case "team":
     case "agent":
     case "skill":
@@ -184,6 +186,10 @@ export function Sidebar({
         {domain === "rooms" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Hash size={18} />
       </button>
+      <button onClick={() => { setBrowseDomain("templates"); onNavigate({ type: "templates" }); }} title="Templates" aria-label="Templates" className={railBtn(domain === "templates")}>
+        {domain === "templates" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
+        <Fingerprint size={18} />
+      </button>
       <button onClick={() => { setBrowseDomain("team"); onNavigate({ type: "team", name: null }); }} title="Team" aria-label="Team" className={railBtn(domain === "team")}>
         {domain === "team" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
         <Users size={18} />
@@ -226,7 +232,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { chats: "Chats", contacts: "Contacts", rooms: "Rooms", team: "Team", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", contacts: "Contacts", rooms: "Rooms", templates: "Templates", team: "Team", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -255,28 +261,8 @@ export function Sidebar({
 
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
         {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
-        {domain === "contacts" && (
-          <>
-            {MOCK_MEMBERS.map((m) => {
-              const active = activePage?.type === "dm" && activePage.memberId === m.id;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => onNavigate({ type: "dm", memberId: m.id })}
-                  className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
-                >
-                  <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <div className={`text-[12.5px] font-medium truncate ${active ? "text-accent-ink" : "text-ink-2"}`}>{m.name}</div>
-                    <div className="text-[10.5px] text-ink-4 truncate">
-                      {m.status === "working" ? `Working${m.activeScope ? ` in ${m.activeScope}` : ""}` : m.template}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </>
-        )}
+        {domain === "templates" && <TemplatesPanelList activePage={activePage} onNavigate={onNavigate} />}
+        {domain === "contacts" && <ContactsPanelList activePage={activePage} onNavigate={onNavigate} />}
         {domain === "rooms" && (
           <>
             {displayRooms.map((r) => {
@@ -502,6 +488,69 @@ function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; on
                 {c.unreadCount > 99 ? "99+" : c.unreadCount}
               </span>
             )}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function ContactsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => getContacts().then((r) => { if (!cancelled) setContacts(r.contacts); }).catch(() => {});
+    load();
+    const t = window.setInterval(load, 10_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, []);
+  if (!contacts) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
+  if (contacts.length === 0) return <div className="px-2 py-3 text-[11.5px] text-ink-4">No members yet — hire one from Contacts.</div>;
+  const sorted = [...contacts].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <>
+      {sorted.map((m) => {
+        const active = activePage?.type === "dm" && activePage.memberId === m.memberId;
+        return (
+          <button
+            key={m.memberId}
+            onClick={() => onNavigate({ type: "dm", memberId: m.memberId })}
+            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+          >
+            <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="sm" />
+            <div className="min-w-0 flex-1">
+              <div className={`text-[12.5px] font-medium truncate ${active ? "text-accent-ink" : "text-ink-2"}`}>{m.name}</div>
+              <div className="text-[10.5px] text-ink-4 truncate">
+                {m.status === "working" ? "Working" : m.agentTemplate}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function TemplatesPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getTemplates().then((r) => { if (!cancelled) setTemplates(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (!templates) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
+  return (
+    <>
+      {templates.map((t) => {
+        const active = activePage?.type === "templates" && activePage.name === t.name;
+        return (
+          <button
+            key={t.name}
+            onClick={() => onNavigate({ type: "templates", name: t.name })}
+            className={`w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${active ? "bg-surface-2" : "hover:bg-surface-1"}`}
+          >
+            <div className={`text-[12.5px] font-medium truncate ${active ? "text-ink-1" : "text-ink-2"}`}>{t.name}</div>
+            <div className="text-[10.5px] text-ink-4 truncate">{t.builtin ? "built-in" : `${t.referencedBy.length} member${t.referencedBy.length === 1 ? "" : "s"}`}</div>
           </button>
         );
       })}

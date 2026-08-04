@@ -16,6 +16,7 @@ import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
 import { MemberSettingsPage } from "./MemberSettingsPage";
+import { TemplatesPage } from "./TemplatesPage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
@@ -348,6 +349,12 @@ export function Layout({ onLogout, username }: LayoutProps) {
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "dm", memberId: activePage.memberId })}
             onFired={() => handleNavigate({ type: "contacts" })}
+          />
+        )}
+        {activePage?.type === "templates" && (
+          <TemplatesPage
+            selected={activePage.name}
+            onSelect={(name) => handleNavigate(name ? { type: "templates", name } : { type: "templates" })}
           />
         )}
 
