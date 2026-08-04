@@ -71,8 +71,8 @@ function summarizeMessage(m: RoomMessage | undefined): { sender: string; text: s
   return { sender: m.sender, text, ts: m.ts };
 }
 
-/** Unread/mention for the human user (not member agent cursors). */
-function countUserUnreadAndMention(
+/** Unread/mention for the human user (not member agent cursors). Exported for tests. */
+export function countUserUnreadAndMention(
   messages: RoomMessage[],
   cursorId: string | null,
   cursorSeq: number | null,
@@ -87,12 +87,16 @@ function countUserUnreadAndMention(
     start = idx === -1 ? 0 : idx + 1;
   }
   const slice = messages.slice(start);
-  // Unread = non-user messages after the user's read cursor
-  const unreadCount = slice.filter((m) => m.sender !== "user").length;
+  // Unread = user-visible chat messages after the user's read cursor.
+  // System notices and typed task/knowledge events never badge (Feishu semantics,
+  // fish 2026-08-04): they are not conversation the user needs to chase.
+  const isUserVisibleChat = (m: RoomMessage): boolean =>
+    m.sender !== "user" && m.sender !== "system" && m.type !== "task_event" && m.type !== "knowledge_event";
+  const unreadCount = slice.filter(isUserVisibleChat).length;
   // v1 mention approx: text contains @<loginName>
   const needle = userLoginName ? `@${userLoginName}` : "";
   const mentioned = needle
-    ? slice.some((m) => m.sender !== "user" && typeof m.content === "string" && m.content.includes(needle))
+    ? slice.some((m) => isUserVisibleChat(m) && typeof m.content === "string" && m.content.includes(needle))
     : false;
   return { unreadCount, mentioned };
 }
