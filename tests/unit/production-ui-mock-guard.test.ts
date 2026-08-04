@@ -6,11 +6,19 @@ import { describe, expect, it } from "vitest";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const readWebSource = (path: string) => readFileSync(resolve(root, "web/src", path), "utf8");
 
-describe("production Team mock guard", () => {
-  it("does not let Team routes import or render the former mock data source", () => {
-    for (const path of ["pages/AgentsPage.tsx", "pages/AgentProfilePage.tsx", "components/CreateRoomDialog.tsx"]) {
+describe("production UI mock guard", () => {
+  it("does not let member/template surfaces import or render mock data sources", () => {
+    for (const path of [
+      "pages/ChatsPage.tsx",
+      "pages/ContactsPage.tsx",
+      "pages/DmPage.tsx",
+      "pages/MemberCreatePage.tsx",
+      "pages/MemberSettingsPage.tsx",
+      "pages/TemplatesPage.tsx",
+      "components/CreateRoomDialog.tsx",
+    ]) {
       const source = readWebSource(path);
-      expect(source).not.toMatch(/team-mock|agentTemplateStats|mock data|CreateRoomDraftPrototype|fail-demo/i);
+      expect(source).not.toMatch(/team-mock|agentTemplateStats|mock data|mock\/contacts|MOCK_MEMBERS|CreateRoomDraftPrototype|fail-demo/i);
     }
   });
 
