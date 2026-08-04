@@ -25,9 +25,12 @@ import {
   readAllDmMessages,
   addDmMessage,
   getLatestDmSeq,
+  getDmCursor,
 } from "../workspace/dm-message-store.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as roomStore from "../workspace/room-store.js";
+import * as messageStore from "../workspace/message-store.js";
+import type { RoomMessage } from "../shared/types.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -58,6 +61,109 @@ function errCode(err: unknown): { status: number; error: string; message: string
   if (msg === "archive_not_found") return { status: 404, error: "archive_not_found", message: msg };
   return { status: 500, error: "internal", message: msg };
 }
+
+function summarizeMessage(m: RoomMessage | undefined): { sender: string; text: string; ts: number } | null {
+  if (!m) return null;
+  const text = (m.content || "").replace(/\s+/g, " ").trim().slice(0, 140);
+  return { sender: m.sender, text, ts: m.ts };
+}
+
+function countUnreadAndMention(
+  messages: RoomMessage[],
+  cursorId: string | null,
+  cursorSeq: number | null,
+  selfNames: Set<string>,
+  selfIds: Set<string>,
+): { unreadCount: number; mentioned: boolean } {
+  let start = 0;
+  if (cursorSeq != null) {
+    const idx = messages.findIndex((m) => typeof m.seq === "number" && m.seq > cursorSeq);
+    start = idx === -1 ? messages.length : idx;
+  } else if (cursorId) {
+    const idx = messages.findIndex((m) => m.id === cursorId);
+    start = idx === -1 ? 0 : idx + 1;
+  }
+  const slice = messages.slice(start);
+  let mentioned = false;
+  for (const m of slice) {
+    if (m.sender === "user" || m.sender === "system") continue;
+    if (m.mentionMemberIds?.some((id) => selfIds.has(id))) mentioned = true;
+    if (m.mentions?.some((n) => selfNames.has(n))) mentioned = true;
+  }
+  // Unread = messages after cursor not sent by user (rough chat-app semantics)
+  const unreadCount = slice.filter((m) => m.sender !== "user").length;
+  return { unreadCount, mentioned };
+}
+
+// ── Chats (unified conversation list) ──
+
+addRoute("GET", "/api/chats", async (_req, res) => {
+  try {
+    const members = listMembers();
+    const rooms = roomStore.listRooms();
+    const chats: Array<{
+      scopeId: string;
+      kind: "dm" | "room";
+      title: string;
+      lastMessage: { sender: string; text: string; ts: number } | null;
+      unreadCount: number;
+      mentioned: boolean;
+      status: string;
+    }> = [];
+
+    for (const m of members) {
+      const msgs = readAllDmMessages(m.id);
+      const last = msgs[msgs.length - 1];
+      const cursor = getDmCursor(m.id);
+      const { unreadCount, mentioned } = countUnreadAndMention(
+        msgs,
+        cursor.messageId,
+        cursor.seq,
+        new Set([m.name]),
+        new Set([m.id]),
+      );
+      chats.push({
+        scopeId: scopeIdOf({ kind: "dm", memberId: m.id }),
+        kind: "dm",
+        title: m.name,
+        lastMessage: summarizeMessage(last),
+        unreadCount,
+        mentioned,
+        status: "idle",
+      });
+    }
+
+    for (const room of rooms) {
+      const msgs = messageStore.readAllMessages(room.id);
+      const last = msgs[msgs.length - 1];
+      const cursors = roomStore.getCursors(room.id);
+      // Aggregate unread across room members using the "latest" cursor lag for user-facing list:
+      // use the room's prompt leader cursor if present, else max cursor coverage.
+      const roomMembers = roomStore.getRoomMembers(room.id);
+      const leader = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId);
+      const cursorKey = leader?.id || roomMembers[0]?.id || "";
+      const cursorId = cursorKey ? (cursors[cursorKey] ?? null) : null;
+      const selfNames = new Set(roomMembers.map((rm) => rm.name));
+      const selfIds = new Set(roomMembers.map((rm) => rm.id));
+      const { unreadCount, mentioned } = countUnreadAndMention(msgs, cursorId, null, selfNames, selfIds);
+      chats.push({
+        scopeId: scopeIdOf({ kind: "room", roomId: room.id }),
+        kind: "room",
+        title: room.name,
+        lastMessage: summarizeMessage(last),
+        unreadCount,
+        mentioned,
+        status: "idle",
+      });
+    }
+
+    chats.sort((a, b) => (b.lastMessage?.ts || 0) - (a.lastMessage?.ts || 0));
+    sendJson(res, 200, { chats });
+  } catch (err) {
+    logger.error("members-api", "chats failed", { error: String(err) });
+    sendJson(res, 500, { error: "internal", message: String(err) });
+  }
+});
 
 // ── Contacts (directory) ──
 

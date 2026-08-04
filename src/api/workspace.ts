@@ -625,9 +625,43 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { agent?: string; name?: string; config?: Partial<RoomMemberConfig> };
+  const body = (await parseBody(req)) as {
+    memberId?: string;
+    agent?: string;
+    name?: string;
+    config?: Partial<RoomMemberConfig>;
+  };
+
+  // 0.20: invite by global memberId (preferred)
+  if (typeof body.memberId === "string" && body.memberId.trim()) {
+    try {
+      const { resolveMemberRef } = await import("../workspace/member-registry.js");
+      const global = resolveMemberRef(body.memberId.trim());
+      if (!global) {
+        sendJson(res, 404, { error: "Member not found" });
+        return;
+      }
+      const added = roomStore.inviteGlobalMember(params.id, {
+        id: global.id,
+        name: global.name,
+        agentTemplate: global.agentTemplate,
+        config: body.config,
+      });
+      if (!added.ok) {
+        sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, { error: added.error });
+        return;
+      }
+      sendJson(res, 200, roomStore.getRoom(params.id));
+      return;
+    } catch (err: any) {
+      sendJson(res, 400, { error: err?.message || String(err) });
+      return;
+    }
+  }
+
+  // Legacy: invite by agent template + local member name
   if (!body.agent) {
-    sendJson(res, 400, { error: "agent name is required" });
+    sendJson(res, 400, { error: "memberId or agent name is required" });
     return;
   }
   if (typeof body.name !== "string" || !body.name.trim()) {
@@ -641,8 +675,43 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     return;
   }
 
+  // Dual-write: if a global member with this name exists, stamp id
+  try {
+    const { findMemberByName } = await import("../workspace/member-registry.js");
+    const g = findMemberByName(body.name);
+    if (g) roomStore.addGlobalMemberId(params.id, g.id);
+  } catch { /* ignore */ }
+
   const updatedRoom = roomStore.getRoom(params.id);
   sendJson(res, 200, updatedRoom);
+});
+
+// 0.20: remove member from room (keeps their scope memory assets)
+addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  let globalMemberId: string | undefined;
+  try {
+    const { resolveMemberRef, findMemberByName } = await import("../workspace/member-registry.js");
+    if (params.memberRef.startsWith("mem_")) {
+      globalMemberId = params.memberRef;
+    } else {
+      const g = resolveMemberRef(params.memberRef) || findMemberByName(params.memberRef);
+      globalMemberId = g?.id;
+    }
+  } catch { /* ignore */ }
+
+  const removed = roomStore.removeRoomMemberByRef(params.id, params.memberRef, { globalMemberId });
+  if (!removed.ok) {
+    sendJson(res, 404, { error: removed.error });
+    return;
+  }
+  // Ensure global id cleared even if ref was room-local id
+  if (globalMemberId) roomStore.removeGlobalMemberId(params.id, globalMemberId);
+  sendJson(res, 200, roomStore.getRoom(params.id));
 });
 
 // ── Agent Events & Steer ──

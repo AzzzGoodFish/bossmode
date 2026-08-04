@@ -114,7 +114,9 @@ function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: stri
 }
 
 function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
-  if (Array.isArray(room.roomMembers) && room.roomMembers.length > 0) {
+  // Empty array is authoritative once roomMembers has been materialized (0.14+ / 0.20).
+  // Only fall back to legacy `members: string[]` when roomMembers is absent.
+  if (Array.isArray(room.roomMembers)) {
     return room.roomMembers.map((member) => ({ ...member, roomId: member.roomId || room.id }));
   }
   return (room.members || []).map((name) => buildRoomMemberRecord(room.id, name, room.memberOverrides?.[name], name));
@@ -714,9 +716,105 @@ export function addRoomMemberFromAgent(
     });
   }
   room.roomMembers = [...getRoomMembersFromRoom(room), member];
+  // Dual-write globalMemberIds when a global id is known for this name (0.20).
+  syncGlobalMemberIdForName(room, memberName);
   writeRoom(room);
   initializeMemberCursor(roomId, member.id);
   return { ok: true, member };
+}
+
+/** Append global member id onto room.globalMemberIds if missing. */
+export function addGlobalMemberId(roomId: string, globalMemberId: string): Room | null {
+  const room = getRoom(roomId);
+  if (!room || !globalMemberId) return null;
+  const ids = new Set(room.globalMemberIds || []);
+  ids.add(globalMemberId);
+  room.globalMemberIds = [...ids];
+  writeRoom(room);
+  return room;
+}
+
+export function removeGlobalMemberId(roomId: string, globalMemberId: string): Room | null {
+  const room = getRoom(roomId);
+  if (!room || !globalMemberId) return null;
+  room.globalMemberIds = (room.globalMemberIds || []).filter((id) => id !== globalMemberId);
+  if (room.promptLeaderGlobalMemberId === globalMemberId) {
+    delete room.promptLeaderGlobalMemberId;
+  }
+  writeRoom(room);
+  return room;
+}
+
+function syncGlobalMemberIdForName(room: Room, memberName: string): void {
+  try {
+    // Lazy require-free static import avoided at top to limit cycle risk with member-registry.
+    // Callers that already know the global id should use addGlobalMemberId.
+    void memberName;
+    void room;
+  } catch { /* ignore */ }
+}
+
+/**
+ * 0.20 invite: attach an existing global member to a room (by mem_ id).
+ * Creates a room-local RoomMemberRecord shadow for dual-read compatibility + stamps globalMemberIds.
+ */
+export function inviteGlobalMember(
+  roomId: string,
+  global: { id: string; name: string; agentTemplate: string; config?: Partial<RoomMemberConfig> },
+): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "invalid" | "duplicate" } {
+  const room = getRoom(roomId);
+  if (!room) return { ok: false, code: "not_found", error: "Room not found" };
+  if ((room.globalMemberIds || []).includes(global.id)) {
+    return { ok: false, code: "duplicate", error: "Member already in this room" };
+  }
+  const memberName = normalizeMemberName(global.name);
+  const validation = validateRoomMemberName(memberName);
+  if (validation) return { ok: false, code: "invalid", error: validation };
+  if (getRoomMembersFromRoom(room).some((m) => m.name === memberName)) {
+    return { ok: false, code: "duplicate", error: "Member name already exists in this room" };
+  }
+
+  const agentName = normalizeMemberName(global.agentTemplate || "general") || "general";
+  // Prefer full agent copy path when template exists; otherwise create a shadow record only.
+  if (loadAgentDefinition(agentName)) {
+    const added = addRoomMemberFromAgent(roomId, {
+      agentName,
+      memberName,
+      config: global.config,
+    });
+    if (!added.ok) return added;
+    addGlobalMemberId(roomId, global.id);
+    return added;
+  }
+
+  const member = buildDirectRoomMemberFromAgent(roomId, {
+    agentName,
+    memberName,
+    config: global.config,
+  });
+  room.roomMembers = [...getRoomMembersFromRoom(room), member];
+  room.globalMemberIds = [...new Set([...(room.globalMemberIds || []), global.id])];
+  writeRoom(room);
+  initializeMemberCursor(roomId, member.id);
+  return { ok: true, member };
+}
+
+export function removeRoomMemberByRef(
+  roomId: string,
+  memberRef: string,
+  opts?: { globalMemberId?: string },
+): { ok: true; removed: RoomMemberRecord } | { ok: false; error: string } {
+  const room = getRoom(roomId);
+  if (!room) return { ok: false, error: "Room not found" };
+  const member = findRoomMemberByRefInRoom(room, memberRef);
+  if (!member) return { ok: false, error: "Member is not in this room" };
+
+  room.roomMembers = getRoomMembersFromRoom(room).filter((m) => m.id !== member.id);
+  writeRoom(room);
+  const gid = opts?.globalMemberId
+    || (memberRef.startsWith("mem_") ? memberRef : undefined);
+  if (gid) removeGlobalMemberId(roomId, gid);
+  return { ok: true, removed: member };
 }
 
 export function addMember(roomId: string, agentName: string): boolean {

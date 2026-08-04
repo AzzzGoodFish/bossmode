@@ -227,3 +227,69 @@ describe("member-global migration", () => {
     expect(reg.listMembers()).toHaveLength(2);
   });
 });
+
+describe("chats aggregation helpers + invite dual-write", () => {
+  beforeEach(() => {
+    state.dir = mkdtempSync(join(tmpdir(), "bm-chats-"));
+  });
+  afterEach(() => {
+    rmSync(state.dir, { recursive: true, force: true });
+  });
+
+  it("inviteGlobalMember dual-writes roomMembers + globalMemberIds; remove clears both", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const reg = await import("../../src/workspace/member-registry.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    // seed general agent so invite can copy template
+    mkdirSync(join(state.dir, "agents"), { recursive: true });
+    writeFileSync(join(state.dir, "agents", "general.md"), "---\nname: general\n---\nHi\n", "utf8");
+
+    const g = reg.createMember({ name: "ops", agentTemplate: "general" });
+    const roomId = "room-inv-1";
+    mkdirSync(join(state.dir, "rooms", roomId), { recursive: true });
+    writeFileSync(
+      join(state.dir, "rooms", roomId, "room.json"),
+      JSON.stringify({
+        id: roomId,
+        name: "ops-room",
+        cwd: state.dir,
+        members: [],
+        roomMembers: [],
+        createdAt: 1,
+      }, null, 2),
+      "utf8",
+    );
+    writeFileSync(join(state.dir, "rooms", roomId, "messages.jsonl"), "", "utf8");
+
+    const invited = roomStore.inviteGlobalMember(roomId, {
+      id: g.id,
+      name: g.name,
+      agentTemplate: g.agentTemplate,
+    });
+    expect(invited.ok).toBe(true);
+    const room = roomStore.getRoom(roomId)!;
+    expect(room.globalMemberIds).toContain(g.id);
+    expect(roomStore.getRoomMembers(roomId).some((m) => m.name === "ops")).toBe(true);
+
+    const rm = roomStore.getRoomMembers(roomId)[0];
+    const removed = roomStore.removeRoomMemberByRef(roomId, rm.id, { globalMemberId: g.id });
+    expect(removed.ok).toBe(true);
+    expect(roomStore.getRoom(roomId)!.globalMemberIds || []).not.toContain(g.id);
+    expect(roomStore.getRoomMembers(roomId)).toHaveLength(0);
+  });
+
+  it("dm unread counts messages after cursor", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const dm = await import("../../src/workspace/dm-message-store.js");
+    const m = reg.createMember({ name: "chatty", agentTemplate: "general" });
+    const a = dm.addDmMessage(m.id, { sender: "user", content: "hi", mentions: [] });
+    dm.addDmMessage(m.id, { sender: "chatty", content: "yo", mentions: [], senderMemberId: m.id });
+    dm.addDmMessage(m.id, { sender: "chatty", content: "again", mentions: [], senderMemberId: m.id });
+    dm.setDmCursor(m.id, { messageId: a.id, seq: a.seq ?? 1 });
+    const msgs = dm.readAllDmMessages(m.id);
+    const cursor = dm.getDmCursor(m.id);
+    const after = msgs.filter((msg) => typeof msg.seq === "number" && cursor.seq != null && msg.seq > cursor.seq);
+    expect(after).toHaveLength(2);
+    expect(after.every((msg) => msg.sender === "chatty")).toBe(true);
+  });
+});
