@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
   CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search,
+  Folder, LayoutTemplate,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, SkillInfo, KnowledgeTreeNode } from "../api/client";
@@ -17,7 +18,7 @@ export type ActivePage =
   | { type: "dm"; memberId: string }
   | { type: "member-create" }
   | { type: "member-settings"; memberId: string }
-  | { type: "templates"; name?: string }
+  | { type: "templates"; name?: string; create?: boolean }
   | { type: "room"; id: string }
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
@@ -196,19 +197,46 @@ export function Sidebar({
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
-      active ? "bg-surface-2" : "hover:bg-surface-1"
+      active ? "bg-accent-dim" : "hover:bg-surface-1"
     }`;
+
+  // 24px leading block for panel rows (Chats keeps avatar/hash).
+  const leadBlock = (icon: React.ReactNode) => (
+    <span className="w-6 h-6 rounded-md bg-surface-2 border border-line-soft text-ink-3 flex items-center justify-center shrink-0">{icon}</span>
+  );
+
+  const createBtn = "w-6 h-6 border border-line rounded-md text-ink-3 hover:text-accent-ink hover:border-line-strong flex items-center justify-center cursor-pointer transition-colors";
 
   const panel = (
     <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
       <div className="h-12 shrink-0 flex items-center justify-between px-3.5 border-b border-line-soft">
         <h1 className="text-[13px] font-semibold text-ink-1">{panelTitle}</h1>
+        {/* Create entry lives in the panel title row for every domain that has one
+            (Chat & List Unification v1); Skills has no create by design. */}
         {domain === "chats" && (
           <button
             onClick={() => onNavigate({ type: "room", id: "__new__" })}
             title="New room"
             data-tour="new-room"
-            className="w-6 h-6 border border-line rounded-md text-ink-3 hover:text-accent-ink hover:border-line-strong flex items-center justify-center cursor-pointer transition-colors"
+            className={createBtn}
+          >
+            <Plus size={13} />
+          </button>
+        )}
+        {domain === "templates" && (
+          <button
+            onClick={() => onNavigate({ type: "templates", create: true })}
+            title="New template"
+            className={createBtn}
+          >
+            <Plus size={13} />
+          </button>
+        )}
+        {domain === "library" && (
+          <button
+            onClick={() => onNavigate({ type: "knowledge", path: "__new__" })}
+            title="New document"
+            className={createBtn}
           >
             <Plus size={13} />
           </button>
@@ -229,7 +257,7 @@ export function Sidebar({
             {skills.map((s) => (
               <button key={s.name} onClick={() => onNavigate({ type: "skill", name: s.name })} className={itemCls(selectedSkillName === s.name)}>
                 <div className="flex items-center gap-2.5">
-                  <span className="w-6 h-6 rounded-md bg-surface-2 text-ink-3 flex items-center justify-center text-[10px] shrink-0">◆</span>
+                  {leadBlock(<Puzzle size={12} />)}
                   <span className={`text-[12.5px] font-medium truncate ${selectedSkillName === s.name ? "text-ink-1" : "text-ink-2"}`}>{s.name}</span>
                 </div>
               </button>
@@ -240,13 +268,23 @@ export function Sidebar({
 
         {domain === "library" && (
           <>
-            <SectionHead label="KNOWLEDGE" onCreate={() => onNavigate({ type: "knowledge", path: "__new__" })} />
+            <SectionHead
+              label={`LIBRARY · ${knowledgeFolders.length}`}
+              onLabelClick={() => onNavigate({ type: "knowledge" })}
+              active={activePage?.type === "knowledge" && !activePage.path}
+            />
             <button onClick={() => onNavigate({ type: "knowledge" })} className={itemCls(activePage?.type === "knowledge" && !activePage.path)}>
-              <span className="text-[12.5px] font-medium text-ink-2">All documents</span>
+              <div className="flex items-center gap-2.5">
+                {leadBlock(<BookOpen size={12} />)}
+                <span className="text-[12.5px] font-medium text-ink-2">All documents</span>
+              </div>
             </button>
             {knowledgeFolders.map((f) => (
               <button key={f.path} onClick={() => onNavigate({ type: "knowledge", path: f.path })} className={itemCls(selectedKnowledgeFolder === f.name)}>
-                <span className={`text-[12.5px] font-medium truncate ${selectedKnowledgeFolder === f.name ? "text-ink-1" : "text-ink-2"}`}>{f.name}</span>
+                <div className="flex items-center gap-2.5">
+                  {leadBlock(<Folder size={12} />)}
+                  <span className={`text-[12.5px] font-medium truncate ${selectedKnowledgeFolder === f.name ? "text-ink-1" : "text-ink-2"}`}>{f.name}</span>
+                </div>
               </button>
             ))}
           </>
@@ -306,9 +344,8 @@ export function Sidebar({
   );
 }
 
-function SectionHead({ label, onCreate, onLabelClick, active }: {
+function SectionHead({ label, onLabelClick, active }: {
   label: string;
-  onCreate?: () => void;
   /** Click section label to open the domain page. */
   onLabelClick?: () => void;
   active?: boolean;
@@ -326,11 +363,6 @@ function SectionHead({ label, onCreate, onLabelClick, active }: {
         </button>
       ) : (
         <span className="text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">{label}</span>
-      )}
-      {onCreate && (
-        <button onClick={onCreate} className="text-ink-4 hover:text-accent-ink cursor-pointer transition-colors" title="Create">
-          <Plus size={12} />
-        </button>
       )}
     </div>
   );
@@ -444,16 +476,26 @@ function TemplatesPanelList({ activePage, onNavigate }: { activePage: ActivePage
   if (!templates) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
   return (
     <>
+      <SectionHead
+        label={`TEMPLATES · ${templates.length}`}
+        onLabelClick={() => onNavigate({ type: "templates" })}
+        active={activePage?.type === "templates" && !activePage.name}
+      />
       {templates.map((t) => {
         const active = activePage?.type === "templates" && activePage.name === t.name;
         return (
           <button
             key={t.name}
             onClick={() => onNavigate({ type: "templates", name: t.name })}
-            className={`w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${active ? "bg-surface-2" : "hover:bg-surface-1"}`}
+            className={`w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${active ? "bg-accent-dim" : "hover:bg-surface-1"}`}
           >
-            <div className={`text-[12.5px] font-medium truncate ${active ? "text-ink-1" : "text-ink-2"}`}>{t.name}</div>
-            <div className="text-[10.5px] text-ink-4 truncate">{t.builtin ? "built-in" : `${t.referencedBy.length} member${t.referencedBy.length === 1 ? "" : "s"}`}</div>
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-md bg-surface-2 border border-line-soft text-ink-3 flex items-center justify-center shrink-0"><LayoutTemplate size={12} /></span>
+              <div className="min-w-0 flex-1">
+                <div className={`text-[12.5px] font-medium truncate ${active ? "text-ink-1" : "text-ink-2"}`}>{t.name}</div>
+                <div className="text-[10.5px] text-ink-4 truncate">{t.builtin ? "built-in" : `${t.referencedBy.length} member${t.referencedBy.length === 1 ? "" : "s"}`}</div>
+              </div>
+            </div>
           </button>
         );
       })}

@@ -352,6 +352,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
         {activePage?.type === "templates" && (
           <TemplatesPage
             selected={activePage.name}
+            startCreating={activePage.create}
             onSelect={(name) => handleNavigate(name ? { type: "templates", name } : { type: "templates" })}
           />
         )}

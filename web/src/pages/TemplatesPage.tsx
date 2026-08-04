@@ -12,8 +12,9 @@
  * GET /api/contacts (resolve referencedBy IDs → names).
  */
 import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2, Lock, Plus, Trash2 } from "lucide-react";
+import { Check, LayoutTemplate, Loader2, Lock, Plus, Trash2 } from "lucide-react";
 import { BackLink } from "../components/BackLink";
+import { ResourceListContainer, ResourceListPage, ResourceRow } from "../components/ResourceList";
 import {
   getTemplates, getAgent, createAgent, updateAgent, deleteAgent, forceDeleteAgent, getContacts,
   type TemplateInfo, type AgentDetail,
@@ -23,11 +24,11 @@ function scaffold(name: string, description: string, prompt: string): string {
   return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${prompt}`;
 }
 
-export function TemplatesPage({ selected, onSelect }: { selected?: string; onSelect?: (name: string | null) => void }) {
+export function TemplatesPage({ selected, startCreating, onSelect }: { selected?: string; startCreating?: boolean; onSelect?: (name: string | null) => void }) {
   const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
   const [memberNames, setMemberNames] = useState<Map<string, string>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(Boolean(startCreating));
 
   const load = () => {
     getTemplates().then(setTemplates).catch((e) => setLoadError(String(e?.message || e)));
@@ -64,57 +65,46 @@ export function TemplatesPage({ selected, onSelect }: { selected?: string; onSel
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-surface-1">
-      <div className="w-full px-6 md:px-10 pt-7 pb-16">
-        <div className="flex items-start justify-between gap-3 mb-1.5">
-          <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Templates</h1>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
-          >
-            <Plus size={13} /> New template
-          </button>
-        </div>
-        <p className="text-[12.5px] text-ink-3 mb-5">
-          Identity prompt sources — a member follows its template; edits apply to every member using it on next activation.
-        </p>
-
-        {loadError && <div role="alert" className="text-[12px] text-blocked mb-3">Couldn’t load templates. {loadError}</div>}
-        {!templates ? (
-          <div className="text-xs text-ink-4 py-4">Loading…</div>
-        ) : (
-          <div className="rounded-xl border border-line divide-y divide-line-soft">
-            {templates.map((t) => {
-              const usedBy = resolveNames(t.referencedBy);
-              return (
-                <button
-                  key={t.name}
-                  type="button"
-                  onClick={() => onSelect?.(t.name)}
-                  className="w-full text-left px-4 py-3.5 hover:bg-surface-2 transition-colors cursor-pointer flex items-center gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13.5px] font-semibold text-ink-1">{t.name}</span>
-                      {t.builtin && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-surface-2 text-ink-3 border border-line">
-                          <Lock size={9} /> built-in
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11.5px] text-ink-3 mt-0.5 truncate">{t.description}</div>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-ink-4" title={usedBy.join(", ")}>
-                    {usedBy.length === 0 ? "unused" : `used by ${usedBy.length}`}
+    <ResourceListPage
+      title="Templates"
+      subtitle={`Identity prompt sources — a member follows its template; edits apply to every member using it on next activation. ${templates?.length ?? 0} templates.`}
+      action={
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
+        >
+          <Plus size={13} /> New template
+        </button>
+      }
+    >
+      {loadError && <div role="alert" className="text-[12px] text-blocked mb-3">Couldn’t load templates. {loadError}</div>}
+      {!templates ? (
+        <div className="text-xs text-ink-4 py-4">Loading…</div>
+      ) : (
+        <ResourceListContainer>
+          {templates.map((t) => {
+            const usedBy = resolveNames(t.referencedBy);
+            return (
+              <ResourceRow
+                key={t.name}
+                icon={<LayoutTemplate size={15} />}
+                name={t.name}
+                badges={t.builtin ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-surface-2 text-ink-3 border border-line">
+                    <Lock size={9} /> built-in
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+                ) : undefined}
+                description={t.description}
+                meta={usedBy.length === 0 ? "unused" : `used by ${usedBy.length}`}
+                metaTitle={usedBy.join(", ")}
+                onClick={() => onSelect?.(t.name)}
+              />
+            );
+          })}
+        </ResourceListContainer>
+      )}
+    </ResourceListPage>
   );
 }
 

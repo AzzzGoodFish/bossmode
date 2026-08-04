@@ -344,7 +344,7 @@ function artifactKind(path: string): "md" | "html" | "file" {
   return "file";
 }
 
-function MessageArtifactChips({
+export function MessageArtifactChips({
   messageId,
   artifacts,
   activeArtifactPreview,
@@ -387,12 +387,12 @@ function MessageArtifactChips({
   );
 }
 
-function shouldShowDateSeparator(prev: RoomMessage | null, current: RoomMessage): boolean {
+export function shouldShowDateSeparator(prev: RoomMessage | null, current: RoomMessage): boolean {
   if (!prev) return true;
   return !isSameLocalDate(prev.ts, current.ts);
 }
 
-function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): boolean {
+export function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): boolean {
   if (!prev) return false;
   if (prev.sender !== current.sender) return false;
   if (current.ts - prev.ts > GROUP_INTERVAL_MS) return false;
@@ -400,7 +400,7 @@ function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): bool
   return true;
 }
 
-function DateSeparator({ ts }: { ts: number }) {
+export function DateSeparator({ ts }: { ts: number }) {
   const formatted = formatMessageDateSeparator(ts);
   return (
     <div className="flex items-center gap-3 my-4">

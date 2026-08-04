@@ -11,6 +11,15 @@ interface MessageInputProps {
   disabled?: boolean;
   roomId?: string;
   onError?: (message: string) => void;
+  /** Override the draft storage key (default `room:${roomId}`). Pass null to disable drafts. */
+  draftKey?: string | null;
+  /** Hide the @ mention autocomplete (e.g. DM — everything activates the member directly). */
+  hideMentions?: boolean;
+  /** Hide paperclip/paste/drop attachment handling (no upload route for this scope yet). */
+  hideAttachments?: boolean;
+  /** Upload scope override (default roomId). Pass "dm:<memberId>" for DM uploads. */
+  uploadScope?: string;
+  placeholder?: string;
 }
 
 /** Format a clipboard image filename: clipboard-YYYYMMDD-HHmmss.png */
@@ -20,8 +29,8 @@ function clipboardFilename(): string {
   return `clipboard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
 }
 
-export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError }: MessageInputProps) {
-  const [value, setValue, clearDraft] = useDraft(roomId ? `room:${roomId}` : null);
+export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder }: MessageInputProps) {
+  const [value, setValue, clearDraft] = useDraft(draftKey !== undefined ? draftKey : roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionIdx, setMentionIdx] = useState(0);
@@ -68,15 +77,16 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   const handleSend = async () => {
     const trimmed = value.trim();
     if (!trimmed && !upload.hasPending) return;
-    if (!roomId && upload.hasPending) return;
+    const scope = uploadScope ?? roomId;
+    if (!scope && upload.hasPending) return;
 
     let content = trimmed;
 
     const attachments: Array<{ storedFilename: string; originalFilename: string; size?: number }> = [];
 
     // Upload pending files
-    if (upload.hasPending && roomId) {
-      const results = await upload.uploadAll(roomId);
+    if (upload.hasPending && scope) {
+      const results = await upload.uploadAll(scope);
       for (const r of results) {
         attachments.push({ storedFilename: r.filename, originalFilename: r.originalFilename, size: r.size });
       }
@@ -99,6 +109,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
 
   const handleChange = (text: string) => {
     setValue(text);
+    if (hideMentions) return;
     const cursorPos = inputRef.current?.selectionStart || text.length;
     const textBeforeCursor = text.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@([\w-]*)$/);
@@ -121,6 +132,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   };
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
+    if (hideAttachments) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageFiles: File[] = [];
@@ -137,9 +149,10 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   const handleDragLeave = useCallback((e: DragEvent) => { e.preventDefault(); setDragOver(false); }, []);
   const handleDrop = useCallback((e: DragEvent) => {
     e.preventDefault(); setDragOver(false);
+    if (hideAttachments) return;
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) upload.addFiles(files);
-  }, [upload.addFiles]);
+  }, [upload.addFiles, hideAttachments]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -210,13 +223,15 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       )}
 
       {/* Attachment upload area */}
-      <AttachmentUploader
-        items={upload.items}
-        onRemove={upload.removeItem}
-        onRetry={upload.retryItem}
-        onCancelAll={upload.cancelAll}
-        disabled={disabled}
-      />
+      {!hideAttachments && (
+        <AttachmentUploader
+          items={upload.items}
+          onRemove={upload.removeItem}
+          onRetry={upload.retryItem}
+          onCancelAll={upload.cancelAll}
+          disabled={disabled}
+        />
+      )}
 
       {/* Drag overlay hint */}
       {dragOver && (
@@ -226,16 +241,20 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       )}
 
       <div className="flex gap-2 items-end">
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || upload.isUploading}
-          className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
-          title="Attach files"
-          aria-label="Attach files"
-        >
-          <Paperclip size={18} />
-        </button>
-        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
+        {!hideAttachments && (
+          <>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || upload.isUploading}
+              className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+              title="Attach files"
+              aria-label="Attach files"
+            >
+              <Paperclip size={18} />
+            </button>
+            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
+          </>
+        )}
 
         <textarea
           ref={inputRef}
@@ -244,7 +263,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={disabled || upload.isUploading}
-          placeholder={upload.isUploading ? "Uploading..." : "Type a message... (@ to mention, Ctrl+V to paste image)"}
+          placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... (@ to mention, Ctrl+V to paste image)")}
           rows={1}
           className="flex-1 bg-inset border border-line rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
                      resize-none focus:outline-none focus:border-line-strong
