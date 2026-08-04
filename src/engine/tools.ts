@@ -14,6 +14,7 @@ import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
 import { getActivationSource } from "./activation-context.js";
+import { isRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 
@@ -184,9 +185,12 @@ export async function handleToolCallback(
         searchOpts.after !== undefined || searchOpts.before !== undefined ||
         searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined;
 
-      const messages: RoomMessage[] = hasFilter
+      const messages: RoomMessage[] = (hasFilter
         ? messageStore.searchMessages(roomId, searchOpts).messages
-        : messageStore.getMessages(roomId, { limit });
+        : messageStore.getMessages(roomId, { limit })
+      // Members never see runtime-failure system notices (same filter as the
+      // activation-context injection path, fish 2026-08-04).
+      ).filter((m) => !isRuntimeFailureRoomMessage(m));
 
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {

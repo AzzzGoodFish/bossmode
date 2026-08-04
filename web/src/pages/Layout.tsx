@@ -143,8 +143,11 @@ export function Layout({ onLogout, username }: LayoutProps) {
     }
 
     if (event.type === "room:message") {
-      // F6: Skip user's own messages
-      if ((event.message as any)?.sender === "user") return;
+      // Skip messages that never badge: user's own, system notices, typed task/knowledge events
+      // (same eligibility as the chats-list unread count, fish 2026-08-04).
+      const msg = event.message as { sender?: string; type?: string } | undefined;
+      if (!msg || msg.sender === "user" || msg.sender === "system") return;
+      if (msg.type === "task_event" || msg.type === "knowledge_event") return;
 
       if (event.roomId !== selectedRoomId) {
         // F1: Different room → Sidebar red dot

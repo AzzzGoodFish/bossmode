@@ -86,6 +86,28 @@ export function useRoom(roomId: string | null) {
     postConversationRead(`room:${roomId}`).catch(() => {});
   }, [roomId]);
 
+  // Follow the read cursor while viewing: realtime appends (not history browsing)
+  // re-report (debounced) so the chats-list unread badge stays in sync —
+  // Feishu semantics: watching a conversation means reading it.
+  useEffect(() => {
+    if (!roomId || inHistoryView || messages.length === 0) return;
+    const t = setTimeout(() => {
+      postConversationRead(`room:${roomId}`).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [roomId, messages, inHistoryView]);
+
+  // Window regaining focus also counts as looking at the conversation.
+  useEffect(() => {
+    if (!roomId) return;
+    const onFocus = () => {
+      if (inHistoryView) return;
+      postConversationRead(`room:${roomId}`).catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [roomId, inHistoryView]);
+
   // Fetch context usage cache once after room is loaded
   useEffect(() => {
     fetchContextUsageCache().catch(console.error);

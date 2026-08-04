@@ -1681,7 +1681,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
   setActivationSource(scopeId, member.name, "private_instruction");
 
   try {
-    const recent = readAllDmMessages(memberId).slice(-40);
+    const recent = readAllDmMessages(memberId).filter((m) => !isRuntimeFailureRoomMessage(m)).slice(-40);
     const transcript = recent
       .map((m) => {
         const who = m.sender === "user" ? "User" : m.sender;
