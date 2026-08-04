@@ -20,7 +20,7 @@ import { parseMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
-import { getMember, getEffectiveConfig } from "../workspace/member-registry.js";
+import { getMember, getEffectiveConfig, findMemberByName } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
@@ -649,12 +649,12 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
     logger.error("agent", "no member or agent definition found", { name: memberRef });
     return null;
   }
-  // 0.20 G3 cutover: overlay global effective-config via ID link (sourceMemberId / globalMemberIds),
-  // never free find-by-name (rename-safe). Unified switches + scope overrides live on the registry.
+  // 0.20: overlay global effective-config when a global member is linked (by name).
+  // Unified switches + scope overrides live on the global registry; room shadow holds legacy fields.
   try {
-    const globalId = roomStore.resolveGlobalMemberId(room, member);
-    if (globalId) {
-      const eff = getEffectiveConfig(globalId, roomScopeId(roomId));
+    const global = findMemberByName(member.name);
+    if (global) {
+      const eff = getEffectiveConfig(global.id, roomScopeId(roomId));
       member = {
         ...member,
         model: eff.model || member.model,

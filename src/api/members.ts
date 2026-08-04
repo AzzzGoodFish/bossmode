@@ -32,6 +32,7 @@ import * as messageStore from "../workspace/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
 import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../shared/types.js";
+import { memberTemplateWarning } from "../workforce/template-lifecycle.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -39,6 +40,7 @@ function publicMember(m: MemberRecord) {
     id: m.id,
     name: m.name,
     agentTemplate: m.agentTemplate,
+    templateWarning: memberTemplateWarning(m.agentTemplate),
     unifiedModel: m.unifiedModel,
     unifiedExtensions: m.unifiedExtensions,
     global: m.global,

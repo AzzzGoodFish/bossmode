@@ -434,25 +434,8 @@ class MemberCredentialStore implements CredentialStore {
     }
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const member = resolveRoomMember(this.roomId, this.memberId);
-    // Prefer room-local credentialId; else G3 ID-link via sourceMemberId / globalMemberIds.
-    let credentialId = member?.credentialId || null;
-    if (!credentialId && member) {
-      try {
-        const roomStore = await import("../workspace/room-store.js");
-        const room = roomStore.getRoom(this.roomId);
-        const globalId = room ? roomStore.resolveGlobalMemberId(room, member) : null;
-        if (globalId) {
-          const { getEffectiveConfig } = await import("../workspace/member-registry.js");
-          const scopeId = `room:${this.roomId}`;
-          const eff = getEffectiveConfig(globalId, scopeId);
-          credentialId = eff.credentialId || null;
-        }
-      } catch {
-        /* fall through */
-      }
-    }
-    if (!credentialId) return null;
-    const profile = getModelCredentialProfile(credentialId);
+    if (!member?.credentialId) return null;
+    const profile = getModelCredentialProfile(member.credentialId);
     if (!profile || !profile.enabled) return null;
     return profile;
   }
