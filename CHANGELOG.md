@@ -4,6 +4,13 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.20.0-rc.3] — 2026-08-04
+
+### Added
+- **Room member management UI**: Room Settings → Members section (invite contacts by memberId, remove with inline confirm, scope memory retained); room header invite picker now uses the 0.20 invite path.
+
+---
+
 ## [0.20.0-rc.2] — 2026-08-04
 
 ### Changed
