@@ -12,7 +12,7 @@ describe("P1 user-language hygiene", () => {
     expect(sidebar).toContain('title="Settings"');
     expect(sidebar).toContain('title: "Extensions"');
     expect(sidebar).not.toContain("Built-in Updates");
-    expect(sidebar).toContain("No Rooms yet. Click + to create one.");
+    expect(sidebar).toContain("No conversations yet.");
     expect(sidebar).not.toMatch(/[\u3400-\u9fff]/u);
   });
 
