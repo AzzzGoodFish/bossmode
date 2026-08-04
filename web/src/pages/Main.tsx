@@ -12,6 +12,7 @@ import {
   addMember as apiAddMember,
 } from "../api/client";
 import { useRoom } from "../hooks/useRoom";
+import { useGlobalMembers } from "../hooks/useGlobalMembers";
 import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
 import { ArtifactPreviewPanel, type MessageArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
@@ -121,24 +122,28 @@ export function Main({
     inHistoryView,
   } = useRoom(selectedRoomId);
 
+  const globalMembers = useGlobalMembers();
   const displayMemberInfos = useMemo(() => {
-    if (room?.roomMembers?.length) {
-      return room.roomMembers.map((member) => ({
-        id: member.id,
-        name: member.name,
-        agent: member.sourceAgent,
-        sourceAgent: member.sourceAgent,
-        roomId: member.roomId || room.id,
-        model: member.config?.model ?? null,
-        thinkingLevel: member.config?.thinkingLevel || "off",
-        avatar: member.avatar,
-        contextLimit: member.config?.contextLimit,
-        credentialId: member.config?.credentialId ?? null,
-        mcpServers: member.config?.mcpServers || [],
-      } as MemberInfo));
+    // 0.20: compose from room.globalMemberIds + contacts (roomMembers array is being removed — G3 debt ②).
+    if (room?.globalMemberIds?.length) {
+      return room.globalMemberIds.map((gid) => {
+        const c = globalMembers.get(gid);
+        return {
+          id: gid,
+          name: c?.name ?? gid.slice(0, 12),
+          agent: c?.agentTemplate ?? "general",
+          sourceAgent: c?.agentTemplate ?? "general",
+          roomId: room.id,
+          model: c?.model ?? null,
+          thinkingLevel: "off",
+          contextLimit: undefined,
+          credentialId: null,
+          mcpServers: [],
+        } as MemberInfo;
+      });
     }
     return (room?.members || []).map((name) => ({ id: name, name, agent: name, sourceAgent: name, thinkingLevel: "off", mcpServers: [] } as MemberInfo));
-  }, [room]);
+  }, [room, globalMembers]);
   const displayMembers = useMemo(() => displayMemberInfos.map((member) => member.name), [displayMemberInfos]);
   const displayMemberAgentHints = useMemo(() => Object.fromEntries(displayMemberInfos.map((member) => [member.name, displayAgentHint(member.agent || member.sourceAgent || member.name)])), [displayMemberInfos]);
   const displayAgentStatus = agentStatus;

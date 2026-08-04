@@ -855,9 +855,10 @@ export interface Room {
   name: string;
   cwd: string;
   members: string[];
+  /** 0.20: authoritative member composition — join via useGlobalMembers(). */
+  globalMemberIds?: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
-  roomMembers?: RoomMemberRecord[];
   /** Provenance: team template this room was instantiated from. */
   template?: { name: string; version: string };
   createdAt: number;
