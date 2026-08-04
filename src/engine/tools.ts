@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
-import { broadcastToRoom } from "../communication/ws.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as taskStore from "../workspace/task-store.js";
@@ -17,7 +16,7 @@ import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
 import { getActivationSource } from "./activation-context.js";
-import { isRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
+import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 
@@ -137,25 +136,12 @@ export async function handleToolCallback(
         }
       }
 
-      // 0.20 DM scope: post to dm-messages, not room bus.
+      // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
       if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-        const memberId = roomId.slice("dm:".length);
-        const { addDmMessage } = await import("../workspace/dm-message-store.js");
-        const msg = addDmMessage(memberId, {
-          sender: agentName,
-          content: message,
-          mentions: [],
-          ...(attachments.length ? { attachments } as any : {}),
-          ...(artifacts.length ? { artifacts } as any : {}),
+        postMessage(roomId, agentName, message, [], {
+          ...(attachments.length ? { attachments } : {}),
+          ...(artifacts.length ? { artifacts } : {}),
         });
-        try {
-          // Reuse room:message shape until WS schema gains dm:message (contract §4).
-          broadcastToRoom(`dm:${memberId}`, {
-            type: "room:message",
-            roomId: `dm:${memberId}`,
-            message: msg as any,
-          } as any);
-        } catch { /* best-effort */ }
         return { ok: true };
       }
 
@@ -208,9 +194,10 @@ export async function handleToolCallback(
       const messages: RoomMessage[] = (hasFilter
         ? messageStore.searchMessages(roomId, searchOpts).messages
         : messageStore.getMessages(roomId, { limit })
-      // Members never see runtime-failure system notices (same filter as the
-      // activation-context injection path, fish 2026-08-04).
-      ).filter((m) => !isRuntimeFailureRoomMessage(m));
+      // Members never see system notices (runtime failures AND non-error system
+      // prompts); typed task/knowledge events stay. Same filter as the
+      // activation-context injection path (fish 2026-08-04).
+      ).filter((m) => !isSystemNoticeHiddenFromMembers(m));
 
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {
@@ -320,7 +307,7 @@ export async function handleToolCallback(
             contentLength: info.contentLength,
             budget: info.budget,
             budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-            message: "Saved. Applies on next member activation or Reload.",
+            message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
           };
         } catch (err: any) {
           return { ok: false, error: err.message || String(err) };
@@ -345,7 +332,7 @@ export async function handleToolCallback(
             contentLength: info.contentLength,
             budget: info.budget,
             budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-            message: "Saved. Applies on next member activation or Reload.",
+            message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
           };
         } catch (err: any) {
           return { ok: false, error: err.message || String(err) };
@@ -378,7 +365,7 @@ export async function handleToolCallback(
           contentLength: principles.contentLength,
           budget,
           budgetHeader: principlesStore.formatBudgetHeader(budget),
-          message: "Saved. Applies on next member activation or Reload.",
+          message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
         };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };

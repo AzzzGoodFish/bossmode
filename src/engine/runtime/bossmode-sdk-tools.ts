@@ -91,7 +91,7 @@ export function createBossmodeSdkTools(opts: {
     defineTool({
       name: "edit_memory",
       label: "Edit Memory",
-      description: "Edit persistent memory by exact text replacement — your own member memory, or the room principles if you are the room leader. oldText must occur exactly once. reason is required (the source of the change). Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars; over-budget edits are rejected with the current full text. Changes apply on next activation or Reload.",
+      description: "Edit persistent memory by exact text replacement — your own member memory, or the room principles if you are the room leader. oldText must occur exactly once. reason is required (the source of the change). Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars; over-budget edits are rejected with the current full text. Changes apply on Reload or a fresh session (a running session keeps its already-compiled prompt).",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         oldText: Type.String({ description: "Exact text to replace. Must occur exactly once." }),
@@ -108,7 +108,7 @@ export function createBossmodeSdkTools(opts: {
     defineTool({
       name: "write_memory",
       label: "Write Memory",
-      description: "Overwrite persistent memory wholesale — your own member memory, or the room principles if you are the room leader. reason is required (the source of the change). Budgets and over-budget rejection same as edit_memory. Changes apply on next activation or Reload.",
+      description: "Overwrite persistent memory wholesale — your own member memory, or the room principles if you are the room leader. reason is required (the source of the change). Budgets and over-budget rejection same as edit_memory. Changes apply on Reload or a fresh session (a running session keeps its already-compiled prompt).",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         content: Type.String({ description: "Full markdown content to save" }),

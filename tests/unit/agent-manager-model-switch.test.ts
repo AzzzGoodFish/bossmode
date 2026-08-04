@@ -541,8 +541,8 @@ describe("agent-manager model hot switch", () => {
       { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: Date.now() },
       { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: Date.now() },
       { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: hidden from pm too', mentions: [], ts: Date.now() },
-      { id: "task", type: "system", sender: "system", content: "[Task] qa moved task to review: **Check this**", mentions: [], ts: Date.now() },
-      { id: "knowledge", type: "system", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: Date.now() },
+      { id: "task", type: "task_event", sender: "system", content: "[Task] qa moved task to review: **Check this**", mentions: [], ts: Date.now() },
+      { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: Date.now() },
       { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: Date.now() },
     ];
 

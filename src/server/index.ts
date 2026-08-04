@@ -13,6 +13,7 @@ import { runPromptMemoryRenameMigration } from "../workspace/prompt-memory-renam
 import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
 import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
+import { runDmPhantomMessagesMigration } from "../workspace/dm-phantom-messages-migration.js";
 import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
@@ -110,6 +111,12 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runMemberStatsBackfillMigration();
   } catch (err) {
     logger.error("server", "member stats backfill migration failed", { error: String(err) });
+  }
+
+  try {
+    runDmPhantomMessagesMigration();
+  } catch (err) {
+    logger.error("server", "dm phantom messages migration failed", { error: String(err) });
   }
 
   try {

@@ -24,6 +24,19 @@ export function isRuntimeFailureRoomMessage(message: { sender: string; content?:
   return MEMBER_RUNTIME_FAILURE_PATTERNS.some((pattern) => pattern.test(content));
 }
 
+/**
+ * Member-perception filter (fish 2026-08-04): members never see system notices
+ * at all — runtime failures AND non-error system prompts (silence notes,
+ * unconfigured hints, length-continuation warnings) are user-facing only.
+ * Typed task/knowledge events stay: they are organization signal members act on.
+ * Applied at all three member-facing history entries (activation injection,
+ * query_room_messages, DM transcript) with the same rule.
+ */
+export function isSystemNoticeHiddenFromMembers(message: { sender: string; type?: string }): boolean {
+  if (message.sender !== "system") return false;
+  return message.type !== "task_event" && message.type !== "knowledge_event";
+}
+
 export function limitRuntimeFailureRoomMessage<T extends { sender: string; content?: string }>(message: T): T {
   if (!isRuntimeFailureRoomMessage(message) || typeof message.content !== "string") return message;
   const content = limitRuntimeErrorMessage(message.content);

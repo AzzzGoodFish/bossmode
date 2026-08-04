@@ -11,7 +11,7 @@ import { resolveMemberExtensionSkillPaths } from "../workspace/extension-store.j
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
-import { isRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
+import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
@@ -71,10 +71,6 @@ function formatRuntimeErrorMessage(error: unknown): string {
   return message;
 }
 
-function isMemberRuntimeFailureMessage(message: RoomMessage): boolean {
-  return isRuntimeFailureRoomMessage(message);
-}
-
 function isMemberConfigured(member: AgentMemberConfig): boolean {
   return Boolean(member.model && member.credentialId);
 }
@@ -84,7 +80,9 @@ function memberUnconfiguredMessage(memberName: string): string {
 }
 
 function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
-  return messages.filter((message) => !isMemberRuntimeFailureMessage(message));
+  // fish 2026-08-04: members never see system notices — neither runtime
+  // failures nor non-error system prompts. Typed task/knowledge events stay.
+  return messages.filter((message) => !isSystemNoticeHiddenFromMembers(message));
 }
 
 interface PendingThinkingSwitch {
@@ -843,90 +841,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         appliedCredentialId: member.credentialId,
       };
 
-      const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
-        if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
-          clearPendingChatReply(instance, `tool:${event.toolName}`);
-        }
-        if (event.type === "agent_start") {
-          instance.turnActive = true;
-          if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
-          updateDispatchState(instance, "running", event.type);
-          flushQueuedInputs(instance, event.type);
-        } else if (event.type === "agent_end") {
-          // Public status may become idle here, but the SDK run can still be finalizing.
-          // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
-          instance.turnActive = false;
-          if (!instance.promptInFlight) {
-            updateDispatchState(instance, "idle", event.type);
-            applyPendingAfterPromptSettlement(instance, event.type);
-            drainQueuedInputsAsPrompt(instance, event.type);
-          } else if (instance.dispatchState === "idle") {
-            applyPendingAfterPromptSettlement(instance, event.type);
-          }
-        } else if (event.type === "compaction_start") {
-          instance.compacting = true;
-          transition(instance, roomId, memberName, "working", event.type);
-        } else if (event.type === "compaction_end") {
-          instance.compacting = false;
-          if (!instance.turnActive) {
-            transition(instance, roomId, memberName, "idle", event.type);
-            drainQueuedInputsAsPrompt(instance, event.type);
-          }
-        } else if (event.type === "runtime_exit" && event.unexpected) {
-          updateDispatchState(instance, "idle", event.type);
-          instance.queuedInputs = [];
-        }
-        if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
-
-        if (event.type === "message_end") {
-          instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
-          if (instance.lastMessageEndWasLength) {
-            instance.lengthContinuationPending = true;
-            logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
-          }
-          // [room] marker speech: if this message's text contains `[room]` followed by
-          // a newline, post the content after the last marker to the room. Checked on
-          // every message_end so members can speak while working, not just at turn end.
-          // Skipped on error turns and on length-truncated intermediate messages (the
-          // final settled message is the one that counts).
-          if (event.stopReason !== "error" && !instance.lastMessageEndWasLength) {
-            const roomText = extractRoomMarkerText(event.text || "");
-            if (roomText !== null) {
-              const members = roomStore.getRoomMembers(roomId);
-              const mentions = parseMentions(roomText, members.map((m: any) => m.name));
-              const target = mentions.length === 1 ? roomStore.resolveRoomMemberRef(roomId, mentions[0]) : undefined;
-              postMessage(roomId, memberName, roomText, mentions, { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
-              clearPendingChatReply(instance, "room_marker");
-              logger.info("agent", "roomMarkerPosted", { member: memberName, roomId, memberId });
-            }
-          }
-        }
-
-        if (event.type === "message_end" && event.stopReason === "error") {
-          instance.hadErrorInTurn = true;
-          const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
-          const detail = formattedError
-            ? ` Error: ${formattedError}`
-            : " An unrecoverable provider error occurred.";
-          logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
-          postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
-        }
-
-        // Unexpected runtime exit: notify room and drop dead instance so next mention respawns.
-        if (event.type === "runtime_exit" && event.unexpected) {
-          const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
-          const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
-          postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
-          logger.warn("agent", "instance removed after unexpected exit", {
-            member: memberName, roomId, code: event.code, signal: event.signal,
-          });
-          if (instances.get(key) === instance) instances.delete(key);
-          try { instance.unsubscribe(); } catch {}
-          try { handle.destroy(); } catch {}
-        }
-      });
-      instance.unsubscribe = unsubscribe;
+      wireInstanceEvents(instance, key, roomId, memberName, memberId);
 
       instances.set(key, instance);
       return instance;
@@ -1490,6 +1405,113 @@ function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
   };
 }
 
+// -- Instance event wiring (single implementation for room and DM scopes) --
+
+/**
+ * THE one instance event subscription. Room and DM instances share this wiring;
+ * the only scope difference is the notification address: `roomId` is the bare
+ * room id for room scope and "dm:<memberId>" for DM scope, and postMessage
+ * routes by that prefix (room store vs member-owned DM store). Failure notices
+ * therefore reach the user in both UIs (G1), and lifecycle handling (length
+ * continuation, compaction, unexpected exit, queued-input draining) cannot
+ * drift between scopes.
+ */
+function wireInstanceEvents(
+  instance: AgentInstance,
+  key: string,
+  roomId: string,
+  memberName: string,
+  memberId: string,
+): void {
+  const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
+    const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
+    if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
+      clearPendingChatReply(instance, `tool:${event.toolName}`);
+    }
+    if (event.type === "agent_start") {
+      instance.turnActive = true;
+      if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
+      updateDispatchState(instance, "running", event.type);
+      flushQueuedInputs(instance, event.type);
+    } else if (event.type === "agent_end") {
+      // Public status may become idle here, but the SDK run can still be finalizing.
+      // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
+      instance.turnActive = false;
+      if (!instance.promptInFlight) {
+        updateDispatchState(instance, "idle", event.type);
+        applyPendingAfterPromptSettlement(instance, event.type);
+        drainQueuedInputsAsPrompt(instance, event.type);
+      } else if (instance.dispatchState === "idle") {
+        applyPendingAfterPromptSettlement(instance, event.type);
+      }
+    } else if (event.type === "compaction_start") {
+      instance.compacting = true;
+      transition(instance, roomId, memberName, "working", event.type);
+    } else if (event.type === "compaction_end") {
+      instance.compacting = false;
+      if (!instance.turnActive) {
+        transition(instance, roomId, memberName, "idle", event.type);
+        drainQueuedInputsAsPrompt(instance, event.type);
+      }
+    } else if (event.type === "runtime_exit" && event.unexpected) {
+      updateDispatchState(instance, "idle", event.type);
+      instance.queuedInputs = [];
+    }
+    if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
+
+    if (event.type === "message_end") {
+      instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
+      if (instance.lastMessageEndWasLength) {
+        instance.lengthContinuationPending = true;
+        logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+      }
+      // [room] marker speech: if this message's text contains `[room]` followed by
+      // a newline, post the content after the last marker to the conversation.
+      // Checked on every message_end so members can speak while working, not just
+      // at turn end. Skipped on error turns and on length-truncated intermediate
+      // messages (the final settled message is the one that counts).
+      // In DM scope there are no room members to mention; the text lands in the
+      // member-owned DM store via the same scope-routed postMessage.
+      if (event.stopReason !== "error" && !instance.lastMessageEndWasLength) {
+        const roomText = extractRoomMarkerText(event.text || "");
+        if (roomText !== null) {
+          const members = roomStore.getRoomMembers(roomId);
+          const mentions = parseMentions(roomText, members.map((m: any) => m.name));
+          const target = mentions.length === 1 ? roomStore.resolveRoomMemberRef(roomId, mentions[0]) : undefined;
+          postMessage(roomId, memberName, roomText, mentions, { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+          clearPendingChatReply(instance, "room_marker");
+          logger.info("agent", "roomMarkerPosted", { member: memberName, roomId, memberId });
+        }
+      }
+    }
+
+    if (event.type === "message_end" && event.stopReason === "error") {
+      instance.hadErrorInTurn = true;
+      const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
+      const detail = formattedError
+        ? ` Error: ${formattedError}`
+        : " An unrecoverable provider error occurred.";
+      logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
+      postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
+    }
+
+    // Unexpected runtime exit: notify the conversation and drop the dead
+    // instance so the next activation respawns it.
+    if (event.type === "runtime_exit" && event.unexpected) {
+      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
+      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
+      postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
+      logger.warn("agent", "instance removed after unexpected exit", {
+        member: memberName, roomId, code: event.code, signal: event.signal,
+      });
+      if (instances.get(key) === instance) instances.delete(key);
+      try { instance.unsubscribe(); } catch {}
+      try { instance.handle.destroy(); } catch {}
+    }
+  });
+  instance.unsubscribe = unsubscribe;
+}
+
 async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
   const scopeId = scopeIdOf({ kind: "dm", memberId });
   const key = dmInstanceKey(memberId);
@@ -1557,21 +1579,15 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         roomMembers: [member.name],
         callbacks: {
           onChat: async (message: string) => {
-            const { addDmMessage } = await import("../workspace/dm-message-store.js");
-            const msg = addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
-            try {
-              broadcastToRoom(`dm:${memberId}`, { type: "room:message", roomId: `dm:${memberId}`, message: msg });
-            } catch { /* best-effort */ }
+            // Single egress: scope-routed postMessage writes the member-owned DM
+            // store, broadcasts to dm:<id> subscribers, and notifies listeners.
+            postMessage(syntheticRoomId, member.name, message);
             const active = instances.get(key);
             if (active) clearPendingChatReply(active, "callback:chat-dm");
           },
           onMention: async (_target: string, message: string) => {
             // DM has no @ routing — treat as normal chat.
-            const { addDmMessage } = await import("../workspace/dm-message-store.js");
-            const msg = addDmMessage(memberId, { sender: member.name, content: message, mentions: [] });
-            try {
-              broadcastToRoom(`dm:${memberId}`, { type: "room:message", roomId: `dm:${memberId}`, message: msg });
-            } catch { /* best-effort */ }
+            postMessage(syntheticRoomId, member.name, message);
             const active = instances.get(key);
             if (active) clearPendingChatReply(active, "callback:mention-dm");
           },
@@ -1602,31 +1618,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         appliedCredentialId: member.credentialId,
       };
 
-      const unsubscribe = handle.subscribe((event: AgentStreamEvent) => {
-        const newStatus = processEvent(
-          syntheticRoomId,
-          member.name,
-          key,
-          event,
-          instance.eventBuffer,
-          memberId,
-          instance.appliedModel,
-        );
-        if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
-          clearPendingChatReply(instance, `tool:${event.toolName}`);
-        }
-        if (event.type === "agent_start") {
-          instance.turnActive = true;
-          updateDispatchState(instance, "running", event.type);
-          flushQueuedInputs(instance, event.type);
-        } else if (event.type === "agent_end") {
-          instance.turnActive = false;
-        }
-        if (newStatus && newStatus !== instance.status) {
-          transition(instance, syntheticRoomId, member.name, newStatus, event.type);
-        }
-      });
-      instance.unsubscribe = unsubscribe;
+      wireInstanceEvents(instance, key, syntheticRoomId, member.name, memberId);
 
       instances.set(key, instance);
       logger.info("agent", "dmAgentCreated", { member: member.name, memberId, scopeId });
@@ -1637,6 +1629,8 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         memberId,
         error: formatRuntimeErrorMessage(err),
       });
+      // User-visible in the DM UI (G1); rooms post the same class of notice.
+      postMessage(syntheticRoomId, "system", `Failed to create member "${member.name}": ${formatRuntimeErrorMessage(err)}`);
       return null;
     }
   })();
@@ -1662,17 +1656,21 @@ export async function activateDmMember(memberId: string): Promise<void> {
   const member = memberRecordToConfig(memberId);
   if (!member || !isMemberConfigured(member)) {
     logger.warn("agent", "activateDmMember: unconfigured", { memberId, name: rec.name });
+    // User-visible, same as the room mention path (G1: no silent DM failures).
+    postMessage(scopeIdOf({ kind: "dm", memberId }), "system", memberUnconfiguredMessage(rec.name));
     return;
   }
 
   const instance = await getOrCreateDm(memberId);
+  // Null already produced a user-visible notice on every path that matters
+  // (creation failure posted inside getOrCreateDm; unconfigured handled above).
   if (!instance) return;
 
   const scopeId = instance.scopeId;
   setActivationSource(scopeId, member.name, "private_instruction");
 
   try {
-    const recent = readAllDmMessages(memberId).filter((m) => !isRuntimeFailureRoomMessage(m)).slice(-40);
+    const recent = readAllDmMessages(memberId).filter((m) => !isSystemNoticeHiddenFromMembers(m)).slice(-40);
     const transcript = recent
       .map((m) => {
         const who = m.sender === "user" ? "User" : m.sender;
