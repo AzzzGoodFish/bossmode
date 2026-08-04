@@ -96,6 +96,40 @@ describe("member credential store live-read", () => {
     mod.setPiCatalogModelsForTests(null);
   });
 
+  it("0.20 DM scope: reads credential from global member effective-config (not room binding)", async () => {
+    const mod = await import("../../src/engine/model-credentials.js");
+    await mod.ensurePiCatalogWarm();
+    mod.setPiCatalogModelsForTests([
+      { provider: "anthropic", id: "claude-a", name: "Claude A", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, input: ["text"] },
+    ]);
+    const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-DM-KEY", name: "DM Key" });
+
+    // No room binding — boundMember stays null (room path would fail).
+    boundMember = null;
+
+    const reg = await import("../../src/workspace/member-registry.js");
+    const member = reg.createMember({
+      name: "alice",
+      agentTemplate: "general",
+      model: "anthropic/claude-a",
+      credentialId: profile.id,
+    });
+
+    const scopeId = `dm:${member.id}`;
+    const store = mod.createMemberCredentialStore(scopeId, member.id);
+
+    // This is the G2 e2e failure path: without DM scope support, read returns undefined.
+    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-DM-KEY" });
+    expect(await store.list()).toEqual([{ providerId: "anthropic", type: "api_key" }]);
+
+    // Room path still uses room binding (regression).
+    boundMember = { id: "rm_dev", name: "dev", credentialId: profile.id };
+    const roomStore = mod.createMemberCredentialStore("room-1", "rm_dev");
+    expect(await roomStore.read("anthropic")).toEqual({ type: "api_key", key: "sk-DM-KEY" });
+
+    mod.setPiCatalogModelsForTests(null);
+  });
+
   it("materializes all enabled providers into models.json without secrets", async () => {
     const mod = await import("../../src/engine/model-credentials.js");
     const openrouter = mod.saveModelCredentialProfile({
