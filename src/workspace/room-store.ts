@@ -7,6 +7,7 @@ import type { CreateRoomMemberInput, Room, CursorMap, RoomLinearIntegration, Roo
 import { getMemberByName } from "../workforce/member-store.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { copyTeamTemplateTo, writeTeamPackage } from "./team-store.js";
+import { getMember } from "./member-registry.js";
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { join as fsJoin } from "node:path";
 
@@ -300,8 +301,51 @@ export function stampGlobalMemberIds(
   } else if (promptLeaderGlobalMemberId === null) {
     delete room.promptLeaderGlobalMemberId;
   }
+  // ID-link cutover: stamp sourceMemberId on local roomMembers by matching names
+  // only among the provided globalMemberIds (never free find-by-name across all members).
+  linkRoomMembersToGlobalIds(room);
   writeRoom(room);
   return room;
+}
+
+/**
+ * Resolve the global mem_* id for a local room member.
+ * Priority: sourceMemberId (if mem_*) → match name within room.globalMemberIds only.
+ * Never falls back to global name search outside globalMemberIds (rename-safe).
+ */
+export function resolveGlobalMemberId(
+  room: Room,
+  local: Pick<RoomMemberRecord, "id" | "name" | "sourceMemberId">,
+): string | null {
+  if (local.sourceMemberId && /^mem_/.test(local.sourceMemberId)) {
+    // Prefer explicit link even if globalMemberIds not yet stamped (invite race).
+    return local.sourceMemberId;
+  }
+  const ids = room.globalMemberIds || [];
+  if (ids.length === 0) return null;
+  for (const id of ids) {
+    const g = getMember(id);
+    if (g && g.name === local.name) return g.id;
+  }
+  return null;
+}
+
+/** Stamp sourceMemberId on each roomMember from room.globalMemberIds name match. */
+function linkRoomMembersToGlobalIds(room: Room): void {
+  if (!Array.isArray(room.roomMembers) || room.roomMembers.length === 0) return;
+  const ids = room.globalMemberIds || [];
+  if (ids.length === 0) return;
+  const byName = new Map<string, string>();
+  for (const id of ids) {
+    const g = getMember(id);
+    if (g) byName.set(g.name, g.id);
+  }
+  room.roomMembers = room.roomMembers.map((m) => {
+    if (m.sourceMemberId && /^mem_/.test(m.sourceMemberId)) return m;
+    const gid = byName.get(m.name);
+    if (!gid) return m;
+    return { ...m, sourceMemberId: gid, updatedAt: Date.now() };
+  });
 }
 
 export function deleteRoom(roomId: string): boolean {
@@ -783,8 +827,10 @@ export function inviteGlobalMember(
       config: global.config,
     });
     if (!added.ok) return added;
+    // ID link: stamp sourceMemberId on the local shadow + globalMemberIds.
+    const stamped = stampLocalSourceMemberId(roomId, added.member.id, global.id);
     addGlobalMemberId(roomId, global.id);
-    return added;
+    return stamped ? { ok: true, member: stamped } : added;
   }
 
   const member = buildDirectRoomMemberFromAgent(roomId, {
@@ -792,11 +838,26 @@ export function inviteGlobalMember(
     memberName,
     config: global.config,
   });
+  member.sourceMemberId = global.id;
   room.roomMembers = [...getRoomMembersFromRoom(room), member];
   room.globalMemberIds = [...new Set([...(room.globalMemberIds || []), global.id])];
   writeRoom(room);
   initializeMemberCursor(roomId, member.id);
   return { ok: true, member };
+}
+
+/** Set sourceMemberId on an existing local room member (ID-link cutover). */
+function stampLocalSourceMemberId(roomId: string, localMemberId: string, globalMemberId: string): RoomMemberRecord | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  let found: RoomMemberRecord | null = null;
+  room.roomMembers = getRoomMembersFromRoom(room).map((m) => {
+    if (m.id !== localMemberId) return m;
+    found = { ...m, sourceMemberId: globalMemberId, updatedAt: Date.now() };
+    return found!;
+  });
+  if (found) writeRoom(room);
+  return found;
 }
 
 export function removeRoomMemberByRef(
