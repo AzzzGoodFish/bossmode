@@ -14,6 +14,7 @@ import { TeamsPage } from "./TeamsPage";
 import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
+import { MemberCreatePage } from "./MemberCreatePage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
@@ -325,6 +326,13 @@ export function Layout({ onLogout, username }: LayoutProps) {
         {activePage?.type === "contacts" && (
           <ContactsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
+            onCreateMember={() => handleNavigate({ type: "member-create" })}
+          />
+        )}
+        {activePage?.type === "member-create" && (
+          <MemberCreatePage
+            onBack={() => handleNavigate({ type: "contacts" })}
+            onCreated={(memberId) => handleNavigate({ type: "dm", memberId })}
           />
         )}
         {activePage?.type === "dm" && (

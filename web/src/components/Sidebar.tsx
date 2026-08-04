@@ -16,6 +16,7 @@ export type ActivePage =
   | { type: "chats" }
   | { type: "contacts" }
   | { type: "dm"; memberId: string }
+  | { type: "member-create" }
   | { type: "room"; id: string }
   | { type: "team"; name: string | null }
   | { type: "agent"; name: string | null }
@@ -34,6 +35,7 @@ export function domainOf(page: ActivePage): Domain {
       return "chats";
     case "contacts":
     case "dm":
+    case "member-create":
       return "contacts";
     case "team":
     case "agent":

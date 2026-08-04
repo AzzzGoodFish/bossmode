@@ -1507,7 +1507,8 @@ export interface MemberDetail {
 }
 
 export async function getMemberDetail(id: string): Promise<MemberDetail> {
-  return apiFetch(`/api/members/${encodeURIComponent(id)}`);
+  const res = await apiFetch<{ member: MemberDetail }>(`/api/members/${encodeURIComponent(id)}`);
+  return res.member;
 }
 
 export interface DmMessage {
@@ -1558,4 +1559,35 @@ export interface ChatEntry {
 
 export async function getChats(): Promise<{ chats: ChatEntry[] }> {
   return apiFetch("/api/chats");
+}
+
+// -- 0.20: member creation + archive import --
+
+export interface CreateMemberInput {
+  name: string;
+  agentTemplate: string;
+  model?: string;
+  credentialId?: string;
+  thinkingLevel?: string;
+  unifiedModel?: boolean;
+  unifiedExtensions?: boolean;
+  importFromArchive?: string;
+}
+
+export async function createGlobalMember(input: CreateMemberInput): Promise<{ member: MemberDetail }> {
+  return apiFetch("/api/members", { method: "POST", body: JSON.stringify(input) });
+}
+
+export interface ArchiveEntry {
+  name: string;
+  template: string;
+  hasPersona: boolean;
+  roomScopes: Array<{ room: string; hasPrinciples: boolean; hasMainline: boolean }>;
+  archivePath: string;
+  credentialHint?: string;
+  kind: "legacy" | "fired";
+}
+
+export async function getMemberArchiveList(): Promise<{ archives: ArchiveEntry[] }> {
+  return apiFetch("/api/members/archive-list");
 }
