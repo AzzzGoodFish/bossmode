@@ -132,10 +132,11 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
   }
 
   // Auth check (skip login endpoint only)
-  // Attachment GET routes skip auth — filenames are sha256 hashes (unguessable), roomIds are UUIDs.
+  // Attachment GET routes skip auth — filenames are sha256 hashes (unguessable), roomIds/memberIds are UUIDs.
   // Browser <img src> and <a download> don't send Authorization headers.
+  // Covers room and DM download routes (0.20 rc.5: DM attachments are member-owned).
   // See TD-A18 for long-term cookie-session migration plan.
-  const isAttachmentGet = req.method === "GET" && /^\/api\/rooms\/[^/]+\/attachments\//.test(url);
+  const isAttachmentGet = req.method === "GET" && /^\/api\/(rooms|dm)\/[^/]+\/attachments\//.test(url);
   if (url !== "/api/auth/login" && !isAttachmentGet && !requireAuth(req.headers)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
