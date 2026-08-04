@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { memberDir } from "./member-registry.js";
 import { scopeDirName, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { parseJsonlLines } from "../shared/jsonl.js";
 import {
   AssetBudgetError,
   PRINCIPLES_MEMBER_MAX_CHARS,
@@ -123,6 +124,24 @@ export function writeMemoryLayer(
   return { content };
 }
 
+/** Exact-text replacement edit — oldText must occur exactly once. */
+export function editMemoryLayer(
+  memberId: string,
+  layer: MemoryLayer,
+  oldText: string,
+  newText: string,
+  actor: MemoryActor,
+  opts: { scopeId?: ScopeId; reason?: string } = {},
+): { content: string } {
+  if (!oldText) throw new Error("oldText is required");
+  const current = readMemoryLayer(memberId, layer, opts.scopeId).content;
+  const first = current.indexOf(oldText);
+  if (first === -1) throw new Error("oldText not found in current content");
+  if (current.indexOf(oldText, first + 1) !== -1) throw new Error("oldText must occur exactly once");
+  const next = current.slice(0, first) + newText + current.slice(first + oldText.length);
+  return writeMemoryLayer(memberId, layer, next, actor, { ...opts, operation: "edit" });
+}
+
 /** Ensure skeleton files exist (empty templates) for a member + optional scope. */
 export function ensureMemorySkeleton(memberId: string, scopeId?: ScopeId): void {
   const root = memoryRoot(memberId);
@@ -145,4 +164,51 @@ export function ensureMemorySkeleton(memberId: string, scopeId?: ScopeId): void 
 
 export function formatMemoryBudgetHeader(layer: MemoryLayer, contentLength: number): string {
   return formatBudgetHeader(computeAssetBudget(contentLength, budgetLimit(layer)));
+}
+
+export interface MemoryLayerInfo {
+  content: string;
+  revision: number;
+  contentHash: string;
+  contentLength: number;
+  updatedAt: number | null;
+  updatedBy: "user" | "member" | null;
+  updatedByMemberId?: string;
+  updatedByName?: string;
+  budget: ReturnType<typeof computeAssetBudget>;
+}
+
+interface MemoryHistoryEvent {
+  ts?: number;
+  actorType?: "user" | "member";
+  actorMemberId?: string;
+  actorName?: string;
+}
+
+/**
+ * Read a layer with revision/audit metadata synthesized from its history log
+ * (revision = number of persisted write events; last event carries writer + ts).
+ * This is the read shape the memory tools and member-asset APIs expose.
+ */
+export function readMemoryLayerInfo(memberId: string, layer: MemoryLayer, scopeId?: ScopeId): MemoryLayerInfo {
+  const { content, meta } = readMemoryLayer(memberId, layer, scopeId);
+  const hp = historyPath(memberId, layer, scopeId);
+  const events = existsSync(hp)
+    ? parseJsonlLines<MemoryHistoryEvent>(readFileSync(hp, "utf-8"), {
+        category: "member-memory-store",
+        context: { memberId, layer, scopeId },
+      })
+    : [];
+  const last = events.length > 0 ? events[events.length - 1] : undefined;
+  return {
+    content,
+    revision: events.length,
+    contentHash: createHash("sha256").update(content, "utf8").digest("hex"),
+    contentLength: content.length,
+    updatedAt: last?.ts ?? null,
+    updatedBy: last?.actorType ?? null,
+    updatedByMemberId: last?.actorMemberId,
+    updatedByName: last?.actorName,
+    budget: meta.budget,
+  };
 }

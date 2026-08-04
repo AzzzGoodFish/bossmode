@@ -10,6 +10,9 @@ import * as roomStore from "../workspace/room-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
+import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
+import { getMember } from "../workspace/member-registry.js";
+import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions } from "../communication/router.js";
@@ -19,6 +22,23 @@ import type { RoomMessage } from "../shared/types.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
+
+/**
+ * 0.20: tool `roomId` is the runtime scope key — a plain room id for room
+ * scope, `dm:<memberId>` for DM scope. Member memory layers live in the
+ * member-global store keyed by ScopeId (contract §6).
+ */
+function toolScopeId(roomId: string): ScopeId {
+  return roomId.startsWith("dm:") ? roomId : `room:${roomId}`;
+}
+
+function resolveMemoryActor(roomId: string, agentName: string): { id: string; name: string } | null {
+  if (roomId.startsWith("dm:")) {
+    const member = getMember(roomId.slice("dm:".length));
+    return member ? { id: member.id, name: member.name } : null;
+  }
+  return roomStore.resolveRoomMemberRef(roomId, agentName);
+}
 
 function mentionIdsFromNames(message: string, roomMembers: Array<{ id: string; name: string }>): string[] {
   const byName = new Map(roomMembers.map((member) => [member.name, member.id]));
@@ -201,33 +221,55 @@ export async function handleToolCallback(
       return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts, seq: m.seq }));
     }
     case "read_memory": {
-      const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
+      const actor = resolveMemoryActor(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const asset = String(params?.asset || "");
       if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
       const scope = String(params?.scope || "member");
       if (asset === "mainline") {
         if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
-        const mainline = mainlineStore.readMainlineWithBudget(roomId, actor.id);
+        const info = readMemoryLayerInfo(actor.id, "mainline", toolScopeId(roomId));
+        const content = roomId.startsWith("dm:") ? info.content : mainlineStore.resolveMainlineRefs(roomId, info.content);
         return {
           ok: true,
           asset,
           scope: "member",
-          content: mainlineStore.resolveMainlineRefs(roomId, mainline.content),
-          revision: mainline.revision,
-          contentHash: mainline.contentHash,
-          contentLength: mainline.contentLength,
-          updatedAt: mainline.updatedAt,
-          updatedBy: mainline.updatedBy,
-          updatedByMemberId: mainline.updatedByMemberId,
-          updatedByName: mainline.updatedByName,
-          budget: mainline.budget,
-          budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
-          suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
+          content,
+          revision: info.revision,
+          contentHash: info.contentHash,
+          contentLength: info.contentLength,
+          updatedAt: info.updatedAt,
+          updatedBy: info.updatedBy,
+          updatedByMemberId: info.updatedByMemberId,
+          updatedByName: info.updatedByName,
+          budget: info.budget,
+          budgetHeader: principlesStore.formatBudgetHeader(info.budget),
+          suggestedTemplate: info.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
         };
       }
       if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
-      const principles = principlesStore.readPrinciplesWithBudget(roomId, scope, scope === "member" ? actor.id : undefined);
+      if (scope === "member") {
+        const info = readMemoryLayerInfo(actor.id, "principles", toolScopeId(roomId));
+        return {
+          ok: true,
+          asset,
+          scope,
+          content: info.content,
+          revision: info.revision,
+          contentHash: info.contentHash,
+          contentLength: info.contentLength,
+          updatedAt: info.updatedAt,
+          updatedBy: info.updatedBy,
+          updatedByMemberId: info.updatedByMemberId,
+          updatedByName: info.updatedByName,
+          budget: info.budget,
+          budgetHeader: principlesStore.formatBudgetHeader(info.budget),
+          suggestedTemplate: info.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE,
+        };
+      }
+      // Room principles — room-level shared asset, still room-keyed (contract §6).
+      if (roomId.startsWith("dm:")) return { ok: false, error: "Room principles are not available in a DM scope" };
+      const principles = principlesStore.readPrinciplesWithBudget(roomId, "room");
       return {
         ok: true,
         asset,
@@ -247,32 +289,33 @@ export async function handleToolCallback(
     }
     case "write_memory":
     case "edit_memory": {
-      const actor = roomStore.resolveRoomMemberRef(roomId, agentName);
+      const actor = resolveMemoryActor(roomId, agentName);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
-      const room = roomStore.getRoom(roomId);
-      if (!room) return { ok: false, error: "Room not found" };
       const asset = String(params?.asset || "");
       if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
       const scope = String(params?.scope || "member");
       const reason = String(params?.reason ?? "").trim();
       if (!reason) return { ok: false, error: "reason is required — record the source of this change (user feedback, a decision, or curation)" };
+      const memoryActor = { type: "member" as const, memberId: actor.id, name: actor.name };
       if (asset === "mainline") {
         if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
         try {
-          const common = { roomId, memberId: actor.id, actor: { type: "member" as const, memberId: actor.id, name: actor.name }, reason };
-          const mainline = tool === "write_memory"
-            ? mainlineStore.writeMainline({ ...common, content: String(params?.content ?? "") })
-            : mainlineStore.editMainline({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
-          const budget = mainlineStore.readMainlineWithBudget(roomId, actor.id).budget;
+          const scopeId = toolScopeId(roomId);
+          if (tool === "write_memory") {
+            writeMemoryLayer(actor.id, "mainline", String(params?.content ?? ""), memoryActor, { scopeId, reason, operation: "write" });
+          } else {
+            editMemoryLayer(actor.id, "mainline", String(params?.oldText ?? ""), String(params?.newText ?? ""), memoryActor, { scopeId, reason });
+          }
+          const info = readMemoryLayerInfo(actor.id, "mainline", scopeId);
           return {
             ok: true,
             asset,
             scope: "member",
-            revision: mainline.revision,
-            contentHash: mainline.contentHash,
-            contentLength: mainline.contentLength,
-            budget,
-            budgetHeader: principlesStore.formatBudgetHeader(budget),
+            revision: info.revision,
+            contentHash: info.contentHash,
+            contentLength: info.contentLength,
+            budget: info.budget,
+            budgetHeader: principlesStore.formatBudgetHeader(info.budget),
             message: "Saved. Applies on next member activation or Reload.",
           };
         } catch (err: any) {
@@ -280,22 +323,48 @@ export async function handleToolCallback(
         }
       }
       if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
-      if (scope === "room") {
-        if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room principles writes are disabled" };
-        if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room principles" };
+      if (scope === "member") {
+        try {
+          const scopeId = toolScopeId(roomId);
+          if (tool === "write_memory") {
+            writeMemoryLayer(actor.id, "principles", String(params?.content ?? ""), memoryActor, { scopeId, reason, operation: "write" });
+          } else {
+            editMemoryLayer(actor.id, "principles", String(params?.oldText ?? ""), String(params?.newText ?? ""), memoryActor, { scopeId, reason });
+          }
+          const info = readMemoryLayerInfo(actor.id, "principles", scopeId);
+          return {
+            ok: true,
+            asset,
+            scope,
+            revision: info.revision,
+            contentHash: info.contentHash,
+            contentLength: info.contentLength,
+            budget: info.budget,
+            budgetHeader: principlesStore.formatBudgetHeader(info.budget),
+            message: "Saved. Applies on next member activation or Reload.",
+          };
+        } catch (err: any) {
+          return { ok: false, error: err.message || String(err) };
+        }
       }
+      // Room principles — room-level shared asset, still room-keyed; leader-only writes.
+      if (roomId.startsWith("dm:")) return { ok: false, error: "Room principles are not available in a DM scope" };
+      const room = roomStore.getRoom(roomId);
+      if (!room) return { ok: false, error: "Room not found" };
+      if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room principles writes are disabled" };
+      if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room principles" };
       try {
         const common = {
           roomId,
-          scope: scope as principlesStore.PrinciplesScope,
-          memberId: scope === "member" ? actor.id : undefined,
-          actor: { type: "member" as const, memberId: actor.id, name: actor.name },
+          scope: "room" as principlesStore.PrinciplesScope,
+          memberId: undefined,
+          actor: memoryActor,
           reason,
         };
         const principles = tool === "write_memory"
           ? principlesStore.writePrinciples({ ...common, content: String(params?.content ?? "") })
           : principlesStore.editPrinciples({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
-        const budget = principlesStore.readPrinciplesWithBudget(roomId, scope as principlesStore.PrinciplesScope, scope === "member" ? actor.id : undefined).budget;
+        const budget = principlesStore.readPrinciplesWithBudget(roomId, "room").budget;
         return {
           ok: true,
           asset,
