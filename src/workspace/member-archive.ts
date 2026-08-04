@@ -140,10 +140,23 @@ export function importMemberFromArchive(opts: {
     if (mj?.agentTemplate) template = opts.agentTemplate || mj.agentTemplate;
     if (cred == null && mj?.global?.credentialId) cred = mj.global.credentialId;
   } else {
-    // legacy: try rooms/*/memory/members/*/principles.md — take newest as persona seed is done by migration writer;
-    // for skeleton import we accept empty persona if not present.
-    const legacyPersona = join(full, "persona", `${opts.name}.md`);
-    if (existsSync(legacyPersona)) persona = readFileSync(legacyPersona, "utf-8");
+    // legacy archive: prefer manifest.principlesPath (absolute path into archive snapshot),
+    // else scan rooms/*/memory/members for matching name principles.
+    const manifest = readJsonIfExists<{
+      members?: Array<{ name: string; sourceAgent?: string; principlesPath?: string; credentialId?: string }>;
+    }>(join(full, "manifest.json"));
+    const entry = manifest?.members?.find((m) => m.name === opts.name);
+    if (entry?.sourceAgent && !opts.agentTemplate) template = entry.sourceAgent;
+    if (cred == null && entry?.credentialId) cred = entry.credentialId;
+    if (entry?.principlesPath && existsSync(entry.principlesPath)) {
+      persona = readFileSync(entry.principlesPath, "utf-8");
+    } else if (entry?.principlesPath) {
+      // principlesPath may be absolute pre-archive; try relative under archive rooms/
+      const relTry = entry.principlesPath.includes("/rooms/")
+        ? join(full, "rooms", entry.principlesPath.split("/rooms/").pop()!)
+        : "";
+      if (relTry && existsSync(relTry)) persona = readFileSync(relTry, "utf-8");
+    }
   }
 
   const rec = createMember({

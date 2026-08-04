@@ -178,9 +178,8 @@ describe("member-global migration", () => {
     rmSync(state.dir, { recursive: true, force: true });
   });
 
-  it("snapshots rooms, creates global members by name, stamps globalMemberIds, is idempotent", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    // Minimal legacy room on disk (avoid agent-store module-level path capture).
+  it("archives only — no auto member create; manifest lists names; idempotent", async () => {
+    const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
     const roomId = "room-test-1";
     const roomDir = join(state.dir, "rooms", roomId);
     mkdirSync(join(roomDir, "memory", "members", "rm_pm"), { recursive: true });
@@ -207,24 +206,22 @@ describe("member-global migration", () => {
     const mig = await import("../../src/workspace/member-global-migration.js");
     const first = mig.runMemberGlobalMigration();
     expect(first.skipped).toBe(false);
-    expect(first.createdMembers).toBe(2);
-    expect(first.roomsStamped).toBe(1);
+    expect(first.archivedMembers).toBe(2);
+    expect(first.archivedRooms).toBe(1);
     expect(first.archivePath).toMatch(/legacy-0.19-/);
+    expect(existsSync(join(state.dir, first.archivePath!, "manifest.json"))).toBe(true);
 
+    // No automatic member creation (spec §十一)
     const reg = await import("../../src/workspace/member-registry.js");
-    const globalPm = reg.findMemberByName("pm");
-    expect(globalPm).toBeTruthy();
-    const mem = await import("../../src/workspace/member-memory-store.js");
-    expect(mem.readMemoryLayer(globalPm!.id, "persona").content).toMatch(/Lead well/);
-
+    expect(reg.listMembers()).toHaveLength(0);
     const roomStore = await import("../../src/workspace/room-store.js");
-    const stamped = roomStore.getRoom(roomId)!;
-    expect(stamped.globalMemberIds?.length).toBe(2);
-    expect(stamped.promptLeaderGlobalMemberId).toBe(globalPm!.id);
+    expect(roomStore.getRoom(roomId)!.globalMemberIds).toBeUndefined();
+
+    const manifest = JSON.parse(readFileSync(join(state.dir, first.archivePath!, "manifest.json"), "utf8"));
+    expect(manifest.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);
 
     const second = mig.runMemberGlobalMigration();
     expect(second.skipped).toBe(true);
-    expect(reg.listMembers()).toHaveLength(2);
   });
 });
 
@@ -278,18 +275,25 @@ describe("chats aggregation helpers + invite dual-write", () => {
     expect(roomStore.getRoomMembers(roomId)).toHaveLength(0);
   });
 
-  it("dm unread counts messages after cursor", async () => {
+  it("user read cursor drives unread after mark-read", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const dm = await import("../../src/workspace/dm-message-store.js");
+    const cursors = await import("../../src/workspace/user-read-cursors.js");
+    const { scopeIdOf } = await import("../../src/shared/conversation-ref.js");
     const m = reg.createMember({ name: "chatty", agentTemplate: "general" });
+    const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
     const a = dm.addDmMessage(m.id, { sender: "user", content: "hi", mentions: [] });
-    dm.addDmMessage(m.id, { sender: "chatty", content: "yo", mentions: [], senderMemberId: m.id });
+    dm.addDmMessage(m.id, { sender: "chatty", content: "yo @fish", mentions: [], senderMemberId: m.id });
     dm.addDmMessage(m.id, { sender: "chatty", content: "again", mentions: [], senderMemberId: m.id });
-    dm.setDmCursor(m.id, { messageId: a.id, seq: a.seq ?? 1 });
+
+    // No user cursor yet → all non-user messages unread
     const msgs = dm.readAllDmMessages(m.id);
-    const cursor = dm.getDmCursor(m.id);
-    const after = msgs.filter((msg) => typeof msg.seq === "number" && cursor.seq != null && msg.seq > cursor.seq);
+    expect(msgs.filter((x) => x.sender !== "user")).toHaveLength(2);
+
+    cursors.setUserReadCursor(scopeId, { messageId: a.id, seq: a.seq ?? 1 });
+    const c = cursors.getUserReadCursor(scopeId)!;
+    const after = msgs.filter((msg) => typeof msg.seq === "number" && c.seq != null && msg.seq > c.seq && msg.sender !== "user");
     expect(after).toHaveLength(2);
-    expect(after.every((msg) => msg.sender === "chatty")).toBe(true);
+    expect(after.some((msg) => msg.content.includes("@fish"))).toBe(true);
   });
 });

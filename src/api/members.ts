@@ -25,11 +25,12 @@ import {
   readAllDmMessages,
   addDmMessage,
   getLatestDmSeq,
-  getDmCursor,
 } from "../workspace/dm-message-store.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
+import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
+import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../shared/types.js";
 
 function publicMember(m: MemberRecord) {
@@ -68,12 +69,12 @@ function summarizeMessage(m: RoomMessage | undefined): { sender: string; text: s
   return { sender: m.sender, text, ts: m.ts };
 }
 
-function countUnreadAndMention(
+/** Unread/mention for the human user (not member agent cursors). */
+function countUserUnreadAndMention(
   messages: RoomMessage[],
   cursorId: string | null,
   cursorSeq: number | null,
-  selfNames: Set<string>,
-  selfIds: Set<string>,
+  userLoginName: string,
 ): { unreadCount: number; mentioned: boolean } {
   let start = 0;
   if (cursorSeq != null) {
@@ -84,15 +85,22 @@ function countUnreadAndMention(
     start = idx === -1 ? 0 : idx + 1;
   }
   const slice = messages.slice(start);
-  let mentioned = false;
-  for (const m of slice) {
-    if (m.sender === "user" || m.sender === "system") continue;
-    if (m.mentionMemberIds?.some((id) => selfIds.has(id))) mentioned = true;
-    if (m.mentions?.some((n) => selfNames.has(n))) mentioned = true;
-  }
-  // Unread = messages after cursor not sent by user (rough chat-app semantics)
+  // Unread = non-user messages after the user's read cursor
   const unreadCount = slice.filter((m) => m.sender !== "user").length;
+  // v1 mention approx: text contains @<loginName>
+  const needle = userLoginName ? `@${userLoginName}` : "";
+  const mentioned = needle
+    ? slice.some((m) => m.sender !== "user" && typeof m.content === "string" && m.content.includes(needle))
+    : false;
   return { unreadCount, mentioned };
+}
+
+function userLoginName(): string {
+  try {
+    return String((readConfig() as any).username || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 // ── Chats (unified conversation list) ──
@@ -101,6 +109,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
   try {
     const members = listMembers();
     const rooms = roomStore.listRooms();
+    const login = userLoginName();
     const chats: Array<{
       scopeId: string;
       kind: "dm" | "room";
@@ -112,18 +121,18 @@ addRoute("GET", "/api/chats", async (_req, res) => {
     }> = [];
 
     for (const m of members) {
+      const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
       const msgs = readAllDmMessages(m.id);
       const last = msgs[msgs.length - 1];
-      const cursor = getDmCursor(m.id);
-      const { unreadCount, mentioned } = countUnreadAndMention(
+      const cursor = getUserReadCursor(scopeId);
+      const { unreadCount, mentioned } = countUserUnreadAndMention(
         msgs,
-        cursor.messageId,
-        cursor.seq,
-        new Set([m.name]),
-        new Set([m.id]),
+        cursor?.messageId ?? null,
+        cursor?.seq ?? null,
+        login,
       );
       chats.push({
-        scopeId: scopeIdOf({ kind: "dm", memberId: m.id }),
+        scopeId,
         kind: "dm",
         title: m.name,
         lastMessage: summarizeMessage(last),
@@ -134,20 +143,18 @@ addRoute("GET", "/api/chats", async (_req, res) => {
     }
 
     for (const room of rooms) {
+      const scopeId = scopeIdOf({ kind: "room", roomId: room.id });
       const msgs = messageStore.readAllMessages(room.id);
       const last = msgs[msgs.length - 1];
-      const cursors = roomStore.getCursors(room.id);
-      // Aggregate unread across room members using the "latest" cursor lag for user-facing list:
-      // use the room's prompt leader cursor if present, else max cursor coverage.
-      const roomMembers = roomStore.getRoomMembers(room.id);
-      const leader = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId);
-      const cursorKey = leader?.id || roomMembers[0]?.id || "";
-      const cursorId = cursorKey ? (cursors[cursorKey] ?? null) : null;
-      const selfNames = new Set(roomMembers.map((rm) => rm.name));
-      const selfIds = new Set(roomMembers.map((rm) => rm.id));
-      const { unreadCount, mentioned } = countUnreadAndMention(msgs, cursorId, null, selfNames, selfIds);
+      const cursor = getUserReadCursor(scopeId);
+      const { unreadCount, mentioned } = countUserUnreadAndMention(
+        msgs,
+        cursor?.messageId ?? null,
+        cursor?.seq ?? null,
+        login,
+      );
       chats.push({
-        scopeId: scopeIdOf({ kind: "room", roomId: room.id }),
+        scopeId,
         kind: "room",
         title: room.name,
         lastMessage: summarizeMessage(last),
@@ -162,6 +169,40 @@ addRoute("GET", "/api/chats", async (_req, res) => {
   } catch (err) {
     logger.error("members-api", "chats failed", { error: String(err) });
     sendJson(res, 500, { error: "internal", message: String(err) });
+  }
+});
+
+/** Mark a conversation as read for the human user (Chats unread source of truth). */
+addRoute("POST", "/api/conversations/:scope/read", async (req, res, params) => {
+  try {
+    const scopeId = decodeURIComponent(params.scope);
+    if (!parseScopeId(scopeId)) {
+      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
+      return;
+    }
+    const body = (await parseBody(req)) as { messageId?: string | null; seq?: number | null };
+    // Default: advance to latest message in that scope
+    let messageId = body.messageId;
+    let seq = body.seq;
+    if (messageId === undefined && seq === undefined) {
+      const ref = parseScopeId(scopeId)!;
+      if (ref.kind === "dm") {
+        const msgs = readAllDmMessages(ref.memberId);
+        const last = msgs[msgs.length - 1];
+        messageId = last?.id ?? null;
+        seq = typeof last?.seq === "number" ? last.seq : null;
+      } else {
+        const msgs = messageStore.readAllMessages(ref.roomId);
+        const last = msgs[msgs.length - 1];
+        messageId = last?.id ?? null;
+        seq = typeof last?.seq === "number" ? last.seq : null;
+      }
+    }
+    const cursor = setUserReadCursor(scopeId, { messageId: messageId ?? null, seq: seq ?? null });
+    sendJson(res, 200, { scopeId, cursor });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    sendJson(res, msg === "scope_not_found" ? 400 : 500, { error: msg === "scope_not_found" ? "scope_not_found" : "internal", message: msg });
   }
 });
 
