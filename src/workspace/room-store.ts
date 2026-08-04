@@ -838,7 +838,7 @@ export function inviteGlobalMember(
   // G3: membership is globalMemberIds only — no roomMembers shadow write.
   addGlobalMemberId(roomId, global.id);
   initializeMemberCursor(roomId, global.id);
-  // Ensure team agent file exists for runtime compile (best-effort).
+  // Global agent file availability check (best-effort; runtime reads global pool).
   if (loadAgentDefinition(agentName)) {
     try {
       addRoomMemberFromAgent(roomId, {

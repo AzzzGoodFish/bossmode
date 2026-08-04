@@ -103,8 +103,7 @@ addRoute("POST", "/api/rooms", async (req, res) => {
         ? unique.find((m) => m.id === leaderGlobalId)!.name
         : unique[0]?.name;
 
-      // createRoom still needs at least one draft when leader is required by legacy path;
-      // empty memberIds is allowed (user manual room) — create with empty team package.
+      // createRoom works with zero members (user manual room) — no team package is materialized.
       let room;
       if (drafts.length === 0) {
         room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
