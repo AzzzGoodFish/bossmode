@@ -525,15 +525,7 @@ addRoute("POST", "/api/dm/:memberId/messages", async (req, res, params) => {
       mentions: [],
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments as any } : {}),
     });
-    // 0.20: DM messages activate the member directly (no @).
-    try {
-      const { activateDmMember } = await import("../engine/agent-manager.js");
-      void activateDmMember(m.id).catch((err) => {
-        console.error("[dm] activate failed", err);
-      });
-    } catch (err) {
-      console.error("[dm] activate import failed", err);
-    }
+    // Activation is WS-B; data layer only persists.
     sendJson(res, 200, { message });
   } catch (err) {
     sendJson(res, 500, { error: "internal", message: String(err) });
@@ -546,20 +538,11 @@ addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
     sendJson(res, 404, { error: "not_found", message: "Member not found" });
     return;
   }
-  const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
-  let status: string = "idle";
-  let contextPct: number | null = null;
-  try {
-    const { getAgentStatus, getAgentContextUsage } = await import("../engine/agent-manager.js");
-    status = getAgentStatus(scopeId, m.id) || "idle";
-    const usage = getAgentContextUsage(scopeId, m.id);
-    if (usage && typeof (usage as any).percentage === "number") contextPct = (usage as any).percentage;
-  } catch { /* runtime not ready */ }
   sendJson(res, 200, {
     memberId: m.id,
-    scopeId,
-    status,
-    contextPct,
+    scopeId: scopeIdOf({ kind: "dm", memberId: m.id }),
+    status: "idle",
+    contextPct: null,
     latestSeq: getLatestDmSeq(m.id),
   });
 });

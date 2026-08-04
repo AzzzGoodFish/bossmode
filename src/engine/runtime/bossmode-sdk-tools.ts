@@ -13,6 +13,8 @@ import {
   WAIT_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
+import * as roomStore from "../../workspace/room-store.js";
+
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
 }
@@ -22,18 +24,18 @@ function truncate(text: string): string {
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
 }
 
-export function createBossmodeSdkTools(opts: {
-  roomId: string;
-  agentName: string;
-  roomMembers: string[];
-  /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
-  scopeKind?: "dm" | "room";
-}): ToolDefinition[] {
-  const scopeKind = opts.scopeKind || "room";
+export function createBossmodeSdkTools(opts: { roomId: string; agentName: string; roomMembers: string[] }): ToolDefinition[] {
   const call = async (tool: string, params: Record<string, any>) => {
     const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
+
+  // Assembly gate: wait is leader-only (the callback re-checks at execution).
+  const isRoomLeader = (() => {
+    const room = roomStore.getRoom(opts.roomId);
+    if (!room?.promptLeaderMemberId) return false;
+    return roomStore.getRoomMembers(opts.roomId).find((m) => m.name === opts.agentName)?.id === room.promptLeaderMemberId;
+  })();
 
   const tools: ToolDefinition[] = [
     defineTool({
@@ -218,8 +220,8 @@ export function createBossmodeSdkTools(opts: {
     }),
   ];
 
-  if (scopeKind === "room") {
-    // Room: wait for all members. Tasks already in base list above.
+  // Leader-only tool (assembly gate). Callback re-validates at execution.
+  if (isRoomLeader) {
     tools.push(defineTool({
       name: "wait",
       label: "Wait",
@@ -239,59 +241,6 @@ export function createBossmodeSdkTools(opts: {
         return textResult(truncate(JSON.stringify(data, null, 2)));
       },
     }));
-  } else {
-    // DM: member directory + create/edit room (no wait/tasks in DM).
-    tools.push(
-      defineTool({
-        name: "list_members",
-        label: "List members",
-        description: "List digital employees in this Bossmode (id, name, identity template). Use before create_room invites.",
-        parameters: Type.Object({
-          query: Type.Optional(Type.String({ description: "Optional name/id/template filter" })),
-        }),
-        execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("list_members", params as any), null, 2))),
-      }),
-      defineTool({
-        name: "create_room",
-        label: "Create room",
-        description: "Create a project room. You become the leader. Invite members by global member id (from list_members). Optional initial room principles.",
-        parameters: Type.Object({
-          name: Type.String({ description: "Room display name" }),
-          cwd: Type.Optional(Type.String({ description: "Working directory (default: current process cwd)" })),
-          memberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite (mem_…)" })),
-          principles: Type.Optional(Type.String({ description: "Initial room principles / announcement markdown" })),
-        }),
-        execute: async (_id, params) => {
-          const data = await call("create_room", params as any) as any;
-          if (data?.ok === false) throw new Error(data.error || "create_room failed");
-          return textResult(truncate(JSON.stringify(data, null, 2)));
-        },
-      }),
-      defineTool({
-        name: "edit_room",
-        label: "Edit room",
-        description: "Leader-only: rename room, update principles, add/remove members by global member id.",
-        parameters: Type.Object({
-          roomId: Type.String({ description: "Room id to edit" }),
-          name: Type.Optional(Type.String({ description: "New room name" })),
-          principles: Type.Optional(Type.String({ description: "Replace room principles markdown" })),
-          reason: Type.Optional(Type.String({ description: "Reason for principles change" })),
-          addMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite" })),
-          removeMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to remove (memory retained)" })),
-        }),
-        execute: async (_id, params) => {
-          const data = await call("edit_room", params as any) as any;
-          if (data?.ok === false) throw new Error(data.error || data.message || "edit_room failed");
-          return textResult(truncate(JSON.stringify(data, null, 2)));
-        },
-      }),
-    );
-
-    // Strip room-only task tools from DM surface (they were added in the base list).
-    const dmDeny = new Set(["create_task", "update_task", "list_tasks", "get_task", "comment_task", "wait"]);
-    for (let i = tools.length - 1; i >= 0; i--) {
-      if (dmDeny.has(tools[i].name)) tools.splice(i, 1);
-    }
   }
 
   // Defensive normalization: TypeBox omits `required` when every property is

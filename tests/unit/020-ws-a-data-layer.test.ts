@@ -275,6 +275,36 @@ describe("chats aggregation helpers + invite dual-write", () => {
     expect(roomStore.getRoomMembers(roomId)).toHaveLength(0);
   });
 
+  it("stampGlobalMemberIds after invite matches memberIds create dual-write", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const reg = await import("../../src/workspace/member-registry.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const a = reg.createMember({ name: "alice", agentTemplate: "general" });
+    const b = reg.createMember({ name: "bob", agentTemplate: "general" });
+    const roomId = "room-mid-1";
+    mkdirSync(join(state.dir, "rooms", roomId), { recursive: true });
+    writeFileSync(
+      join(state.dir, "rooms", roomId, "room.json"),
+      JSON.stringify({
+        id: roomId,
+        name: "r2",
+        cwd: state.dir,
+        members: [],
+        roomMembers: [],
+        createdAt: 1,
+      }, null, 2),
+      "utf8",
+    );
+    // Invite both (shadow records + global ids) — same dual-write as POST memberIds path
+    expect(roomStore.inviteGlobalMember(roomId, { id: a.id, name: a.name, agentTemplate: "general" }).ok).toBe(true);
+    expect(roomStore.inviteGlobalMember(roomId, { id: b.id, name: b.name, agentTemplate: "general" }).ok).toBe(true);
+    roomStore.stampGlobalMemberIds(roomId, [a.id, b.id], a.id);
+    const stamped = roomStore.getRoom(roomId)!;
+    expect(stamped.globalMemberIds?.sort()).toEqual([a.id, b.id].sort());
+    expect(stamped.promptLeaderGlobalMemberId).toBe(a.id);
+    expect(roomStore.getRoomMembers(roomId).map((m) => m.name).sort()).toEqual(["alice", "bob"]);
+  });
+
   it("user read cursor drives unread after mark-read", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const dm = await import("../../src/workspace/dm-message-store.js");

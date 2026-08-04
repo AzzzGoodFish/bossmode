@@ -53,31 +53,20 @@ describe("wait tool — gates + idle short-circuit", () => {
     expect(self.error).toMatch(/yourself/);
   });
 
-  it("0.20: non-leader can also wait (no longer leader-only)", async () => {
+  it("non-leader is rejected", async () => {
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const { notifyMemberIdle, isMemberWaiting } = await import("../../src/engine/wait-wait.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const qa = roomStore.getRoomMembers(roomId).find((m) => m.name === "qa")!;
-    const developer = roomStore.getRoomMembers(roomId).find((m) => m.name === "developer")!;
-
-    const pending = handleToolCallback("wait", roomId, "qa", { member: "developer", timeoutMinutes: 5 });
-    for (let i = 0; i < 50 && !isMemberWaiting(roomId, qa.id); i++) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    expect(isMemberWaiting(roomId, qa.id)).toBe(true);
-    notifyMemberIdle(roomId, developer.id);
-    const result = await pending as any;
-    expect(result.ok).toBe(true);
-    expect(result.reason).toBe("idle");
+    const denied = await handleToolCallback("wait", roomId, "qa", { member: "developer" }) as any;
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toMatch(/Only the configured room leader/);
   });
 
-  it("assembly gate: all room members see wait; watch is gone", async () => {
+  it("assembly gate: leader sees wait; non-leader does not; watch is gone", async () => {
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
     const leaderTools = createBossmodeSdkTools({ roomId, agentName: "pm", roomMembers: ["pm", "qa", "developer"] });
     const memberTools = createBossmodeSdkTools({ roomId, agentName: "qa", roomMembers: ["pm", "qa", "developer"] });
     expect(leaderTools.some((t) => t.name === "wait")).toBe(true);
     expect(leaderTools.some((t) => t.name === "watch")).toBe(false);
-    expect(memberTools.some((t) => t.name === "wait")).toBe(true);
+    expect(memberTools.some((t) => t.name === "wait")).toBe(false);
     expect(memberTools.some((t) => t.name === "watch")).toBe(false);
   });
 

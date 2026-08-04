@@ -1,26 +1,11 @@
-/**
- * Member prompt compiler — 0.20 six-segment assembly.
- * Order (fish): template identity → Core → persona → scope principles → mainline → room principles → (messages)
- * Contract + product spec v3.
- */
 import { createHash } from "node:crypto";
 import { logger } from "../foundation/logger.js";
 import { formatBudgetHeader, readPrinciplesWithBudget } from "../workspace/principles-store.js";
 import { readMainlineWithBudget, resolveMainlineRefs } from "../workspace/mainline-store.js";
-import { readMemoryLayer } from "../workspace/member-memory-store.js";
-import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../shared/types.js";
 
-export type PromptSectionId =
-  | "source-agent"
-  | "bossmode-core"
-  | "persona"
-  | "member-principles"
-  | "member-mainline"
-  | "room-principles";
-
 export interface CompiledPromptSection {
-  id: PromptSectionId;
+  id: "source-agent" | "bossmode-core" | "room-principles" | "member-principles" | "member-mainline";
   title: string;
   source: string;
   content: string;
@@ -68,19 +53,9 @@ function section(args: {
   };
 }
 
-/** Wrap a prompt asset with its section title and budget header (capacity is always visible). */
-function wrapAsset(title: string, budgetHeader: string, content: string): string {
-  return `---\n\n## ${title}\n\n${budgetHeader}\n\n${content.trim()}\n`;
-}
-
-function buildRoomCorePrompt(args: {
-  room: Room;
-  memberName: string;
-  sourceRole: string;
-  docsRoot: string;
-}): string {
+function buildCorePrompt(args: { room: Room; member: AgentMemberConfig; agentDef: AgentDefinition; docsRoot: string }): string {
   const memberList = args.room.members.join(", ");
-  const role = args.memberName !== args.sourceRole ? ` (source role: ${args.sourceRole})` : "";
+  const role = args.member.name !== args.agentDef.name ? ` (source role: ${args.agentDef.name})` : "";
   const leader = args.room.promptLeaderMemberId
     ? args.room.roomMembers?.find((m) => m.id === args.room.promptLeaderMemberId)?.name || "configured member"
     : "none configured";
@@ -88,7 +63,7 @@ function buildRoomCorePrompt(args: {
 
 ## Bossmode Environment
 
-You are "${args.memberName}"${role} in a Bossmode group chat room "${args.room.name}".
+You are "${args.member.name}"${role} in a Bossmode group chat room "${args.room.name}".
 Room members: ${memberList}
 Working directory: ${args.room.cwd}
 Room leader: ${leader}
@@ -118,168 +93,57 @@ Example:
 
 ## Memory
 
-You have persistent memory assets, maintained with the read/edit/write_memory tools:
+You have two persistent memory assets, maintained with the read/edit/write_memory tools:
 
-**Persona** — who you are across all scopes (global identity notes).
-**Principles** — how you work in the **current scope** (this room). Store rules that save the user from correcting you twice.
-**Mainline** — what you work on in the **current scope**: a "## Focus" section plus a "## Dynamic Index" of pointers.
+**Principles** — how you work: durable behavior and communication norms that evolve with the user's feedback. Store rules that save the user from correcting you twice.
+  Not this: "Shipped v2.3 on Monday" — it expires; chat history holds it.
+  This: "The user prefers conclusion-first updates; details only on request."
 
-You may **read** memory from other scopes you belong to (pass an optional scope parameter). You may only **write** the current scope's principles/mainline (and global persona).
+**Mainline** — what you work on: a "## Focus" section for long-lived domain knowledge, plus a "## Dynamic Index" of pointers (docs/..., task:<id>, msg:#<n>) to the few assets you keep returning to this phase — one line of context each, never the content itself.
+  Not this: a full QA report pasted inline.
+  This: "- task:a1b2c3d4 — tool-description simplification (next release batch)"
 
 Curate both: keep only what stays useful. Progress, results, and anything that expires belong in chat history, not memory.
 `;
 }
 
-function buildDmCorePrompt(args: {
-  memberName: string;
-  sourceRole: string;
-  activeScopes?: string[];
-  docsRoot: string;
-}): string {
-  const role = args.memberName !== args.sourceRole ? ` (source role: ${args.sourceRole})` : "";
-  const scopes = (args.activeScopes && args.activeScopes.length > 0)
-    ? args.activeScopes.join(", ")
-    : "dm only (no rooms yet)";
-  return `---
-
-## Bossmode Environment
-
-You are "${args.memberName}"${role} — a digital employee in a one-to-one private chat with the user.
-This is your **DM scope** (not a multi-member room).
-Scopes you exist in: ${scopes}
-Working directory: the user's workspace (see tool environment).
-
-Messages you receive are wrapped in envelopes that tell you where they came from.
-
-## Communication
-
-Speak with the \`chat\` tool — messages go directly to this private chat. There is **no** \`[room]\` marker and **no** \`@\` routing in DM (you are already talking to the user).
-
-## Tools unique to DM
-
-In private chat you can manage the user's workspace of digital employees:
-- Discover other members (id, name, identity)
-- \`create_room\` — open a project room, optionally set room principles, invite members by id; you become the room leader
-- \`edit_room\` — when you are leader of a room: rename, adjust members, update principles
-
-## Memory
-
-You have persistent memory assets, maintained with the read/edit/write_memory tools:
-
-**Persona** — who you are across all scopes (global identity notes).
-**Principles** — how you work in the **current scope** (this DM).
-**Mainline** — what you work on in the **current scope**.
-
-You may **read** memory, chat history, tasks, room principles, and library from any scope you belong to (optional scope parameter on query tools). You may only **write** the current scope's principles/mainline (and global persona).
-
-Curate carefully: progress and ephemeral detail stay in chat history.
-`;
+/** Wrap a prompt asset with its section title and budget header (capacity is always visible). */
+function wrapAsset(title: string, budgetHeader: string, content: string): string {
+  return `---\n\n## ${title}\n\n${budgetHeader}\n\n${content.trim()}\n`;
 }
 
-/**
- * 0.20 scope-aware compiler.
- * Assembly order: template → Core → persona → scope principles → mainline → room principles (room only).
- */
-export function compileMemberPromptForScope(args: {
-  scopeId: ScopeId;
-  memberId: string;
-  memberName: string;
+export function compileMemberPrompt(args: {
+  room: Room;
+  member: AgentMemberConfig;
   agentDef: AgentDefinition;
-  /** Required when scope is room:* */
-  room?: Room | null;
   docsRoot: string;
-  /** Optional list of scopes this member belongs to (for DM Core environment). */
-  activeScopes?: string[];
+  activeTools?: string[];
 }): CompiledMemberPrompt {
-  const ref = parseScopeId(args.scopeId);
-  if (!ref) throw new Error(`scope_not_found: ${args.scopeId}`);
-
   const agentPrompt = args.agentDef.systemPrompt.trim() ? args.agentDef.systemPrompt : "";
-  const sourceRole = args.agentDef.name;
-
-  let corePrompt: string;
-  let roomPrinciplesContent = "";
-  let roomPrinciplesBudgetHeader = "";
-  let roomPrinciplesIncluded = false;
-
-  if (ref.kind === "dm") {
-    corePrompt = buildDmCorePrompt({
-      memberName: args.memberName,
-      sourceRole,
-      activeScopes: args.activeScopes,
-      docsRoot: args.docsRoot,
-    });
-  } else {
-    if (!args.room) throw new Error("room required for room scope compile");
-    corePrompt = buildRoomCorePrompt({
-      room: args.room,
-      memberName: args.memberName,
-      sourceRole,
-      docsRoot: args.docsRoot,
-    });
-    const roomPrinciples = readPrinciplesWithBudget(args.room.id, "room");
-    roomPrinciplesContent = roomPrinciples.content;
-    roomPrinciplesBudgetHeader = formatBudgetHeader(roomPrinciples.budget);
-    roomPrinciplesIncluded = roomPrinciples.content.trim().length > 0;
-  }
-
-  // Persona (global) + scope principles/mainline from 0.20 member-memory-store.
-  // Fall back to legacy room-keyed stores when new paths are empty (migration window).
-  const persona = readMemoryLayer(args.memberId, "persona");
-  let scopePrinciples = readMemoryLayer(args.memberId, "principles", args.scopeId);
-  let scopeMainline = readMemoryLayer(args.memberId, "mainline", args.scopeId);
-
-  if (ref.kind === "room" && args.room) {
-    if (!scopePrinciples.content.trim()) {
-      const legacy = readPrinciplesWithBudget(args.room.id, "member", args.memberId);
-      if (legacy.content.trim()) {
-        scopePrinciples = { content: legacy.content, meta: { length: legacy.content.length, budget: legacy.budget } };
-      }
-    }
-    if (!scopeMainline.content.trim()) {
-      const legacy = readMainlineWithBudget(args.room.id, args.memberId);
-      if (legacy.content.trim()) {
-        const resolved = resolveMainlineRefs(args.room.id, legacy.content);
-        scopeMainline = { content: resolved, meta: { length: resolved.length, budget: legacy.budget } };
-      }
-    } else if (args.room) {
-      // Resolve docs/task refs when we have a room context
-      scopeMainline = {
-        ...scopeMainline,
-        content: resolveMainlineRefs(args.room.id, scopeMainline.content),
-      };
-    }
-  }
+  const corePrompt = buildCorePrompt(args);
+  const roomPrinciples = readPrinciplesWithBudget(args.room.id, "room");
+  const memberPrinciples = readPrinciplesWithBudget(args.room.id, "member", args.member.id);
+  const memberMainline = readMainlineWithBudget(args.room.id, args.member.id);
+  const mainlineContent = memberMainline.content.trim() ? resolveMainlineRefs(args.room.id, memberMainline.content) : memberMainline.content;
 
   const sections = [
     section({ id: "source-agent", title: "Source Agent", source: `agent:${args.agentDef.name}`, content: agentPrompt, included: agentPrompt.trim().length > 0 }),
     section({ id: "bossmode-core", title: "Bossmode Core", source: "bossmode", content: corePrompt, included: true }),
-    section({ id: "persona", title: "Persona", source: `member:${args.memberId}`, content: persona.content, included: persona.content.trim().length > 0 }),
-    section({ id: "member-principles", title: "Scope Principles", source: `member:${args.memberId}:${args.scopeId}`, content: scopePrinciples.content, included: scopePrinciples.content.trim().length > 0 }),
-    section({ id: "member-mainline", title: "Scope Mainline", source: `member:${args.memberId}:${args.scopeId}`, content: scopeMainline.content, included: scopeMainline.content.trim().length > 0 }),
-    section({ id: "room-principles", title: "Room Principles", source: ref.kind === "room" ? `room:${ref.roomId}` : "none", content: roomPrinciplesContent, included: roomPrinciplesIncluded }),
+    section({ id: "member-principles", title: "Member Principles", source: `room-member:${args.member.id}`, content: memberPrinciples.content, included: memberPrinciples.content.trim().length > 0 }),
+    section({ id: "member-mainline", title: "Member Mainline", source: `room-member:${args.member.id}`, content: mainlineContent, included: mainlineContent.trim().length > 0 }),
+    section({ id: "room-principles", title: "Room Principles", source: `room:${args.room.id}`, content: roomPrinciples.content, included: roomPrinciples.content.trim().length > 0 }),
   ];
 
-  const appendSystemPrompt: string[] = [corePrompt];
-  if (persona.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Persona", formatBudgetHeader(persona.meta.budget), persona.content));
-  }
-  if (scopePrinciples.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Scope Principles", formatBudgetHeader(scopePrinciples.meta.budget), scopePrinciples.content));
-  }
-  if (scopeMainline.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Scope Mainline", formatBudgetHeader(scopeMainline.meta.budget), scopeMainline.content));
-  }
-  if (roomPrinciplesIncluded) {
-    appendSystemPrompt.push(wrapAsset("Room Principles", roomPrinciplesBudgetHeader, roomPrinciplesContent));
-  }
+  const appendSystemPrompt = [corePrompt];
+  if (memberPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Member Principles", formatBudgetHeader(memberPrinciples.budget), memberPrinciples.content));
+  if (mainlineContent.trim()) appendSystemPrompt.push(wrapAsset("Member Mainline", formatBudgetHeader(memberMainline.budget), mainlineContent));
+  if (roomPrinciples.content.trim()) appendSystemPrompt.push(wrapAsset("Room Principles", formatBudgetHeader(roomPrinciples.budget), roomPrinciples.content));
 
   const fullPrompt = [agentPrompt, ...appendSystemPrompt].filter((part) => part.trim().length > 0).join("\n\n");
   const manifestHash = hashContent(JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))));
   logger.info("agent", "compilePrompt", {
-    member: args.memberName,
-    memberId: args.memberId,
-    scopeId: args.scopeId,
+    member: args.member.name,
+    memberId: args.member.id,
     agent: args.agentDef.name,
     sections: Object.fromEntries(sections.map((s) => [s.id, { chars: s.charCount, included: s.included }])),
     totalChars: fullPrompt.length,
@@ -295,26 +159,4 @@ export function compileMemberPromptForScope(args: {
     sections,
     manifestHash,
   };
-}
-
-/**
- * Backward-compatible room compiler used by existing room activation paths.
- * Delegates to scope-aware compiler with room:<id> scope.
- */
-export function compileMemberPrompt(args: {
-  room: Room;
-  member: AgentMemberConfig;
-  agentDef: AgentDefinition;
-  docsRoot: string;
-  activeTools?: string[];
-}): CompiledMemberPrompt {
-  const scopeId: ScopeId = `room:${args.room.id}`;
-  return compileMemberPromptForScope({
-    scopeId,
-    memberId: args.member.id,
-    memberName: args.member.name,
-    agentDef: args.agentDef,
-    room: args.room,
-    docsRoot: args.docsRoot,
-  });
 }

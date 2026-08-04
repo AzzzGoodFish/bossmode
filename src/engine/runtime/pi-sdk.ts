@@ -696,7 +696,6 @@ class PiSdkAgentHandle implements AgentHandle {
       roomId: opts.roomId,
       agentName: opts.member.name,
       roomMembers: this.toolAssembly.roomMembers,
-      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
     });
     this.bossmodeToolNames = new Set(customTools.map((t) => t.name));
     if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
@@ -803,14 +802,10 @@ export class PiSdkRuntime implements AgentRuntime {
     const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
     const resolvedModel = `${provider}/${modelId}`;
 
+    const safeRoom = safeSegment(opts.roomId);
     const safeMember = safeSegment(opts.member.id);
-    // 0.20: DM runtime under members/<id>/dm/; room under <roomId>/<memberId>/.
-    const isDm = typeof opts.roomId === "string" && opts.roomId.startsWith("dm:");
-    const defaultAgentDir = isDm
-      ? join(getBossmodePiRuntimeRoot(), "members", safeMember, "dm")
-      : join(getBossmodePiRuntimeRoot(), safeSegment(opts.roomId), safeMember);
-    const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
-    const sessionDir = join(runtimeAgentDir, "sessions");
+    const runtimeAgentDir = piConfig?.agentDir || join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
+    const sessionDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
@@ -899,12 +894,7 @@ export class PiSdkRuntime implements AgentRuntime {
     });
     await resourceLoader.reload();
 
-    const customTools = createBossmodeSdkTools({
-      roomId: opts.roomId,
-      agentName: opts.member.name,
-      roomMembers: opts.roomMembers,
-      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-    });
+    const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
     const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
     // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
     // when tools is provided it becomes a lifetime allowlist and strips extension
