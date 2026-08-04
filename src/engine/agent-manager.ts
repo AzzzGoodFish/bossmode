@@ -1662,10 +1662,9 @@ export async function activateDmMember(memberId: string): Promise<void> {
   }
 
   const instance = await getOrCreateDm(memberId);
-  if (!instance) {
-    postMessage(scopeIdOf({ kind: "dm", memberId }), "system", `Failed to activate member "${member.name}": runtime unavailable.`);
-    return;
-  }
+  // Null already produced a user-visible notice on every path that matters
+  // (creation failure posted inside getOrCreateDm; unconfigured handled above).
+  if (!instance) return;
 
   const scopeId = instance.scopeId;
   setActivationSource(scopeId, member.name, "private_instruction");
