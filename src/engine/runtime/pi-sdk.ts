@@ -696,6 +696,7 @@ class PiSdkAgentHandle implements AgentHandle {
       roomId: opts.roomId,
       agentName: opts.member.name,
       roomMembers: this.toolAssembly.roomMembers,
+      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
     });
     this.bossmodeToolNames = new Set(customTools.map((t) => t.name));
     if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
@@ -898,7 +899,12 @@ export class PiSdkRuntime implements AgentRuntime {
     });
     await resourceLoader.reload();
 
-    const customTools = createBossmodeSdkTools({ roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers });
+    const customTools = createBossmodeSdkTools({
+      roomId: opts.roomId,
+      agentName: opts.member.name,
+      roomMembers: opts.roomMembers,
+      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
+    });
     const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
     // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
     // when tools is provided it becomes a lifetime allowlist and strips extension
