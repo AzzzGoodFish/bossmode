@@ -22,13 +22,19 @@ function truncate(text: string): string {
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
 }
 
-export function createBossmodeSdkTools(opts: { roomId: string; agentName: string; roomMembers: string[] }): ToolDefinition[] {
+export function createBossmodeSdkTools(opts: {
+  roomId: string;
+  agentName: string;
+  roomMembers: string[];
+  /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
+  scopeKind?: "dm" | "room";
+}): ToolDefinition[] {
+  const scopeKind = opts.scopeKind || "room";
   const call = async (tool: string, params: Record<string, any>) => {
     const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
 
-  // 0.20: wait is available to every room member (assembly + execution).
   const tools: ToolDefinition[] = [
     defineTool({
       name: "chat",
@@ -212,26 +218,81 @@ export function createBossmodeSdkTools(opts: { roomId: string; agentName: string
     }),
   ];
 
-  // 0.20: wait available to all room members (assembly + execution).
-  tools.push(defineTool({
-    name: "wait",
-    label: "Wait",
-    description: WAIT_DESCRIPTION,
-    parameters: Type.Object({
-      member: Type.String({ description: "Target member name to wait on" }),
-      timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
-    }),
-    execute: async (_id, params) => {
-      const data = await call("wait", params as any) as any;
-      if (data?.ok === false) throw new Error(data.error || "Wait failed");
-      if (data?.reason === "message") {
-        const body = typeof data.message === "string" ? data.message : "";
-        return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
-      }
-      if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
-      return textResult(truncate(JSON.stringify(data, null, 2)));
-    },
-  }));
+  if (scopeKind === "room") {
+    // Room: wait for all members. Tasks already in base list above.
+    tools.push(defineTool({
+      name: "wait",
+      label: "Wait",
+      description: WAIT_DESCRIPTION,
+      parameters: Type.Object({
+        member: Type.String({ description: "Target member name to wait on" }),
+        timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("wait", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Wait failed");
+        if (data?.reason === "message") {
+          const body = typeof data.message === "string" ? data.message : "";
+          return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
+        }
+        if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
+        return textResult(truncate(JSON.stringify(data, null, 2)));
+      },
+    }));
+  } else {
+    // DM: member directory + create/edit room (no wait/tasks in DM).
+    tools.push(
+      defineTool({
+        name: "list_members",
+        label: "List members",
+        description: "List digital employees in this Bossmode (id, name, identity template). Use before create_room invites.",
+        parameters: Type.Object({
+          query: Type.Optional(Type.String({ description: "Optional name/id/template filter" })),
+        }),
+        execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("list_members", params as any), null, 2))),
+      }),
+      defineTool({
+        name: "create_room",
+        label: "Create room",
+        description: "Create a project room. You become the leader. Invite members by global member id (from list_members). Optional initial room principles.",
+        parameters: Type.Object({
+          name: Type.String({ description: "Room display name" }),
+          cwd: Type.Optional(Type.String({ description: "Working directory (default: current process cwd)" })),
+          memberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite (mem_…)" })),
+          principles: Type.Optional(Type.String({ description: "Initial room principles / announcement markdown" })),
+        }),
+        execute: async (_id, params) => {
+          const data = await call("create_room", params as any) as any;
+          if (data?.ok === false) throw new Error(data.error || "create_room failed");
+          return textResult(truncate(JSON.stringify(data, null, 2)));
+        },
+      }),
+      defineTool({
+        name: "edit_room",
+        label: "Edit room",
+        description: "Leader-only: rename room, update principles, add/remove members by global member id.",
+        parameters: Type.Object({
+          roomId: Type.String({ description: "Room id to edit" }),
+          name: Type.Optional(Type.String({ description: "New room name" })),
+          principles: Type.Optional(Type.String({ description: "Replace room principles markdown" })),
+          reason: Type.Optional(Type.String({ description: "Reason for principles change" })),
+          addMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite" })),
+          removeMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to remove (memory retained)" })),
+        }),
+        execute: async (_id, params) => {
+          const data = await call("edit_room", params as any) as any;
+          if (data?.ok === false) throw new Error(data.error || data.message || "edit_room failed");
+          return textResult(truncate(JSON.stringify(data, null, 2)));
+        },
+      }),
+    );
+
+    // Strip room-only task tools from DM surface (they were added in the base list).
+    const dmDeny = new Set(["create_task", "update_task", "list_tasks", "get_task", "comment_task", "wait"]);
+    for (let i = tools.length - 1; i >= 0; i--) {
+      if (dmDeny.has(tools[i].name)) tools.splice(i, 1);
+    }
+  }
 
   // Defensive normalization: TypeBox omits `required` when every property is
   // optional — valid JSON Schema (OpenAI/xAI accept it), but some
