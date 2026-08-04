@@ -7,7 +7,7 @@
  * Data: /api/members/:id, /api/dm/:memberId/{messages,session}.
  */
 import { useCallback, useEffect, useState } from "react";
-import { PanelRight, Send, Info } from "lucide-react";
+import { PanelRight, Send, Info, Settings2 } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import {
   getMemberDetail, getDmMessages, getDmSession, sendDmMessage,
@@ -15,7 +15,7 @@ import {
 } from "../api/client";
 import { formatTokenCount } from "./ContactsPage";
 
-export function DmPage({ memberId, onBack }: { memberId: string; onBack: () => void }) {
+export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string; onBack: () => void; onOpenSettings?: (memberId: string) => void }) {
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [session, setSession] = useState<DmSession | null>(null);
   const [messages, setMessages] = useState<DmMessage[] | null>(null);
@@ -71,7 +71,7 @@ export function DmPage({ memberId, onBack }: { memberId: string; onBack: () => v
   }
   if (!member) return <div className="flex-1 flex items-center justify-center text-sm text-ink-3">Loading…</div>;
 
-  const status = session?.status ?? member.status;
+  const status = session?.status ?? "idle";
   const contextPct = session?.contextPct ?? null;
 
   return (
@@ -169,14 +169,24 @@ export function DmPage({ memberId, onBack }: { memberId: string; onBack: () => v
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="text-[15px] font-bold text-ink-1">{member.name}</div>
-                  <div className="text-[11.5px] text-ink-3 mt-0.5">{member.description || `${member.agentTemplate} member`}</div>
+                  <div className="text-[11.5px] text-ink-3 mt-0.5">{member.agentTemplate} member</div>
                 </div>
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    title="Member settings"
+                    onClick={() => onOpenSettings(member.memberId)}
+                    className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-ink-4 hover:text-ink-1 hover:bg-surface-2 cursor-pointer"
+                  >
+                    <Settings2 size={15} />
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-2 text-[11.5px]">
                 <Zone label="Template" value={member.agentTemplate} />
-                <Zone label="Model" value={member.model ?? "—"} mono />
+                <Zone label="Model" value={member.global?.model ?? "—"} mono />
                 <Zone label="Unified" value={member.unifiedModel && member.unifiedExtensions ? "on" : "custom"} />
                 <Zone label="Scopes" value="—" />
               </div>

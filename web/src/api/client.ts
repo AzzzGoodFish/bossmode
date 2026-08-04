@@ -1492,18 +1492,25 @@ export async function getContacts(): Promise<{ contacts: ContactEntry[] }> {
   return apiFetch("/api/contacts");
 }
 
+export interface MemberGlobalConfig {
+  model: string | null;
+  credentialId: string | null;
+  thinkingLevel: string | null;
+  skills: string[];
+  extensions: string[];
+  mcpServers: string[];
+}
+
 export interface MemberDetail {
   memberId: string;
   name: string;
   agentTemplate: string;
-  description?: string;
-  status: string;
-  model?: string | null;
-  credentialId?: string | null;
-  thinkingLevel?: string | null;
   unifiedModel: boolean;
   unifiedExtensions: boolean;
+  global?: MemberGlobalConfig;
+  scopeOverrides?: Record<string, Record<string, unknown>>;
   createdAt?: number;
+  updatedAt?: number;
 }
 
 export async function getMemberDetail(id: string): Promise<MemberDetail> {
@@ -1590,4 +1597,39 @@ export interface ArchiveEntry {
 
 export async function getMemberArchiveList(): Promise<{ archives: ArchiveEntry[] }> {
   return apiFetch("/api/members/archive-list");
+}
+
+// -- 0.20: member scopes + fire --
+
+export interface MemberScopeInfo {
+  scopeId: string;
+  kind: "dm" | "room";
+  label: string;
+  status: string;
+  lastActiveAt: number | null;
+}
+
+export async function getMemberScopes(id: string): Promise<{ scopes: MemberScopeInfo[] }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/scopes`);
+}
+
+export async function deleteGlobalMember(id: string): Promise<void> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+export async function patchMemberScopeConfig(id: string, scope: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/config?scope=${encodeURIComponent(scope)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function patchGlobalMember(id: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }

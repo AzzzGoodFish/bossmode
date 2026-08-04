@@ -15,6 +15,7 @@ import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
+import { MemberSettingsPage } from "./MemberSettingsPage";
 import { TeamDetailPage } from "./TeamDetailPage";
 import { Main } from "./Main";
 import { AgentProfilePage } from "./AgentProfilePage";
@@ -339,6 +340,14 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <DmPage
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "contacts" })}
+            onOpenSettings={(memberId) => handleNavigate({ type: "member-settings", memberId })}
+          />
+        )}
+        {activePage?.type === "member-settings" && (
+          <MemberSettingsPage
+            memberId={activePage.memberId}
+            onBack={() => handleNavigate({ type: "dm", memberId: activePage.memberId })}
+            onFired={() => handleNavigate({ type: "contacts" })}
           />
         )}
 
