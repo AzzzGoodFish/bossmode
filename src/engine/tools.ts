@@ -307,7 +307,7 @@ export async function handleToolCallback(
             contentLength: info.contentLength,
             budget: info.budget,
             budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-            message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
+            message: "Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
           };
         } catch (err: any) {
           return { ok: false, error: err.message || String(err) };
@@ -332,7 +332,7 @@ export async function handleToolCallback(
             contentLength: info.contentLength,
             budget: info.budget,
             budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-            message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
+            message: "Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
           };
         } catch (err: any) {
           return { ok: false, error: err.message || String(err) };
@@ -365,7 +365,7 @@ export async function handleToolCallback(
           contentLength: principles.contentLength,
           budget,
           budgetHeader: principlesStore.formatBudgetHeader(budget),
-          message: "Saved. Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
+          message: "Applies on Reload or a fresh session — a running session keeps its already-compiled prompt.",
         };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };
