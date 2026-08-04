@@ -78,7 +78,7 @@ describe("query_room_messages member-visible filter", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("hides runtime-failure system notices but keeps real conversation and other system info", async () => {
+  it("hides ALL system notices (failures + non-error prompts) but keeps conversation and typed events", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const messageStore = await import("../../src/workspace/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
@@ -87,11 +87,19 @@ describe("query_room_messages member-visible filter", () => {
     messageStore.addMessage(room.id, msg("user", "REAL-USER-MSG"));
     messageStore.addMessage(room.id, msg("pm", "REAL-MEMBER-MSG"));
     messageStore.addMessage(room.id, msg("system", "Member \"pm\" request failed. runtime blew up with a long stack trace"));
+    messageStore.addMessage(room.id, msg("system", "Member \"pm\" finished without replying."));
+    messageStore.addMessage(room.id, msg("system", "Member \"pm\" hasn't selected a model yet. Open the member card."));
+    messageStore.addMessage(room.id, msg("system", "TASKEVENT-KEPT", { type: "task_event" }));
+    messageStore.addMessage(room.id, msg("system", "KNOWLEDGEEVENT-KEPT", { type: "knowledge_event" }));
 
     const result = (await handleToolCallback("query_room_messages", room.id, "pm", {})) as any[];
     const texts = result.map((m: any) => m.content).join("\n");
     expect(texts).toContain("REAL-USER-MSG");
     expect(texts).toContain("REAL-MEMBER-MSG");
+    expect(texts).toContain("TASKEVENT-KEPT");
+    expect(texts).toContain("KNOWLEDGEEVENT-KEPT");
     expect(texts).not.toContain("request failed");
+    expect(texts).not.toContain("finished without replying");
+    expect(texts).not.toContain("hasn't selected a model");
   });
 });

@@ -2,6 +2,7 @@
 // All messages (user, agent, system) go through here.
 
 import * as messageStore from "../workspace/message-store.js";
+import { addDmMessage } from "../workspace/dm-message-store.js";
 import { broadcastToRoom } from "./ws.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -31,7 +32,12 @@ export function postMessage(
   mentions: string[] = [],
   extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds">>,
 ): RoomMessage {
-  const message = messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
+  // Scope-aware egress: a "dm:<memberId>" conversation address routes to the
+  // member-owned DM store (never to a phantom rooms/dm:<id>/messages.jsonl).
+  // Broadcast channel and listener notification stay keyed by the same address.
+  const message = roomId.startsWith("dm:")
+    ? addDmMessage(roomId.slice("dm:".length), { sender, content, mentions, ...extra })
+    : messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
 
   // WebSocket broadcast
   broadcastToRoom(roomId, { type: "room:message", roomId, message });

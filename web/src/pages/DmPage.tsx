@@ -149,6 +149,17 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
           ) : (
             messages.map((msg) => {
               const fromMember = msg.sender === member.name;
+              const isSystem = msg.sender === "system";
+              // System notices (e.g. turn failures) render as centered notice
+              // lines, same role as the room chat's system rows — the user must
+              // see DM failures (G1), they just never reach the member.
+              if (isSystem) {
+                return (
+                  <div key={msg.id} className="py-2 flex justify-center">
+                    <div className="max-w-[85%] text-[12px] text-ink-3 text-center leading-relaxed whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                );
+              }
               return (
               <div key={msg.id} className="flex gap-2.5 py-2">
                 {fromMember ? (
