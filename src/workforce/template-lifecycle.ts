@@ -7,11 +7,18 @@ import { listMembers, updateMember } from "../workspace/member-registry.js";
 import * as roomStore from "../workspace/room-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { addDmMessage } from "../workspace/dm-message-store.js";
-import { loadAgentDefinition } from "../workforce/agent-store.js";
+import { loadAgentDefinition, listFactoryTemplateNames } from "../workforce/agent-store.js";
 import { logger } from "../foundation/logger.js";
 
+/**
+ * Immutable = general ∪ factory templates/agents/* names ∪ tags:builtin.
+ * Same-named shadow in ~/.bossmode/agents is still treated as factory/builtin.
+ */
 export function isImmutableTemplate(name: string): boolean {
+  if (!name) return false;
   if (name === "general") return true;
+  const factory = listFactoryTemplateNames();
+  if (factory.includes(name)) return true;
   const def = loadAgentDefinition(name);
   return !!def?.tags?.includes("builtin");
 }

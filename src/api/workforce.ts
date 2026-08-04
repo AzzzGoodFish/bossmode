@@ -151,10 +151,12 @@ addRoute("GET", "/api/templates", async (_req, res) => {
     const { listMembers } = await import("../workspace/member-registry.js");
     const agents = loadAgentDefinitions();
     const members = listMembers();
+    const { listFactoryTemplateNames } = await import("../workforce/agent-store.js");
+    const factory = new Set(listFactoryTemplateNames());
     const templates = agents.map((a) => ({
       name: a.name,
       description: a.description || "",
-      builtin: a.name === "general" || (a.tags || []).includes("builtin"),
+      builtin: a.name === "general" || factory.has(a.name) || (a.tags || []).includes("builtin"),
       referencedBy: members.filter((m) => m.agentTemplate === a.name).map((m) => m.id),
     }));
     sendJson(res, 200, { templates });

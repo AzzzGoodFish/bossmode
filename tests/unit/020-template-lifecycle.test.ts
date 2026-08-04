@@ -42,9 +42,19 @@ describe("template lifecycle S5", () => {
     expect(msgs.some((x) => x.sender === "system" && /general/i.test(x.content))).toBe(true);
   });
 
-  it("general is immutable", async () => {
+  it("general and factory-shipped names are immutable", async () => {
     const life = await import("../../src/workforce/template-lifecycle.js");
-    // Without loadable general file tags, name===general is enough
+    const { listFactoryTemplateNames } = await import("../../src/workforce/agent-store.js");
     expect(life.isImmutableTemplate("general")).toBe(true);
+    const factory = listFactoryTemplateNames();
+    expect(factory.length).toBeGreaterThan(0);
+    // Seeded roles (developer/qa/pm/…) live in package templates/agents — immutable even without tags
+    for (const name of ["developer", "qa", "pm", "architect", "designer"]) {
+      if (factory.includes(name)) {
+        expect(life.isImmutableTemplate(name)).toBe(true);
+      }
+    }
+    // Custom name not in factory → mutable (unless tags:builtin on loaded def)
+    expect(life.isImmutableTemplate("custom_x_not_factory")).toBe(false);
   });
 });
