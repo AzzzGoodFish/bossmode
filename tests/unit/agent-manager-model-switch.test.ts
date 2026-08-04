@@ -583,7 +583,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
     expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), agentPrompt: "test", skillNames: ["review"] });
-    expect(first.reloadCalls[0].skillPaths[0]).toContain("/tmp/skills/review");
+    expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
   });
 
   it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {

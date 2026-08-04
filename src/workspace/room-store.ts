@@ -6,10 +6,7 @@ import { logger } from "../foundation/logger.js";
 import type { CreateRoomMemberInput, Room, CursorMap, RoomLinearIntegration, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
-import { copyTeamTemplateTo, writeTeamPackage } from "./team-store.js";
 import { getMember, renameMember } from "./member-registry.js";
-import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
-import { join as fsJoin } from "node:path";
 
 function roomsDir(): string {
   return join(getBossmodeDir(), "rooms");
@@ -221,14 +218,9 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
   const validation = validateRoomMemberNameList(drafts.map((draft) => draft.name));
   if (validation) throw new Error(validation);
 
-  // Agents must exist either in the chosen template or the global gallery.
-  let templateMeta: { name: string; version: string } | undefined;
-  if (opts?.templateName) {
-    // Defer full validation until after copy — agent files come from the template package.
-  } else {
-    for (const draft of drafts) {
-      if (!loadAgentDefinition(draft.agent)) throw new Error(`Agent not found: ${draft.agent}`);
-    }
+  // 0.20: agents always come from the global pool (no room-local team package).
+  for (const draft of drafts) {
+    if (!loadAgentDefinition(draft.agent)) throw new Error(`Agent not found: ${draft.agent}`);
   }
 
   const leaderName = opts?.promptLeaderMemberName ? normalizeMemberName(opts.promptLeaderMemberName) : undefined;
@@ -256,36 +248,10 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
     mkdirSync(dir, { recursive: true });
     if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
 
-    // Instantiate team package into rooms/<id>/team/ (room-local agents — no global fallback at compile).
-    const teamDest = join(dir, "team");
+    // Provenance only — no room-local team/agents materialization (0.20 team layer removed).
     if (opts?.templateName) {
-      const team = copyTeamTemplateTo(opts.templateName, teamDest);
-      templateMeta = { name: team.meta.name, version: team.meta.version };
-      // Validate drafts against template agents
-      const agentNames = new Set(team.agents.map((a) => a.name));
-      for (const draft of drafts) {
-        if (!agentNames.has(draft.agent)) throw new Error(`Agent "${draft.agent}" is not in team template "${team.meta.name}"`);
-      }
-    } else {
-      // Blank / add-agent path: copy each selected agent from the global gallery into the room team package.
-      const agents = drafts.map((draft) => {
-        const def = loadAgentDefinition(draft.agent);
-        if (!def) throw new Error(`Agent not found: ${draft.agent}`);
-        const globalPath = fsJoin(getBossmodeDir(), "agents", `${draft.agent}.md`);
-        const markdown = fsExistsSync(globalPath)
-          ? fsReadFileSync(globalPath, "utf-8")
-          : `---\nname: ${def.name}\ndescription: ${JSON.stringify(def.description || "")}\n---\n\n${def.systemPrompt || ""}\n`;
-        return { fileName: `${draft.agent}.md`, markdown };
-      });
-      writeTeamPackage(teamDest, {
-        name,
-        description: "Room team",
-        version: "1.0.0",
-        leader: leaderName,
-        agents,
-      });
+      room.template = { name: opts.templateName, version: "1.0.0" };
     }
-    if (templateMeta) room.template = templateMeta;
 
     writeRoom(room);
 
@@ -810,38 +776,14 @@ export function addRoomMemberFromAgent(
   }
 
   const member = buildDirectRoomMemberFromAgent(roomId, { agentName, memberName, config: input.config });
-  // Ensure room-local agent copy exists (compile path is room-local only).
-  const teamAgentsDir = join(roomDir(roomId), "team", "agents");
-  mkdirSync(teamAgentsDir, { recursive: true });
-  const destAgent = join(teamAgentsDir, `${agentName}.md`);
-  if (!existsSync(destAgent)) {
-    const globalPath = join(getBossmodeDir(), "agents", `${agentName}.md`);
-    if (existsSync(globalPath)) {
-      writeFileSync(destAgent, readFileSync(globalPath, "utf-8"), "utf-8");
-    } else if (agent) {
-      writeFileSync(
-        destAgent,
-        `---\nname: ${agent.name}\ndescription: ${JSON.stringify(agent.description || "")}\n---\n\n${agent.systemPrompt || ""}\n`,
-        "utf-8",
-      );
-    }
+  // 0.20: no room-local team package — agent defs load from global pool at runtime.
+  // Legacy path only: append shadow if room still uses roomMembers (no globalMemberIds yet).
+  if (!room.globalMemberIds?.length) {
+    room.roomMembers = [...getRoomMembersFromRoom(room), member];
+    room.members = [...(room.members || []), memberName].filter((n, i, a) => a.indexOf(n) === i);
+    writeRoom(room);
+    initializeMemberCursor(roomId, member.id);
   }
-  if (!existsSync(join(roomDir(roomId), "team", "team.md"))) {
-    writeTeamPackage(join(roomDir(roomId), "team"), {
-      name: room.name,
-      description: "Room team",
-      version: "1.0.0",
-      agents: readdirSync(teamAgentsDir).filter((f) => f.endsWith(".md")).map((f) => ({
-        fileName: f,
-        markdown: readFileSync(join(teamAgentsDir, f), "utf-8"),
-      })),
-    });
-  }
-  room.roomMembers = [...getRoomMembersFromRoom(room), member];
-  // Dual-write globalMemberIds when a global id is known for this name (0.20).
-  syncGlobalMemberIdForName(room, memberName);
-  writeRoom(room);
-  initializeMemberCursor(roomId, member.id);
   return { ok: true, member };
 }
 

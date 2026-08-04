@@ -18,7 +18,7 @@ import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, resolveCredentialProfileForModel, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
-import { ensureRoomTeamAgent } from "../workspace/team-store.js";
+import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
@@ -376,9 +376,9 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, re
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const agentDef = ensureRoomTeamAgent(params.id, member.agent);
+  const agentDef = loadAgentDefinition(member.agent);
   if (!agentDef) {
-    sendJson(res, 404, { error: "Room team agent definition not found for this member" });
+    sendJson(res, 404, { error: "Agent definition not found for this member" });
     return;
   }
   const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
