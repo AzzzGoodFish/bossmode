@@ -234,6 +234,45 @@ describe("member-global migration", () => {
     expect(second.skipped).toBe(true);
   });
 
+  it("F1: marker done + room never stamped (poisoned rc.2-era state) self-heals on first startup", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    // Registry already has the members (the rc.2-era build created them before
+    // the stamping code existed).
+    const reg = await import("../../src/workspace/member-registry.js");
+    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
+
+    // Poisoned room: members present by name, roomMembers deleted, no stamp.
+    const roomId = "room-poisoned";
+    const roomDir = join(state.dir, "rooms", roomId);
+    mkdirSync(roomDir, { recursive: true });
+    writeFileSync(
+      join(roomDir, "room.json"),
+      JSON.stringify({ id: roomId, name: "dev", cwd: state.dir, members: ["pm", "developer"], createdAt: 1 }, null, 2),
+      "utf8",
+    );
+    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
+
+    // Marker lies: done, but no room was ever stamped.
+    mkdirSync(join(state.dir, ".migrations"), { recursive: true });
+    writeFileSync(join(state.dir, ".migrations", "member-global-v1.json"), JSON.stringify({ migration: "member-global-v1", done: true, at: 1 }), "utf8");
+
+    const mig = await import("../../src/workspace/member-global-migration.js");
+    const res = mig.runMemberGlobalMigration();
+    expect(res.skipped).toBe(true); // one-shot part stays marker-guarded
+
+    // Data-driven repair stamped the room anyway — first startup self-heals.
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const healed = roomStore.getRoom(roomId)!;
+    expect(healed.globalMemberIds?.sort()).toEqual([pm.id, dev.id].sort());
+    expect(roomStore.getRoomMembers(roomId).map((m) => m.name).sort()).toEqual(["developer", "pm"]);
+
+    // Steady state: already-stamped rooms are never rewritten by the repair.
+    const before = JSON.stringify(roomStore.getRoom(roomId));
+    mig.runMemberGlobalMigration();
+    expect(JSON.stringify(roomStore.getRoom(roomId))).toBe(before);
+  });
+
   it("moves per-room member mainline into (member, room) scope mainline", async () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const roomId = "room-mig-ml";

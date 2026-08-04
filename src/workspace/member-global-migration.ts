@@ -158,6 +158,43 @@ function readIfExists(path?: string): string {
 }
 
 /**
+ * Every-startup, data-state-driven room stamp repair (F1, 2026-08-04).
+ * The one-shot marker can lie: rc.2-era builds wrote `done` before the
+ * stamping code existed, leaving rooms with members but no globalMemberIds —
+ * the Members API then returns []. Markers are not consulted here: a room
+ * whose stamp is missing/empty while its members resolve by name in the
+ * registry gets (re)stamped. Stamping itself is idempotent, and rooms whose
+ * data already says "stamped" are never touched. Poisoned states self-heal
+ * on the first startup with this code — no restart, no marker reset.
+ */
+export function repairRoomGlobalMemberStamps(): number {
+  let repaired = 0;
+  for (const room of roomStore.listRooms()) {
+    try {
+      // Data says stamped — trust the data, not the marker.
+      if (Array.isArray(room.globalMemberIds) && room.globalMemberIds.length > 0) continue;
+      const roomMembers = roomStore.getRoomMembers(room.id);
+      if (roomMembers.length === 0) continue; // genuinely empty room
+      const globalIds = roomMembers
+        .map((rm) => findMemberByName(rm.name)?.id)
+        .filter((id): id is string => !!id);
+      if (globalIds.length === 0) continue; // registry has no match — nothing safe to stamp
+      const leaderName = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId)?.name;
+      const leaderGlobalId = leaderName ? findMemberByName(leaderName)?.id : undefined;
+      roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId);
+      repaired += 1;
+      logger.info("migration", "room global-member stamp repaired (data-driven)", {
+        roomId: room.id,
+        members: globalIds.length,
+      });
+    } catch (err) {
+      logger.error("migration", "failed to repair room stamp", { roomId: room.id, error: String(err) });
+    }
+  }
+  return repaired;
+}
+
+/**
  * Run once per bossmode dir. Safe to call every startup.
  */
 export function runMemberGlobalMigration(): {
@@ -168,6 +205,9 @@ export function runMemberGlobalMigration(): {
   mainlinesMoved: number;
   conflicts: number;
 } {
+  // Data-driven stamp repair runs every startup, marker or not (F1).
+  repairRoomGlobalMemberStamps();
+
   const existing = readMarker();
   if (existing?.done) {
     return { skipped: true, archivePath: existing.archivePath, createdMembers: 0, roomsStamped: 0, mainlinesMoved: 0, conflicts: 0 };
@@ -235,7 +275,6 @@ export function runMemberGlobalMigration(): {
   // 3) Auto-create global members (name aggregation, credential binding, persona seed).
   let createdMembers = 0;
   let mainlinesMoved = 0;
-  const nameToGlobalId = new Map<string, string>();
   for (const [name, instances] of byName) {
     const canon = pickCanonical(instances);
     let rec = findMemberByName(name);
@@ -254,7 +293,6 @@ export function runMemberGlobalMigration(): {
         continue;
       }
     }
-    nameToGlobalId.set(name, rec.id);
 
     // Persona seed: newest member principles across this name's instances.
     try {
@@ -282,23 +320,10 @@ export function runMemberGlobalMigration(): {
     }
   }
 
-  // 4) Stamp rooms (globalMemberIds + leader + sourceMemberId links + cursor rekey via store helper).
-  let roomsStamped = 0;
-  for (const room of roomStore.listRooms()) {
-    try {
-      const roomMembers = roomStore.getRoomMembers(room.id);
-      const globalIds = roomMembers
-        .map((rm) => nameToGlobalId.get(rm.name))
-        .filter((id): id is string => !!id);
-      if (globalIds.length === 0) continue;
-      const leaderName = roomMembers.find((rm) => rm.id === room.promptLeaderMemberId)?.name;
-      const leaderGlobalId = leaderName ? nameToGlobalId.get(leaderName) : undefined;
-      roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId);
-      roomsStamped += 1;
-    } catch (err) {
-      logger.error("migration", "failed to stamp room", { roomId: room.id, error: String(err) });
-    }
-  }
+  // 4) Stamp rooms (globalMemberIds + leader + sourceMemberId links + cursor rekey).
+  // Same data-driven repair that runs at every startup — after creation the
+  // registry holds every name, so this stamps all legacy rooms.
+  const roomsStamped = repairRoomGlobalMemberStamps();
 
   writeMarker({
     done: true,
