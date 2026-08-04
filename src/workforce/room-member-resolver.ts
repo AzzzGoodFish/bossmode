@@ -1,21 +1,42 @@
 import { loadAgentDefinition } from "./agent-store.js";
 import * as memberStore from "./member-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import { getEffectiveConfig } from "../workspace/member-registry.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../shared/types.js";
 
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
   const sourceAgent = roomMember.sourceAgent;
-  const getMember = "getMember" in memberStore ? (memberStore as any).getMember as (id: string) => AgentMemberConfig | undefined : undefined;
+  const getLegacyMember = "getMember" in memberStore ? (memberStore as any).getMember as (id: string) => AgentMemberConfig | undefined : undefined;
   const getMemberByName = "getMemberByName" in memberStore ? (memberStore as any).getMemberByName as (name: string) => AgentMemberConfig | undefined : undefined;
-  const sourceMember = roomMember.sourceMemberId && getMember
-    ? getMember(roomMember.sourceMemberId)
+  const sourceMember = roomMember.sourceMemberId && getLegacyMember
+    ? getLegacyMember(roomMember.sourceMemberId)
     : roomMember.migratedFrom
       ? getMemberByName?.(roomMember.migratedFrom.memberName || roomMember.name)
       : undefined;
   const agentDef = loadAgentDefinition(sourceAgent || sourceMember?.agent || roomMember.name);
-  if (!sourceMember && !agentDef) return null;
+  if (!sourceMember && !agentDef && !roomMember.id.startsWith("mem_")) return null;
 
   const config = roomMember.config || {};
+  // G3: when identity is mem_*, pull live config from global registry effective-config.
+  let effModel = config.model || sourceMember?.model;
+  let effCred = config.credentialId ?? sourceMember?.credentialId;
+  let effThink = config.thinkingLevel || sourceMember?.thinkingLevel || "off";
+  let effSkills = config.skills ?? sourceMember?.skills;
+  let effExt = Array.isArray(config.extensions) ? config.extensions : [];
+  let effMcp = Array.isArray(config.mcpServers) ? config.mcpServers : [];
+  const globalId = roomMember.id.startsWith("mem_") ? roomMember.id : roomMember.sourceMemberId;
+  if (globalId && globalId.startsWith("mem_") && roomMember.roomId) {
+    try {
+      const eff = getEffectiveConfig(globalId, `room:${roomMember.roomId}`);
+      effModel = eff.model || effModel;
+      effCred = eff.credentialId ?? effCred;
+      effThink = (eff.thinkingLevel as string) || effThink;
+      if (eff.skills?.length) effSkills = eff.skills;
+      if (eff.extensions?.length) effExt = eff.extensions;
+      if (eff.mcpServers?.length) effMcp = eff.mcpServers;
+    } catch { /* registry cold / member missing */ }
+  }
+
   return {
     id: roomMember.id,
     name: roomMember.name,
@@ -23,13 +44,13 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     agent: sourceAgent || sourceMember?.agent || roomMember.name,
     runtime: sourceMember?.runtime || "pi-cli",
     avatar: roomMember.avatar || sourceMember?.avatar || agentDef?.avatar,
-    model: config.model || sourceMember?.model,
-    credentialId: config.credentialId ?? sourceMember?.credentialId,
-    thinkingLevel: config.thinkingLevel || sourceMember?.thinkingLevel || "off",
+    model: effModel,
+    credentialId: effCred,
+    thinkingLevel: effThink,
     contextLimit: config.contextLimit ?? sourceMember?.contextLimit,
-    skills: config.skills ?? sourceMember?.skills,
-    mcpServers: Array.isArray(config.mcpServers) ? config.mcpServers : [],
-    extensions: Array.isArray(config.extensions) ? config.extensions : [],
+    skills: effSkills,
+    mcpServers: effMcp,
+    extensions: effExt,
     createdAt: roomMember.createdAt,
   };
 }

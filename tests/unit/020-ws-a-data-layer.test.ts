@@ -233,7 +233,7 @@ describe("chats aggregation helpers + invite dual-write", () => {
     rmSync(state.dir, { recursive: true, force: true });
   });
 
-  it("inviteGlobalMember dual-writes roomMembers + globalMemberIds; remove clears both", async () => {
+  it("inviteGlobalMember stamps globalMemberIds; remove clears membership", async () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
@@ -266,7 +266,8 @@ describe("chats aggregation helpers + invite dual-write", () => {
     expect(invited.ok).toBe(true);
     const room = roomStore.getRoom(roomId)!;
     expect(room.globalMemberIds).toContain(g.id);
-    expect(roomStore.getRoomMembers(roomId).some((m) => m.name === "ops")).toBe(true);
+    expect(room.roomMembers).toBeUndefined();
+    expect(roomStore.getRoomMembers(roomId).some((m) => m.id === g.id && m.name === "ops")).toBe(true);
 
     const rm = roomStore.getRoomMembers(roomId)[0];
     const removed = roomStore.removeRoomMemberByRef(roomId, rm.id, { globalMemberId: g.id });
@@ -275,7 +276,7 @@ describe("chats aggregation helpers + invite dual-write", () => {
     expect(roomStore.getRoomMembers(roomId)).toHaveLength(0);
   });
 
-  it("stampGlobalMemberIds after invite matches memberIds create dual-write", async () => {
+  it("stampGlobalMemberIds after invite matches memberIds create path", async () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
@@ -295,13 +296,15 @@ describe("chats aggregation helpers + invite dual-write", () => {
       }, null, 2),
       "utf8",
     );
-    // Invite both (shadow records + global ids) — same dual-write as POST memberIds path
+    // Invite both by global id — membership is globalMemberIds only
     expect(roomStore.inviteGlobalMember(roomId, { id: a.id, name: a.name, agentTemplate: "general" }).ok).toBe(true);
     expect(roomStore.inviteGlobalMember(roomId, { id: b.id, name: b.name, agentTemplate: "general" }).ok).toBe(true);
     roomStore.stampGlobalMemberIds(roomId, [a.id, b.id], a.id);
     const stamped = roomStore.getRoom(roomId)!;
     expect(stamped.globalMemberIds?.sort()).toEqual([a.id, b.id].sort());
     expect(stamped.promptLeaderGlobalMemberId).toBe(a.id);
+    expect(stamped.roomMembers).toBeUndefined();
+    expect(roomStore.getRoomMembers(roomId).map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
     expect(roomStore.getRoomMembers(roomId).map((m) => m.name).sort()).toEqual(["alice", "bob"]);
   });
 

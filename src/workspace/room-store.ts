@@ -7,7 +7,7 @@ import type { CreateRoomMemberInput, Room, CursorMap, RoomLinearIntegration, Roo
 import { getMemberByName } from "../workforce/member-store.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { copyTeamTemplateTo, writeTeamPackage } from "./team-store.js";
-import { getMember } from "./member-registry.js";
+import { getMember, renameMember } from "./member-registry.js";
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { join as fsJoin } from "node:path";
 
@@ -115,8 +115,30 @@ function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: stri
 }
 
 function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
-  // Empty array is authoritative once roomMembers has been materialized (0.14+ / 0.20).
-  // Only fall back to legacy `members: string[]` when roomMembers is absent.
+  // 0.20 G3 cutover: globalMemberIds is membership authority. Synthesize records with id=mem_*.
+  if (Array.isArray(room.globalMemberIds) && room.globalMemberIds.length > 0) {
+    const out: RoomMemberRecord[] = [];
+    for (const gid of room.globalMemberIds) {
+      const g = getMember(gid);
+      if (!g) continue;
+      const shadow = Array.isArray(room.roomMembers)
+        ? room.roomMembers.find((m) => m.sourceMemberId === gid || m.id === gid || m.name === g.name)
+        : undefined;
+      out.push({
+        id: gid,
+        roomId: room.id,
+        name: g.name,
+        sourceAgent: g.agentTemplate || "general",
+        sourceMemberId: gid,
+        avatar: shadow?.avatar,
+        // Config lives on global registry (effective-config); do not rehydrate shadow config.
+        createdAt: shadow?.createdAt || g.createdAt,
+        updatedAt: g.updatedAt,
+      });
+    }
+    return out;
+  }
+  // Legacy: roomMembers array, then members: string[].
   if (Array.isArray(room.roomMembers)) {
     return room.roomMembers.map((member) => ({ ...member, roomId: member.roomId || room.id }));
   }
@@ -298,14 +320,48 @@ export function stampGlobalMemberIds(
   room.globalMemberIds = Array.from(new Set(globalMemberIds.filter(Boolean)));
   if (promptLeaderGlobalMemberId) {
     room.promptLeaderGlobalMemberId = promptLeaderGlobalMemberId;
+    room.promptLeaderMemberId = promptLeaderGlobalMemberId; // leader id is mem_* after cutover
   } else if (promptLeaderGlobalMemberId === null) {
     delete room.promptLeaderGlobalMemberId;
   }
-  // ID-link cutover: stamp sourceMemberId on local roomMembers by matching names
-  // only among the provided globalMemberIds (never free find-by-name across all members).
+  // Link shadows → migrate cursors rm_*→mem_* → drop roomMembers (globalMemberIds is authority).
   linkRoomMembersToGlobalIds(room);
+  migrateCursorsToGlobalIds(room);
+  if (room.globalMemberIds.length > 0) {
+    room.members = room.globalMemberIds
+      .map((id) => getMember(id)?.name)
+      .filter((n): n is string => Boolean(n));
+    delete room.roomMembers;
+  }
   writeRoom(room);
   return room;
+}
+
+/** Rekey cursors.json from rm_ and name keys to mem_* using sourceMemberId map. */
+function migrateCursorsToGlobalIds(room: Room): void {
+  const path = cursorsPath(room.id);
+  if (!existsSync(path)) return;
+  let cursors: CursorMap;
+  try {
+    cursors = JSON.parse(readFileSync(path, "utf-8")) as CursorMap;
+  } catch {
+    return;
+  }
+  const locals = Array.isArray(room.roomMembers) ? room.roomMembers : [];
+  const next: CursorMap = {};
+  for (const [key, val] of Object.entries(cursors)) {
+    if (key.startsWith("mem_")) {
+      next[key] = val;
+      continue;
+    }
+    const local = locals.find((m) => m.id === key || m.name === key);
+    const gid = local
+      ? (local.sourceMemberId && local.sourceMemberId.startsWith("mem_") ? local.sourceMemberId : resolveGlobalMemberId(room, local))
+      : null;
+    if (gid) next[gid] = val;
+    // Drop unmapped rm_* keys (orphan after cutover)
+  }
+  writeFileSync(path, JSON.stringify(next, null, 2), "utf-8");
 }
 
 /**
@@ -698,6 +754,28 @@ export function renameRoomMember(roomId: string, memberRef: string, nextNameRaw:
   if (validation) return { ok: false, code: "invalid", error: validation };
   const duplicate = getRoomMembersFromRoom(room).find((entry) => entry.id !== member.id && entry.name === nextName);
   if (duplicate) return { ok: false, code: "duplicate", error: "Member name already exists in this room" };
+
+  // G3: name lives on global member; room list is derived.
+  const globalId = resolveGlobalMemberId(room, member) || (member.id.startsWith("mem_") ? member.id : null);
+  if (globalId) {
+    try {
+      renameMember(globalId, nextName);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (/taken|exists/i.test(msg)) return { ok: false, code: "duplicate", error: msg };
+      return { ok: false, code: "invalid", error: msg };
+    }
+    // Refresh derived members names on room
+    const refreshed = getRoom(roomId)!;
+    refreshed.members = (refreshed.globalMemberIds || [])
+      .map((id) => getMember(id)?.name)
+      .filter((n): n is string => Boolean(n));
+    writeRoom(refreshed);
+    const next = getRoomMembers(roomId).find((m) => m.id === globalId)!;
+    return { ok: true, member: next };
+  }
+
+  // Legacy roomMembers-only path
   const nextMember = { ...member, name: nextName, updatedAt: Date.now() };
   room.roomMembers = getRoomMembersFromRoom(room).map((entry) => entry.id === member.id ? nextMember : entry);
   writeRoom(room);
@@ -820,44 +898,46 @@ export function inviteGlobalMember(
 
   const agentName = normalizeMemberName(global.agentTemplate || "general") || "general";
   // Prefer full agent copy path when template exists; otherwise create a shadow record only.
+  // G3: membership is globalMemberIds only — no roomMembers shadow write.
+  addGlobalMemberId(roomId, global.id);
+  initializeMemberCursor(roomId, global.id);
+  // Ensure team agent file exists for runtime compile (best-effort).
   if (loadAgentDefinition(agentName)) {
-    const added = addRoomMemberFromAgent(roomId, {
-      agentName,
-      memberName,
-      config: global.config,
-    });
-    if (!added.ok) return added;
-    // ID link: stamp sourceMemberId on the local shadow + globalMemberIds.
-    const stamped = stampLocalSourceMemberId(roomId, added.member.id, global.id);
-    addGlobalMemberId(roomId, global.id);
-    return stamped ? { ok: true, member: stamped } : added;
+    try {
+      addRoomMemberFromAgent(roomId, {
+        agentName,
+        memberName,
+        config: global.config,
+      });
+    } catch {
+      /* agent file copy optional */
+    }
   }
-
-  const member = buildDirectRoomMemberFromAgent(roomId, {
-    agentName,
-    memberName,
-    config: global.config,
-  });
-  member.sourceMemberId = global.id;
-  room.roomMembers = [...getRoomMembersFromRoom(room), member];
-  room.globalMemberIds = [...new Set([...(room.globalMemberIds || []), global.id])];
-  writeRoom(room);
-  initializeMemberCursor(roomId, member.id);
-  return { ok: true, member };
-}
-
-/** Set sourceMemberId on an existing local room member (ID-link cutover). */
-function stampLocalSourceMemberId(roomId: string, localMemberId: string, globalMemberId: string): RoomMemberRecord | null {
-  const room = getRoom(roomId);
-  if (!room) return null;
-  let found: RoomMemberRecord | null = null;
-  room.roomMembers = getRoomMembersFromRoom(room).map((m) => {
-    if (m.id !== localMemberId) return m;
-    found = { ...m, sourceMemberId: globalMemberId, updatedAt: Date.now() };
-    return found!;
-  });
-  if (found) writeRoom(room);
-  return found;
+  // Strip roomMembers — globalMemberIds is sole membership authority.
+  {
+    const r = getRoom(roomId);
+    if (r?.globalMemberIds?.length) {
+      r.members = r.globalMemberIds.map((id) => getMember(id)?.name).filter((n): n is string => Boolean(n));
+      delete r.roomMembers;
+      writeRoom(r);
+    }
+  }
+  const synthesized = getRoomMembers(roomId).find((m) => m.id === global.id || m.sourceMemberId === global.id);
+  if (!synthesized) {
+    return {
+      ok: true,
+      member: {
+        id: global.id,
+        roomId,
+        name: memberName,
+        sourceAgent: agentName,
+        sourceMemberId: global.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    };
+  }
+  return { ok: true, member: synthesized };
 }
 
 export function removeRoomMemberByRef(
@@ -870,11 +950,30 @@ export function removeRoomMemberByRef(
   const member = findRoomMemberByRefInRoom(room, memberRef);
   if (!member) return { ok: false, error: "Member is not in this room" };
 
-  room.roomMembers = getRoomMembersFromRoom(room).filter((m) => m.id !== member.id);
-  writeRoom(room);
   const gid = opts?.globalMemberId
+    || resolveGlobalMemberId(room, member)
+    || (member.id.startsWith("mem_") ? member.id : undefined)
     || (memberRef.startsWith("mem_") ? memberRef : undefined);
-  if (gid) removeGlobalMemberId(roomId, gid);
+
+  // G3: membership authority is globalMemberIds
+  if (gid) {
+    room.globalMemberIds = (room.globalMemberIds || []).filter((id) => id !== gid);
+    if (room.promptLeaderGlobalMemberId === gid) delete room.promptLeaderGlobalMemberId;
+    if (room.promptLeaderMemberId === gid || room.promptLeaderMemberId === member.id) {
+      delete room.promptLeaderMemberId;
+    }
+  }
+  if (Array.isArray(room.roomMembers)) {
+    room.roomMembers = room.roomMembers.filter((m) => m.id !== member.id && m.sourceMemberId !== gid);
+    if (room.globalMemberIds?.length) delete room.roomMembers;
+  }
+  room.members = (room.globalMemberIds?.length
+    ? room.globalMemberIds.map((id) => getMember(id)?.name).filter((n): n is string => Boolean(n))
+    : (room.members || []).filter((n) => n !== member.name));
+  writeRoom(room);
+  // Drop cursor for this member (mem_* or legacy key)
+  deleteCursor(roomId, member.id);
+  if (gid && gid !== member.id) deleteCursor(roomId, gid);
   return { ok: true, removed: member };
 }
 

@@ -540,10 +540,12 @@ export async function handleToolCallback(
         return { ok: false, error: err?.message || String(err) };
       }
 
-      // Stamp globalMemberIds (roomMembers already created from drafts).
-      for (const m of invitees) {
-        roomStore.addGlobalMemberId(room.id, m.id);
-      }
+      // Cutover: stamp globalMemberIds + migrate leader to mem_* + drop roomMembers.
+      roomStore.stampGlobalMemberIds(
+        room.id,
+        invitees.map((m) => m.id),
+        creator.id,
+      );
 
       const principles = typeof params?.principles === "string" ? params.principles.trim() : "";
       if (principles) {
@@ -589,9 +591,14 @@ export async function handleToolCallback(
       const room = roomStore.getRoom(targetRoomId);
       if (!room) return { ok: false, error: "Room not found" };
 
-      // Leader gate: room.promptLeaderMemberId must match actor's room-local id OR global name match.
+      // Leader gate: promptLeaderGlobalMemberId / promptLeaderMemberId (mem_*) vs actor.
       const actorLocal = roomStore.resolveRoomMemberRef(targetRoomId, agentName);
-      if (!room.promptLeaderMemberId || !actorLocal || room.promptLeaderMemberId !== actorLocal.id) {
+      if (!actorLocal) {
+        return { ok: false, error: "not_room_leader", message: "Only the room leader can edit this room" };
+      }
+      const leaderId = room.promptLeaderGlobalMemberId || room.promptLeaderMemberId;
+      const actorGlobalId = roomStore.resolveGlobalMemberId(room, actorLocal) || actorLocal.id;
+      if (!leaderId || (leaderId !== actorLocal.id && leaderId !== actorGlobalId)) {
         return { ok: false, error: "not_room_leader", message: "Only the room leader can edit this room" };
       }
 

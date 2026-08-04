@@ -38,7 +38,7 @@ describe("G3 ID-link cutover", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("stampGlobalMemberIds sets sourceMemberId on local room members", async () => {
+  it("stampGlobalMemberIds synthesizes members from globalMemberIds and drops roomMembers", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "m/a", credentialId: "c1" });
@@ -50,8 +50,14 @@ describe("G3 ID-link cutover", () => {
     ], undefined, { promptLeaderMemberName: "pm" });
 
     roomStore.stampGlobalMemberIds(room.id, [pm.id, dev.id], pm.id);
+    const fresh = roomStore.getRoom(room.id)!;
+    expect(fresh.roomMembers).toBeUndefined();
+    expect(fresh.globalMemberIds).toEqual([pm.id, dev.id]);
+    expect(fresh.promptLeaderMemberId).toBe(pm.id);
+
     const members = roomStore.getRoomMembers(room.id);
-    expect(members.find((m) => m.name === "pm")?.sourceMemberId).toBe(pm.id);
+    expect(members.map((m) => m.id).sort()).toEqual([dev.id, pm.id].sort());
+    expect(members.find((m) => m.name === "pm")?.id).toBe(pm.id);
     expect(members.find((m) => m.name === "developer")?.sourceMemberId).toBe(dev.id);
   });
 
@@ -70,7 +76,7 @@ describe("G3 ID-link cutover", () => {
     expect(roomStore.resolveGlobalMemberId(fresh, local)).toBe(pm.id);
   });
 
-  it("inviteGlobalMember stamps sourceMemberId", async () => {
+  it("inviteGlobalMember adds mem_* membership without roomMembers array", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
@@ -85,9 +91,13 @@ describe("G3 ID-link cutover", () => {
     });
     expect(invited.ok).toBe(true);
     if (invited.ok) {
+      expect(invited.member.id).toBe(dev.id);
       expect(invited.member.sourceMemberId).toBe(dev.id);
     }
-    expect(roomStore.getRoom(room.id)!.globalMemberIds).toContain(dev.id);
+    const fresh = roomStore.getRoom(room.id)!;
+    expect(fresh.globalMemberIds).toContain(dev.id);
+    expect(fresh.roomMembers).toBeUndefined();
+    expect(roomStore.getRoomMembers(room.id).map((m) => m.id)).toEqual(expect.arrayContaining([pm.id, dev.id]));
   });
 
   it("does not resolve a same-named global member outside globalMemberIds", async () => {
