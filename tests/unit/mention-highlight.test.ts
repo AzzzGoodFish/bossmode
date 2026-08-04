@@ -50,6 +50,31 @@ describe("splitMentionTokens — three tiers", () => {
   });
 });
 
+describe("splitMentionTokens — code is literal", () => {
+  it("backticked @/! never tints on the plain-text path (user messages)", () => {
+    const parts = splitMentionTokens("对照 `!pm` 与 `@qa` 均应字面", OPTS);
+    expect(parts.every((p) => !p.tier)).toBe(true);
+    // original text preserved byte-for-byte (strip is whitespace-only)
+    expect(parts.map((p) => p.text).join("")).toBe("对照 `!pm` 与 `@qa` 均应字面");
+  });
+
+  it("fenced blocks never tint; tokens outside code still do", () => {
+    const fenced = splitMentionTokens("```\n!pm\n@qa\n```\nreal !pm", OPTS);
+    const tinted = fenced.filter((p) => p.tier);
+    expect(tinted).toEqual([{ text: "!pm", tier: "urgent" }]);
+  });
+
+  it("backend and web stripCodeSegments are byte-identical", async () => {
+    const backend = await import("../../src/shared/mention-text.js");
+    const web = await import("../../web/src/utils/mention-tokens");
+    const cases = ["plain", "`inline` x", "```\nblock\n``` y", "unclosed ``` tail", "a `b` c `d` e", "`!pm`"];
+    for (const c of cases) {
+      expect(web.stripCodeSegments(c)).toBe(backend.stripCodeSegments(c));
+      expect(web.stripCodeSegments(c)).toHaveLength(c.length);
+    }
+  });
+});
+
 describe("mentionNameSet", () => {
   it("snapshot wins when present; roster is fallback; loginName always included", () => {
     expect(mentionNameSet(["pm"], ["pm", "qa"], "fish").sort()).toEqual(["fish", "pm"]);

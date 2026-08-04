@@ -23,7 +23,7 @@ vi.mock("../../src/shared/config.js", () => ({
   getBossmodeDir: () => state.tmpDir,
 }));
 
-import { parseUrgentMentions, parseUrgentMentionMemberIds, initRouter } from "../../src/communication/router.js";
+import { parseMentions, parseUrgentMentions, parseUrgentMentionMemberIds, initRouter } from "../../src/communication/router.js";
 import { postMessage } from "../../src/communication/message-bus.js";
 
 const MEMBERS = ["pm", "qa", "dev-ben"];
@@ -63,6 +63,21 @@ describe("parseUrgentMentions", () => {
 
   it("coexists with @ mentions and dedupes", () => {
     expect(parseUrgentMentions("@qa look, and !pm !pm now", MEMBERS)).toEqual(["pm"]);
+  });
+
+  it("code segments are literal text: backticked !name never parses (inline + fenced)", () => {
+    expect(parseUrgentMentions("对照 `!pm` 应字面", MEMBERS)).toEqual([]);
+    expect(parseUrgentMentions("```\n!pm in a fence\n```", MEMBERS)).toEqual([]);
+    expect(parseUrgentMentions("real !pm plus `!qa`", MEMBERS)).toEqual(["pm"]);
+    // unclosed fence runs to end
+    expect(parseUrgentMentions("```\n!pm", MEMBERS)).toEqual([]);
+  });
+
+  it("@ follows the same rule: code-span @name never activates", () => {
+    expect(parseMentions("讨论 `@pm` 这个手势", MEMBERS)).toEqual([]);
+    expect(parseMentions("```\n@pm fenced\n```", MEMBERS)).toEqual([]);
+    expect(parseMentions("real @pm plus `@qa`", MEMBERS)).toEqual(["pm"]);
+    expect(parseMentions("`@all` fenced out", MEMBERS)).toEqual([]);
   });
 
   it("maps to member ids", () => {

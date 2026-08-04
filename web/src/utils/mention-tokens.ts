@@ -28,6 +28,18 @@ export const MENTION_PILL_CLASSES: Record<MentionTier, string> = {
 
 const LEGAL_NAME_CHAR = "[\\w.-]";
 
+/**
+ * Strip markdown code segments (inline `…` + fenced blocks) as same-length
+ * whitespace — offsets stay stable so match ranges map back to the original
+ * text. Mirror of src/shared/mention-text.ts (web cannot import src/shared);
+ * parity is locked by tests. Code is literal text: a backticked @/! never tints.
+ */
+export function stripCodeSegments(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(?:```|$)/g, (m) => " ".repeat(m.length))
+    .replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length));
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -56,6 +68,7 @@ export function splitMentionTokens(content: string, opts: MentionTokenOptions): 
   // `@` keeps the long-standing behavior (no left constraint — the backend
   // parser works the same way). Boundary is captured, not lookbehind, to keep
   // parity with older JS targets.
+  const scan = stripCodeSegments(content);
   const nameAlt = names.map(escapeRegex).join("|");
   const bangRe = `(^|[^\\w!])(!)(${nameAlt})(?!${LEGAL_NAME_CHAR})`;
   const atRe = `(@)(${nameAlt})(?!${LEGAL_NAME_CHAR})`;
@@ -63,7 +76,7 @@ export function splitMentionTokens(content: string, opts: MentionTokenOptions): 
 
   const parts: MentionTokenPart[] = [];
   let cursor = 0;
-  for (let match = matcher.exec(content); match; match = matcher.exec(content)) {
+  for (let match = matcher.exec(scan); match; match = matcher.exec(scan)) {
     const isBang = match[2] === "!";
     const boundary = isBang ? match[1] : "";
     const prefix = isBang ? "!" : "@";

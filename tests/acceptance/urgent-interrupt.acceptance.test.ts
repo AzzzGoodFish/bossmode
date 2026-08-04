@@ -160,6 +160,17 @@ describe("Acceptance: urgent ! interrupt", () => {
     expect(promptCalls).toHaveLength(0);
     expect(mockAbortFn).not.toHaveBeenCalled();
 
+    // backticked !pm — code is literal text: no activation, no urgent snapshot
+    await sendMessage(room.id, "对照 `!pm` 应字面渲染不触发");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(promptCalls).toHaveLength(0);
+    expect(mockAbortFn).not.toHaveBeenCalled();
+    const msgs = await getMessages(room.id);
+    const codeMsg = msgs.find((m) => typeof m.content === "string" && m.content.includes("应字面渲染"));
+    expect(codeMsg).toBeTruthy();
+    expect(codeMsg.urgentMentions ?? []).toEqual([]);
+    expect(codeMsg.mentions ?? []).toEqual([]);
+
     // idle urgent — direct activation without abort or banner
     await sendMessage(room.id, "!pm quick question");
     await vi.waitFor(() => expect(promptCalls.length).toBe(1), { timeout: 3000 });
