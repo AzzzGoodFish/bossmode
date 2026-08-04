@@ -105,41 +105,13 @@ describe("Acceptance: Summarize & Message Range", () => {
     });
   });
 
-  // ── Message Range ──
+  // ── Message Range (removed with the summary feature) ──
 
-  describe("Message range (for expanding summaries)", () => {
-    it("returns messages in range", async () => {
-      const room = await createRoom("range-test", ["pm"]);
-      const msgs = await sendMessages(room.id, 10, "range");
-
-      const from = msgs[2].id;
-      const to = msgs[7].id;
-      const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages/range?from=${from}&to=${to}`, { token });
-      expect(res.status).toBe(200);
-
-      const data: RoomMessage[] = JSON.parse(res.body);
-      expect(data.length).toBe(6); // msgs 2-7 inclusive
-      expect(data[0].content).toBe("range 2");
-      expect(data[5].content).toBe("range 7");
-    });
-
-    it("returns 400 when from/to missing", async () => {
-      const room = await createRoom("range-bad", ["pm"]);
-      const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages/range?from=x`, { token });
-      expect(res.status).toBe(400);
-    });
-
-    it("returns empty array for nonexistent message IDs", async () => {
-      const room = await createRoom("range-empty", ["pm"]);
-      await sendMessages(room.id, 5);
-
-      const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages/range?from=msg-nonexist&to=msg-other`, { token });
-      expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual([]);
-    });
-
-    it("returns 404 for nonexistent room", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/rooms/fake-id/messages/range?from=a&to=b", { token });
+  describe("Message range endpoints removed", () => {
+    it("range route is gone (sole consumer was SummaryCard)", async () => {
+      const room = await createRoom("range-gone", ["pm"]);
+      await sendMessages(room.id, 3, "range");
+      const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages/range?from=a&to=b`, { token });
       expect(res.status).toBe(404);
     });
   });
