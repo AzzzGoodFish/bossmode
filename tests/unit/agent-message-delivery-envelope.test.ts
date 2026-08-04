@@ -164,17 +164,6 @@ describe("agent delivery envelope formatting", () => {
     expect(sent).not.toContain("mentioned by");
   });
 
-  it("keeps summary messages as pass-through", async () => {
-    mocks.getMessagesSince.mockReturnValue([
-      { id: "s1", sender: "summarizer", content: "[Summary | covers ...]", mentions: [], ts: 1, type: "summary" },
-      { id: "m3", sender: "user", content: "@pm status?", mentions: ["pm"], ts: 3 },
-    ]);
-
-    await activateAgent("room1", "pm");
-    const sent = mocks.prompt.mock.calls[0][0] as string;
-    expect(sent).toContain("[Summary | covers ...]");
-  });
-
   it("formats multiple non-mention messages as a shared transcript without any trigger-specific header", async () => {
     mocks.getMessagesSince.mockReturnValue([
       { id: "m1", sender: "user", content: "plain msg", mentions: [], ts: 1, seq: 201 },

@@ -43,7 +43,7 @@ function writeNextSeq(roomId: string, next: number): void {
   writeFileSync(seqPath(roomId), String(next), "utf-8");
 }
 
-// 2a: spread to propagate all fields (type, summary_meta, etc.)
+// 2a: spread to propagate all fields (type, task_event_meta, etc.)
 export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">): RoomMessage {
   const bounded = limitRuntimeFailureRoomMessage(msg);
   const seq = readNextSeq(roomId);
@@ -60,57 +60,7 @@ export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">):
   return message;
 }
 
-// 2b: Core merge — summaries replace the messages they cover
-export function mergeWithSummaries(messages: RoomMessage[]): RoomMessage[] {
-  // Collect all summary messages and the ranges they cover
-  const summaries = messages.filter((m) => m.type === "summary" && m.summary_meta);
-  if (summaries.length === 0) return messages;
-
-  // Build a set of message IDs covered by summaries
-  const coveredIds = new Set<string>();
-  const summaryInsertions: { fromId: string; summary: RoomMessage }[] = [];
-
-  for (const summary of summaries) {
-    const meta = summary.summary_meta!;
-    const fromIdx = messages.findIndex((m) => m.id === meta.covered_range.from_id);
-    const toIdx = messages.findIndex((m) => m.id === meta.covered_range.to_id);
-    if (fromIdx === -1 || toIdx === -1) continue;
-
-    // Mark all messages in range as covered (including from and to)
-    for (let i = fromIdx; i <= toIdx; i++) {
-      if (messages[i].type !== "summary") {
-        coveredIds.add(messages[i].id);
-      }
-    }
-    summaryInsertions.push({ fromId: meta.covered_range.from_id, summary });
-  }
-
-  // Build merged result: replace covered ranges with summaries
-  const result: RoomMessage[] = [];
-  const insertedSummaryIds = new Set<string>();
-
-  for (const msg of messages) {
-    // Skip the summary messages from their original position (they'll be inserted at from_id)
-    if (msg.type === "summary") continue;
-
-    // Check if this message is the start of a covered range
-    for (const ins of summaryInsertions) {
-      if (ins.fromId === msg.id && !insertedSummaryIds.has(ins.summary.id)) {
-        result.push(ins.summary);
-        insertedSummaryIds.add(ins.summary.id);
-      }
-    }
-
-    // Skip covered messages
-    if (coveredIds.has(msg.id)) continue;
-
-    result.push(msg);
-  }
-
-  return result;
-}
-
-// 2c: getMessages with merge
+// 2c: getMessages
 export function getMessages(roomId: string, opts?: { limit?: number; before?: string; around?: string }): RoomMessage[] {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
@@ -119,9 +69,6 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
   if (!content.trim()) return [];
 
   let messages: RoomMessage[] = parseRoomMessages(content, roomId);
-
-  // Merge summaries before pagination
-  messages = mergeWithSummaries(messages);
 
   // Around: return a window centered on the target message
   if (opts?.around) {
@@ -159,13 +106,12 @@ export function getMessagesSince(roomId: string, cursorId: string | null): RoomM
   const content = readFileSync(path, "utf-8");
   if (!content.trim()) return [];
 
-  const raw: RoomMessage[] = parseRoomMessages(content, roomId);
-  const messages = mergeWithSummaries(raw);
+  const messages: RoomMessage[] = parseRoomMessages(content, roomId);
 
   if (!cursorId) return messages;
 
   const idx = messages.findIndex((m) => m.id === cursorId);
-  // Cursor not in merged → return all merged (agent-manager contextLimit truncates)
+  // Cursor not found → return all (agent-manager contextLimit truncates)
   if (idx === -1) return messages;
   return messages.slice(idx + 1);
 }
@@ -211,15 +157,6 @@ export function readAllMessages(roomId: string): RoomMessage[] {
   return parseRoomMessages(content, roomId);
 }
 
-// 2d: Get raw messages in a range (for expanding summaries — no merge)
-export function getMessagesByRange(roomId: string, fromId: string, toId: string): RoomMessage[] {
-  const all = readAllMessages(roomId);
-  const fromIdx = all.findIndex((m) => m.id === fromId);
-  const toIdx = all.findIndex((m) => m.id === toId);
-  if (fromIdx === -1 || toIdx === -1) return [];
-  return all.slice(fromIdx, toIdx + 1).filter((m) => m.type !== "summary");
-}
-
 // -- Message search --
 
 export interface SearchOptions {
@@ -229,7 +166,7 @@ export interface SearchOptions {
   before?: number;   // ts < before (epoch ms)
   limit?: number;    // default 50, max 500
   offset?: number;   // default 0
-  type?: string;     // message type filter (e.g. "summary", "task_event", "knowledge_event")
+  type?: string;     // message type filter (e.g. "task_event", "knowledge_event")
   aroundSeq?: number; // return a window centered on the message with this seq
 }
 
@@ -239,7 +176,7 @@ export interface SearchResult {
 }
 
 export function searchMessages(roomId: string, opts: SearchOptions = {}): SearchResult {
-  const all = mergeWithSummaries(readAllMessages(roomId));
+  const all = readAllMessages(roomId);
 
   // aroundSeq: window centered on the target seq (bypasses the other filters).
   if (opts.aroundSeq !== undefined) {

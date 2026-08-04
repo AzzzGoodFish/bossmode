@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, BookOpen, FileText, Plus, Pencil, ArrowRight, Trash2, Eye } from "lucide-react";
 import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, RoomMessageAttachment } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
-import { SummaryCard } from "./SummaryCard";
 import { MessageSearchBar } from "./MessageSearchBar";
 import type { MessageArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
 import { formatMessageDateSeparator, isSameLocalDate } from "../utils/message-date";
@@ -218,8 +217,6 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       onPreview={onPreviewArtifact ? () => onPreviewArtifact({ kind: "message", messageId: msg.id, title: msg.knowledge_event_meta!.title, artifacts: [msg.knowledge_event_meta!.path], selectedIndex: 0 }) : undefined}
                       onOpenInLibrary={onNavigateToKnowledge ? () => onNavigateToKnowledge(msg.knowledge_event_meta!.path) : undefined}
                     />
-                  ) : msg.type === "summary" ? (
-                    <SummaryCard message={msg} roomId={roomId || ""} />
                   ) : (
                     <MessageBubble
                       sender={msg.sender}

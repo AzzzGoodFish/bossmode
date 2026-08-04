@@ -877,20 +877,6 @@ export async function getMemberActiveTools(roomId: string, memberRef: string): P
 
 // -- Messages --
 
-export interface SummaryMeta {
-  title: string;
-  covered_range: {
-    from_id: string;
-    to_id: string;
-    count: number;
-  };
-  time_range: {
-    from: number;
-    to: number;
-  };
-  participants: string[];
-}
-
 export interface TaskEventMeta {
   action: "created" | "updated" | "status_changed" | "commented" | "deleted";
   taskId: string;
@@ -927,8 +913,7 @@ export interface RoomMessage {
   mentions: string[];
   mentionMemberIds?: string[];
   ts: number;
-  type?: "summary" | "task_event" | "knowledge_event";
-  summary_meta?: SummaryMeta;
+  type?: "task_event" | "knowledge_event";
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
   artifacts?: string[];
@@ -1100,10 +1085,6 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   }
 
   return res.json();
-}
-
-export async function getMessageRange(roomId: string, fromId: string, toId: string): Promise<RoomMessage[]> {
-  return apiFetch(`/api/rooms/${roomId}/messages/range?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
 }
 
 export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";

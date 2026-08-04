@@ -14,6 +14,7 @@ import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-renam
 import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
 import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
 import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
+import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
@@ -118,6 +119,15 @@ export function startServer(opts: ServerOptions): Promise<void> {
     }
   } catch (err) {
     logger.error("server", "member-global-v1 migration failed", { error: String(err) });
+  }
+
+  try {
+    const result = runSummaryRemovalMigration();
+    if (!result.skipped) {
+      logger.info("server", "summary-removal-v1 migration applied", result);
+    }
+  } catch (err) {
+    logger.error("server", "summary-removal-v1 migration failed", { error: String(err) });
   }
 
   // Initialize the SQLite projection (0.19.1). Non-blocking: a fresh DB

@@ -664,29 +664,20 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
 
   const items = messages.map((raw) => {
     const m = renderMessageForAgent(roomId, raw);
-    return { msg: m, role: resolveSenderRole(m.sender) as SenderRole, isSummary: m.type === "summary" };
+    return { msg: m, role: resolveSenderRole(m.sender) as SenderRole };
   });
 
-  const nonSummary = items.filter((i) => !i.isSummary);
-
-  // Single non-summary message → single-message envelope.
-  if (nonSummary.length === 1) {
-    const parts: string[] = [];
-    for (const item of items) {
-      if (item.isSummary) parts.push(item.msg.content);
-      else parts.push(wrapRoomContextMessage(item.msg, roomName, item.role));
-    }
-    return parts.join("\n\n");
+  // Single message → single-message envelope.
+  if (items.length === 1) {
+    return wrapRoomContextMessage(items[0].msg, roomName, items[0].role);
   }
 
   // Multiple messages → shared transcript envelope (each message keeps its own
   // full sub-header with seq + timestamp so it can be referenced individually).
-  const transcript = wrapRoomMessagesTranscript(
-    nonSummary.map((i) => ({ msg: i.msg, role: i.role })),
+  return wrapRoomMessagesTranscript(
+    items.map((i) => ({ msg: i.msg, role: i.role })),
     roomName,
   );
-  const summaryParts = items.filter((i) => i.isSummary).map((i) => i.msg.content);
-  return [transcript, ...summaryParts].join("\n\n");
 }
 
 // Resolve skills: member config > agent definition > empty

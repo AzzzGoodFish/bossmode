@@ -152,11 +152,6 @@ export function useRoom(roomId: string | null) {
       if (!roomId) return;
 
       if (event.type === "room:message" && event.roomId === roomId) {
-        // Summary messages trigger full reload (merged view changes)
-        if (event.message.type === "summary") {
-          if (!inHistoryView) reloadRoom();
-          return;
-        }
         // In history view, don't append new messages (user is reading old context)
         if (inHistoryView) return;
         setMessages((prev) => {

@@ -1,4 +1,4 @@
-// Workspace API routes — Room, Message, Summarize, Attachments
+// Workspace API routes — Room, Message, Attachments
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
@@ -997,25 +997,4 @@ addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
   const result = messageStore.searchMessages(params.id, opts);
   sendJson(res, 200, result);
 });
-
-addRoute("GET", "/api/rooms/:id/messages/range", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-
-  const url = new URL(req.url || "", "http://localhost");
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-
-  if (!from || !to) {
-    sendJson(res, 400, { error: "from and to query parameters are required" });
-    return;
-  }
-
-  const messages = messageStore.getMessagesByRange(params.id, from, to);
-  sendJson(res, 200, messages);
-});
-
 // Attachment routes moved to src/api/uploads.ts (stream-based)
