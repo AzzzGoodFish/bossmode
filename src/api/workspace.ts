@@ -22,6 +22,7 @@ import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
+import { readMemoryLayerInfo } from "../workspace/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
@@ -312,8 +313,9 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/principles", async (_req, res
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const principles = principlesStore.readPrinciplesWithBudget(params.id, "member", member.id);
-  sendJson(res, 200, { ...principles, asset: "principles", scope: "member", memberId: member.id, memberName: member.name, budgetHeader: principlesStore.formatBudgetHeader(principles.budget), suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
+  // 0.20: member-level assets live in the member-global memory store (contract §6).
+  const info = readMemoryLayerInfo(member.id, "principles", `room:${params.id}`);
+  sendJson(res, 200, { ...info, asset: "principles", scope: "member", memberId: member.id, memberName: member.name, budgetHeader: principlesStore.formatBudgetHeader(info.budget), suggestedTemplate: info.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
 });
 
 addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, params) => {
@@ -327,18 +329,19 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, 
     sendJson(res, 404, { error: "Member is not in this room" });
     return;
   }
-  const mainline = mainlineStore.readMainlineWithBudget(params.id, member.id);
-  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, mainline.content);
+  // 0.20: member-level assets live in the member-global memory store (contract §6).
+  const info = readMemoryLayerInfo(member.id, "mainline", `room:${params.id}`);
+  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, info.content);
   sendJson(res, 200, {
-    ...mainline,
+    ...info,
     content: resolvedContent,
     parsed: mainlineStore.parseMainline(resolvedContent),
     asset: "mainline",
     scope: "member",
     memberId: member.id,
     memberName: member.name,
-    budgetHeader: principlesStore.formatBudgetHeader(mainline.budget),
-    suggestedTemplate: mainline.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
+    budgetHeader: principlesStore.formatBudgetHeader(info.budget),
+    suggestedTemplate: info.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
   });
 });
 
