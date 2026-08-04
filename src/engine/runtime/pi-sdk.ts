@@ -802,10 +802,14 @@ export class PiSdkRuntime implements AgentRuntime {
     const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
     const resolvedModel = `${provider}/${modelId}`;
 
-    const safeRoom = safeSegment(opts.roomId);
     const safeMember = safeSegment(opts.member.id);
-    const runtimeAgentDir = piConfig?.agentDir || join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
-    const sessionDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember, "sessions");
+    // 0.20: DM runtime under members/<id>/dm/; room under <roomId>/<memberId>/.
+    const isDm = typeof opts.roomId === "string" && opts.roomId.startsWith("dm:");
+    const defaultAgentDir = isDm
+      ? join(getBossmodePiRuntimeRoot(), "members", safeMember, "dm")
+      : join(getBossmodePiRuntimeRoot(), safeSegment(opts.roomId), safeMember);
+    const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
+    const sessionDir = join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 

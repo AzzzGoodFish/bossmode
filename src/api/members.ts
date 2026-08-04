@@ -525,7 +525,15 @@ addRoute("POST", "/api/dm/:memberId/messages", async (req, res, params) => {
       mentions: [],
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments as any } : {}),
     });
-    // Activation is WS-B; data layer only persists.
+    // 0.20: DM messages activate the member directly (no @).
+    try {
+      const { activateDmMember } = await import("../engine/agent-manager.js");
+      void activateDmMember(m.id).catch((err) => {
+        console.error("[dm] activate failed", err);
+      });
+    } catch (err) {
+      console.error("[dm] activate import failed", err);
+    }
     sendJson(res, 200, { message });
   } catch (err) {
     sendJson(res, 500, { error: "internal", message: String(err) });

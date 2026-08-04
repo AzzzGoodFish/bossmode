@@ -1979,9 +1979,12 @@ export function exportPiConfigForMember(args: {
   const profile = resolveCredentialProfileForModel({ modelRef: args.modelRef, credentialId: args.credentialId });
   if (!profile) return null;
 
-  const safeRoom = args.roomId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const safeMember = args.memberName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const agentDir = join(getBossmodePiRuntimeRoot(), safeRoom, safeMember);
+  const safeMember = args.memberName.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  // 0.20 DM sessions live under members/<id>/dm/ (contract §6).
+  const isDm = typeof args.roomId === "string" && args.roomId.startsWith("dm:");
+  const agentDir = isDm
+    ? join(getBossmodePiRuntimeRoot(), "members", safeMember, "dm")
+    : join(getBossmodePiRuntimeRoot(), args.roomId.replace(/[^a-zA-Z0-9._-]+/g, "_"), safeMember);
   mkdirSync(agentDir, { recursive: true });
 
   // Materialize ALL enabled providers (endpoint + model metadata only). Auth is

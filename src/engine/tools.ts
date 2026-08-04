@@ -116,6 +116,28 @@ export async function handleToolCallback(
         }
       }
 
+      // 0.20 DM scope: post to dm-messages, not room bus.
+      if (typeof roomId === "string" && roomId.startsWith("dm:")) {
+        const memberId = roomId.slice("dm:".length);
+        const { addDmMessage } = await import("../workspace/dm-message-store.js");
+        const msg = addDmMessage(memberId, {
+          sender: agentName,
+          content: message,
+          mentions: [],
+          ...(attachments.length ? { attachments } as any : {}),
+          ...(artifacts.length ? { artifacts } as any : {}),
+        });
+        try {
+          // Reuse room:message shape until WS schema gains dm:message (contract §4).
+          broadcastToRoom(`dm:${memberId}`, {
+            type: "room:message",
+            roomId: `dm:${memberId}`,
+            message: msg as any,
+          } as any);
+        } catch { /* best-effort */ }
+        return { ok: true };
+      }
+
       const room = roomStore.getRoom(roomId);
       const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
       const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
