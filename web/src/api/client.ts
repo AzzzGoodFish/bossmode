@@ -1,6 +1,17 @@
 const BASE_URL = "";
 
 let authToken: string | null = localStorage.getItem("bossmode_token");
+let authUsername: string | null = localStorage.getItem("bossmode_username");
+
+/** Login name of the human user — powers the "@me" mention tier (`@<loginName>`, same judgement as unread mentioned). */
+export function getUsername(): string | null {
+  return authUsername;
+}
+
+export function setUsername(username: string): void {
+  authUsername = username;
+  localStorage.setItem("bossmode_username", username);
+}
 
 export function setToken(token: string): void {
   authToken = token;
@@ -10,6 +21,8 @@ export function setToken(token: string): void {
 export function clearToken(): void {
   authToken = null;
   localStorage.removeItem("bossmode_token");
+  authUsername = null;
+  localStorage.removeItem("bossmode_username");
 }
 
 export function getToken(): string | null {
@@ -59,6 +72,7 @@ export async function login(
     body: JSON.stringify({ username, password }),
   });
   setToken(result.token);
+  setUsername(username);
   return result;
 }
 
@@ -912,6 +926,9 @@ export interface RoomMessage {
   content: string;
   mentions: string[];
   mentionMemberIds?: string[];
+  /** `!name` urgent-interrupt targets (subset of mentions) — name snapshots + ids. */
+  urgentMentions?: string[];
+  urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event";
   task_event_meta?: TaskEventMeta;

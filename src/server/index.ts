@@ -18,7 +18,7 @@ import { runMemberGlobalMigration } from "../workspace/member-global-migration.j
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, activateAll } from "../engine/agent-manager.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, interruptAgent, activateAll } from "../engine/agent-manager.js";
 import { initRouter } from "../communication/router.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
@@ -182,6 +182,11 @@ export function startServer(opts: ServerOptions): Promise<void> {
     (roomId) => {
       activateAll(roomId).catch((err) => {
         logger.error("router", "activateAll failed", { roomId, error: String(err) });
+      });
+    },
+    (roomId, memberRef, urgentByName) => {
+      interruptAgent(roomId, memberRef, urgentByName).catch((err) => {
+        logger.error("router", "urgent interrupt failed", { roomId, member: memberRef, error: String(err) });
       });
     },
   );

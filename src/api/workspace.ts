@@ -9,7 +9,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
-import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
+import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
@@ -501,11 +501,20 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
 
   // Parse @ mentions from content
   const roomMembers = roomStore.getRoomMembers(params.id);
-  const mentions = parseMentions(content, roomMembers.map((member) => member.name));
-  const mentionMemberIds = parseMentionMemberIds(content, roomMembers);
+  const urgentMentions = parseUrgentMentions(content, roomMembers.map((member) => member.name));
+  const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
+  // ! targets merge into mentions/mentionMemberIds — unread, highlight and
+  // mention stats share one list (fish 2026-08-04).
+  const mentions = [...new Set([...parseMentions(content, roomMembers.map((member) => member.name)), ...urgentMentions])];
+  const mentionMemberIds = [...new Set([...parseMentionMemberIds(content, roomMembers), ...urgentMentionMemberIds])];
 
   // Post via message-bus (writes + broadcasts + notifies router listeners)
-  const extra = { mentionMemberIds, ...(attachments.length > 0 ? { attachments } : {}), ...(artifacts.length > 0 ? { artifacts } : {}) };
+  const extra = {
+    mentionMemberIds,
+    ...(urgentMentions.length > 0 ? { urgentMentions, urgentMentionMemberIds } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+  };
   postMessage(params.id, "user", content, mentions, extra);
 
   // Return the latest message

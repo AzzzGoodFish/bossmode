@@ -110,6 +110,8 @@ Found it — the failure is in the token refresh.   ← posted
 
 \`@name\` activates that member immediately — use \`@\` only when you need that member to respond or act right away. To simply mention a member without activating them, write the name without \`@\`.
 
+\`@name\` queues an activation — it does not interrupt the member's current work. \`!name\` is an **urgent interrupt**: it aborts the member's current turn immediately and your message becomes the next turn. **Use \`!\` only for true emergencies** — the aborted turn may leave partial work the member must verify afterwards. For routine coordination, always prefer \`@\`.
+
 Multiple \`@name\` in one message activate all of them at the same time — a single message cannot express "A first, then B". When work has a sequential dependency, \`@\` only the first member and let completion drive the next step: the first member hands off by \`@\`-ing the next when done, or you \`@\` the next after the first reports back.
 
 Example:

@@ -21,7 +21,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../../src/communication/message-bus.js", () => ({ postMessage: mocks.postMessage }));
 vi.mock("../../src/workspace/room-store.js", () => ({ getRoom: mocks.getRoom }));
-vi.mock("../../src/communication/router.js", () => ({ parseMentions: mocks.parseMentions }));
+vi.mock("../../src/communication/router.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  parseMentions: mocks.parseMentions,
+}));
 vi.mock("../../src/engine/agent-manager.js", () => ({ emitAgentReply: mocks.emitAgentReply }));
 vi.mock("../../src/workspace/message-store.js", () => ({ getMessages: vi.fn(() => []), getMessagesByRange: vi.fn(() => []), addMessage: vi.fn() }));
 vi.mock("../../src/knowledge/store.js", () => ({

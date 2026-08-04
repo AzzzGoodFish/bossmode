@@ -5,6 +5,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageSearchBar } from "./MessageSearchBar";
 import type { MessageArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
 import { formatMessageDateSeparator, isSameLocalDate } from "../utils/message-date";
+import { getUsername } from "../api/client";
 
 interface ChatAreaProps {
   messages: RoomMessage[];
@@ -226,6 +227,9 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
                       mentions={msg.mentions}
+                      urgentMentions={msg.urgentMentions}
+                      members={members}
+                      loginName={getUsername()}
                       roomId={roomId}
                       messageId={msg.id}
                       attachments={msg.attachments}

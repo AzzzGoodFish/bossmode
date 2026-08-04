@@ -17,6 +17,7 @@ import {
   type MemberDetail, type DmMessage, type DmSession,
 } from "../api/client";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
+import { getUsername } from "../api/client";
 
 const PAGE_SIZE = 50;
 const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
@@ -176,6 +177,8 @@ export function DmPage({ memberId, onBack, onOpenSettings }: { memberId: string;
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
                       mentions={msg.mentions}
+                        members={[member.name]}
+                        loginName={getUsername()}
                       roomId={`dm:${memberId}`}
                       messageId={msg.id}
                       attachments={msg.attachments}

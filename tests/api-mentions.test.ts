@@ -7,7 +7,10 @@ const getRoom = vi.fn();
 
 vi.mock("../src/communication/message-bus.js", () => ({ postMessage }));
 vi.mock("../src/engine/agent-manager.js", () => ({ emitAgentReply }));
-vi.mock("../src/communication/router.js", () => ({ parseMentions }));
+vi.mock("../src/communication/router.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  parseMentions,
+}));
 vi.mock("../src/workspace/room-store.js", () => ({ getRoom }));
 vi.mock("../src/workspace/message-store.js", () => ({ getMessages: vi.fn(() => []), getMessagesByRange: vi.fn(() => []), addMessage: vi.fn() }));
 vi.mock("../src/knowledge/store.js", () => ({ listEntries: vi.fn(() => []), addEntry: vi.fn(), updateEntry: vi.fn(), deleteEntry: vi.fn() }));
