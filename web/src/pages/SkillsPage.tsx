@@ -22,7 +22,7 @@ export function SkillsPage({ onSelectSkill }: SkillsPageProps) {
   return (
     <ResourceListPage
       title="Skills"
-      subtitle={`Reusable capability packs from disk — members opt in per scope. ${skills.length} skills configured.`}
+      subtitle={`Reusable capability packs from disk — members opt in per scope. ${skills.length} skill${skills.length === 1 ? "" : "s"} configured.`}
       search={
         <div className="relative mb-5 max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
