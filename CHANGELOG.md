@@ -4,6 +4,32 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.20.0-rc.2] — 2026-08-04
+
+### Changed
+- **Full automatic 0.19→0.20 migration** (fish-confirmed): global members auto-created by name aggregation with template/credential binding, persona seeded from newest member principles, per-room mainlines re-homed to (member, room) scopes, rooms stamped usable immediately. Non-destructive archive + manifest kept; same-name conflicts recorded in manifest.
+
+---
+
+## [0.20.0-rc.1] — 2026-08-04
+
+Breaking release — digital employee model (member-global unification).
+
+### Added
+- **Global members (digital employees)**: contacts + direct messages; member id/name globally unique; room invites reference global members.
+- **Four-layer member memory**: persona (global) + per-scope principles + per-scope mainline; read any scope, write current scope only.
+- **Private chat (DM)**: no @ needed; DM members get create_room/edit_room (leader-gated)/list_members tools; room members get tasks/wait.
+- **Discord-style IA**: Chats home with unified DM+room list, unread/mention badges, server-computed unread with user read cursors; Contacts page; rail secondary area.
+- **Template governance**: factory templates immutable; deleting a referenced template with force rebinds members to general + scope warnings.
+- **Firing & archive**: DELETE member archives to backups/fired-*; import from legacy archive restores persona.
+- **Config inheritance**: unifiedModel/unifiedExtensions switches; scope overrides are diff-only; effective-config shared by UI and runtime.
+
+### Removed
+- Team template layer (teams store/API/migrations/UI), room-local team packages.
+- Legacy `/api/rooms/:id/agents/:agent/*` session routes → unified `/api/conversations/:scope/*`.
+
+---
+
 ## [0.19.6] — 2026-08-03
 
 ### Added
