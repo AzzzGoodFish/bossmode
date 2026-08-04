@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle,
+  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, SkillInfo, KnowledgeTreeNode } from "../api/client";
-import { getRooms, getSkills, getKnowledgeTree, getChats, getContacts, getTemplates, type ChatEntry, type ContactEntry, type TemplateInfo } from "../api/client";
+import { getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type ChatEntry, type TemplateInfo } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
@@ -26,7 +26,7 @@ export type ActivePage =
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "chats" | "contacts" | "templates" | "skills" | "library" | "system";
+type Domain = "chats" | "templates" | "skills" | "library" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
@@ -36,7 +36,7 @@ export function domainOf(page: ActivePage): Domain {
     case "dm":
     case "member-create":
     case "member-settings":
-      return "contacts";
+      return "chats";
     case "templates":
       return "templates";
     case "skill":
@@ -144,10 +144,6 @@ export function Sidebar({
         <MessageSquare size={18} />
         {hasAnyUnreadRoom && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent" />}
       </button>
-      <button onClick={() => { setBrowseDomain("contacts"); onNavigate({ type: "contacts" }); }} title="Contacts" aria-label="Contacts" className={railBtn(domain === "contacts")}>
-        {domain === "contacts" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <Contact size={18} />
-      </button>
       <div className="flex-1" />
       <div className="w-5 h-px bg-line-soft my-1.5" />
       <button onClick={() => { setBrowseDomain("templates"); onNavigate({ type: "templates" }); }} title="Templates" aria-label="Templates" className={railBtn(domain === "templates")}>
@@ -196,7 +192,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { chats: "Chats", contacts: "Contacts", templates: "Templates", skills: "Skills", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", templates: "Templates", skills: "Skills", library: "Library", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -222,7 +218,6 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
         {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
         {domain === "templates" && <TemplatesPanelList activePage={activePage} onNavigate={onNavigate} />}
-        {domain === "contacts" && <ContactsPanelList activePage={activePage} onNavigate={onNavigate} />}
 
         {domain === "skills" && (
           <>
@@ -274,7 +269,18 @@ export function Sidebar({
       </div>
 
       {domain === "chats" && (
-        <div className="border-t border-line-soft shrink-0 p-2">
+        <div className="border-t border-line-soft shrink-0 p-2 space-y-px">
+          <button
+            onClick={() => onNavigate({ type: "contacts" })}
+            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
+              activePage?.type === "contacts" || activePage?.type === "member-create"
+                ? "bg-surface-2 text-ink-1"
+                : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
+            }`}
+          >
+            <Contact size={14} />
+            <span>Contacts</span>
+          </button>
           <button
             onClick={() => onNavigate({ type: "all-tasks" })}
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
@@ -333,6 +339,7 @@ function SectionHead({ label, onCreate, onLabelClick, active }: {
 /** Compact unified conversation list for the Chats panel domain. */
 function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
   const [chats, setChats] = useState<ChatEntry[] | null>(null);
+  const [query, setQuery] = useState("");
   useEffect(() => {
     let cancelled = false;
     const load = () => getChats().then((r) => { if (!cancelled) setChats(r.chats); }).catch(() => {});
@@ -344,84 +351,86 @@ function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; on
     () => [...(chats ?? [])].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0)),
     [chats],
   );
+  const q = query.trim().toLowerCase();
+  const filtered = q ? sorted.filter((c) => c.title.toLowerCase().includes(q)) : sorted;
+  const unread = filtered.filter((c) => c.unreadCount > 0 || c.mentioned);
+  const rest = filtered.filter((c) => !(c.unreadCount > 0 || c.mentioned));
+
   if (!chats) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
-  if (sorted.length === 0) return <div className="px-2 py-3 text-[11.5px] text-ink-4">No conversations yet.</div>;
   return (
     <>
-      {sorted.map((c) => {
-        const active =
-          (c.kind === "dm" && activePage?.type === "dm" && activePage.memberId === c.memberId) ||
-          (c.kind === "room" && activePage?.type === "room" && activePage.id === c.roomId);
-        return (
-          <button
-            key={c.scopeId}
-            onClick={() =>
-              c.kind === "dm" && c.memberId
-                ? onNavigate({ type: "dm", memberId: c.memberId })
-                : c.roomId
-                  ? onNavigate({ type: "room", id: c.roomId })
-                  : undefined
-            }
-            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
-          >
-            {c.kind === "dm" ? (
-              <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
-            ) : (
-              <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
-                <Hash size={12} />
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
-              <div className="text-[10.5px] text-ink-4 truncate">
-                {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
-              </div>
-            </div>
-            {c.unreadCount > 0 && (
-              <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
-                {c.unreadCount > 99 ? "99+" : c.unreadCount}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      {/* search */}
+      <div className="px-1.5 pb-2">
+        <div className="flex items-center gap-1.5 rounded-lg border border-line bg-inset px-2.5 py-1.5 focus-within:border-accent transition-colors">
+          <Search size={12} className="text-ink-4 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search conversations"
+            className="w-full bg-transparent outline-none text-[12px] text-ink-1 placeholder:text-ink-4"
+          />
+        </div>
+      </div>
+
+      {sorted.length === 0 && <div className="px-2 py-3 text-[11.5px] text-ink-4">No conversations yet.</div>}
+      {sorted.length > 0 && filtered.length === 0 && (
+        <div className="px-2 py-3 text-[11.5px] text-ink-4">No matches for “{query.trim()}”.</div>
+      )}
+
+      {unread.length > 0 && (
+        <>
+          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">UNREAD · {unread.length}</div>
+          {unread.map((c) => <ChatRow key={c.scopeId} c={c} activePage={activePage} onNavigate={onNavigate} />)}
+          <div className="h-2.5" />
+        </>
+      )}
+      {rest.length > 0 && (
+        <>
+          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-[0.05em] text-ink-4">CHATS</div>
+          {rest.map((c) => <ChatRow key={c.scopeId} c={c} activePage={activePage} onNavigate={onNavigate} />)}
+        </>
+      )}
     </>
   );
 }
 
-function ContactsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
-  const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => getContacts().then((r) => { if (!cancelled) setContacts(r.contacts); }).catch(() => {});
-    load();
-    const t = window.setInterval(load, 10_000);
-    return () => { cancelled = true; window.clearInterval(t); };
-  }, []);
-  if (!contacts) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
-  if (contacts.length === 0) return <div className="px-2 py-3 text-[11.5px] text-ink-4">No members yet — hire one from Contacts.</div>;
-  const sorted = [...contacts].sort((a, b) => a.name.localeCompare(b.name));
+function ChatRow({ c, activePage, onNavigate }: { c: ChatEntry; activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const active =
+    (c.kind === "dm" && activePage?.type === "dm" && activePage.memberId === c.memberId) ||
+    (c.kind === "room" && activePage?.type === "room" && activePage.id === c.roomId);
   return (
-    <>
-      {sorted.map((m) => {
-        const active = activePage?.type === "dm" && activePage.memberId === m.memberId;
-        return (
-          <button
-            key={m.memberId}
-            onClick={() => onNavigate({ type: "dm", memberId: m.memberId })}
-            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
-          >
-            <StaffBadge name={m.name} status={statusFromAgent(m.status)} size="sm" />
-            <div className="min-w-0 flex-1">
-              <div className={`text-[12.5px] font-medium truncate ${active ? "text-accent-ink" : "text-ink-2"}`}>{m.name}</div>
-              <div className="text-[10.5px] text-ink-4 truncate">
-                {m.status === "working" ? "Working" : m.agentTemplate}
-              </div>
-            </div>
-          </button>
-        );
-      })}
-    </>
+    <button
+      onClick={() =>
+        c.kind === "dm" && c.memberId
+          ? onNavigate({ type: "dm", memberId: c.memberId })
+          : c.roomId
+            ? onNavigate({ type: "room", id: c.roomId })
+            : undefined
+      }
+      className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+    >
+      {c.kind === "dm" ? (
+        <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
+      ) : (
+        <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
+          <Hash size={12} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
+        <div className="text-[10.5px] text-ink-4 truncate">
+          {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
+        </div>
+      </div>
+      {c.mentioned && (
+        <span className="shrink-0 w-[18px] h-[18px] rounded-full bg-blocked text-white text-[10px] font-bold flex items-center justify-center">@</span>
+      )}
+      {c.unreadCount > 0 && (
+        <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
+          {c.unreadCount > 99 ? "99+" : c.unreadCount}
+        </span>
+      )}
+    </button>
   );
 }
 
