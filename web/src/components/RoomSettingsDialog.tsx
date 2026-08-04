@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Crown, Trash2 } from "lucide-react";
+import { AlertCircle, Crown, Loader2, Trash2, UserPlus, X } from "lucide-react";
 import { Sheet } from "./Sheet";
-import type { MemberInfo, Principles, Room } from "../api/client";
-import { getRoomMembers, getRoomPrinciples, updateRoomSettings, deleteRoom } from "../api/client";
+import { StaffBadge } from "./StaffBadge";
+import type { ContactEntry, MemberInfo, Principles, Room } from "../api/client";
+import { getRoomMembers, getRoomPrinciples, updateRoomSettings, deleteRoom, getContacts, inviteRoomMember, removeRoomMember } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 
@@ -57,6 +58,11 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   const [leaderId, setLeaderId] = useState<string>(room.promptLeaderMemberId || "");
   const [docsPath, setDocsPath] = useState(room.docsPath || "");
   const [members, setMembers] = useState<MemberInfo[]>([]);
+  const [contacts, setContacts] = useState<ContactEntry[]>([]);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
   const [principlesState, setPrinciplesState] = useState<PrinciplesPreviewState>({ status: "loading" });
   const principlesRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
@@ -84,8 +90,49 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setMembers([]);
     setError(null);
     getRoomMembers(room.id).then(setMembers).catch((err) => { console.error("Failed to load Room members", err); toast("Couldn’t load Room members. Close Settings and try again.", "error"); });
+    getContacts().then((r) => setContacts(r.contacts)).catch(() => {});
     void loadPrinciples();
   }, [open, room, toast, loadPrinciples]);
+
+  const refreshMembers = useCallback(async () => {
+    const fresh = await getRoomMembers(room.id);
+    setMembers(fresh);
+  }, [room.id]);
+
+  const inviteCandidates = useMemo(() => {
+    const inRoom = new Set(members.map((m) => m.id));
+    return contacts.filter((c) => !inRoom.has(c.memberId));
+  }, [contacts, members]);
+
+  const handleInvite = async (memberId: string) => {
+    setMemberBusyId(memberId); setMemberError(null);
+    try {
+      const updated = await inviteRoomMember(room.id, memberId);
+      await refreshMembers();
+      onSaved(updated);
+      setInviteOpen(false);
+      toast("Member added to the room", "success");
+    } catch (err) {
+      setMemberError(String((err as Error)?.message || err));
+    } finally {
+      setMemberBusyId(null);
+    }
+  };
+
+  const handleRemove = async (member: MemberInfo) => {
+    setMemberBusyId(member.id); setMemberError(null);
+    try {
+      const updated = await removeRoomMember(room.id, member.id);
+      await refreshMembers();
+      onSaved(updated);
+      setConfirmRemoveId(null);
+      toast(`${member.name} removed — their scope memory is kept`, "success");
+    } catch (err) {
+      setMemberError(String((err as Error)?.message || err));
+    } finally {
+      setMemberBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -197,6 +244,84 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
               <p className="text-xs text-ink-4">The Room leader can update the Room Principles. You can change or clear the leader at any time.</p>
               {currentLeader && <p className="text-xs text-ink-3">Current leader: <span className="font-mono text-ink-2">@{currentLeader.name}</span></p>}
               {missingLeader && <p className="text-xs text-blocked">Saved leader is no longer a current room member. Select a new leader or clear it.</p>}
+            </section>
+
+            <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-ink-1">Members · {members.length}</h3>
+                <button
+                  type="button"
+                  onClick={() => { setInviteOpen((v) => !v); setMemberError(null); }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-line rounded-lg text-xs font-semibold text-ink-2 hover:bg-surface-2 cursor-pointer"
+                >
+                  <UserPlus size={13} /> Add member
+                </button>
+              </div>
+
+              {inviteOpen && (
+                <div className="rounded-lg border border-line bg-surface-1 divide-y divide-line-soft max-h-44 overflow-y-auto">
+                  {inviteCandidates.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-ink-4">Every contact is already in this room. Hire a new member from Contacts first.</p>
+                  ) : (
+                    inviteCandidates.map((c) => (
+                      <button
+                        key={c.memberId}
+                        type="button"
+                        disabled={memberBusyId !== null}
+                        onClick={() => void handleInvite(c.memberId)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <StaffBadge name={c.name} size="xs" />
+                        <span className="text-[12.5px] font-medium text-ink-1 flex-1 truncate">{c.name}</span>
+                        <span className="text-[10.5px] text-ink-4">{c.agentTemplate}</span>
+                        {memberBusyId === c.memberId && <Loader2 size={12} className="animate-spin text-ink-4" />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+
+              <div className="divide-y divide-line-soft">
+                {members.map((m) => {
+                  const isLeader = room.promptLeaderMemberId === m.id;
+                  const confirming = confirmRemoveId === m.id;
+                  return (
+                    <div key={m.id} className="py-2">
+                      <div className="flex items-center gap-2.5">
+                        <StaffBadge name={m.name} size="xs" />
+                        <span className="text-[12.5px] font-medium text-ink-1 truncate">{m.name}</span>
+                        {isLeader && <Crown size={12} className="text-think shrink-0" />}
+                        <span className="text-[10.5px] text-ink-4 truncate flex-1">{m.agent}</span>
+                        {!confirming && (
+                          <button
+                            type="button"
+                            title={`Remove ${m.name} from this room`}
+                            onClick={() => { setConfirmRemoveId(m.id); setMemberError(null); }}
+                            className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-ink-4 hover:text-blocked hover:bg-blocked/10 cursor-pointer"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      {confirming && (
+                        <div className="mt-2 ml-8 flex items-center gap-2 rounded-lg border border-blocked/30 bg-blocked/5 px-2.5 py-2">
+                          <span className="text-[11px] text-ink-2 flex-1">Remove {m.name}? Their scope memory is kept.{isLeader ? " Leadership will be cleared." : ""}</span>
+                          <button
+                            type="button"
+                            disabled={memberBusyId === m.id}
+                            onClick={() => void handleRemove(m)}
+                            className="px-2 py-1 rounded-md bg-blocked text-white text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                          >
+                            {memberBusyId === m.id ? <Loader2 size={11} className="animate-spin" /> : "Remove"}
+                          </button>
+                          <button type="button" onClick={() => setConfirmRemoveId(null)} className="text-[11px] text-ink-3 hover:underline cursor-pointer">Cancel</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {memberError && <div role="alert" className="text-[11px] text-blocked">{memberError}</div>}
             </section>
 
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">

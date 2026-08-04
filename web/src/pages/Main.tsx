@@ -9,7 +9,7 @@ import { Search, Plus, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
-  addMember as apiAddMember,
+  inviteRoomMember,
 } from "../api/client";
 import { useRoom } from "../hooks/useRoom";
 import { useGlobalMembers } from "../hooks/useGlobalMembers";
@@ -229,23 +229,13 @@ export function Main({
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  const handleAddMember = useCallback(async (agentName: string, memberName?: string) => {
+  // 0.20: room invite = add an existing global member by id.
+  const handleAddMember = useCallback(async (memberId: string) => {
     if (!selectedRoomId) return;
-    const name = (memberName || agentName).trim();
-    if (!name) return;
-    if (displayMembers.some((m) => m.toLowerCase() === name.toLowerCase())) {
-      toast(`This room already has a member named ${name}. Pick another name.`, "error");
-      return;
-    }
-    try {
-      await apiAddMember(selectedRoomId, agentName, name);
-      await reloadRoom();
-      setShowAddMember(false);
-    } catch (err) {
-      console.error("Failed to add Room member", err);
-      toast(userActionError("add this member", "Check the Agent and member name, then try again."), "error");
-    }
-  }, [displayMembers, selectedRoomId, reloadRoom, toast]);
+    await inviteRoomMember(selectedRoomId, memberId);
+    await reloadRoom();
+    setShowAddMember(false);
+  }, [selectedRoomId, reloadRoom]);
 
   if (!room) {
     return (
@@ -459,7 +449,7 @@ export function Main({
         />
       )}
       {showAddMember && (
-        <AddMemberDialog currentMembers={displayMembers} currentMemberInfos={displayMemberInfos} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
+        <AddMemberDialog currentMemberIds={displayMemberInfos.map((m) => m.id)} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
       )}
     </>
   );

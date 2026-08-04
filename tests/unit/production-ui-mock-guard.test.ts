@@ -22,11 +22,10 @@ describe("production UI mock guard", () => {
     }
   });
 
-  it("does not invent Agent templates when the real Agent request is empty or fails", () => {
+  it("does not invent contacts when the real contacts request is empty or fails", () => {
     const source = readWebSource("components/AddMemberDialog.tsx");
     expect(source).not.toMatch(/const fallback\s*=\s*items\.length/);
     expect(source).not.toMatch(/catch\s*\(\)\s*=>\s*\{\s*const fallback/);
-    expect(source).toContain("Couldn’t load Agent templates.");
-    expect(source).toContain("No Agent templates are available yet.");
+    expect(source).toContain("Every contact is already in this room.");
   });
 });
