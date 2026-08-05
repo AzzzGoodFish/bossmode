@@ -193,13 +193,12 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(labels.some((l) => l.includes("this DM"))).toBe(true);
   });
 
-  it("members config PATCH write path: persistMemberConfigPatch routes by unified flags on any scope", async () => {
+  it("members config PATCH write path: applyMemberConfigPatch routes by unified flags on any scope", async () => {
     const { dev, roomA } = await seedWorld();
     const reg = await import("../../src/workspace/member-registry.js");
-    const manager = await import("../../src/engine/agent-manager.js");
 
     // Unified member patched at DM scope → global write, no scope override.
-    manager.persistMemberConfigPatch(`dm:${dev.id}`, dev.id, { thinkingLevel: "high" });
+    reg.applyMemberConfigPatch(dev.id, `dm:${dev.id}`, { thinkingLevel: "high" });
     let rec = reg.getMember(dev.id)!;
     expect(rec.global.thinkingLevel).toBe("high");
     expect(rec.scopeOverrides[`dm:${dev.id}`]).toBeUndefined();
@@ -212,7 +211,7 @@ describe("cross-scope reads (flagship ①)", () => {
       credentialId: rec.global.credentialId,
       unifiedModel: false,
     });
-    manager.persistMemberConfigPatch(`dm:${scoped.id}`, scoped.id, { thinkingLevel: "low" });
+    reg.applyMemberConfigPatch(scoped.id, `dm:${scoped.id}`, { thinkingLevel: "low" });
     rec = reg.getMember(scoped.id)!;
     expect(rec.global.thinkingLevel).toBeNull();
     expect(rec.scopeOverrides[`dm:${scoped.id}`]?.thinkingLevel).toBe("low");
@@ -221,7 +220,7 @@ describe("cross-scope reads (flagship ①)", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const room2 = roomStore.createRoom("delta", dir, [{ agent: "dev", name: "scoped" }], undefined);
     roomStore.stampGlobalMemberIds(room2.id, [scoped.id], scoped.id);
-    manager.persistMemberConfigPatch(`room:${room2.id}`, scoped.id, { thinkingLevel: "max" });
+    reg.applyMemberConfigPatch(scoped.id, `room:${room2.id}`, { thinkingLevel: "max" });
     rec = reg.getMember(scoped.id)!;
     expect(rec.scopeOverrides[`room:${room2.id}`]?.thinkingLevel).toBe("max");
     expect(roomStore.getRoom(room2.id)!.memberOverrides).toBeUndefined();

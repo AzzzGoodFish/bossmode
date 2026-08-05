@@ -4,6 +4,7 @@ import { Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
+  getMemberScopedStats, getMemberMemoryAsset, getMemberCorePromptScoped, getConversationTools,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
@@ -95,7 +96,7 @@ export function thinkLevelTextClass(level?: string | null): string {
   }
 }
 
-function isAssignableMcpServer(server: McpServerSummary): boolean {
+export function isAssignableMcpServer(server: McpServerSummary): boolean {
   return server.transport !== "invalid" && server.availability?.status !== "invalid-config";
 }
 
@@ -599,9 +600,9 @@ function AssetRevLine({ left, right }: { left: string; right?: string }) {
   );
 }
 
-function AssetTag({ children }: { children: string }) {
+function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }) {
   return (
-    <span className="text-[9.5px] font-bold uppercase tracking-wide border border-line-soft bg-surface-2 text-ink-4 rounded-full px-2 py-0.5 shrink-0">
+    <span className={`text-[9.5px] font-bold uppercase tracking-wide border rounded-full px-2 py-0.5 shrink-0 ${tone === "dm" ? "border-line-soft bg-think-dim text-think" : "border-line-soft bg-surface-2 text-ink-4"}`}>
       {children}
     </span>
   );
@@ -757,18 +758,19 @@ function StatSlot({ label, value, detail }: { label: string; value: string; deta
 /** Overview status block: six real, data-backed cells. Every value is sourced
  * from live state or the persistent per-member stats accumulator (never
  * fabricated) — a member with no recorded activity shows real zeros. */
-function StatusGrid({ status, member, contextUsage, stats, models }: {
+function StatusGrid({ status, member, contextUsage, stats, models, dm }: {
   status: string;
   member: MemberInfo;
   contextUsage?: ContextUsageData;
   stats: MemberStats | null;
   models: AvailableModelOption[];
+  dm?: boolean;
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : null;
   const totalTokens = stats ? stats.tokens.input + stats.tokens.output + stats.tokens.cacheRead + stats.tokens.cacheWrite : 0;
   return (
-    <PanelCard title="Status" tag={<AssetTag>this room</AssetTag>} hint="Live state and cumulative activity for this member, in this room.">
+    <PanelCard title="Status" tag={<AssetTag tone={dm ? "dm" : "room"}>{dm ? "this DM" : "this room"}</AssetTag>} hint={dm ? "Live state and cumulative activity for this member, in this DM." : "Live state and cumulative activity for this member, in this room."}>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
         <StatSlot label="STATUS" value={statusLabel(status)} />
         <StatSlot label="MODEL" value={member.model ? compactModelId(member.model, models) : "—"} />
@@ -879,8 +881,9 @@ function CoreCard({ corePrompt }: { corePrompt: { content: string; charCount: nu
   );
 }
 
-function MemberConfigPanel({
+export function MemberConfigPanel({
   roomId,
+  dmScope,
   member,
   status,
   contextUsage,
@@ -907,6 +910,10 @@ function MemberConfigPanel({
   onOpenExtensionsSettings,
 }: {
   roomId: string;
+  /** 0.20 flagship ②: when set the panel reads/writes the dm scope — data via
+   * the members-shaped scope-addressed APIs, tags read "this DM", and the
+   * room-principles layer (which does not exist for a DM) is hidden. */
+  dmScope?: { scopeId: string; memberId: string };
   member: MemberInfo;
   status: string;
   contextUsage?: ContextUsageData;
@@ -954,6 +961,23 @@ function MemberConfigPanel({
     setRoomPrinciples(null);
     setMemberPrinciples(null);
     setMainline(null);
+    if (dmScope) {
+      // DM scope: member assets come from the members-shaped memory API; the
+      // room-principles layer does not exist here (card hidden below).
+      Promise.all([
+        getMemberMemoryAsset(dmScope.memberId, "principles", dmScope.scopeId),
+        getMemberMemoryAsset(dmScope.memberId, "mainline", dmScope.scopeId),
+      ]).then(([principlesAsset, mainlineAsset]) => {
+        if (cancelled) return;
+        setMemberPrinciples(principlesAsset);
+        setMainline(mainlineAsset as Mainline);
+      }).catch(() => {
+        if (cancelled) return;
+        setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
+        setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
+      });
+      return () => { cancelled = true; };
+    }
     Promise.all([
       getRoomPrinciples(roomId),
       getMemberPrinciples(roomId, member.id || member.name),
@@ -970,25 +994,32 @@ function MemberConfigPanel({
       setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
     });
     return () => { cancelled = true; };
-  }, [roomId, member.id, member.name]);
+  }, [roomId, member.id, member.name, dmScope?.scopeId, dmScope?.memberId]);
 
   useEffect(() => {
     let cancelled = false;
     setStats(null);
-    getMemberStats(member.id || member.name, roomId)
+    const empty = { turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };
+    const fetchStats = dmScope
+      ? getMemberScopedStats(dmScope.memberId, dmScope.scopeId)
+      : getMemberStats(member.id || member.name, roomId);
+    fetchStats
       .then((result) => { if (!cancelled) setStats(result); })
-      .catch(() => { if (!cancelled) setStats({ turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 }); });
+      .catch(() => { if (!cancelled) setStats(empty); });
     return () => { cancelled = true; };
-  }, [roomId, member.id, member.name]);
+  }, [roomId, member.id, member.name, dmScope?.scopeId, dmScope?.memberId]);
 
   useEffect(() => {
     let cancelled = false;
     setCorePrompt(null);
-    getMemberCorePrompt(roomId, member.id || member.name)
+    const fetchPrompt = dmScope
+      ? getMemberCorePromptScoped(dmScope.memberId, dmScope.scopeId)
+      : getMemberCorePrompt(roomId, member.id || member.name);
+    fetchPrompt
       .then((result) => { if (!cancelled) setCorePrompt(result); })
       .catch(() => { if (!cancelled) setCorePrompt({ content: "", charCount: 0 }); });
     return () => { cancelled = true; };
-  }, [roomId, member.id, member.name]);
+  }, [roomId, member.id, member.name, dmScope?.scopeId, dmScope?.memberId]);
 
   const draftNameTrimmed = draftName.trim();
   const nameConflict = !!draftNameTrimmed && draftNameTrimmed.toLowerCase() !== member.name.toLowerCase() && existingMemberNames.some((name) => name.toLowerCase() === draftNameTrimmed.toLowerCase());
@@ -1054,7 +1085,7 @@ function MemberConfigPanel({
               ) : null}
               <div className="text-xs text-ink-4 mt-1 truncate">
                 {displayAgentLabel(member.agent || member.sourceAgent || member.name)} · <span className="font-mono">@{member.name}</span>
-                {member.createdAt ? ` · in this room since ${formatSinceDate(member.createdAt)}` : ""}
+                {member.createdAt ? ` · ${dmScope ? "member" : "in this room"} since ${formatSinceDate(member.createdAt)}` : ""}
               </div>
             </div>
           </div>
@@ -1080,15 +1111,15 @@ function MemberConfigPanel({
 
       {tab === "activity" ? (
         <div className="flex-1 min-h-0 flex flex-col">
-          <ActivityTab roomId={roomId} agentName={member.name} />
+          <ActivityTab roomId={roomId} agentName={member.name} dmScope={dmScope} />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
         {tab === "overview" && (
           <div className="space-y-4 pb-6">
-            <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} />
+            <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} dm={!!dmScope} />
             <MemoryBudgets principlesBudget={memberPrinciples?.budget} mainlineBudget={mainline?.budget} />
-            <PanelCard title="Model" tag={<AssetTag>this room</AssetTag>} hint="Model and thinking level for this member in this room. Applies on the next turn.">
+            <PanelCard title="Model" tag={<AssetTag tone={dmScope ? "dm" : "room"}>{dmScope ? "this DM" : "this room"}</AssetTag>} hint={dmScope ? "Model and thinking level for this member in this DM. Applies on the next turn." : "Model and thinking level for this member in this room. Applies on the next turn."}>
               <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
                 <label className="block space-y-1.5 min-w-0">
                   <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
@@ -1132,6 +1163,7 @@ function MemberConfigPanel({
               emptyHint="Nothing curated yet."
             />
             <MainlineCard member={member} mainline={mainline} full />
+            {!dmScope && (
             <PanelCard
               title="Room principles"
               tag={<AssetTag>shared · leader-written</AssetTag>}
@@ -1148,6 +1180,7 @@ function MemberConfigPanel({
                 <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />
               )}
             </PanelCard>
+            )}
             <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
               <span className="font-extrabold text-accent-ink shrink-0">i</span>
               <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_memory</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
@@ -1217,6 +1250,7 @@ function MemberConfigPanel({
                 </div>
               </div>
 
+              {!dmScope && (
               <details className="rounded-lg border border-line-soft bg-surface-1 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-ink-3 hover:text-ink-1">Troubleshooting</summary>
                 <div className="mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line-soft pt-2">
@@ -1226,10 +1260,11 @@ function MemberConfigPanel({
                   <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Restart member</button>
                 </div>
               </details>
+              )}
             </section>
 
             {/* 2–4. Tool sections — accordion, collapsed by default */}
-            <ActiveToolsSection roomId={roomId} memberRef={member.id || member.name} status={status} reloadKey={activeToolsReloadKey} />
+            <ActiveToolsSection roomId={roomId} memberRef={member.id || member.name} status={status} reloadKey={activeToolsReloadKey} dmScope={dmScope} />
 
             <SessionSectionAccordion
               title="Extensions"
@@ -1863,11 +1898,12 @@ function paramEntries(parameters: unknown): Array<{ name: string; type: string; 
   });
 }
 
-function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
+function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmScope }: {
   roomId: string;
   memberRef: string;
   status: string;
   reloadKey: number;
+  dmScope?: { scopeId: string; memberId: string };
 }) {
   const [loading, setLoading] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
@@ -1882,10 +1918,17 @@ function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
     setLoading(true);
     setError(false);
     try {
-      const data = await getMemberActiveTools(roomId, memberRef);
-      setSessionActive(!!data.sessionActive);
-      setTools(Array.isArray(data.tools) ? data.tools : []);
-      setMessage(data.message);
+      if (dmScope) {
+        const data = await getConversationTools(dmScope.scopeId, dmScope.memberId);
+        setSessionActive(!!data.live?.sessionActive);
+        setTools(Array.isArray(data.live?.tools) ? data.live!.tools : []);
+        setMessage(data.live?.message);
+      } else {
+        const data = await getMemberActiveTools(roomId, memberRef);
+        setSessionActive(!!data.sessionActive);
+        setTools(Array.isArray(data.tools) ? data.tools : []);
+        setMessage(data.message);
+      }
     } catch {
       setError(true);
       setSessionActive(false);
@@ -1893,7 +1936,7 @@ function ActiveToolsSection({ roomId, memberRef, status, reloadKey }: {
     } finally {
       setLoading(false);
     }
-  }, [roomId, memberRef]);
+  }, [roomId, memberRef, dmScope?.scopeId, dmScope?.memberId]);
 
   useEffect(() => { void load(); }, [load, reloadKey, status]);
 

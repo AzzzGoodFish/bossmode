@@ -1550,6 +1550,87 @@ export async function patchMemberScopeConfig(id: string, scope: string, patch: R
   });
 }
 
+export interface MemberEffectiveConfig {
+  model?: string | null;
+  credentialId?: string | null;
+  thinkingLevel?: string | null;
+  skills?: string[];
+  extensions?: string[];
+  mcpServers?: string[];
+}
+
+export async function getMemberEffectiveConfig(id: string, scope: string): Promise<MemberEffectiveConfig> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/effective-config?scope=${encodeURIComponent(scope)}`);
+}
+
+export interface ConversationSessionInfo {
+  scopeId: string;
+  memberId: string;
+  status: string;
+  busy: boolean;
+  contextPct: number | null;
+  contextUsage?: ContextUsageData;
+}
+
+export async function getConversationSession(scopeId: string, memberId: string): Promise<ConversationSessionInfo> {
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/session?memberId=${encodeURIComponent(memberId)}`);
+}
+
+// ── 0.20 flagship ②: scope-addressed panel data (room:<id> | dm:<memberId>) ──
+
+export async function getMemberScopedStats(id: string, scope: string): Promise<MemberStats> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/stats?scope=${encodeURIComponent(scope)}`);
+}
+
+export async function getMemberScopedActivityEvents(
+  id: string,
+  scope: string,
+  limit: number,
+  beforeSeq?: number,
+  types?: string[],
+): Promise<ActivityEventsPage> {
+  const qs = new URLSearchParams({ scope, limit: String(limit) });
+  if (beforeSeq !== undefined) qs.set("beforeSeq", String(beforeSeq));
+  if (types && types.length) qs.set("types", types.join(","));
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/events?${qs}`);
+}
+
+/** Scope-addressed prompt asset (principles/mainline) — same rich payload the
+ * room members routes return (revision/hash/budget header + parsed mainline). */
+export async function getMemberMemoryAsset(id: string, layer: "principles" | "mainline", scope: string): Promise<Principles & { parsed?: ParsedMainline }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/memory?layer=${layer}&scope=${encodeURIComponent(scope)}`);
+}
+
+/** Scope-addressed compiled core prompt — maps the members-shaped route's
+ * sections/fullPrompt payload onto the { content, charCount } the panel renders. */
+export async function getMemberCorePromptScoped(id: string, scope: string): Promise<{ content: string; charCount: number }> {
+  const res = await apiFetch<{ fullPrompt: string }>(`/api/members/${encodeURIComponent(id)}/core-prompt?scope=${encodeURIComponent(scope)}`);
+  return { content: res.fullPrompt || "", charCount: (res.fullPrompt || "").length };
+}
+
+export interface ConversationToolsInfo {
+  scopeId: string;
+  memberId: string;
+  live: { sessionActive: boolean; tools: MemberActiveTool[]; message?: string } | null;
+  status: string;
+}
+
+export async function getConversationTools(scopeId: string, memberId: string): Promise<ConversationToolsInfo> {
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/tools?memberId=${encodeURIComponent(memberId)}`);
+}
+
+export async function conversationMemberAction(
+  scopeId: string,
+  memberId: string,
+  action: "abort" | "reset-session" | "reload" | "steer",
+  text?: string,
+): Promise<{ ok?: boolean; message?: string; reloaded?: boolean }> {
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/${action}?memberId=${encodeURIComponent(memberId)}`, {
+    method: "POST",
+    body: JSON.stringify(text ? { text } : {}),
+  });
+}
+
 export async function patchGlobalMember(id: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
     method: "PATCH",

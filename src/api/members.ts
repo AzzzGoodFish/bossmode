@@ -14,12 +14,14 @@ import {
   fireMember,
   resolveMemberRef,
   getEffectiveConfig,
+  applyMemberConfigPatch,
   MemberNameTakenError,
   MemberNotFoundError,
   type MemberRecord,
 } from "../workspace/member-registry.js";
-import { readMemoryLayer } from "../workspace/member-memory-store.js";
-import { persistMemberConfigPatch } from "../engine/agent-manager.js";
+import { readMemoryLayer, readMemoryLayerInfo } from "../workspace/member-memory-store.js";
+import * as mainlineStore from "../workspace/mainline-store.js";
+import * as principlesStore from "../workspace/principles-store.js";
 import { listArchives, importMemberFromArchive } from "../workspace/member-archive.js";
 import {
   readAllDmMessages,
@@ -454,8 +456,23 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
       return;
     }
-    const data = readMemoryLayer(m.id, layer, scope as ScopeId | undefined);
-    sendJson(res, 200, { content: data.content, meta: data.meta });
+    // Rich payload matching the room members principles/mainline routes
+    // (revision/hash/budget header + parsed mainline + starter template) so the
+    // unified member panel renders identically from either scope.
+    const info = readMemoryLayerInfo(m.id, layer, scope as ScopeId | undefined);
+    const scopeRef = scope ? parseScopeId(scope) : null;
+    const content = layer === "mainline" && scopeRef
+      ? mainlineStore.resolveMainlineRefs(scopeRef.kind === "room" ? scopeRef.roomId : `dm:${scopeRef.memberId}`, info.content)
+      : info.content;
+    sendJson(res, 200, {
+      ...info,
+      content,
+      parsed: layer === "mainline" ? mainlineStore.parseMainline(content) : undefined,
+      budgetHeader: principlesStore.formatBudgetHeader(info.budget),
+      suggestedTemplate: info.content.trim()
+        ? undefined
+        : layer === "mainline" ? mainlineStore.MAINLINE_TEMPLATE : layer === "principles" ? principlesStore.PRINCIPLES_TEMPLATE : undefined,
+    });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
@@ -504,9 +521,9 @@ addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
     for (const key of ["model", "credentialId", "thinkingLevel", "skills", "extensions", "mcpServers"]) {
       if (Object.prototype.hasOwnProperty.call(body, key)) diff[key] = body[key];
     }
-    persistMemberConfigPatch(scope, m.id, diff);
-    const updated = getMember(m.id);
-    if (!updated) throw new Error(`Member disappeared mid-patch: ${m.id}`);
+    // Unified write authority: unifiedModel/unifiedExtensions fields go global,
+    // everything else lands in this scope's override (same rule as room PATCH).
+    const updated = applyMemberConfigPatch(m.id, scope as ScopeId, diff);
     sendJson(res, 200, {
       member: publicMember(updated),
       effective: getEffectiveConfig(m.id, scope),

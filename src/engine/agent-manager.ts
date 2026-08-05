@@ -21,7 +21,7 @@ import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/w
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { listRoomsForMember } from "../workspace/scope-access.js";
-import { getMember, getEffectiveConfig, updateMember, patchScopeOverride } from "../workspace/member-registry.js";
+import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
@@ -1022,39 +1022,14 @@ function splitPatchByUnifiedFlags(rec: { unifiedModel: boolean; unifiedExtension
  */
 function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
   if (memberId.startsWith("mem_")) {
-    const rec = getMember(memberId);
-    if (!rec) {
-      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId });
-      return;
+    try {
+      applyMemberConfigPatch(memberId, scopeIdOf({ kind: "room", roomId }), patch as Record<string, unknown>);
+    } catch (err) {
+      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId, error: String(err) });
     }
-    const { globalPatch, scopePatch } = splitPatchByUnifiedFlags(rec, patch);
-    if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
-    if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeIdOf({ kind: "room", roomId }), scopePatch);
     return;
   }
   roomStore.updateRoomMemberOverride(roomId, memberId, patch);
-}
-
-/**
- * Scope-native persist (architect 2026-08-05: one write-authority rule
- * across the product). Used by PATCH /api/members/:id/config?scope= —
- * accepts `room:<id>` (delegates to persistConfigPatch, legacy rooms keep
- * memberOverrides) and `dm:<memberId>` (registry only — DM scopes are
- * always registry members).
- */
-export function persistMemberConfigPatch(scopeId: ScopeId, memberId: string, patch: RoomMemberConfigPatch): void {
-  if (scopeId.startsWith("room:")) {
-    persistConfigPatch(scopeId.slice("room:".length), memberId, patch);
-    return;
-  }
-  const rec = getMember(memberId);
-  if (!rec) {
-    logger.error("agent", "persistMemberConfigPatch: member not in registry", { memberId, scopeId });
-    return;
-  }
-  const { globalPatch, scopePatch } = splitPatchByUnifiedFlags(rec, patch);
-  if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
-  if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeId, scopePatch);
 }
 
 /** Persist a config patch for a room member (resolves ref → member id, routes by authority). */
