@@ -5,6 +5,9 @@ import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
+  getEnvironmentCommunication,
+  saveEnvironmentCommunication,
+  resetEnvironmentCommunication,
   getMcpSettings,
   updateMcpSettings,
   checkMcpServers,
@@ -46,6 +49,7 @@ interface SettingsPageProps {
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   models: { title: "Models", desc: "Connect providers and choose available models." },
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
+  prompt: { title: "Prompt", desc: "Environment & Communication asset compiled into every member." },
   extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
   integrations: { title: "Integrations", desc: "Connect external tools and services." },
   usage: { title: "Usage", desc: "Token consumption by identity, room and time" },
@@ -85,6 +89,11 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   });
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [runtimeSaved, setRuntimeSaved] = useState(false);
+  const [ecContent, setEcContent] = useState("");
+  const [ecSavedContent, setEcSavedContent] = useState("");
+  const [ecSource, setEcSource] = useState<"default" | "user">("default");
+  const [ecSaving, setEcSaving] = useState(false);
+  const [ecSaved, setEcSaved] = useState(false);
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
@@ -104,7 +113,39 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
     getMcpSettings().then(setMcpSettings).catch(console.error);
     refreshExtensions();
+    getEnvironmentCommunication().then((a) => { setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source); }).catch(console.error);
   }, []);
+
+  const handleEcSave = async () => {
+    setEcSaving(true);
+    try {
+      const a = await saveEnvironmentCommunication(ecContent);
+      setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source);
+      setEcSaved(true);
+      setTimeout(() => setEcSaved(false), 3000);
+    } catch (err: any) {
+      console.error("Failed to save Environment & Communication:", err);
+      toast(userActionError("save Environment & Communication"), "error");
+    } finally {
+      setEcSaving(false);
+    }
+  };
+
+  const handleEcReset = async () => {
+    if (!(await confirm("Restore the product default Environment & Communication? Your edits will be discarded."))) return;
+    setEcSaving(true);
+    try {
+      const a = await resetEnvironmentCommunication();
+      setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source);
+      setEcSaved(true);
+      setTimeout(() => setEcSaved(false), 3000);
+    } catch (err: any) {
+      console.error("Failed to restore Environment & Communication:", err);
+      toast(userActionError("restore Environment & Communication"), "error");
+    } finally {
+      setEcSaving(false);
+    }
+  };
 
   const handleRuntimeChange = async (updates: Partial<RuntimeSettings>) => {
     const previous = runtimeSettings;
@@ -292,6 +333,49 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           {runtimeSaved && <div className="text-xs text-onair">Saved!</div>}
           </div>
         </details>
+      </div>
+      )}
+
+      {/* Prompt — Environment & Communication global asset (0.20 experience ③) */}
+      {section === "prompt" && (
+      <div className="space-y-4">
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Environment &amp; Communication</div>
+              <div className="text-xs text-ink-3 mt-0.5">
+                Global prompt asset compiled into every member (room and DM). Editing changes how members present themselves; applies after members Reload or start a new session.{" "}
+                {ecSource === "user" && <span className="text-amber-600">(customized)</span>}
+                {ecSource === "default" && <span className="text-ink-4">(product default)</span>}
+              </div>
+            </div>
+            <button
+              onClick={handleEcReset}
+              disabled={ecSaving || ecSource !== "user"}
+              className="px-3 py-1.5 text-xs border border-line text-ink-2 hover:bg-surface-2 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Restore default
+            </button>
+          </div>
+          <textarea
+            value={ecContent}
+            onChange={(e) => setEcContent(e.target.value)}
+            rows={18}
+            spellCheck={false}
+            className="w-full bg-inset border border-line rounded-lg px-3 py-2 text-xs font-mono text-ink-1 focus:outline-none focus:border-accent"
+          />
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-ink-4">Markdown is preserved verbatim. Keep it short — it is injected into every member's system prompt.</p>
+            <button
+              onClick={handleEcSave}
+              disabled={ecSaving || ecContent.trim() === ecSavedContent}
+              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
+            >
+              {ecSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+          {ecSaved && <div className="text-xs text-onair">Saved! Members pick this up after Reload or a new session.</div>}
+        </div>
       </div>
       )}
 

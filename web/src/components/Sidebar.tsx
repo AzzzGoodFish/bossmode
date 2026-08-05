@@ -10,7 +10,7 @@ import { getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type Cha
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
-export type SettingsSection = "models" | "runtime" | "integrations" | "extensions" | "usage";
+export type SettingsSection = "models" | "runtime" | "prompt" | "integrations" | "extensions" | "usage";
 
 export type ActivePage =
   | { type: "chats" }
@@ -69,6 +69,7 @@ interface SidebarProps {
 const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string }> = [
   { id: "models", title: "Models", desc: "Connect providers and choose available models." },
   { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
+  { id: "prompt", title: "Prompt", desc: "Environment & Communication asset every member sees." },
   { id: "extensions", title: "Extensions", desc: "Install pi agent extensions (e.g. web search)." },
   { id: "integrations", title: "Integrations", desc: "Connect external tools and services." },
   { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time" },

@@ -8,12 +8,14 @@ import { logger } from "../foundation/logger.js";
 import { formatBudgetHeader, readPrinciplesWithBudget } from "../workspace/principles-store.js";
 import { readMainlineWithBudget, resolveMainlineRefs } from "../workspace/mainline-store.js";
 import { readMemoryLayer } from "../workspace/member-memory-store.js";
+import { getEnvironmentCommunicationAsset } from "../workspace/environment-communication-asset.js";
 import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../shared/types.js";
 
 export type PromptSectionId =
   | "source-agent"
   | "bossmode-core"
+  | "environment-communication"
   | "persona"
   | "member-principles"
   | "member-mainline"
@@ -253,9 +255,15 @@ export function compileMemberPromptForScope(args: {
     }
   }
 
+  // 0.20 experience ③: global user-editable Environment & Communication asset
+  // (shared framing + communication style, spliced into both room and DM Core
+  // variants — user file when edited, code default otherwise).
+  const ecAsset = getEnvironmentCommunicationAsset();
+
   const sections = [
     section({ id: "source-agent", title: "Source Agent", source: `agent:${args.agentDef.name}`, content: agentPrompt, included: agentPrompt.trim().length > 0 }),
     section({ id: "bossmode-core", title: "Bossmode Core", source: "bossmode", content: corePrompt, included: true }),
+    section({ id: "environment-communication", title: "Environment & Communication", source: "asset:environment-communication", content: ecAsset.content, included: ecAsset.content.trim().length > 0 }),
     section({ id: "persona", title: "Persona", source: `member:${args.memberId}`, content: persona.content, included: persona.content.trim().length > 0 }),
     section({ id: "member-principles", title: "Scope Principles", source: `member:${args.memberId}:${args.scopeId}`, content: scopePrinciples.content, included: scopePrinciples.content.trim().length > 0 }),
     section({ id: "member-mainline", title: "Scope Mainline", source: `member:${args.memberId}:${args.scopeId}`, content: scopeMainline.content, included: scopeMainline.content.trim().length > 0 }),
@@ -263,6 +271,9 @@ export function compileMemberPromptForScope(args: {
   ];
 
   const appendSystemPrompt: string[] = [corePrompt];
+  if (ecAsset.content.trim()) {
+    appendSystemPrompt.push(ecAsset.content.trim());
+  }
   if (persona.content.trim()) {
     appendSystemPrompt.push(wrapAsset("Persona", formatBudgetHeader(persona.meta.budget), persona.content));
   }

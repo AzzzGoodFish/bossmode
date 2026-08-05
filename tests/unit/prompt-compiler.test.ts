@@ -76,19 +76,25 @@ describe("prompt compiler", () => {
     expect(prompt).toMatch(/## Room Principles\n\n\d+% — \d+\/8,000\n/);
     expect(prompt).toMatch(/## Scope Principles\n\n\d+% — \d+\/4,000\n/);
     expect(prompt).toMatch(/## Scope Mainline\n\n\d+% — \d+\/4,000\n/);
-    // Section ids renamed + mainline added
+    // Section ids renamed + mainline added + E&C asset spliced after Core
     const ids = compiled.sections.map((s) => s.id);
-    expect(ids).toEqual(["source-agent", "bossmode-core", "persona", "member-principles", "member-mainline", "room-principles"]);
+    expect(ids).toEqual(["source-agent", "bossmode-core", "environment-communication", "persona", "member-principles", "member-mainline", "room-principles"]);
+    // 0.20 experience ③: product default Environment & Communication asset is injected
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("A colleague, not a system");
+    expect(prompt).toContain("No AI-slop phrasing");
     // Mainline index resolved at injection: dead task marked stale, never deleted
     expect(prompt).toContain("[stale] task:task-none");
-    // Real injection order in the assembled text: Core -> Member Principles ->
+    // Real injection order in the assembled text: Core -> E&C -> Member Principles ->
     // Member Mainline -> Room Principles (fish's ruling: Room principles last).
     const coreIdx = prompt.indexOf("## Communication");
+    const ecIdx = prompt.indexOf("## Environment");
     const memberPrinciplesIdx = prompt.indexOf("## Scope Principles");
     const mainlineIdx = prompt.indexOf("## Scope Mainline");
     const roomPrinciplesIdx = prompt.indexOf("## Room Principles");
     expect(coreIdx).toBeGreaterThan(-1);
-    expect(coreIdx).toBeLessThan(memberPrinciplesIdx);
+    expect(coreIdx).toBeLessThan(ecIdx);
+    expect(ecIdx).toBeLessThan(memberPrinciplesIdx);
     expect(memberPrinciplesIdx).toBeLessThan(mainlineIdx);
     expect(mainlineIdx).toBeLessThan(roomPrinciplesIdx);
   });
