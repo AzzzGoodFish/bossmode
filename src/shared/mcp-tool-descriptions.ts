@@ -1,6 +1,6 @@
 // Centralized agent tool descriptions used by agent tool definitions.
 
-export const QUERY_ROOM_MESSAGES_DESCRIPTION = `Search and retrieve messages from the current room. Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.
+export const QUERY_ROOM_MESSAGES_DESCRIPTION = `Search and retrieve messages from the current scope (or a target scope via the scope parameter — 'room:<id>' or 'dm:<memberId>', membership-checked; DM targets are served from the member-owned DM store). Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.
 
 Use this tool when:
 - You need to recall what was discussed earlier (beyond your current activation context)
@@ -14,11 +14,13 @@ export const CREATE_TASK_DESCRIPTION = `Create a task in the current room and re
 
 export const UPDATE_TASK_DESCRIPTION = `Update fields of an existing task (status, assignee, priority, title, description, references, subscribers). Status changes are posted as room system messages. Assignment and subscriber changes never activate members.`;
 
-export const LIST_TASKS_DESCRIPTION = `List tasks in the current room, optionally filtered by status or assignee. Returns id, title, status, priority, assignee, references, subscribers, and commentCount per task — comment bodies not included (use get_task).`;
+export const LIST_TASKS_DESCRIPTION = `List tasks in the current room (or a target room via the scope parameter — 'room:<id>', membership-checked; tasks are room-scoped, a DM scope has no task list), optionally filtered by status or assignee. Returns id, title, status, priority, assignee, references, subscribers, and commentCount per task — comment bodies not included (use get_task).`;
 
 export const GET_TASK_DESCRIPTION = `Get full details of a task: description, references, subscribers, and comments.`;
 
 export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comments are persisted on the task only: their content does not appear in the room stream (the room sees just a "commented on task" event) and they never activate members.`;
+
+export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task and the target_scope parameter of read_memory.`;
 
 export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
 
@@ -48,6 +50,8 @@ export const PARAM_DESCRIPTIONS = {
   around_seq: "Return a window of messages centered on the message with this seq (use with limit to control window size)",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
+  scope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
+  targetScope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
 
   // task tools
   taskTitle: "Task title",

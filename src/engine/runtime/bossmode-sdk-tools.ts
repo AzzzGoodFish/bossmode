@@ -6,6 +6,7 @@ import {
   CREATE_TASK_DESCRIPTION,
   UPDATE_TASK_DESCRIPTION,
   LIST_TASKS_DESCRIPTION,
+  LIST_SCOPES_DESCRIPTION,
   GET_TASK_DESCRIPTION,
   COMMENT_TASK_DESCRIPTION,
   QUERY_INTEGRATION_DESCRIPTION,
@@ -64,6 +65,7 @@ export function createBossmodeSdkTools(opts: {
         around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
         limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
         output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
+        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
       }),
       execute: async (_id, params) => {
         const data = await call("query_room_messages", params as any) as any;
@@ -79,6 +81,7 @@ export function createBossmodeSdkTools(opts: {
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
         scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
+        target_scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.targetScope })),
       }),
       execute: async (_id, params) => {
         const data = await call("read_memory", params as any) as any;
@@ -159,12 +162,26 @@ export function createBossmodeSdkTools(opts: {
       },
     }),
     defineTool({
+      name: "list_scopes",
+      label: "List Scopes",
+      description: LIST_SCOPES_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async () => {
+        const data = await call("list_scopes", {}) as any;
+        if (data?.ok === false) throw new Error(data.error || "List scopes failed");
+        const scopes = Array.isArray(data?.scopes) ? data.scopes : [];
+        if (scopes.length === 0) return textResult("No scopes found.");
+        return textResult(scopes.map((s: any) => `- ${s.name} (${s.scope})`).join("\n"));
+      },
+    }),
+    defineTool({
       name: "list_tasks",
       label: "List Tasks",
       description: LIST_TASKS_DESCRIPTION,
       parameters: Type.Object({
         status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatusFilter })),
         assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssigneeFilter })),
+        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
       }),
       execute: async (_id, params) => {
         const tasks = await call("list_tasks", params as any) as any;
@@ -177,7 +194,10 @@ export function createBossmodeSdkTools(opts: {
       name: "get_task",
       label: "Get Task",
       description: GET_TASK_DESCRIPTION,
-      parameters: Type.Object({ taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }) }),
+      parameters: Type.Object({
+        taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
+        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
+      }),
       execute: async (_id, params) => {
         const data = await call("get_task", params as any) as any;
         if (data?.ok === false) return textResult("Failed: " + data.error);
@@ -306,8 +326,9 @@ export function createBossmodeSdkTools(opts: {
       }),
     );
 
-    // Strip room-only task tools from DM surface (they were added in the base list).
-    const dmDeny = new Set(["create_task", "update_task", "list_tasks", "get_task", "comment_task", "wait"]);
+    // Strip room-only write tools from the DM surface (reads — list_tasks,
+    // get_task — stay: they accept a target scope since 0.20.0 flagship ①).
+    const dmDeny = new Set(["create_task", "update_task", "comment_task", "wait"]);
     for (let i = tools.length - 1; i >= 0; i--) {
       if (dmDeny.has(tools[i].name)) tools.splice(i, 1);
     }

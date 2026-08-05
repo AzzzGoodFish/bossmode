@@ -20,6 +20,7 @@ import { parseMentions, parseUrgentMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, updateMember, patchScopeOverride } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
@@ -992,19 +993,32 @@ export interface RoomMemberConfigPatch {
   thinkingLevel?: string | null;
   mcpServers?: string[] | null;
   extensions?: string[] | null;
+  skills?: string[] | null;
+}
+
+/** Split a config patch by the member's unified flags (same grouping as
+ * getEffectiveConfig): model/credentialId/thinkingLevel ← unifiedModel;
+ * skills/extensions/mcpServers ← unifiedExtensions. Mixed members split
+ * across both writes. */
+function splitPatchByUnifiedFlags(rec: { unifiedModel: boolean; unifiedExtensions: boolean }, patch: RoomMemberConfigPatch): { globalPatch: Record<string, unknown>; scopePatch: Record<string, unknown> } {
+  const globalPatch: Record<string, unknown> = {};
+  const scopePatch: Record<string, unknown> = {};
+  for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
+    if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
+  }
+  for (const key of ["mcpServers", "extensions", "skills"] as const) {
+    if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
+  }
+  return { globalPatch, scopePatch };
 }
 
 /**
  * Persist a room-member config patch to the 0.20 authority — the member
- * registry (F4, 2026-08-04). Routing follows the member's unified flags,
- * same as getEffectiveConfig: model/credentialId/thinkingLevel go global when
- * unifiedModel=true else this room's scope override; mcpServers/extensions go
- * global when unifiedExtensions=true else scope override (mixed members split
- * across both writes). The pre-0.20 room.json memberOverrides write is
- * invisible to every read side for mem_* members (display / effective-config
- * / activate-heal) — "applies once, display stale, heal rolls back". Legacy
- * non-mem_ rooms keep memberOverrides (the only authority their read side
- * consults).
+ * registry (F4, 2026-08-04). Routing follows the member's unified flags.
+ * The pre-0.20 room.json memberOverrides write is invisible to every read
+ * side for mem_* members (display / effective-config / activate-heal) —
+ * "applies once, display stale, heal rolls back". Legacy non-mem_ rooms
+ * keep memberOverrides (the only authority their read side consults).
  */
 function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
   if (memberId.startsWith("mem_")) {
@@ -1013,19 +1027,34 @@ function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberC
       logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId });
       return;
     }
-    const globalPatch: Record<string, unknown> = {};
-    const scopePatch: Record<string, unknown> = {};
-    for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
-      if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
-    }
-    for (const key of ["mcpServers", "extensions"] as const) {
-      if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
-    }
+    const { globalPatch, scopePatch } = splitPatchByUnifiedFlags(rec, patch);
     if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
     if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeIdOf({ kind: "room", roomId }), scopePatch);
     return;
   }
   roomStore.updateRoomMemberOverride(roomId, memberId, patch);
+}
+
+/**
+ * Scope-native persist (architect 2026-08-05: one write-authority rule
+ * across the product). Used by PATCH /api/members/:id/config?scope= —
+ * accepts `room:<id>` (delegates to persistConfigPatch, legacy rooms keep
+ * memberOverrides) and `dm:<memberId>` (registry only — DM scopes are
+ * always registry members).
+ */
+export function persistMemberConfigPatch(scopeId: ScopeId, memberId: string, patch: RoomMemberConfigPatch): void {
+  if (scopeId.startsWith("room:")) {
+    persistConfigPatch(scopeId.slice("room:".length), memberId, patch);
+    return;
+  }
+  const rec = getMember(memberId);
+  if (!rec) {
+    logger.error("agent", "persistMemberConfigPatch: member not in registry", { memberId, scopeId });
+    return;
+  }
+  const { globalPatch, scopePatch } = splitPatchByUnifiedFlags(rec, patch);
+  if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
+  if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeId, scopePatch);
 }
 
 /** Persist a config patch for a room member (resolves ref → member id, routes by authority). */
@@ -1038,6 +1067,19 @@ export function persistRoomMemberConfigPatch(roomId: string, memberRef: string, 
 /** Clear a member's model binding on the same authority as persistConfigPatch. */
 export function clearMemberModelBinding(roomId: string, memberRef: string): void {
   persistRoomMemberConfigPatch(roomId, memberRef, { model: null, credentialId: null });
+}
+
+/**
+ * Scope labels for the DM Core prompt's "Scopes you exist in" line (flagship
+ * ①): rooms the member belongs to + this DM. Previously the DM compile call
+ * passed [scopeId] only — the line showed just the DM itself, leaving DM
+ * members room-blind (fish 2026-08-05).
+ */
+export function buildDmScopeLabels(memberId: string, dmScopeId: string): string[] {
+  return [
+    ...listRoomsForMember(memberId).map((r) => `${r.name} (room:${r.id})`),
+    `this DM (${dmScopeId})`,
+  ];
 }
 
 export async function switchMemberModel(roomId: string, memberRef: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
@@ -1734,7 +1776,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
       agentDef,
       room: null,
       docsRoot: docsRootPath,
-      activeScopes: [scopeId],
+      activeScopes: buildDmScopeLabels(memberId, scopeId),
     });
 
     const skills = resolveSkills(member, agentDef);
