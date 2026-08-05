@@ -251,6 +251,34 @@ export function patchScopeOverride(
   return rec;
 }
 
+/**
+ * Single write authority for member config patches (0.20 unified semantics):
+ * model/credentialId/thinkingLevel go global when unifiedModel=true, else this
+ * scope's override; mcpServers/extensions go global when unifiedExtensions=true,
+ * else scope override (mixed members split across both writes). Null clears a
+ * field (global: reset to null; scope: fall back to global). Every API write
+ * path — room PATCH, members PATCH, panel model switch — delegates here.
+ */
+export function applyMemberConfigPatch(
+  id: string,
+  scopeId: ScopeId,
+  patch: Record<string, unknown>,
+): MemberRecord {
+  const rec = getMember(id);
+  if (!rec) throw new MemberNotFoundError(id);
+  const globalPatch: Record<string, unknown> = {};
+  const scopePatch: Record<string, unknown> = {};
+  for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
+    if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
+  }
+  for (const key of ["mcpServers", "extensions"] as const) {
+    if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
+  }
+  if (Object.keys(globalPatch).length > 0) updateMember(id, { global: globalPatch as Partial<MemberGlobalConfig> });
+  if (Object.keys(scopePatch).length > 0) patchScopeOverride(id, scopeId, scopePatch as MemberScopeOverride);
+  return getMember(id)!;
+}
+
 export interface EffectiveConfig extends MemberGlobalConfig {
   sources: {
     model: "global" | "scope";

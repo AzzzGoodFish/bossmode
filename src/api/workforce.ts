@@ -19,6 +19,10 @@ import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
 import { readMemberStats } from "../workspace/member-stats-store.js";
+import { resolveMemberRef } from "../workspace/member-registry.js";
+import { parseScopeId } from "../shared/conversation-ref.js";
+import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
+import { loadEventsPaginated } from "../engine/event-handler.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 
@@ -376,18 +380,59 @@ addRoute("GET", "/api/members/:id/token-usage", async (req, res, params) => {
   sendJson(res, 200, getMemberTokenUsage(member.name));
 });
 
-/** Persistent per-member stats for this room: turns, tool calls, active work
+/** Persistent per-member stats for this scope: turns, tool calls, active work
  * time (ms), cumulative tokens, and cost. Sourced from the incremental
  * accumulator (member-stats-store), not a live JSONL rescan. A member with no
- * recorded activity yet returns real zeros, never fabricated numbers. */
+ * recorded activity yet returns real zeros, never fabricated numbers.
+ * Canonical form: ?scope=room:<id>|dm:<memberId> (0.20 scope addressing);
+ * legacy ?roomId= keeps working for room-scope consumers. */
 addRoute("GET", "/api/members/:id/stats", async (req, res, params) => {
   const url = new URL(req.url || "", "http://localhost");
+  const scopeParam = url.searchParams.get("scope");
   const roomId = url.searchParams.get("roomId");
-  if (!roomId) { sendJson(res, 400, { error: "roomId is required" }); return; }
+  if (!scopeParam && !roomId) { sendJson(res, 400, { error: "scope is required" }); return; }
+  if (scopeParam) {
+    const ref = parseScopeId(scopeParam);
+    if (!ref) { sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" }); return; }
+    const member = resolveMemberRef(params.id);
+    if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+    // Scope artifact key: room scope → room uuid; dm scope → "dm:<memberId>"
+    // (the instance registry key DM events/stats are recorded under today).
+    const artifactKey = ref.kind === "room" ? ref.roomId : `dm:${ref.memberId}`;
+    sendJson(res, 200, readMemberStats(artifactKey, member.id));
+    return;
+  }
   const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string; name: string } | null : undefined;
-  const roomMember = resolveRoomMemberRef?.(roomId, params.id);
+  const roomMember = resolveRoomMemberRef?.(roomId!, params.id);
   if (!roomMember) { sendJson(res, 404, { error: "Member not found in this room" }); return; }
-  sendJson(res, 200, readMemberStats(roomId, roomMember.id));
+  sendJson(res, 200, readMemberStats(roomId!, roomMember.id));
+});
+
+/** Index-backed Activity pagination by scope (same engine as the room members
+ * events route): query the SQLite activity index for a seq window, then O(1)
+ * fetch the matching jsonl lines by byte offset. Falls back to the file
+ * tail-scan when the projection is unavailable so the endpoint always answers. */
+addRoute("GET", "/api/members/:id/events", async (req, res, params) => {
+  const url = new URL(req.url || "", "http://localhost");
+  const scopeParam = url.searchParams.get("scope");
+  const ref = scopeParam ? parseScopeId(scopeParam) : null;
+  if (!ref) { sendJson(res, 400, { error: "scope_not_found", message: "valid scope is required" }); return; }
+  const member = resolveMemberRef(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const artifactKey = ref.kind === "room" ? ref.roomId : `dm:${ref.memberId}`;
+  const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 500));
+  const beforeSeq = url.searchParams.get("beforeSeq") ? parseInt(url.searchParams.get("beforeSeq")!, 10) : undefined;
+  const typesParam = url.searchParams.get("types");
+  const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
+
+  catchUpActivityIndex(artifactKey, member.id);
+  const page = queryActivityPage(artifactKey, member.id, { beforeSeq, limit, types });
+  if (page) {
+    sendJson(res, 200, { events: page.events, hasMore: page.hasMore, nextBeforeSeq: page.nextBeforeSeq });
+    return;
+  }
+  const result = loadEventsPaginated(artifactKey, member.id, limit, beforeSeq);
+  sendJson(res, 200, { events: result.events, hasMore: result.hasMore, nextBeforeSeq: result.hasMore ? Math.max(0, (result.total - result.events.length)) : null });
 });
 
 addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {

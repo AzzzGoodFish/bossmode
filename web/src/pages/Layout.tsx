@@ -340,6 +340,8 @@ export function Layout({ onLogout, username }: LayoutProps) {
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "contacts" })}
             onOpenSettings={(memberId) => handleNavigate({ type: "member-settings", memberId })}
+            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
+            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
         {activePage?.type === "member-settings" && (

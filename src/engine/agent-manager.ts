@@ -20,7 +20,7 @@ import { parseMentions, parseUrgentMentions } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { getMember, getEffectiveConfig, updateMember, patchScopeOverride } from "../workspace/member-registry.js";
+import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import {
@@ -1008,21 +1008,11 @@ export interface RoomMemberConfigPatch {
  */
 function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
   if (memberId.startsWith("mem_")) {
-    const rec = getMember(memberId);
-    if (!rec) {
-      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId });
-      return;
+    try {
+      applyMemberConfigPatch(memberId, scopeIdOf({ kind: "room", roomId }), patch as Record<string, unknown>);
+    } catch (err) {
+      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId, error: String(err) });
     }
-    const globalPatch: Record<string, unknown> = {};
-    const scopePatch: Record<string, unknown> = {};
-    for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
-      if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
-    }
-    for (const key of ["mcpServers", "extensions"] as const) {
-      if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
-    }
-    if (Object.keys(globalPatch).length > 0) updateMember(memberId, { global: globalPatch });
-    if (Object.keys(scopePatch).length > 0) patchScopeOverride(memberId, scopeIdOf({ kind: "room", roomId }), scopePatch);
     return;
   }
   roomStore.updateRoomMemberOverride(roomId, memberId, patch);

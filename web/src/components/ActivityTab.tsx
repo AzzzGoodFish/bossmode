@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { getMemberActivityEvents, getToken } from "../api/client";
+import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
@@ -18,9 +18,13 @@ type FilterMode = "all" | "tools" | "replies";
  * - Only the event stream scrolls. Infinite scroll-up + scroll anchoring apply to
  *   that stream container alone.
  */
-export function ActivityTab({ roomId, agentName }: {
+export function ActivityTab({ roomId, agentName, dmScope }: {
   roomId: string;
   agentName: string;
+  /** 0.20 flagship ②: when set, activity reads/watches the dm scope — events
+   * come from the members-shaped route and the WS subscription targets the
+   * synthetic dm:<memberId> room the DM instance emits on. */
+  dmScope?: { scopeId: string; memberId: string };
 }) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,14 +43,16 @@ export function ActivityTab({ roomId, agentName }: {
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getMemberActivityEvents(roomId, agentName, PAGE_SIZE);
+      const result = dmScope
+        ? await getMemberScopedActivityEvents(dmScope.memberId, dmScope.scopeId, PAGE_SIZE)
+        : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE);
       setEvents(result.events as AgentEvent[]);
       setHasMore(result.hasMore);
       setBeforeSeq(result.nextBeforeSeq ?? undefined);
     } finally {
       setLoading(false);
     }
-  }, [roomId, agentName]);
+  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
 
   useEffect(() => { scrolledToLatestRef.current = false; void loadInitial(); }, [loadInitial]);
 
@@ -63,17 +69,18 @@ export function ActivityTab({ roomId, agentName }: {
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId, agent: agentName }));
+    const watchRoomId = dmScope ? `dm:${dmScope.memberId}` : roomId;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: agentName }));
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === "agent:event" && data.roomId === roomId && data.agent === agentName) {
+        if (data.type === "agent:event" && data.roomId === watchRoomId && data.agent === agentName) {
           setEvents((prev) => [...prev, data.event as AgentEvent]);
         }
       } catch {}
     };
     return () => ws.close();
-  }, [roomId, agentName]);
+  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
 
   const loadOlder = useCallback(async () => {
     if (!hasMore || beforeSeq === undefined || loadingOlderRef.current) return;
@@ -83,7 +90,9 @@ export function ActivityTab({ roomId, agentName }: {
     const prevScrollHeight = el?.scrollHeight ?? 0;
     const prevScrollTop = el?.scrollTop ?? 0;
     try {
-      const result = await getMemberActivityEvents(roomId, agentName, PAGE_SIZE, beforeSeq);
+      const result = dmScope
+        ? await getMemberScopedActivityEvents(dmScope.memberId, dmScope.scopeId, PAGE_SIZE, beforeSeq)
+        : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE, beforeSeq);
       setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
       setHasMore(result.hasMore);
       setBeforeSeq(result.nextBeforeSeq ?? undefined);
@@ -97,7 +106,7 @@ export function ActivityTab({ roomId, agentName }: {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore, beforeSeq, roomId, agentName]);
+  }, [hasMore, beforeSeq, roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
 
   // Infinite scroll: scrolling near the top of the event-stream container
   // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).
