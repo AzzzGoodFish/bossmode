@@ -11,8 +11,7 @@ import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch } from "../engine/agent-manager.js";
-import { loadEventsPaginated, loadEventsPaginatedMerged } from "../engine/event-handler.js";
-import { listMemberArtifactRefs } from "../workspace/member-artifact-refs.js";
+import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
@@ -859,21 +858,6 @@ addRoute("GET", "/api/rooms/:id/members/:ref/events", async (req, res, params) =
   const beforeSeq = url.searchParams.get("beforeSeq") ? parseInt(url.searchParams.get("beforeSeq")!, 10) : undefined;
   const typesParam = url.searchParams.get("types");
   const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
-
-  // Read-side key merge (pre-F5): when this member's events live under more
-  // than one key form in the room (mem_/rm_/name), serve the ts-merged stream.
-  const { findMemberByName: findGlobalByName } = await import("../workspace/member-registry.js");
-  const globalMatch = member?.name ? findGlobalByName(member.name) : null;
-  const artifactRefs = listMemberArtifactRefs(params.id, [
-    { id: memberId, name: member?.name },
-    ...(globalMatch && globalMatch.id !== memberId ? [{ id: globalMatch.id, name: globalMatch.name }] : []),
-  ]);
-  if (artifactRefs.length > 1) {
-    const merged = loadEventsPaginatedMerged(params.id, artifactRefs, limit, beforeSeq);
-    const filtered = types?.length ? merged.events.filter((e) => types.includes((e as { type?: string }).type || "")) : merged.events;
-    sendJson(res, 200, { events: filtered, hasMore: merged.hasMore, nextBeforeSeq: merged.hasMore ? Math.max(0, merged.total - merged.events.length) : null });
-    return;
-  }
 
   // Self-heal any index gap for this member before serving (tail beyond wm).
   catchUpActivityIndex(params.id, memberId);

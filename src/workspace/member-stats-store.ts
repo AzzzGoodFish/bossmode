@@ -26,27 +26,6 @@ function statsPath(roomId: string, memberRef: string): string {
   return join(getBossmodeDir(), "rooms", roomId, "agent-events", `${memberRef}.stats.json`);
 }
 
-/** Sum a member's stats across every artifact key form (mem_/rm_/name — see
- * member-artifact-refs). Read-side merge until the F5 rekey converges files. */
-export function readMemberStatsMerged(roomId: string, memberRefs: string[]): MemberStats {
-  const merged = emptyStats();
-  let updatedAt = 0;
-  for (const ref of memberRefs) {
-    const s = readMemberStats(roomId, ref);
-    merged.turns += s.turns;
-    merged.toolCalls += s.toolCalls;
-    merged.activeMs += s.activeMs;
-    merged.tokens.input += s.tokens.input;
-    merged.tokens.output += s.tokens.output;
-    merged.tokens.cacheRead += s.tokens.cacheRead;
-    merged.tokens.cacheWrite += s.tokens.cacheWrite;
-    merged.cost += s.cost;
-    if (s.updatedAt && s.updatedAt > updatedAt) updatedAt = s.updatedAt;
-  }
-  if (updatedAt) merged.updatedAt = updatedAt;
-  return merged;
-}
-
 export function readMemberStats(roomId: string, memberRef: string): MemberStats {
   const path = statsPath(roomId, memberRef);
   if (!existsSync(path)) return emptyStats();

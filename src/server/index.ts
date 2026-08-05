@@ -17,6 +17,7 @@ import { runDmPhantomMessagesMigration } from "../workspace/dm-phantom-messages-
 import { runMemberOverridesCleanupMigration } from "../workspace/member-overrides-cleanup-migration.js";
 import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
+import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, interruptAgent, activateAll } from "../engine/agent-manager.js";
@@ -155,6 +156,19 @@ export function startServer(opts: ServerOptions): Promise<void> {
     initProjection();
   } catch (err) {
     logger.error("server", "projection init failed", { error: String(err) });
+  }
+
+  // F5: rekey legacy agent-events artifacts (name/rm_ keys) to mem_ identity.
+  // Runs after projection init so stale index rows can be deleted and the
+  // merged files re-indexed immediately. Data-driven idempotent — re-runs are
+  // no-ops once no resolvable legacy files remain.
+  try {
+    const result = runAgentEventsRekeyMigration();
+    if (result.roomsWithChanges > 0 || result.orphans.length > 0) {
+      logger.info("server", "agent-events-rekey-v1 migration applied", { ...result });
+    }
+  } catch (err) {
+    logger.error("server", "agent-events-rekey migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so
