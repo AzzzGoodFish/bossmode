@@ -11,6 +11,8 @@ import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
 import { getMember } from "../workspace/member-registry.js";
+import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
+import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
@@ -38,6 +40,28 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
     return member ? { id: member.id, name: member.name } : null;
   }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
+}
+
+/**
+ * Cross-scope read (0.20.0 flagship): resolve the optional `scope` parameter
+ * of read tools to a target runtime scope key (plain room id or dm:<id>).
+ * Default (absent/empty) = current scope. Anything else goes through the
+ * shared membership check — failures return an explicit error, never a
+ * silent fallback to the current scope.
+ */
+function resolveReadTarget(
+  currentRoomId: string,
+  actor: { id: string; name: string },
+  scopeParam: unknown,
+): { ok: true; roomId: string } | { ok: false; error: string } {
+  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") return { ok: true, roomId: currentRoomId };
+  const scopeId = String(scopeParam).trim();
+  try {
+    const access = assertMemberScopeAccess(actor.id, scopeId);
+    return { ok: true, roomId: access.kind === "dm" ? `dm:${access.memberId}` : access.roomId };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 /** Mention parse for outgoing member messages: @ and ! targets alike merge into
@@ -190,6 +214,11 @@ export async function handleToolCallback(
       return { ok: true };
     }
     case "query_room_messages": {
+      const qActor = resolveMemoryActor(roomId, agentName);
+      if (!qActor) return { ok: false, error: "Current member is not in this room" };
+      const target = resolveReadTarget(roomId, qActor, params?.scope);
+      if (!target.ok) return { ok: false, error: target.error };
+      const targetRoomId = target.roomId;
       const limit = Math.max(1, Math.min(params?.limit ?? 50, 500));
       const searchOpts: messageStore.SearchOptions = {
         query: params?.query ? String(params.query) : undefined,
@@ -206,17 +235,43 @@ export async function handleToolCallback(
         searchOpts.after !== undefined || searchOpts.before !== undefined ||
         searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined;
 
-      const messages: RoomMessage[] = (hasFilter
-        ? messageStore.searchMessages(roomId, searchOpts).messages
-        : messageStore.getMessages(roomId, { limit })
+      let messages: RoomMessage[];
+      if (targetRoomId.startsWith("dm:")) {
+        // DM store has no query index — filter in memory with the same semantics.
+        let all = readAllDmMessages(targetRoomId.slice("dm:".length));
+        if (searchOpts.query) {
+          const q = searchOpts.query.toLowerCase();
+          all = all.filter((m) => (m.content || "").toLowerCase().includes(q));
+        }
+        if (searchOpts.from) all = all.filter((m) => m.sender === searchOpts.from);
+        if (searchOpts.after !== undefined) all = all.filter((m) => (m.ts ?? 0) >= (searchOpts.after as number));
+        if (searchOpts.before !== undefined) all = all.filter((m) => (m.ts ?? 0) <= (searchOpts.before as number));
+        if (searchOpts.type) all = all.filter((m) => (m as any).type === searchOpts.type);
+        if (searchOpts.aroundSeq !== undefined) {
+          const center = all.findIndex((m) => m.seq === searchOpts.aroundSeq);
+          if (center >= 0) {
+            const half = Math.floor(limit / 2);
+            all = all.slice(Math.max(0, center - half), center + half + 1);
+          } else {
+            all = [];
+          }
+        } else {
+          all = all.slice(-limit);
+        }
+        messages = all;
+      } else {
+        messages = hasFilter
+          ? messageStore.searchMessages(targetRoomId, searchOpts).messages
+          : messageStore.getMessages(targetRoomId, { limit });
+      }
       // Members never see system notices (runtime failures AND non-error system
       // prompts); typed task/knowledge events stay. Same filter as the
       // activation-context injection path (fish 2026-08-04).
-      ).filter((m) => !isSystemNoticeHiddenFromMembers(m));
+      messages = messages.filter((m) => !isSystemNoticeHiddenFromMembers(m));
 
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {
-        const filePath = join(tmpdir(), `bossmode-search-${roomId.slice(0, 8)}-${randomUUID().slice(0, 8)}.md`);
+        const filePath = join(tmpdir(), `bossmode-search-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
         const content = renderMessagesAsMarkdown(messages, searchOpts);
         writeFileSync(filePath, content, "utf-8");
         logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
@@ -232,10 +287,15 @@ export async function handleToolCallback(
       const asset = String(params?.asset || "");
       if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
       const scope = String(params?.scope || "member");
+      // Cross-scope read: optional target_scope ('room:<id>' | 'dm:<memberId>',
+      // membership-checked) — default current scope.
+      const memTarget = resolveReadTarget(roomId, actor, params?.target_scope);
+      if (!memTarget.ok) return { ok: false, error: memTarget.error };
+      const memRoomId = memTarget.roomId;
       if (asset === "mainline") {
         if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
-        const info = readMemoryLayerInfo(actor.id, "mainline", toolScopeId(roomId));
-        const content = roomId.startsWith("dm:") ? info.content : mainlineStore.resolveMainlineRefs(roomId, info.content);
+        const info = readMemoryLayerInfo(actor.id, "mainline", toolScopeId(memRoomId));
+        const content = memRoomId.startsWith("dm:") ? info.content : mainlineStore.resolveMainlineRefs(memRoomId, info.content);
         return {
           ok: true,
           asset,
@@ -255,7 +315,7 @@ export async function handleToolCallback(
       }
       if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
       if (scope === "member") {
-        const info = readMemoryLayerInfo(actor.id, "principles", toolScopeId(roomId));
+        const info = readMemoryLayerInfo(actor.id, "principles", toolScopeId(memRoomId));
         return {
           ok: true,
           asset,
@@ -274,8 +334,8 @@ export async function handleToolCallback(
         };
       }
       // Room principles — room-level shared asset, still room-keyed (contract §6).
-      if (roomId.startsWith("dm:")) return { ok: false, error: "Room principles are not available in a DM scope" };
-      const principles = principlesStore.readPrinciplesWithBudget(roomId, "room");
+      if (memRoomId.startsWith("dm:")) return { ok: false, error: "Room principles are not available in a DM scope" };
+      const principles = principlesStore.readPrinciplesWithBudget(memRoomId, "room");
       return {
         ok: true,
         asset,
@@ -441,10 +501,22 @@ export async function handleToolCallback(
         return { ok: false, error: err.message || String(err) };
       }
     }
+    case "list_scopes": {
+      const actor = resolveMemoryActor(roomId, agentName);
+      if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const rooms = listRoomsForMember(actor.id).map((r) => ({ scope: `room:${r.id}`, name: r.name }));
+      return { ok: true, scopes: [...rooms, { scope: `dm:${actor.id}`, name: "Direct message with user" }] };
+    }
     case "list_tasks": {
-      let tasks = taskStore.listTasks(roomId);
+      const tActor = resolveMemoryActor(roomId, agentName);
+      if (!tActor) return { ok: false, error: "Current member is not in this room" };
+      const tTarget = resolveReadTarget(roomId, tActor, params?.scope);
+      if (!tTarget.ok) return { ok: false, error: tTarget.error };
+      if (tTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
+      const tasksRoomId = tTarget.roomId;
+      let tasks = taskStore.listTasks(tasksRoomId);
       if (params?.status) tasks = tasks.filter((t) => t.status === params.status);
-      if (params?.assignee) tasks = tasks.filter((t) => taskAssigneeMatches(roomId, t, String(params.assignee)));
+      if (params?.assignee) tasks = tasks.filter((t) => taskAssigneeMatches(tasksRoomId, t, String(params.assignee)));
       return tasks.map((t) => ({
         id: t.id, title: t.title, status: t.status, priority: t.priority,
         assignee: t.assignee, createdBy: t.createdBy,
@@ -454,9 +526,14 @@ export async function handleToolCallback(
       }));
     }
     case "get_task": {
+      const gActor = resolveMemoryActor(roomId, agentName);
+      if (!gActor) return { ok: false, error: "Current member is not in this room" };
+      const gTarget = resolveReadTarget(roomId, gActor, params?.scope);
+      if (!gTarget.ok) return { ok: false, error: gTarget.error };
+      if (gTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
       const taskId = params?.taskId ? String(params.taskId) : "";
       if (!taskId) return { ok: false, error: "taskId is required" };
-      const task = taskStore.getTask(roomId, taskId);
+      const task = taskStore.getTask(gTarget.roomId, taskId);
       if (!task) return { ok: false, error: `Task not found: ${taskId}` };
       return truncateToolResult(renderTaskAsMarkdown(task));
     }

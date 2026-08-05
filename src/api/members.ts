@@ -14,12 +14,12 @@ import {
   fireMember,
   resolveMemberRef,
   getEffectiveConfig,
-  patchScopeOverride,
   MemberNameTakenError,
   MemberNotFoundError,
   type MemberRecord,
 } from "../workspace/member-registry.js";
 import { readMemoryLayer } from "../workspace/member-memory-store.js";
+import { persistMemberConfigPatch } from "../engine/agent-manager.js";
 import { listArchives, importMemberFromArchive } from "../workspace/member-archive.js";
 import {
   readAllDmMessages,
@@ -496,12 +496,17 @@ addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
       return;
     }
     const body = (await parseBody(req)) as Record<string, unknown>;
-    // null clears override field
+    // null clears the field. Write goes through the single authority-routing
+    // rule (F4 persistConfigPatch generalized, architect 2026-08-05): unified
+    // flags decide global vs this-scope override — previously this route
+    // always wrote the scope override even for unified members.
     const diff: Record<string, unknown> = {};
     for (const key of ["model", "credentialId", "thinkingLevel", "skills", "extensions", "mcpServers"]) {
       if (Object.prototype.hasOwnProperty.call(body, key)) diff[key] = body[key];
     }
-    const updated = patchScopeOverride(m.id, scope, diff as any);
+    persistMemberConfigPatch(scope, m.id, diff);
+    const updated = getMember(m.id);
+    if (!updated) throw new Error(`Member disappeared mid-patch: ${m.id}`);
     sendJson(res, 200, {
       member: publicMember(updated),
       effective: getEffectiveConfig(m.id, scope),
