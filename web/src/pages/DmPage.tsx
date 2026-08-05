@@ -56,7 +56,6 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const dmScopeId = `dm:${memberId}`;
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // MemberInfo the shared panel expects = member identity + effective config
   // in this DM scope (model/thinking/mcp/extensions all scope-resolved).
@@ -265,9 +264,13 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
     }
   }, [confirm, dmScopeId, memberId, member?.name, toast]);
 
-  // Jump to a specific message (mainline msg refs): scroll + highlight in
-  // DOM, or fetch an around-window from the server when not loaded.
+  // Jump to a specific message (mainline msg refs): scroll + pulse highlight
+  // in DOM, or fetch an around-window from the server when not loaded.
+  // Narrow screens: the docked Sheet covers the chat — close it first so the
+  // jump target is visible (designer alignment 2026-08-05). Desktop keeps it
+  // open, matching the room search-jump behavior.
   const jumpToMessage = useCallback(async (messageId: string): Promise<void> => {
+    if (panelOpen && window.innerWidth < 768) setPanelOpen(false);
     const alreadyLoaded = messages?.some((m) => m.id === messageId);
     if (!alreadyLoaded) {
       const window = await getDmMessages(memberId, { around: messageId, limit: PAGE_SIZE }).catch(() => null);
@@ -279,10 +282,11 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
     const el = scrollRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setHighlightedId(messageId);
-      setTimeout(() => setHighlightedId(null), 1500);
+      // Same pulse as the room search jump — one "jumped to a message" look.
+      el.classList.add("message-pulse");
+      setTimeout(() => el.classList.remove("message-pulse"), 1600);
     }
-  }, [memberId, messages]);
+  }, [memberId, messages, panelOpen]);
 
   if (error && !member) {
     return (
@@ -355,9 +359,8 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
                 const grouped = isGroupedWithPrev(prev, msg);
                 const time = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                 const fullTime = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-                const highlighted = highlightedId === msg.id;
                 return (
-                  <div key={msg.id} data-message-id={msg.id} className={highlighted ? "rounded-lg ring-2 ring-accent/60 bg-accent/5 px-1" : ""}>
+                  <div key={msg.id} data-message-id={msg.id}>
                     {showDateSep && <DateSeparator ts={msg.ts} />}
                     <MessageBubble
                       sender={msg.sender}
