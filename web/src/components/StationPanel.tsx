@@ -26,6 +26,7 @@ interface StationPanelProps {
   onOpenExtensionsSettings?: () => void;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
+  onJumpToMessage?: (messageId: string) => Promise<void>;
 }
 
 export function formatTokens(n: number): string {
@@ -101,7 +102,7 @@ export function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -536,6 +537,7 @@ This clears the member's working session memory and starts fresh. Room messages 
             onRetryExtensions={refreshExtensions}
             onToggleExtension={(extId) => toggleMemberExtension(memberInfos[selectedMember], extId)}
             onOpenExtensionsSettings={() => { onOpenExtensionsSettings?.(); setSelectedMember(null); }}
+            onJumpToMessage={onJumpToMessage}
           />
         )}
       </Sheet>
@@ -652,22 +654,40 @@ const INDEX_KIND_CLS: Record<string, string> = {
   msg: "bg-surface-3 text-ink-3",
 };
 
-function MainlineIndexList({ index }: { index: MainlineIndexEntry[] }) {
+function MainlineIndexList({ index, onJumpToMessage }: { index: MainlineIndexEntry[]; onJumpToMessage?: (messageId: string) => Promise<void> }) {
   if (index.length === 0) return null;
+  const jumpMsg = (entry: MainlineIndexEntry) => {
+    if (!entry.msgId || entry.stale || !onJumpToMessage) return;
+    void onJumpToMessage(entry.msgId);
+  };
   return (
     <ul className="mt-2.5 flex flex-col gap-1.5">
-      {index.map((entry, i) => (
-        <li key={`${entry.raw}:${i}`} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${entry.stale ? "border-dashed border-line opacity-60" : "border-line-soft bg-surface-1"}`}>
-          {entry.kind !== "other" && (
-            <span className={`text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 shrink-0 ${INDEX_KIND_CLS[entry.kind]}`}>{entry.kind}</span>
-          )}
-          <span className={`font-mono text-[11.5px] text-ink-1 truncate ${entry.stale ? "line-through" : ""}`}>{entry.kind === "other" ? entry.note : entry.ref}</span>
-          {entry.stale && <span className="text-[9.5px] font-bold uppercase text-blocked shrink-0">stale</span>}
-          {entry.kind !== "other" && entry.note && (
-            <span className="ml-auto text-[11px] text-ink-4 truncate max-w-[40%] text-right shrink-0">{entry.note}</span>
-          )}
-        </li>
-      ))}
+      {index.map((entry, i) => {
+        const clickableMsg = entry.kind === "msg" && !!entry.msgId && !entry.stale && !!onJumpToMessage;
+        const display = entry.kind === "msg" && entry.summary
+          ? (entry.note ? entry.note : entry.summary)
+          : entry.note;
+        return (
+          <li key={`${entry.raw}:${i}`}>
+            <button
+              type="button"
+              disabled={!clickableMsg}
+              onClick={() => jumpMsg(entry)}
+              title={entry.kind === "msg" && entry.stale ? "Message no longer available" : entry.kind === "msg" && clickableMsg ? "Jump to message" : undefined}
+              className={`w-full flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${entry.stale ? "border-dashed border-line opacity-60 cursor-default" : "border-line-soft bg-surface-1"} ${clickableMsg ? "hover:bg-surface-2 hover:border-line-strong cursor-pointer" : "cursor-default"}`}
+            >
+              {entry.kind !== "other" && (
+                <span className={`text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 shrink-0 ${INDEX_KIND_CLS[entry.kind]}`}>{entry.kind}</span>
+              )}
+              <span className={`font-mono text-[11.5px] text-ink-1 truncate ${entry.stale ? "line-through" : ""}`}>{entry.kind === "other" ? entry.note : entry.ref}</span>
+              {entry.stale && <span className="text-[9.5px] font-bold uppercase text-blocked shrink-0">stale</span>}
+              {entry.kind !== "other" && display && (
+                <span className="ml-auto text-[11px] text-ink-4 truncate max-w-[40%] text-right shrink-0">{display}</span>
+              )}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -702,7 +722,7 @@ function PrinciplesCard({ title, hint, principles, full, emptyTitle, emptyHint }
   );
 }
 
-function MainlineCard({ member, mainline, full }: { member: MemberInfo; mainline: Mainline | null; full?: boolean }) {
+function MainlineCard({ member, mainline, full, onJumpToMessage }: { member: MemberInfo; mainline: Mainline | null; full?: boolean; onJumpToMessage?: (messageId: string) => Promise<void> }) {
   return (
     <PanelCard
       title="Mainline"
@@ -722,7 +742,7 @@ function MainlineCard({ member, mainline, full }: { member: MemberInfo; mainline
               <div className="text-[12.5px] text-ink-2 leading-relaxed preview-markdown max-h-40 overflow-y-auto"><Markdown content={mainline.parsed.focus} /></div>
             </Fold>
           ))}
-          <MainlineIndexList index={mainline.parsed.index} />
+          <MainlineIndexList index={mainline.parsed.index} onJumpToMessage={onJumpToMessage} />
           <AssetRevLine
             left={revisionLine(mainline)}
             right={mainline.parsed.index.length > 0
@@ -885,6 +905,7 @@ export function MemberConfigPanel({
   roomId,
   dmScope,
   member,
+  onJumpToMessage,
   status,
   contextUsage,
   existingMemberNames,
@@ -938,6 +959,7 @@ export function MemberConfigPanel({
   onRetryExtensions: () => void;
   onToggleExtension: (extId: string) => void;
   onOpenExtensionsSettings?: () => void;
+  onJumpToMessage?: (messageId: string) => Promise<void>;
 }) {
   const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
   const pct = hasUsage ? Math.round(contextUsage.percentage!) : 0;
@@ -1162,7 +1184,7 @@ export function MemberConfigPanel({
               emptyTitle="Empty"
               emptyHint="Nothing curated yet."
             />
-            <MainlineCard member={member} mainline={mainline} full />
+            <MainlineCard member={member} mainline={mainline} full onJumpToMessage={onJumpToMessage} />
             {!dmScope && (
             <PanelCard
               title="Room principles"

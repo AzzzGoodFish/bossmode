@@ -11,6 +11,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import type { Mainline, MainlineIndexEntry, ParsedMainline, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
 import { getTask } from "./task-store.js";
 import { readAllMessages } from "./message-store.js";
+import { readAllDmMessages } from "./dm-message-store.js";
 import { entryExists } from "../knowledge/store.js";
 import { AssetBudgetError, computeAssetBudget } from "./principles-store.js";
 
@@ -197,6 +198,30 @@ export function editMainline(args: {
 const LIST_ITEM_RE = /^(\s*(?:[-*+]|\d+\.)\s+)(.*)$/;
 const STALE_MARK = "[stale]";
 
+/** Messages for a scope key — room:<id> reads the room stream; dm:<memberId>
+ * reads the member's DM stream (which lives member-owned, not under the
+ * phantom rooms/dm:<id> dir). One source for ref resolution + msg enrichment. */
+export function loadScopeMessages(scopeKey: string): ReturnType<typeof readAllMessages> {
+  if (scopeKey.startsWith("dm:")) {
+    const memberId = scopeKey.slice("dm:".length);
+    return readAllDmMessages(memberId);
+  }
+  return readAllMessages(scopeKey);
+}
+
+/** Map msg refs to {msgId, summary} for parse enrichment (msg entries only). */
+export function buildMsgLookup(messages: ReturnType<typeof readAllMessages>): Map<string, { msgId: string; summary: string }> {
+  const lookup = new Map<string, { msgId: string; summary: string }>();
+  for (const m of messages) {
+    const summary = (m.content || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (typeof (m as { seq?: number }).seq === "number") {
+      lookup.set(`seq:${(m as { seq?: number }).seq}`, { msgId: m.id, summary });
+    }
+    lookup.set(`id:${m.id}`, { msgId: m.id, summary });
+  }
+  return lookup;
+}
+
 type RefToken =
   | { kind: "docs"; path: string }
   | { kind: "task"; id: string }
@@ -237,7 +262,7 @@ function resolveRef(ref: RefToken, ctx: { roomId: string; messages: ReturnType<t
  * focus text plus index entries with kind/ref/note/stale. Pure function — the
  * markdown file stays the only storage form.
  */
-export function parseMainline(content: string): ParsedMainline {
+export function parseMainline(content: string, msgLookup?: Map<string, { msgId: string; summary: string }>): ParsedMainline {
   const lines = content.split("\n");
   let section: "focus" | "index" | null = null;
   const focusLines: string[] = [];
@@ -270,7 +295,18 @@ export function parseMainline(content: string): ParsedMainline {
     }
     const note = body.slice(body.indexOf(parsed.raw) + parsed.raw.length).replace(/^\s*—\s*/, "").trim();
     const kind = parsed.ref.kind === "docs" ? "doc" : parsed.ref.kind === "task" ? "task" : "msg";
-    index.push({ kind, ref: parsed.raw, note, stale, raw: body.trim() });
+    let msgId: string | undefined;
+    let summary: string | undefined;
+    if (kind === "msg" && msgLookup) {
+      const hit = parsed.ref.kind === "msg-seq"
+        ? msgLookup.get(`seq:${parsed.ref.seq}`)
+        : parsed.ref.kind === "msg-id" ? msgLookup.get(`id:${parsed.ref.id}`) : undefined;
+      if (hit) {
+        msgId = hit.msgId;
+        summary = hit.summary;
+      }
+    }
+    index.push({ kind, ref: parsed.raw, note, stale, raw: body.trim(), ...(msgId ? { msgId } : {}), ...(summary ? { summary } : {}) });
   }
   return { focus: focusLines.join("\n").trim(), index };
 }
@@ -280,12 +316,12 @@ export function parseMainline(content: string): ParsedMainline {
  * resolved: unresolvable refs are prefixed with `[stale]` (honest, never deleted);
  * refs that resolve again lose a stale mark left by an earlier read.
  */
-export function resolveMainlineRefs(roomId: string, content: string): string {
+export function resolveMainlineRefs(roomId: string, content: string, preloaded?: ReturnType<typeof readAllMessages>): string {
   if (!content.includes(MAINLINE_INDEX_HEADING)) return content;
   const lines = content.split("\n");
   let inIndex = false;
-  let messages: ReturnType<typeof readAllMessages> | null = null;
-  const getMessages = () => (messages ??= readAllMessages(roomId));
+  let messages: ReturnType<typeof readAllMessages> | null = preloaded ?? null;
+  const getMessages = () => (messages ??= loadScopeMessages(roomId));
 
   const out = lines.map((line) => {
     const heading = line.trim().match(/^##(?!#)\s*(.*)$/);

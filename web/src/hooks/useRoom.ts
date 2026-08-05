@@ -191,18 +191,29 @@ export function useRoom(roomId: string | null) {
     [roomId],
   );
 
-  // Jump to a specific message by ID — fetches around window if not in DOM
+  // Jump to a specific message by ID — fetches around window if not in DOM,
+  // then scrolls it into view with the same pulse highlight the search jump
+  // uses. Shared by ChatArea's search pipeline and the panel's mainline msg
+  // refs (体验批②).
   const jumpToMessage = useCallback(async (messageId: string): Promise<void> => {
     if (!roomId) return;
     // Check if already loaded
     const alreadyLoaded = messages.some((m) => m.id === messageId);
-    if (alreadyLoaded) return;
-    // Fetch around window
-    const window = await getMessages(roomId, { around: messageId, limit: PAGE_SIZE });
-    if (window.length === 0) return; // message not found
-    setMessages(window);
-    setHasMore(true);
-    setInHistoryView(true);
+    if (!alreadyLoaded) {
+      // Fetch around window
+      const window = await getMessages(roomId, { around: messageId, limit: PAGE_SIZE });
+      if (window.length === 0) return; // message not found
+      setMessages(window);
+      setHasMore(true);
+      setInHistoryView(true);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
+    const el = document.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("message-pulse");
+      setTimeout(() => el.classList.remove("message-pulse"), 1600);
+    }
   }, [roomId, messages]);
 
   // Return to latest messages from history view
