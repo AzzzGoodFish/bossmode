@@ -76,6 +76,7 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(ids).toEqual([
       "source-agent",
       "bossmode-core",
+      "environment-communication",
       "persona",
       "member-principles",
       "member-mainline",

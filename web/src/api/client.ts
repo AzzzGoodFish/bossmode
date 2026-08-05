@@ -1253,6 +1253,27 @@ export async function updateRuntimeSettings(settings: boolean | Partial<RuntimeS
   });
 }
 
+export interface EnvironmentCommunicationAsset {
+  content: string;
+  source: "default" | "user";
+  updatedAt?: number;
+}
+
+export async function getEnvironmentCommunication(): Promise<EnvironmentCommunicationAsset> {
+  return apiFetch("/api/settings/environment-communication");
+}
+
+export async function saveEnvironmentCommunication(content: string): Promise<EnvironmentCommunicationAsset> {
+  return apiFetch("/api/settings/environment-communication", {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function resetEnvironmentCommunication(): Promise<EnvironmentCommunicationAsset> {
+  return apiFetch("/api/settings/environment-communication", { method: "DELETE" });
+}
+
 export async function getMcpSettings(): Promise<McpSettings> {
   return apiFetch("/api/settings/mcp");
 }

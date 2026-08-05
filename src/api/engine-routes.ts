@@ -5,6 +5,7 @@ import {
   invalidateModelCredentialProfile,
 } from "../engine/agent-manager.js";
 import { readConfig, writeConfig } from "../shared/config.js";
+import { getEnvironmentCommunicationAsset, saveEnvironmentCommunication, resetEnvironmentCommunication } from "../workspace/environment-communication-asset.js";
 import type { PiTransportSetting } from "../shared/types.js";
 import {
   cancelOAuthLoginJob,
@@ -304,6 +305,39 @@ addRoute("PUT", "/api/settings/runtime", async (req, res) => {
     config.runtime = runtime;
     writeConfig(config);
     sendJson(res, 200, normalizeRuntimeSettings(config.runtime));
+  } catch (err: any) {
+    sendJson(res, 500, { error: err.message });
+  }
+});
+
+// GET /api/settings/environment-communication — global user-editable prompt
+// asset (0.20 experience ③). Returns current content + source + updatedAt.
+addRoute("GET", "/api/settings/environment-communication", async (_req, res) => {
+  try {
+    sendJson(res, 200, getEnvironmentCommunicationAsset());
+  } catch (err: any) {
+    sendJson(res, 500, { error: err.message });
+  }
+});
+
+// PUT /api/settings/environment-communication — materialize the user file.
+addRoute("PUT", "/api/settings/environment-communication", async (req, res) => {
+  try {
+    const body = (await parseBody(req)) as { content?: unknown };
+    if (typeof body?.content !== "string" || !body.content.trim()) {
+      sendJson(res, 400, { error: "content is required and cannot be empty" });
+      return;
+    }
+    sendJson(res, 200, saveEnvironmentCommunication(body.content));
+  } catch (err: any) {
+    sendJson(res, 500, { error: err.message });
+  }
+});
+
+// DELETE /api/settings/environment-communication — restore the product default.
+addRoute("DELETE", "/api/settings/environment-communication", async (_req, res) => {
+  try {
+    sendJson(res, 200, resetEnvironmentCommunication());
   } catch (err: any) {
     sendJson(res, 500, { error: err.message });
   }
