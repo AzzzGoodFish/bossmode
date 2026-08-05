@@ -217,6 +217,7 @@ export async function handleToolCallback(
       const qActor = resolveMemoryActor(roomId, agentName);
       if (!qActor) return { ok: false, error: "Current member is not in this room" };
       const target = resolveReadTarget(roomId, qActor, params?.scope);
+      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>' or 'dm:<memberId>')" };
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
       const limit = Math.max(1, Math.min(params?.limit ?? 50, 500));
@@ -286,14 +287,28 @@ export async function handleToolCallback(
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const asset = String(params?.asset || "");
       if (asset !== "principles" && asset !== "mainline") return { ok: false, error: "asset must be 'principles' or 'mainline'" };
-      const scope = String(params?.scope || "member");
-      // Cross-scope read: optional target_scope ('room:<id>' | 'dm:<memberId>',
-      // membership-checked) — default current scope.
-      const memTarget = resolveReadTarget(roomId, actor, params?.target_scope);
-      if (!memTarget.ok) return { ok: false, error: memTarget.error };
-      const memRoomId = memTarget.roomId;
+      const scope = String(params?.scope ?? "member");
+      // Single `scope` parameter, dual value domain (rc.8 unification):
+      //   'room' | 'member'        → asset level (unchanged legacy meaning)
+      //   'room:<id>' | 'dm:<id>'  → cross-scope read target (membership-
+      //                              checked; default asset level 'member')
+      // Disjoint domains — no ambiguity. Unknown values are explicit errors,
+      // never a silent fallback. target_scope is retired.
+      if (params?.target_scope !== undefined) {
+        return { ok: false, error: "target_scope is retired — use scope with 'room:<id>' or 'dm:<memberId>'" };
+      }
+      let assetScope = scope;
+      let memRoomId = roomId;
+      if (scope.startsWith("room:") || scope.startsWith("dm:")) {
+        const memTarget = resolveReadTarget(roomId, actor, scope);
+        if (!memTarget.ok) return { ok: false, error: memTarget.error };
+        memRoomId = memTarget.roomId;
+        assetScope = "member";
+      } else if (scope !== "room" && scope !== "member") {
+        return { ok: false, error: "scope must be 'room', 'member', 'room:<id>', or 'dm:<memberId>'" };
+      }
       if (asset === "mainline") {
-        if (scope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
+        if (assetScope === "room") return { ok: false, error: "Mainline is member-level only; a room-level shared focus is not supported yet" };
         const info = readMemoryLayerInfo(actor.id, "mainline", toolScopeId(memRoomId));
         const content = memRoomId.startsWith("dm:") ? info.content : mainlineStore.resolveMainlineRefs(memRoomId, info.content);
         return {
@@ -313,13 +328,13 @@ export async function handleToolCallback(
           suggestedTemplate: info.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
         };
       }
-      if (scope !== "room" && scope !== "member") return { ok: false, error: "scope must be 'room' or 'member'" };
-      if (scope === "member") {
+      if (assetScope !== "room" && assetScope !== "member") return { ok: false, error: "scope must be 'room', 'member', 'room:<id>', or 'dm:<memberId>'" };
+      if (assetScope === "member") {
         const info = readMemoryLayerInfo(actor.id, "principles", toolScopeId(memRoomId));
         return {
           ok: true,
           asset,
-          scope,
+          scope: assetScope,
           content: info.content,
           revision: info.revision,
           contentHash: info.contentHash,
@@ -339,7 +354,7 @@ export async function handleToolCallback(
       return {
         ok: true,
         asset,
-        scope,
+        scope: assetScope,
         content: principles.content,
         revision: principles.revision,
         contentHash: principles.contentHash,
@@ -511,6 +526,7 @@ export async function handleToolCallback(
       const tActor = resolveMemoryActor(roomId, agentName);
       if (!tActor) return { ok: false, error: "Current member is not in this room" };
       const tTarget = resolveReadTarget(roomId, tActor, params?.scope);
+      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
       if (!tTarget.ok) return { ok: false, error: tTarget.error };
       if (tTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
       const tasksRoomId = tTarget.roomId;
@@ -529,6 +545,7 @@ export async function handleToolCallback(
       const gActor = resolveMemoryActor(roomId, agentName);
       if (!gActor) return { ok: false, error: "Current member is not in this room" };
       const gTarget = resolveReadTarget(roomId, gActor, params?.scope);
+      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
       if (!gTarget.ok) return { ok: false, error: gTarget.error };
       if (gTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
       const taskId = params?.taskId ? String(params.taskId) : "";

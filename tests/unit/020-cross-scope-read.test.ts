@@ -141,7 +141,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(dmTasks.error).toMatch(/room-scoped/);
   });
 
-  it("read_memory: target_scope reads own member memory and room principles at another scope", async () => {
+  it("read_memory: scope param reads own member memory and room principles at another scope (dual value domain)", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const memStore = await import("../../src/workspace/member-memory-store.js");
     memStore.writeMemoryLayer(dev.id, "principles", "beta-scope rules", { type: "member", memberId: dev.id, name: "dev" }, { scopeId: `room:${roomB.id}`, reason: "test", operation: "write" });
@@ -149,18 +149,25 @@ describe("cross-scope reads (flagship ①)", () => {
     principlesStore.writePrinciples({ roomId: roomB.id, scope: "room", content: "beta room principles", actor: { type: "member", memberId: dev.id, name: "dev" }, reason: "test" });
 
     const tools = await import("../../src/engine/tools.js");
-    // Member principles at room:B scope, read from roomA.
-    const res = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", target_scope: `room:${roomB.id}` })) as any;
+    // Member principles at room:B scope, read from roomA via scope=room:<B>.
+    const res = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: `room:${roomB.id}` })) as any;
     expect(res.ok).toBe(true);
     expect(res.content).toBe("beta-scope rules");
 
-    // Room principles of roomB from roomA.
+    // Room principles of roomB from roomA: not reachable through read_memory's
+    // single scope param (asset-level 'room' reads only the CURRENT room; a
+    // room:<id> target reads the member's own assets at that scope). This is a
+    // deliberate scope trim from flagship ① (room principles of another room
+    // are niche — a member of B already has them injected) — flagged to
+    // architect; resurrect via a composed param if he rules it back in.
     const rp = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "room", target_scope: `room:${roomB.id}` })) as any;
-    expect(rp.ok).toBe(true);
-    expect(rp.content).toBe("beta room principles");
+    expect(rp.ok).toBe(false); // target_scope is retired → explicit error (no silent room-principles read)
+    const rp2 = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "room" })) as any;
+    expect(rp2.ok).toBe(true);
+    expect(rp2.content).not.toBe("beta room principles"); // current roomA, not roomB
 
     // Unauthorized target scope → explicit error.
-    const denied = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", target_scope: `room:${roomC.id}` })) as any;
+    const denied = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: `room:${roomC.id}` })) as any;
     expect(denied.ok).toBe(false);
     expect(denied.error).toMatch(/not a member/);
 
@@ -168,6 +175,31 @@ describe("cross-scope reads (flagship ①)", () => {
     const cur = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles" })) as any;
     expect(cur.ok).toBe(true);
     expect(cur.content).not.toBe("beta-scope rules");
+  });
+
+  it("scope param validation: invalid values and retired keys are explicit errors, never silent", async () => {
+    const { dev, roomA } = await seedWorld();
+    const tools = await import("../../src/engine/tools.js");
+    // Invalid scope value on read_memory.
+    const bad = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "roomx" })) as any;
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toMatch(/must be 'room', 'member', 'room:<id>', or 'dm:<memberId>'/);
+    // Retired target_scope on read_memory.
+    const retired = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", target_scope: `room:${roomA.id}` })) as any;
+    expect(retired.ok).toBe(false);
+    expect(retired.error).toMatch(/target_scope is retired/);
+    // Retired target_scope on query_room_messages (QA's silent-fallback trap).
+    const q = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { target_scope: `room:${roomA.id}` })) as any;
+    expect(Array.isArray(q)).toBe(false);
+    expect(q.ok).toBe(false);
+    expect(q.error).toMatch(/unknown parameter 'target_scope'/);
+    // Retired target_scope on list_tasks / get_task.
+    const lt = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { target_scope: `room:${roomA.id}` })) as any;
+    expect(lt.ok).toBe(false);
+    expect(lt.error).toMatch(/unknown parameter 'target_scope'/);
+    const gt = (await tools.handleToolCallback("get_task", roomA.id, "dev", { taskId: "x", target_scope: `room:${roomA.id}` })) as any;
+    expect(gt.ok).toBe(false);
+    expect(gt.error).toMatch(/unknown parameter 'target_scope'/);
   });
 
   it("list_scopes: rooms (id+name) + own DM; excludes non-member rooms", async () => {
