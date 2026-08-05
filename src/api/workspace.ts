@@ -331,11 +331,12 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, 
   }
   // 0.20: member-level assets live in the member-global memory store (contract §6).
   const info = readMemoryLayerInfo(member.id, "mainline", `room:${params.id}`);
-  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, info.content);
+  const scopeMessages = mainlineStore.loadScopeMessages(params.id);
+  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, info.content, scopeMessages);
   sendJson(res, 200, {
     ...info,
     content: resolvedContent,
-    parsed: mainlineStore.parseMainline(resolvedContent),
+    parsed: mainlineStore.parseMainline(resolvedContent, mainlineStore.buildMsgLookup(scopeMessages)),
     asset: "mainline",
     scope: "member",
     memberId: member.id,

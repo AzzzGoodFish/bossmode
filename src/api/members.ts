@@ -461,13 +461,15 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
     // unified member panel renders identically from either scope.
     const info = readMemoryLayerInfo(m.id, layer, scope as ScopeId | undefined);
     const scopeRef = scope ? parseScopeId(scope) : null;
-    const content = layer === "mainline" && scopeRef
-      ? mainlineStore.resolveMainlineRefs(scopeRef.kind === "room" ? scopeRef.roomId : `dm:${scopeRef.memberId}`, info.content)
+    const scopeKey = scopeRef ? (scopeRef.kind === "room" ? scopeRef.roomId : `dm:${scopeRef.memberId}`) : null;
+    const scopeMessages = scopeKey ? mainlineStore.loadScopeMessages(scopeKey) : null;
+    const content = layer === "mainline" && scopeKey && scopeMessages
+      ? mainlineStore.resolveMainlineRefs(scopeKey, info.content, scopeMessages)
       : info.content;
     sendJson(res, 200, {
       ...info,
       content,
-      parsed: layer === "mainline" ? mainlineStore.parseMainline(content) : undefined,
+      parsed: layer === "mainline" ? mainlineStore.parseMainline(content, scopeMessages ? mainlineStore.buildMsgLookup(scopeMessages) : undefined) : undefined,
       budgetHeader: principlesStore.formatBudgetHeader(info.budget),
       suggestedTemplate: info.content.trim()
         ? undefined
@@ -545,13 +547,27 @@ addRoute("GET", "/api/dm/:memberId/messages", async (req, res, params) => {
     }
     const url = new URL(req.url || "", "http://localhost");
     const before = url.searchParams.get("before");
+    const around = url.searchParams.get("around");
     const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 1), 500);
     let messages = readAllDmMessages(m.id);
-    if (before) {
+    if (around) {
+      // Jump window: center on the referenced message (id or seq).
+      const idx = messages.findIndex((msg) => msg.id === around || String(msg.seq) === around);
+      if (idx >= 0) {
+        const half = Math.floor(Math.min(limit, 100) / 2);
+        const start = Math.max(0, idx - half);
+        const end = Math.min(messages.length, idx + half + 1);
+        messages = messages.slice(start, end);
+      } else {
+        messages = [];
+      }
+    } else if (before) {
       const idx = messages.findIndex((msg) => msg.id === before || String(msg.seq) === before);
       if (idx > 0) messages = messages.slice(0, idx);
+      if (messages.length > limit) messages = messages.slice(-limit);
+    } else if (messages.length > limit) {
+      messages = messages.slice(-limit);
     }
-    if (messages.length > limit) messages = messages.slice(-limit);
     sendJson(res, 200, { messages });
   } catch (err) {
     sendJson(res, 500, { error: "internal", message: String(err) });

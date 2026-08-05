@@ -377,6 +377,7 @@ export function Main({
             agentStatus={displayAgentStatus}
             contextUsage={displayContextUsage}
             roomId={room.id}
+            onJumpToMessage={jumpToMessage}
             onOpenMcpSettings={onOpenMcpSettings}
             onOpenExtensionsSettings={onOpenExtensionsSettings}
             onMembersChanged={reloadRoom}
@@ -392,6 +393,7 @@ export function Main({
               agentStatus={displayAgentStatus}
               contextUsage={displayContextUsage}
               roomId={room.id}
+              onJumpToMessage={jumpToMessage}
               onOpenMcpSettings={onOpenMcpSettings}
             onOpenExtensionsSettings={onOpenExtensionsSettings}
               onMembersChanged={reloadRoom}

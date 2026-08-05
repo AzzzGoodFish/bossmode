@@ -56,6 +56,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const dmScopeId = `dm:${memberId}`;
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // MemberInfo the shared panel expects = member identity + effective config
   // in this DM scope (model/thinking/mcp/extensions all scope-resolved).
@@ -264,6 +265,25 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
     }
   }, [confirm, dmScopeId, memberId, member?.name, toast]);
 
+  // Jump to a specific message (mainline msg refs): scroll + highlight in
+  // DOM, or fetch an around-window from the server when not loaded.
+  const jumpToMessage = useCallback(async (messageId: string): Promise<void> => {
+    const alreadyLoaded = messages?.some((m) => m.id === messageId);
+    if (!alreadyLoaded) {
+      const window = await getDmMessages(memberId, { around: messageId, limit: PAGE_SIZE }).catch(() => null);
+      if (!window || window.messages.length === 0) return;
+      setMessages(window.messages);
+      setHasMore(true);
+    }
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const el = scrollRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(messageId);
+      setTimeout(() => setHighlightedId(null), 1500);
+    }
+  }, [memberId, messages]);
+
   if (error && !member) {
     return (
       <div className="flex-1 flex items-center justify-center text-ink-3">
@@ -335,8 +355,9 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
                 const grouped = isGroupedWithPrev(prev, msg);
                 const time = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                 const fullTime = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                const highlighted = highlightedId === msg.id;
                 return (
-                  <div key={msg.id} data-message-id={msg.id}>
+                  <div key={msg.id} data-message-id={msg.id} className={highlighted ? "rounded-lg ring-2 ring-accent/60 bg-accent/5 px-1" : ""}>
                     {showDateSep && <DateSeparator ts={msg.ts} />}
                     <MessageBubble
                       sender={msg.sender}
@@ -414,6 +435,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             }}
             onToggleExtension={handleToggleExtension}
             onOpenExtensionsSettings={() => { onOpenExtensionsSettings?.(); setPanelOpen(false); }}
+            onJumpToMessage={jumpToMessage}
           />
         </Sheet>
       )}

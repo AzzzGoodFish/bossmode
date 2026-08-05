@@ -776,6 +776,10 @@ export interface MainlineIndexEntry {
   note: string;
   stale: boolean;
   raw: string;
+  /** msg entries only: resolvable message id for jump (absent = stale/unreachable) */
+  msgId?: string;
+  /** msg entries only: content preview from the referenced message */
+  summary?: string;
 }
 
 export interface ParsedMainline {
@@ -1435,10 +1439,11 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
 // the human. One contract, no divergence.
 export type DmMessage = RoomMessage;
 
-export async function getDmMessages(memberId: string, params?: { before?: number; limit?: number }): Promise<{ messages: DmMessage[] }> {
+export async function getDmMessages(memberId: string, params?: { before?: number | string; limit?: number; around?: string }): Promise<{ messages: DmMessage[] }> {
   const q = new URLSearchParams();
-  if (params?.before) q.set("before", String(params.before));
+  if (params?.before !== undefined) q.set("before", String(params.before));
   if (params?.limit) q.set("limit", String(params.limit));
+  if (params?.around) q.set("around", params.around);
   const qs = q.toString();
   return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
 }
