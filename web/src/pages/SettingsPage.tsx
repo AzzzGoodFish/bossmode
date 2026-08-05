@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus } from "../api/client";
+import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
   getEnvironmentCommunication,
   saveEnvironmentCommunication,
   resetEnvironmentCommunication,
+  getMemoryBudgets,
+  updateMemoryBudgets,
   getMcpSettings,
   updateMcpSettings,
   checkMcpServers,
@@ -94,6 +96,9 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [ecSource, setEcSource] = useState<"default" | "user">("default");
   const [ecSaving, setEcSaving] = useState(false);
   const [ecSaved, setEcSaved] = useState(false);
+  const [memBudgets, setMemBudgets] = useState<MemoryBudgets>({ persona: 4000, memberPrinciples: 4000, mainline: 4000, roomPrinciples: 8000 });
+  const [memBudgetsSaving, setMemBudgetsSaving] = useState(false);
+  const [memBudgetsSaved, setMemBudgetsSaved] = useState(false);
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
@@ -114,6 +119,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     getMcpSettings().then(setMcpSettings).catch(console.error);
     refreshExtensions();
     getEnvironmentCommunication().then((a) => { setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source); }).catch(console.error);
+    getMemoryBudgets().then(setMemBudgets).catch(console.error);
   }, []);
 
   const handleEcSave = async () => {
@@ -144,6 +150,26 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       toast(userActionError("restore Environment & Communication"), "error");
     } finally {
       setEcSaving(false);
+    }
+  };
+
+  const handleMemBudgetChange = (key: keyof MemoryBudgets, value: string) => {
+    const n = Number(value);
+    setMemBudgets((prev) => ({ ...prev, [key]: Number.isFinite(n) && n > 0 ? Math.floor(n) : prev[key] }));
+  };
+
+  const handleMemBudgetsSave = async () => {
+    setMemBudgetsSaving(true);
+    try {
+      const saved = await updateMemoryBudgets(memBudgets);
+      setMemBudgets(saved);
+      setMemBudgetsSaved(true);
+      setTimeout(() => setMemBudgetsSaved(false), 3000);
+    } catch (err: any) {
+      console.error("Failed to save memory budgets:", err);
+      toast(userActionError("save memory budgets"), "error");
+    } finally {
+      setMemBudgetsSaving(false);
     }
   };
 
@@ -368,13 +394,49 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
             <p className="text-[11px] text-ink-4">Markdown is preserved verbatim. Keep it short — it is injected into every member's system prompt.</p>
             <button
               onClick={handleEcSave}
-              disabled={ecSaving || ecContent.trim() === ecSavedContent}
+              disabled={ecSaving || ecContent.trim() === ecSavedContent || ecContent.trim() === ""}
               className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
             >
               {ecSaving ? "Saving..." : "Save"}
             </button>
           </div>
           {ecSaved && <div className="text-xs text-onair">Saved! Members pick this up after Reload or a new session.</div>}
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
+          <div>
+            <div className="text-sm font-medium text-ink-1">Memory budgets</div>
+            <div className="text-xs text-ink-3 mt-0.5">Character limits for each member memory asset. Lowering never truncates existing content — a write is rejected until the asset is trimmed. Applies to new sessions / after Reload.</div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">Persona</span>
+              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.persona} onChange={(e) => handleMemBudgetChange("persona", e.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">Member principles</span>
+              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.memberPrinciples} onChange={(e) => handleMemBudgetChange("memberPrinciples", e.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">Mainline</span>
+              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.mainline} onChange={(e) => handleMemBudgetChange("mainline", e.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-ink-2">Room principles</span>
+              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.roomPrinciples} onChange={(e) => handleMemBudgetChange("roomPrinciples", e.target.value)} />
+            </label>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-ink-4">Defaults: persona 4,000 · member principles 4,000 · mainline 4,000 · room principles 8,000.</p>
+            <button
+              onClick={handleMemBudgetsSave}
+              disabled={memBudgetsSaving}
+              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
+            >
+              {memBudgetsSaving ? "Saving..." : "Save budgets"}
+            </button>
+          </div>
+          {memBudgetsSaved && <div className="text-xs text-onair">Saved! Applies to new sessions / after Reload.</div>}
         </div>
       </div>
       )}

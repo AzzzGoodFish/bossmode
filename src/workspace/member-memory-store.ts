@@ -10,15 +10,14 @@ import { scopeDirName, parseScopeId, type ScopeId } from "../shared/conversation
 import { parseJsonlLines } from "../shared/jsonl.js";
 import {
   AssetBudgetError,
-  PRINCIPLES_MEMBER_MAX_CHARS,
   PRINCIPLES_TEMPLATE,
   computeAssetBudget,
   formatBudgetHeader,
 } from "./principles-store.js";
 import {
-  MAINLINE_MAX_CHARS,
   MAINLINE_TEMPLATE,
 } from "./mainline-store.js";
+import { getMemoryBudget } from "./memory-budgets.js";
 
 export type MemoryLayer = "persona" | "principles" | "mainline";
 
@@ -61,8 +60,9 @@ function templateFor(layer: MemoryLayer): string {
 }
 
 function budgetLimit(layer: MemoryLayer): number {
-  if (layer === "mainline") return MAINLINE_MAX_CHARS;
-  return PRINCIPLES_MEMBER_MAX_CHARS;
+  if (layer === "mainline") return getMemoryBudget("mainline");
+  if (layer === "persona") return getMemoryBudget("persona");
+  return getMemoryBudget("memberPrinciples");
 }
 
 function ensureParent(filePath: string): void {

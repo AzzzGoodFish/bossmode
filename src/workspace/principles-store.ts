@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
+import { getMemoryBudget } from "./memory-budgets.js";
 import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
 
 export type PrinciplesScope = "room" | "member";
@@ -38,7 +39,7 @@ export const PRINCIPLES_ROOM_MAX_CHARS = 8_000;
 export const PRINCIPLES_TEMPLATE = "## Rules\n\n## Core Knowledge\n\n## Working Notes\n\n## Linked Documents\n";
 
 export function principlesBudgetLimit(scope: PrinciplesScope): number {
-  return scope === "room" ? PRINCIPLES_ROOM_MAX_CHARS : PRINCIPLES_MEMBER_MAX_CHARS;
+  return scope === "room" ? getMemoryBudget("roomPrinciples") : getMemoryBudget("memberPrinciples");
 }
 
 function formatThousands(n: number): string {
