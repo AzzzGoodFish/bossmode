@@ -8,6 +8,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
+import { getMemoryBudget } from "./memory-budgets.js";
 import type { Mainline, MainlineIndexEntry, ParsedMainline, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
 import { getTask } from "./task-store.js";
 import { readAllMessages } from "./message-store.js";
@@ -123,7 +124,8 @@ export function readMainline(roomId: string, memberId: string): Mainline {
 
 export function readMainlineWithBudget(roomId: string, memberId: string): Mainline & { budget: PromptAssetBudget } {
   const mainline = readMainline(roomId, memberId);
-  return { ...mainline, budget: computeAssetBudget(mainline.content.length, MAINLINE_MAX_CHARS) };
+  const limit = getMemoryBudget("mainline");
+  return { ...mainline, budget: computeAssetBudget(mainline.content.length, limit) };
 }
 
 export function writeMainline(args: {
@@ -138,12 +140,13 @@ export function writeMainline(args: {
   const reason = String(args.reason ?? "").trim();
   if (!reason) throw new Error("reason is required — record the source of this change (user feedback, a decision, or curation)");
   const current = readMainline(args.roomId, args.memberId);
-  if (content.length > MAINLINE_MAX_CHARS) {
+  const limit = getMemoryBudget("mainline");
+  if (content.length > limit) {
     throw new AssetBudgetError({
       assetLabel: "member mainline",
       attemptedLength: content.length,
       currentContent: current.content,
-      budget: computeAssetBudget(current.content.length, MAINLINE_MAX_CHARS),
+      budget: computeAssetBudget(current.content.length, limit),
     });
   }
   ensureMainlinesDir(args.roomId, args.memberId);

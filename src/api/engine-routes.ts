@@ -6,6 +6,7 @@ import {
 } from "../engine/agent-manager.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 import { getEnvironmentCommunicationAsset, saveEnvironmentCommunication, resetEnvironmentCommunication } from "../workspace/environment-communication-asset.js";
+import { getMemoryBudgets, normalizeMemoryBudgetsInput } from "../workspace/memory-budgets.js";
 import type { PiTransportSetting } from "../shared/types.js";
 import {
   cancelOAuthLoginJob,
@@ -340,5 +341,29 @@ addRoute("DELETE", "/api/settings/environment-communication", async (_req, res) 
     sendJson(res, 200, resetEnvironmentCommunication());
   } catch (err: any) {
     sendJson(res, 500, { error: err.message });
+  }
+});
+
+// GET /api/settings/memory-budgets — memory asset character budgets
+// (0.20 experience ①). Single source: memory-budgets module (config.json).
+addRoute("GET", "/api/settings/memory-budgets", async (_req, res) => {
+  try {
+    sendJson(res, 200, getMemoryBudgets());
+  } catch (err: any) {
+    sendJson(res, 500, { error: err.message });
+  }
+});
+
+// PUT /api/settings/memory-budgets — update one or more budgets.
+addRoute("PUT", "/api/settings/memory-budgets", async (req, res) => {
+  try {
+    const body = (await parseBody(req)) as Record<string, unknown>;
+    const next = normalizeMemoryBudgetsInput(body || {});
+    const config = readConfig();
+    config.memoryBudgets = next;
+    writeConfig(config);
+    sendJson(res, 200, next);
+  } catch (err: any) {
+    sendJson(res, 400, { error: err.message });
   }
 });

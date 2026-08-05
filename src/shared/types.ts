@@ -50,6 +50,14 @@ export interface BossmodeConfig {
   };
   runtime?: BossmodeRuntimeConfig;
   mcp?: BossmodeMcpConfig;
+  /** Memory asset character budgets (persona / memberPrinciples / mainline /
+   * roomPrinciples). Optional — absent uses product defaults. */
+  memoryBudgets?: {
+    persona?: number;
+    memberPrinciples?: number;
+    mainline?: number;
+    roomPrinciples?: number;
+  };
   /** Model directory (pi.dev catalog) preferences. */
   catalog?: {
     /** Auto-refresh interval in days for the built-in provider catalog. Default 7. 0 = off. */

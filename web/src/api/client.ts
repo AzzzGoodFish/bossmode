@@ -1274,6 +1274,24 @@ export async function resetEnvironmentCommunication(): Promise<EnvironmentCommun
   return apiFetch("/api/settings/environment-communication", { method: "DELETE" });
 }
 
+export interface MemoryBudgets {
+  persona: number;
+  memberPrinciples: number;
+  mainline: number;
+  roomPrinciples: number;
+}
+
+export async function getMemoryBudgets(): Promise<MemoryBudgets> {
+  return apiFetch("/api/settings/memory-budgets");
+}
+
+export async function updateMemoryBudgets(budgets: Partial<MemoryBudgets>): Promise<MemoryBudgets> {
+  return apiFetch("/api/settings/memory-budgets", {
+    method: "PUT",
+    body: JSON.stringify(budgets),
+  });
+}
+
 export async function getMcpSettings(): Promise<McpSettings> {
   return apiFetch("/api/settings/mcp");
 }
