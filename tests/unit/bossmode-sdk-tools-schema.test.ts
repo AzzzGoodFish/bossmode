@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Backend errors (ok:false) must surface as thrown errors in every SDK tool
+// wrapper — a silent "No messages found." / "Failed to load tasks." was the
+// exact silent-fallback trap the rc.8 param unification aimed to kill (QA
+// caught query_room_messages / list_tasks swallowing ok:false).
+vi.mock("../../src/engine/tools.js", () => ({
+  handleToolCallback: vi.fn(async () => ({ ok: false, error: "boom: explicit error" })),
+}));
+
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 
 // Defensive contract: every custom tool must serialize its JSON Schema with an
@@ -33,5 +42,19 @@ describe("createBossmodeSdkTools schema normalization", () => {
     expect((commentTask!.parameters as { required?: string[] }).required).toEqual(
       expect.arrayContaining(["taskId", "comment"]),
     );
+  });
+});
+
+describe("createBossmodeSdkTools error surfacing", () => {
+  const tools = createBossmodeSdkTools({ roomId: "r1", agentName: "tester", roomMembers: ["tester"] });
+
+  it("query_room_messages surfaces backend ok:false as a thrown error", async () => {
+    const tool = tools.find((t) => t.name === "query_room_messages")!;
+    await expect((tool.execute as any)?.("id", { query: "x" })).rejects.toThrow("boom: explicit error");
+  });
+
+  it("list_tasks surfaces backend ok:false as a thrown error", async () => {
+    const tool = tools.find((t) => t.name === "list_tasks")!;
+    await expect((tool.execute as any)?.("id", {})).rejects.toThrow("boom: explicit error");
   });
 });
