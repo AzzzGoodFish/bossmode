@@ -69,6 +69,7 @@ export function createBossmodeSdkTools(opts: {
       }),
       execute: async (_id, params) => {
         const data = await call("query_room_messages", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Query messages failed");
         if (data && typeof data === "object" && "path" in data) return textResult("Messages written to: " + data.path + " (count: " + data.count + ")");
         const messages = Array.isArray(data) ? data : [];
         return textResult(truncate(messages.length === 0 ? "No messages found." : messages.map((m) => "[" + m.sender + "]: " + m.content).join("\n\n")));
@@ -183,8 +184,9 @@ export function createBossmodeSdkTools(opts: {
         scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
       }),
       execute: async (_id, params) => {
-        const tasks = await call("list_tasks", params as any) as any;
-        if (!Array.isArray(tasks)) return textResult("Failed to load tasks.");
+        const data = await call("list_tasks", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Failed to load tasks");
+        const tasks = Array.isArray(data) ? data : [];
         if (tasks.length === 0) return textResult("No tasks found.");
         return textResult(tasks.map((t) => "[" + t.status + "] " + t.priority + " " + t.title + (t.assignee ? " (@" + t.assignee + ")" : "") + (t.commentCount ? " comments:" + t.commentCount : "") + " id:" + t.id).join("\n"));
       },
