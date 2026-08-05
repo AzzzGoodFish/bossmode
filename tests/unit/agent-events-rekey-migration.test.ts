@@ -248,4 +248,44 @@ describe("F5 agent-events rekey migration", () => {
     expect(countActivityRows(db, "room-1", "architect")).toBe(0);
     expect(countActivityRows(db, "room-1", arch.id)).toBe(15);
   });
+
+  it("resolves rm_ orphans via the legacy snapshot roster (backups/legacy-…/rooms/<rid>/room.json)", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const pm = reg.createMember({ name: "pm", agentTemplate: "architect" });
+    // Current roster rewritten a generation — rm_old maps to NO current member.
+    await seedRoom("room-1", [pm.id], ["pm"]); // current roster rm_0 → pm (sourceMemberId mem)
+    // Legacy snapshot: rm_old → "pm" (the pre-cutover generation)
+    const snapRoom = join(dir, "backups", "legacy-0.19-x", "rooms", "room-1");
+    mkdirSync(snapRoom, { recursive: true });
+    writeFileSync(join(snapRoom, "room.json"), JSON.stringify({
+      id: "room-1", roomMembers: [{ id: "rm_old", name: "pm", sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
+    }), "utf-8");
+    seedEventFile("room-1", "rm_old", [{ type: "agent_start", ts: 100 }]);
+
+    const { runAgentEventsRekeyMigration } = await import("../../src/workspace/agent-events-rekey-migration.js");
+    const result = runAgentEventsRekeyMigration();
+    expect(result.orphans).toEqual([]);
+    expect(existsSync(join(eventsDir("room-1"), "rm_old.jsonl"))).toBe(false);
+    expect(lineCount("room-1", pm.id)).toBe(1);
+  });
+
+  it("conflicting legacy snapshot mappings keep the rm_ key an orphan", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const pm = reg.createMember({ name: "pm", agentTemplate: "architect" });
+    await seedRoom("room-1", [pm.id], ["pm"]);
+    // Two snapshot generations disagree on who rm_old is → ambiguous → orphan
+    for (const [snap, name] of [["legacy-a", "pm"], ["legacy-b", "architect"]]) {
+      const snapRoom = join(dir, "backups", snap, "rooms", "room-1");
+      mkdirSync(snapRoom, { recursive: true });
+      writeFileSync(join(snapRoom, "room.json"), JSON.stringify({
+        id: "room-1", roomMembers: [{ id: "rm_old", name, sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
+      }), "utf-8");
+    }
+    seedEventFile("room-1", "rm_old", [{ type: "agent_start", ts: 100 }]);
+
+    const { runAgentEventsRekeyMigration } = await import("../../src/workspace/agent-events-rekey-migration.js");
+    const result = runAgentEventsRekeyMigration();
+    expect(result.orphans).toEqual([{ roomId: "room-1", key: "rm_old" }]);
+    expect(existsSync(join(eventsDir("room-1"), "rm_old.jsonl"))).toBe(true);
+  });
 });
