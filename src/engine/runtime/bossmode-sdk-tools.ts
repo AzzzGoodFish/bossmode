@@ -80,8 +80,7 @@ export function createBossmodeSdkTools(opts: {
       description: "Read your persistent memory, with its budget header (usage/limit). asset: 'principles' (durable working rules) or 'mainline' (working focus: a '## Focus' section plus a '## Dynamic Index' list of refs — docs/..., task:<id>, msg:#<seq>; refs whose target no longer exists are marked [stale] on read, never auto-deleted). scope (optional): 'room' or 'member', principles only, default 'member'. Mainline is member-level only.",
       parameters: Type.Object({
         asset: Type.String({ description: "'principles' or 'mainline'" }),
-        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
-        target_scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.targetScope })),
+        scope: Type.Optional(Type.String({ description: "Asset level 'room' | 'member' (principles only, default 'member'), or a cross-scope read target 'room:<id>' | 'dm:<memberId>' (membership-checked; default current scope)" })),
       }),
       execute: async (_id, params) => {
         const data = await call("read_memory", params as any) as any;

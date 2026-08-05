@@ -20,7 +20,7 @@ export const GET_TASK_DESCRIPTION = `Get full details of a task: description, re
 
 export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comments are persisted on the task only: their content does not appear in the room stream (the room sees just a "commented on task" event) and they never activate members.`;
 
-export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task and the target_scope parameter of read_memory.`;
+export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task / read_memory.`;
 
 export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
 
@@ -51,7 +51,6 @@ export const PARAM_DESCRIPTIONS = {
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
   scope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
-  targetScope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
 
   // task tools
   taskTitle: "Task title",
