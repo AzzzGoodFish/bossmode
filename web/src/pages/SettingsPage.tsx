@@ -394,7 +394,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
             <p className="text-[11px] text-ink-4">Markdown is preserved verbatim. Keep it short — it is injected into every member's system prompt.</p>
             <button
               onClick={handleEcSave}
-              disabled={ecSaving || ecContent.trim() === ecSavedContent || ecContent.trim() === ""}
+              disabled={ecSaving || ecContent.trim() === ecSavedContent.trim() || ecContent.trim() === ""}
               className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
             >
               {ecSaving ? "Saving..." : "Save"}
