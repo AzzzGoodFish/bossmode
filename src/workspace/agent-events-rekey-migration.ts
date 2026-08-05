@@ -76,7 +76,19 @@ function uniqueMemberByName(name: string): MemberRecord | null {
  * Resolve a legacy artifact key to a mem_ member id through the explicit
  * evidence chain. Returns null when the key is not resolvable (orphan).
  */
-function resolveLegacyKey(roomId: string, key: string): { memId: string } | null {
+/**
+ * Resolve a legacy artifact key to a mem_ member id through the explicit
+ * evidence chain:
+ *   1. current roster (roomMembers sourceMemberId / name)
+ *   2. legacy snapshot rosters (backups/legacy-…/rooms/<rid>/room.json) —
+ *      the pre-cutover generation where rm_ ids map to names; consulted only
+ *      when the current roster misses (architect 2026-08-05: the rm_ orphans
+ *      are resolvable, the roster was rewritten a generation at cutover)
+ *   3. registry unique name hit
+ * Returns null when the key is not resolvable (orphan). `fallback` carries the
+ * snapshot-roster map for this room (conflicted rmIds are absent → orphan).
+ */
+function resolveLegacyKey(roomId: string, key: string, fallback?: Map<string, string>): { memId: string } | null {
   if (key.startsWith("mem_")) {
     // Already current identity — only skip when the member exists.
     return getMember(key) ? { memId: key } : null;
@@ -86,8 +98,52 @@ function resolveLegacyKey(roomId: string, key: string): { memId: string } | null
   if (rosterHit?.sourceMemberId?.startsWith("mem_") && getMember(rosterHit.sourceMemberId)) {
     return { memId: rosterHit.sourceMemberId };
   }
+  if (!rosterHit && key.startsWith("rm_") && fallback) {
+    const legacyName = fallback.get(key);
+    if (legacyName) {
+      const byName = uniqueMemberByName(legacyName);
+      if (byName) return { memId: byName.id };
+    }
+  }
   const byName = uniqueMemberByName(rosterHit?.name || key);
   return byName ? { memId: byName.id } : null;
+}
+
+/**
+ * Snapshot-roster fallback for a room: scan backups/legacy-…/rooms/<rid>/room.json
+ * and map each rm_ id to its member name. When the same rm_ id maps to different
+ * names across snapshot generations the id is genuinely ambiguous — it is left
+ * out of the map (stays an orphan).
+ */
+function loadLegacyRosterFallback(roomId: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const conflicts = new Set<string>();
+  const backupsRoot = join(getBossmodeDir(), "backups");
+  if (!existsSync(backupsRoot)) return map;
+  let snapDirs: string[] = [];
+  try {
+    snapDirs = readdirSync(backupsRoot).filter((d) => d.startsWith("legacy-"));
+  } catch {
+    return map;
+  }
+  snapDirs.sort();
+  for (const snap of snapDirs) {
+    const path = join(backupsRoot, snap, "rooms", roomId, "room.json");
+    if (!existsSync(path)) continue;
+    try {
+      const room = JSON.parse(readFileSync(path, "utf-8")) as { roomMembers?: Array<{ id?: string; name?: string }> };
+      for (const m of room.roomMembers ?? []) {
+        if (!m.id?.startsWith("rm_") || !m.name) continue;
+        const prev = map.get(m.id);
+        if (prev === undefined) map.set(m.id, m.name);
+        else if (prev !== m.name) conflicts.add(m.id);
+      }
+    } catch (err) {
+      logger.warn("agent-events-rekey", "failed to read legacy snapshot roster", { roomId, snap, error: String(err) });
+    }
+  }
+  for (const id of conflicts) map.delete(id);
+  return map;
 }
 
 function eventsDir(roomId: string): string {
@@ -214,8 +270,9 @@ function planRoom(roomId: string, result: AgentEventsRekeyResult): RoomPlan | nu
   if (files.length === 0) return null;
 
   const plan: RoomPlan = { roomId, renames: [], merges: [], statsPaths: [], affectedKeys: new Set(), memTargets: new Set() };
+  const rosterFallback = loadLegacyRosterFallback(roomId);
   for (const { key, jsonl, stats } of files) {
-    const resolved = resolveLegacyKey(roomId, key);
+    const resolved = resolveLegacyKey(roomId, key, rosterFallback);
     if (!resolved) {
       if (!key.startsWith("mem_")) {
         result.orphans.push({ roomId, key });
