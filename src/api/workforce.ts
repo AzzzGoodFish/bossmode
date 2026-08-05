@@ -18,11 +18,12 @@ import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
-import { readMemberStats } from "../workspace/member-stats-store.js";
-import { resolveMemberRef } from "../workspace/member-registry.js";
+import { readMemberStats, readMemberStatsMerged } from "../workspace/member-stats-store.js";
+import { resolveMemberRef, findMemberByName } from "../workspace/member-registry.js";
+import { listMemberArtifactRefs } from "../workspace/member-artifact-refs.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
-import { loadEventsPaginated } from "../engine/event-handler.js";
+import { loadEventsPaginated, loadEventsPaginatedMerged } from "../engine/event-handler.js";
 
 const ONLY_SUPPORTED_RUNTIME = "pi-cli";
 
@@ -399,13 +400,24 @@ addRoute("GET", "/api/members/:id/stats", async (req, res, params) => {
     // Scope artifact key: room scope → room uuid; dm scope → "dm:<memberId>"
     // (the instance registry key DM events/stats are recorded under today).
     const artifactKey = ref.kind === "room" ? ref.roomId : `dm:${ref.memberId}`;
-    sendJson(res, 200, readMemberStats(artifactKey, member.id));
+    // Read-side key merge (pre-F5): count every artifact key form this member
+    // has in the scope — mem_ id, legacy rm_ room-member id, bare name.
+    const identities: Array<{ id?: string; name?: string }> = [{ id: member.id, name: member.name }];
+    if (ref.kind === "room") {
+      for (const rm of roomStore.getRoomMembers(ref.roomId)) {
+        if (rm.name === member.name && rm.id !== member.id) identities.push({ id: rm.id, name: rm.name });
+      }
+    }
+    const refs = listMemberArtifactRefs(artifactKey, identities);
+    sendJson(res, 200, refs.length > 1 ? readMemberStatsMerged(artifactKey, refs) : readMemberStats(artifactKey, refs[0] ?? member.id));
     return;
   }
   const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string; name: string } | null : undefined;
   const roomMember = resolveRoomMemberRef?.(roomId!, params.id);
   if (!roomMember) { sendJson(res, 404, { error: "Member not found in this room" }); return; }
-  sendJson(res, 200, readMemberStats(roomId!, roomMember.id));
+  const globalMatch = findMemberByName(roomMember.name);
+  const refs = listMemberArtifactRefs(roomId!, [{ id: roomMember.id, name: roomMember.name }, ...(globalMatch ? [{ id: globalMatch.id, name: globalMatch.name }] : [])]);
+  sendJson(res, 200, refs.length > 1 ? readMemberStatsMerged(roomId!, refs) : readMemberStats(roomId!, refs[0] ?? roomMember.id));
 });
 
 /** Index-backed Activity pagination by scope (same engine as the room members
@@ -425,13 +437,29 @@ addRoute("GET", "/api/members/:id/events", async (req, res, params) => {
   const typesParam = url.searchParams.get("types");
   const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
 
+  // Read-side key merge (pre-F5): when the member's events live under more
+  // than one key form, serve the ts-merged stream (index-cursor window).
+  const eventIdentities: Array<{ id?: string; name?: string }> = [{ id: member.id, name: member.name }];
+  if (ref.kind === "room") {
+    for (const rm of roomStore.getRoomMembers(ref.roomId)) {
+      if (rm.name === member.name && rm.id !== member.id) eventIdentities.push({ id: rm.id, name: rm.name });
+    }
+  }
+  const eventRefs = listMemberArtifactRefs(artifactKey, eventIdentities);
+  if (eventRefs.length > 1) {
+    const merged = loadEventsPaginatedMerged(artifactKey, eventRefs, limit, beforeSeq);
+    const filtered = types?.length ? merged.events.filter((e) => types.includes((e as { type?: string }).type || "")) : merged.events;
+    sendJson(res, 200, { events: filtered, hasMore: merged.hasMore, nextBeforeSeq: merged.hasMore ? Math.max(0, merged.total - merged.events.length) : null });
+    return;
+  }
+
   catchUpActivityIndex(artifactKey, member.id);
   const page = queryActivityPage(artifactKey, member.id, { beforeSeq, limit, types });
   if (page) {
     sendJson(res, 200, { events: page.events, hasMore: page.hasMore, nextBeforeSeq: page.nextBeforeSeq });
     return;
   }
-  const result = loadEventsPaginated(artifactKey, member.id, limit, beforeSeq);
+  const result = loadEventsPaginated(artifactKey, eventRefs[0] ?? member.id, limit, beforeSeq);
   sendJson(res, 200, { events: result.events, hasMore: result.hasMore, nextBeforeSeq: result.hasMore ? Math.max(0, (result.total - result.events.length)) : null });
 });
 

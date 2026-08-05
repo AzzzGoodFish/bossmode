@@ -103,6 +103,21 @@ export function loadEventsPaginated(roomId: string, agentRef: string, limit: num
   return { events: all.slice(startIdx, endIdx), total, hasMore: startIdx > 0 };
 }
 
+/** Read-side key merge (pre-F5 bridge): merge a member's event streams across
+ * every artifact key form (mem_/rm_/name) into one ts-ordered stream, then
+ * window it with the same index-cursor semantics as loadEventsPaginated.
+ * Used only when more than one key form exists; single-key reads keep the
+ * SQLite activity-index fast path. */
+export function loadEventsPaginatedMerged(roomId: string, agentRefs: string[], limit: number, before?: number): { events: AgentHistoryEvent[]; total: number; hasMore: boolean } {
+  const all = agentRefs
+    .flatMap((ref) => loadEventsFromDisk(roomId, ref))
+    .sort((a, b) => ((a as { ts?: number }).ts ?? 0) - ((b as { ts?: number }).ts ?? 0));
+  const total = all.length;
+  const endIdx = before !== undefined ? Math.min(before, total) : total;
+  const startIdx = Math.max(0, endIdx - limit);
+  return { events: all.slice(startIdx, endIdx), total, hasMore: startIdx > 0 };
+}
+
 // -- Stream state accumulation --
 
 // Accumulate streaming text/thinking so message_end has complete content
