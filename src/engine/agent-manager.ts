@@ -363,7 +363,7 @@ async function runPrompt(
   instance.lengthContinuationPending = false;
   if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
   try {
-    await instance.handle.prompt(message);
+    await instance.handle.prompt(message, { owesReply: instance.pendingChatReply });
     instance.promptInFlight = false;
     await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
   } catch (err: any) {
