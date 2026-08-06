@@ -88,7 +88,7 @@ export interface AgentRuntimeParams {
 }
 
 export interface AgentHandle {
-  prompt(message: string, opts?: { owesReply?: boolean }): Promise<void>;
+  prompt(message: string): Promise<void>;
   steer(message: string): void;
   abort(): void;
   destroy(): void;
