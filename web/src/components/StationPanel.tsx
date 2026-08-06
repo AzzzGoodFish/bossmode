@@ -610,6 +610,69 @@ function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }
   );
 }
 
+/** First non-empty line of an asset, trimmed — the collapsed one-line preview. */
+function firstContentLine(content: string): string {
+  const line = content.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+  return line ?? "";
+}
+
+type PromptView = "markdown" | "raw";
+
+/** Prompt-assets unified accordion card (fish-approved prototype
+ * prompt-assets-accordion-v1): header row clickable (chevron rotates 90°,
+ * title, scope tag, right budget mini meter); default collapsed = one-line
+ * preview; expanded = hint line merged with [Markdown | Raw] toggle in one
+ * row (hint left truncated with title tooltip, toggle right) + content area
+ * 320px max-height inner scroll. */
+function AccordionCard({ title, tag, hint, budget, preview, defaultView, empty, renderContent }: {
+  title: string;
+  tag?: React.ReactNode;
+  hint?: React.ReactNode;
+  budget?: PromptAssetBudget;
+  preview: string;
+  defaultView?: PromptView;
+  empty?: React.ReactNode;
+  renderContent: (view: PromptView) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<PromptView>(defaultView ?? "markdown");
+  return (
+    <section className="rounded-xl border border-line-soft bg-surface-1 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+      >
+        <ChevronRight size={13} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
+        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
+        {tag}
+        {open ? (
+          <span className="ml-auto shrink-0">{budget && <BudgetMeter budget={budget} />}</span>
+        ) : (
+          <span className="ml-auto min-w-0 pl-3 text-[11.5px] text-ink-4 truncate">{preview}</span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-line-soft px-4 py-3">
+          <div className="flex items-center gap-2 mb-2 min-w-0">
+            {hint ? (
+              <span className="text-[11.5px] text-ink-4 leading-relaxed truncate min-w-0" title={typeof hint === "string" ? hint : undefined}>{hint}</span>
+            ) : null}
+            <span className="ml-auto shrink-0 flex items-center gap-0.5 rounded-md border border-line-soft bg-surface-2 p-0.5 text-[11px] font-medium">
+              <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
+              <button type="button" onClick={() => setView("raw")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Raw</button>
+            </span>
+          </div>
+          <div className="max-h-[320px] overflow-y-auto">
+            {empty ?? renderContent(view)}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PanelCard({ title, tag, aside, hint, children }: {
   title: string;
   tag?: React.ReactNode;
@@ -636,15 +699,6 @@ function EmptyAsset({ title, hint }: { title: string; hint: string }) {
       <div className="text-[12.5px] font-semibold text-ink-3">{title}</div>
       <div className="text-xs text-ink-4 mt-0.5 leading-relaxed">{hint}</div>
     </div>
-  );
-}
-
-function Fold({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
-  return (
-    <details open={defaultOpen} className="mt-2.5 rounded-lg border border-line-soft bg-surface-1">
-      <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-ink-3 hover:text-ink-1 transition-colors">{title}</summary>
-      <div className="border-t border-line-soft px-3 py-2.5">{children}</div>
-    </details>
   );
 }
 
@@ -704,56 +758,61 @@ function PrinciplesCard({ title, hint, principles, full, emptyTitle, emptyHint }
   emptyTitle: string;
   emptyHint: string;
 }) {
+  void full; // accordion caps content height uniformly (320px) — the old full/non-full split is gone
   return (
-    <PanelCard title={title} aside={<BudgetMeter budget={principles?.budget} />} hint={hint}>
-      {principles === null ? (
-        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
-      ) : principles.content.trim() ? (
+    <AccordionCard
+      title={title}
+      budget={principles?.budget}
+      hint={hint}
+      preview={principles ? firstContentLine(principles.content) : "Loading…"}
+      empty={principles === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : principles.content.trim() ? undefined : <EmptyAsset title={emptyTitle} hint={emptyHint} />}
+      renderContent={(view) => (
         <>
-          <div className={`mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3 overflow-y-auto ${full ? "" : "max-h-56"}`}>
-            <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown"><Markdown content={principles.content} /></div>
+          <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+            {view === "markdown" ? <Markdown content={principles!.content} /> : principles!.content}
           </div>
-          <AssetRevLine left={revisionLine(principles)} right="member-curated" />
+          <AssetRevLine left={revisionLine(principles!)} right="member-curated" />
         </>
-      ) : (
-        <EmptyAsset title={emptyTitle} hint={emptyHint} />
       )}
-    </PanelCard>
+    />
   );
 }
 
 function MainlineCard({ member, mainline, full, onJumpToMessage }: { member: MemberInfo; mainline: Mainline | null; full?: boolean; onJumpToMessage?: (messageId: string) => Promise<void> }) {
+  void full;
   return (
-    <PanelCard
+    <AccordionCard
       title="Mainline"
-      aside={<BudgetMeter budget={mainline?.budget} />}
+      tag={<AssetTag>focus · index</AssetTag>}
+      budget={mainline?.budget}
       hint="What this member is working on — durable focus plus live pointers into docs, tasks and messages."
-    >
-      {mainline === null ? (
-        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
-      ) : mainline.content.trim() ? (
+      preview={mainline ? firstContentLine(mainline.content) : "Loading…"}
+      empty={mainline === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : mainline.content.trim() ? undefined : <EmptyAsset title="No mainline yet" hint={`Once @${member.name} settles into work, it pins its focus and key references here.`} />}
+      renderContent={(view) => (
         <>
-          {mainline.parsed.focus && (full ? (
-            <div className="mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3">
-              <div className="text-[12.5px] text-ink-2 leading-relaxed preview-markdown"><Markdown content={mainline.parsed.focus} /></div>
+          {mainline!.parsed.focus && (
+            <div className="mb-2.5">
+              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-4 mb-1">Focus</div>
+              <div className={`text-[12.5px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+                {view === "markdown" ? <Markdown content={mainline!.parsed.focus} /> : mainline!.parsed.focus}
+              </div>
             </div>
-          ) : (
-            <Fold title="Focus — long-lived working knowledge" defaultOpen>
-              <div className="text-[12.5px] text-ink-2 leading-relaxed preview-markdown max-h-40 overflow-y-auto"><Markdown content={mainline.parsed.focus} /></div>
-            </Fold>
-          ))}
-          <MainlineIndexList index={mainline.parsed.index} onJumpToMessage={onJumpToMessage} />
+          )}
+          {mainline!.parsed.index.length > 0 && (
+            <div className="mb-2.5">
+              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-4 mb-1">Index</div>
+              <MainlineIndexList index={mainline!.parsed.index} onJumpToMessage={onJumpToMessage} />
+            </div>
+          )}
           <AssetRevLine
-            left={revisionLine(mainline)}
-            right={mainline.parsed.index.length > 0
-              ? `${mainline.parsed.index.length} pinned references${mainline.parsed.index.some((i) => i.stale) ? " · stale shown honestly" : ""}`
+            left={revisionLine(mainline!)}
+            right={mainline!.parsed.index.length > 0
+              ? `${mainline!.parsed.index.length} pinned references${mainline!.parsed.index.some((i) => i.stale) ? " · stale shown honestly" : ""}`
               : undefined}
           />
         </>
-      ) : (
-        <EmptyAsset title="No mainline yet" hint={`Once @${member.name} settles into work, it pins its focus and key references here.`} />
       )}
-    </PanelCard>
+    />
   );
 }
 
@@ -851,30 +910,33 @@ function IdentityCard({ member }: { member: MemberInfo }) {
   }, [agentName]);
   // Agents without skills metadata legitimately have none (built-in templates ship without it).
   const skills = agent?.skills ?? [];
+  const description = agent?.description ?? "";
+  const rawText = [displayAgentLabel(agent?.name || agentName), description, skills.length ? `Skills: ${skills.join(", ")}` : ""].filter(Boolean).join("\n\n");
   return (
-    <PanelCard
+    <AccordionCard
       title="Identity"
       tag={<AssetTag>from Agent · stable</AssetTag>}
       hint={<>Who this member is. Defined by the <b className="text-ink-2">{displayAgentLabel(agentName)}</b> Agent template; identical across rooms that use it.</>}
-    >
-      {agent ? (
-        <div className="mt-2.5 rounded-lg border border-line-soft bg-inset px-3.5 py-3 max-h-32 overflow-y-auto">
-          <div className="text-[12.5px] text-ink-2 leading-relaxed">
-            <b className="text-ink-1">{displayAgentLabel(agent.name)}</b>
-            {agent.description ? ` — ${agent.description}` : ""}
+      preview={description ? firstContentLine(description) : displayAgentLabel(agentName)}
+      empty={loadFailed ? <EmptyAsset title="Agent template unavailable" hint="The Agent definition could not be loaded; this member still runs on its saved configuration." /> : !agent ? <div className="text-xs text-ink-4 py-1">Loading…</div> : undefined}
+      renderContent={(view) => (
+        <>
+          <div className={`text-[12.5px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+            {view === "markdown" ? (
+              <>
+                <b className="text-ink-1">{displayAgentLabel(agent!.name)}</b>
+                {description ? ` — ${description}` : ""}
+              </>
+            ) : rawText}
           </div>
           {skills.length > 0 && (
             <div className="mt-1.5 text-[11.5px] text-ink-4">
               Skills: {skills.map((skill) => <code key={skill} className="bg-surface-3 rounded px-1 py-0.5 text-[11px] mr-1">{skill}</code>)}
             </div>
           )}
-        </div>
-      ) : loadFailed ? (
-        <EmptyAsset title="Agent template unavailable" hint="The Agent definition could not be loaded; this member still runs on its saved configuration." />
-      ) : (
-        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
+        </>
       )}
-    </PanelCard>
+    />
   );
 }
 
@@ -883,21 +945,19 @@ function IdentityCard({ member }: { member: MemberInfo }) {
  * same compiler the runtime uses; never a static/hardcoded preview. */
 function CoreCard({ corePrompt }: { corePrompt: { content: string; charCount: number } | null }) {
   return (
-    <PanelCard
+    <AccordionCard
       title="Core"
       tag={<AssetTag>platform · shared</AssetTag>}
       hint="Bossmode Core — environment, communication and Memory guidance shared by every member. Same structure for all; only values (room/member names) differ."
-    >
-      {corePrompt === null ? (
-        <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
-      ) : corePrompt.content.trim() ? (
-        <Fold title={`Preview — ${formatTokens(corePrompt.charCount)} chars`}>
-          <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown max-h-48 overflow-y-auto whitespace-pre-wrap">{corePrompt.content}</div>
-        </Fold>
-      ) : (
-        <EmptyAsset title="Unavailable" hint="Could not load the compiled Core prompt for this member." />
+      preview={corePrompt ? firstContentLine(corePrompt.content) : "Loading…"}
+      defaultView="raw"
+      empty={corePrompt === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : corePrompt.content.trim() ? undefined : <EmptyAsset title="Unavailable" hint="Could not load the compiled Core prompt for this member." />}
+      renderContent={(view) => (
+        <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+          {view === "markdown" ? <Markdown content={corePrompt!.content} /> : corePrompt!.content}
+        </div>
       )}
-    </PanelCard>
+    />
   );
 }
 
@@ -1186,22 +1246,19 @@ export function MemberConfigPanel({
             />
             <MainlineCard member={member} mainline={mainline} full onJumpToMessage={onJumpToMessage} />
             {!dmScope && (
-            <PanelCard
-              title="Room principles"
-              tag={<AssetTag>shared · leader-written</AssetTag>}
-              aside={<BudgetMeter budget={roomPrinciples?.budget} />}
-              hint="Room-wide working rules, shared by all members."
-            >
-              {roomPrinciples === null ? (
-                <div className="mt-2.5 text-xs text-ink-4">Loading…</div>
-              ) : roomPrinciples.content.trim() ? (
-                <Fold title={`Preview — ${roomPrinciples.budget ? `${roomPrinciples.budget.pct}% of ${roomPrinciples.budget.limit.toLocaleString("en-US")}` : "shared"}`}>
-                  <div className="text-[13px] text-ink-2 leading-relaxed preview-markdown max-h-48 overflow-y-auto"><Markdown content={roomPrinciples.content} /></div>
-                </Fold>
-              ) : (
-                <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />
-              )}
-            </PanelCard>
+              <AccordionCard
+                title="Room principles"
+                tag={<AssetTag>shared · leader-written</AssetTag>}
+                budget={roomPrinciples?.budget}
+                hint="Room-wide working rules, shared by all members."
+                preview={roomPrinciples ? firstContentLine(roomPrinciples.content) : "Loading…"}
+                empty={roomPrinciples === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : roomPrinciples.content.trim() ? undefined : <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />}
+                renderContent={(view) => (
+                  <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+                    {view === "markdown" ? <Markdown content={roomPrinciples!.content} /> : roomPrinciples!.content}
+                  </div>
+                )}
+              />
             )}
             <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
               <span className="font-extrabold text-accent-ink shrink-0">i</span>
