@@ -118,8 +118,8 @@ describe("prompt compiler", () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("## Communication");
-    expect(compiled.fullPrompt).toContain("Speak with the `response` tool");
-    expect(compiled.fullPrompt).toContain("the only way your text reaches the room");
+    expect(compiled.fullPrompt).toContain("start your text with `response: `");
+    expect(compiled.fullPrompt).toContain("only texts with this prefix are posted");
     expect(compiled.fullPrompt).not.toContain("[room]");
     expect(compiled.fullPrompt).not.toContain("Text without the marker");
     // Activation rules (fish 0.18.9): @ = immediate activate; plain name = mention only;
