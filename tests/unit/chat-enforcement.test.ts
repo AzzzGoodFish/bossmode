@@ -127,7 +127,7 @@ describe("chat enforcement pending reply", () => {
 
   it("does not warn when chat tool succeeds", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+      handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
     });
 
     await activateAgent("room1", "developer");
@@ -137,7 +137,7 @@ describe("chat enforcement pending reply", () => {
 
   it("posts the silence note when the chat tool call itself fails", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: false }, isError: true });
+      handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: false }, isError: true });
     });
 
     await activateAgent("room1", "developer");
@@ -151,11 +151,11 @@ describe("chat enforcement pending reply", () => {
     state.promptImpl = vi.fn(async () => {
       const call = handle.prompt.mock.calls.length;
       if (call === 1) {
-        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+        handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
         handle.emit({ type: "message_end", text: "", stopReason: "max_output_tokens" });
         handle.emit({ type: "agent_end" });
       } else if (call === 2) {
-        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-2", result: { ok: true }, isError: false });
+        handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-2", result: { ok: true }, isError: false });
       }
     });
 
@@ -163,20 +163,20 @@ describe("chat enforcement pending reply", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
-    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `chat` call");
+    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `response` call");
   });
 
   it("continues once after length-truncated threshold compaction with no SDK retry", async () => {
     state.promptImpl = vi.fn(async () => {
       const call = handle.prompt.mock.calls.length;
       if (call === 1) {
-        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+        handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
         handle.emit({ type: "message_end", text: "", stopReason: "length" });
         handle.emit({ type: "agent_end" });
         handle.emit({ type: "compaction_start", reason: "threshold" });
         handle.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
       } else if (call === 2) {
-        handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-2", result: { ok: true }, isError: false });
+        handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-2", result: { ok: true }, isError: false });
       }
     });
 
@@ -184,12 +184,12 @@ describe("chat enforcement pending reply", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
-    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `chat` call");
+    expect(handle.prompt.mock.calls[1][0]).toContain("deliver the result with a `response` call");
   });
 
   it("does not continue after normal threshold compaction", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+      handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
       handle.emit({ type: "message_end", text: "done", stopReason: "stop" });
       handle.emit({ type: "agent_end" });
       handle.emit({ type: "compaction_start", reason: "threshold" });
@@ -203,7 +203,7 @@ describe("chat enforcement pending reply", () => {
 
   it("does not duplicate SDK retry when runtime starts again after length truncation", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "call-1", result: { ok: true }, isError: false });
+      handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
       handle.emit({ type: "message_end", text: "", stopReason: "length" });
       handle.emit({ type: "agent_end" });
       handle.emit({ type: "compaction_start", reason: "overflow" });
@@ -219,7 +219,7 @@ describe("chat enforcement pending reply", () => {
   it("stops after one automatic length continuation to avoid loops", async () => {
     state.promptImpl = vi.fn(async () => {
       const call = handle.prompt.mock.calls.length;
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: `call-${call}`, result: { ok: true }, isError: false });
+      handle.emit({ type: "tool_end", toolName: "response", toolCallId: `call-${call}`, result: { ok: true }, isError: false });
       handle.emit({ type: "message_end", text: "", stopReason: "length" });
       handle.emit({ type: "agent_end" });
       handle.emit({ type: "compaction_start", reason: "threshold" });

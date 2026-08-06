@@ -201,7 +201,7 @@ describe("agent-manager pending creation dedup", () => {
     mocks.prompt
       .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirst = resolve; }))
       .mockImplementationOnce(async () => {
-        mocks.subscribeCb?.({ type: "tool_end", toolName: "chat", toolCallId: "call-queued", result: { ok: true }, isError: false } as any);
+        mocks.subscribeCb?.({ type: "tool_end", toolName: "response", toolCallId: "call-queued", result: { ok: true }, isError: false } as any);
       });
 
     const first = activateAgent("room1", "developer");

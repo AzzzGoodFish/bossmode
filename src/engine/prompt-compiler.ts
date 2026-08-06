@@ -99,9 +99,9 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Two ways to speak in the room: (1) call the \`chat\` tool; (2) write \`[room]\` on its own line — everything after it is posted to the room, everything before it stays private. Text without the marker never reaches the room.
+Two ways to speak in the room: (1) call the \`response\` tool; (2) write \`[room]\` on its own line — everything after it is posted to the room, everything before it stays private. Text without the marker never reaches the room.
 
-Use **exactly one** channel per message — either the \`chat\` tool or the \`[room]\` marker, never both. The same content sent through both channels is posted to the room twice.
+Use **exactly one** channel per message — either the \`response\` tool or the \`[room]\` marker, never both. The same content sent through both channels is posted to the room twice.
 
 Example:
 \`\`\`
@@ -157,7 +157,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Speak with the \`chat\` tool — messages go directly to this private chat. There is **no** \`[room]\` marker and **no** \`@\` routing in DM (you are already talking to the user).
+Speak with the \`response\` tool — messages go directly to this private chat. There is **no** \`[room]\` marker and **no** \`@\` routing in DM (you are already talking to the user).
 
 ## Tools unique to DM
 

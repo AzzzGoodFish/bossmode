@@ -72,7 +72,7 @@ describe("chat mention routing", () => {
     const onMentionAll = vi.fn();
     const unsubscribe = initRouter(onMention, onMentionAll);
 
-    await handleToolCallback("chat", "room1", "architect", {
+    await handleToolCallback("response", "room1", "architect", {
       message: "@developer please implement",
       mentions: ["developer"],
     });
@@ -88,12 +88,12 @@ describe("chat mention routing", () => {
     const onMentionAll = vi.fn();
     const unsubscribe = initRouter(onMention, onMentionAll);
 
-    await handleToolCallback("chat", "room1", "architect", {
+    await handleToolCallback("response", "room1", "architect", {
       message: "@architect self ping",
       mentions: ["architect"],
     });
 
-    await handleToolCallback("chat", "room1", "developer", {
+    await handleToolCallback("response", "room1", "developer", {
       message: "@architect handing back",
       mentions: ["architect"],
     });

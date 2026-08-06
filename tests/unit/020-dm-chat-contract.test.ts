@@ -58,7 +58,7 @@ describe("020 DM chat contract", () => {
     const dmRoomId = `dm:${member.id}`;
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const result = (await handleToolCallback("chat", dmRoomId, "architect", { message: "hello dm" })) as any;
+    const result = (await handleToolCallback("response", dmRoomId, "architect", { message: "hello dm" })) as any;
     expect(result.ok).toBe(true);
 
     const store = await import("../../src/workspace/dm-message-store.js");

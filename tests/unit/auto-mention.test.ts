@@ -51,7 +51,7 @@ describe("tools chat textual @mention activation", () => {
   it("activates parsed @mentions from room message text", async () => {
     mocks.parseMentions.mockReturnValue(["developer"]);
 
-    const result = await handleToolCallback("chat", "room1", "architect", {
+    const result = await handleToolCallback("response", "room1", "architect", {
       message: "@developer please implement",
     });
 
@@ -62,7 +62,7 @@ describe("tools chat textual @mention activation", () => {
   it("passes all parsed exact @mentions", async () => {
     mocks.parseMentions.mockReturnValue(["developer", "qa"]);
 
-    const result = await handleToolCallback("chat", "room1", "architect", {
+    const result = await handleToolCallback("response", "room1", "architect", {
       message: "@developer @qa sync",
     });
 
@@ -73,7 +73,7 @@ describe("tools chat textual @mention activation", () => {
   it("falls back to no activation when room lookup fails", async () => {
     mocks.getRoom.mockReturnValue(null);
 
-    const result = await handleToolCallback("chat", "room1", "architect", {
+    const result = await handleToolCallback("response", "room1", "architect", {
       message: "@developer ping",
     });
 

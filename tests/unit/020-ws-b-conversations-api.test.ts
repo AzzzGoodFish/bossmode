@@ -38,7 +38,7 @@ describe("020 conversations / scope surface", () => {
     const { toolSurfaceForScope } = await import("../../src/engine/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
-    expect(dm.families).toEqual(expect.arrayContaining(["create_room", "list_members", "chat"]));
+    expect(dm.families).toEqual(expect.arrayContaining(["create_room", "list_members", "response"]));
     expect(dm.families).not.toContain("wait");
 
     const roomMember = toolSurfaceForScope("room:r1", { isRoomLeader: false });

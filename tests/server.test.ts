@@ -178,7 +178,7 @@ describe("HTTP server", () => {
       path: "/internal/tool-callback",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "chat", args: {} }),
+      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "response", args: {} }),
     });
     expect(unauth.status).toBe(401);
 
@@ -188,7 +188,7 @@ describe("HTTP server", () => {
       path: "/internal/tool-callback",
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "chat", args: {} }),
+      body: JSON.stringify({ roomId: "room", agentName: "pm", tool: "response", args: {} }),
     });
     expect(authed.status).toBe(404);
   });
