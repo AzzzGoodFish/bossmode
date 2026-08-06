@@ -92,5 +92,17 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
     expect(prompts.length).toBe(1);
     expect(prompts[0]).not.toContain("unread messages");
     expect(prompts[0]).toContain("@pm again?");
+
+    // Third activation with a self-reply in between: pm replies, then fish
+    // asks again — the self reply must NOT count as unread (QA打回, fish 14843).
+    const { postMessage } = await import("../../src/communication/message-bus.js");
+    postMessage(room.id, "pm", "PONG SELF", []);
+    prompts.length = 0;
+    await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "@pm third?" } });
+    await waitForPrompt(1);
+    const third = prompts[prompts.length - 1];
+    expect(third).toContain("@pm third?");
+    expect(third).not.toContain("unread messages"); // own reply excluded
+    expect(third).not.toContain("PONG SELF");
   });
 });
