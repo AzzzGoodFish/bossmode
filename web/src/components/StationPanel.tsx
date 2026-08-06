@@ -611,8 +611,13 @@ function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }
 }
 
 /** First non-empty line of an asset, trimmed — the collapsed one-line preview. */
+/** First non-empty content line of an asset — skips markdown headings and
+ * separator lines so the collapsed preview shows real content (Mainline shows
+ * its first Focus sentence, not "## Focus"). */
 function firstContentLine(content: string): string {
-  const line = content.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+  const line = content.split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !/^#{1,6}\s/.test(l) && !/^[-=]{3,}$/.test(l));
   return line ?? "";
 }
 
@@ -642,15 +647,18 @@ function AccordionCard({ title, tag, hint, budget, preview, defaultView, empty, 
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+        className="w-full block px-4 py-2.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
       >
-        <ChevronRight size={13} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
-        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
-        {tag}
-        {open ? (
+        <span className="flex items-center gap-2 min-w-0">
+          <ChevronRight size={13} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
+          <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
+          {tag}
           <span className="ml-auto shrink-0">{budget && <BudgetMeter budget={budget} />}</span>
-        ) : (
-          <span className="ml-auto min-w-0 pl-3 text-[11.5px] text-ink-4 truncate">{preview}</span>
+        </span>
+        {!open && preview && (
+          <span className="mt-1 flex items-center gap-2 min-w-0 pl-[36px]">
+            <span className="text-[11.5px] text-ink-4 truncate min-w-0">{preview}</span>
+          </span>
         )}
       </button>
       {open && (
