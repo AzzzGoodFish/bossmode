@@ -225,11 +225,17 @@ interface CompactionWatchdogRun {
   interventionRequested: boolean;
   /** Assistant stop with empty text and ≤1 output token (max_tokens clamp fault or transient). */
   emptyStopSeen: boolean;
+  /** Assistant stop with text but NO tool call — the model answered in prose;
+   * the text is invisible to the room (2026-08-06 k3 cold-cache incidents). */
+  textOnlyStopSeen: boolean;
 }
 
 interface WatchdogTurnState {
   interventions: number;
   emptyRetries: number;
+  textRetries: number;
+  /** Whether this turn owes a visible chat reply (agent-manager replyDebt). */
+  owesReply: boolean;
 }
 
 /**
@@ -260,6 +266,12 @@ const WATCHDOG_CONTINUE_PROMPT =
  * provider behavior — compaction is never triggered by response shape). */
 const WATCHDOG_EMPTY_RETRY_PROMPT =
   "⚠ Your previous response came back empty (no content). Repeat your previous response.";
+
+/** One nudge retry for a text-only stop: the model wrote its reply as plain
+ * text instead of calling the chat tool, so the room never saw it. Ask it to
+ * deliver the reply through the tool (architect 2026-08-06, P0 reply salvage). */
+const WATCHDOG_TEXT_RETRY_PROMPT =
+  "⚠ Your previous response was written as plain text and never reached the room. Deliver your reply by calling the chat tool now.";
 
 function assistantTextOf(content: unknown): string {
   if (!Array.isArray(content)) return "";
@@ -323,6 +335,27 @@ class PiSdkAgentHandle implements AgentHandle {
     for (const listener of this.listeners) listener(event);
   }
 
+  private async maybeCompactPreRun(): Promise<void> {
+    try {
+      const settings = this.session.settingsManager.getCompactionSettings();
+      if (settings.enabled === false) return;
+      const usage = await this.getContextUsage();
+      if (!usage || usage.rawMaxTokens <= 0 || usage.totalTokens <= 0) return;
+      const threshold = watchdogActionThreshold(usage.rawMaxTokens, settings.reserveTokens ?? 16384);
+      if (threshold > 0 && usage.totalTokens > threshold) {
+        logger.warn("runtime:pi-sdk", "compaction watchdog: pre-run above action line, compacting first", {
+          model: usage.model,
+          totalTokens: usage.totalTokens,
+          actionThreshold: threshold,
+          contextWindow: usage.rawMaxTokens,
+        });
+        await this.compact();
+      }
+    } catch (err) {
+      logger.warn("runtime:pi-sdk", "pre-run compaction check failed (turn proceeds)", { error: String(err) });
+    }
+  }
+
   private startCompactionWatchdogRun(): void {
     const settings = this.session.settingsManager.getCompactionSettings();
     const model = this.session.model as any;
@@ -341,6 +374,7 @@ class PiSdkAgentHandle implements AgentHandle {
       compactionEventSeen: false,
       interventionRequested: false,
       emptyStopSeen: false,
+      textOnlyStopSeen: false,
     };
   }
 
@@ -373,6 +407,15 @@ class PiSdkAgentHandle implements AgentHandle {
       Number(usage.output ?? 0) <= 1
     ) {
       run.emptyStopSeen = true;
+    }
+    // Text-only stop: stop + non-empty text + no tool call — the model wrote
+    // its reply in prose. Invisible to the room unless salvaged.
+    if (
+      raw.message.stopReason === "stop" &&
+      !hasToolCalls &&
+      assistantTextOf(raw.message.content).trim().length > 0
+    ) {
+      run.textOnlyStopSeen = true;
     }
 
     // Mid-run action: real usage crossed the action line and the turn continues
@@ -500,6 +543,16 @@ class PiSdkAgentHandle implements AgentHandle {
       }
       throw new Error("Model returned an empty response twice in a row. Try again, or compact/reset the session if it persists.");
     }
+
+    // C: text-only stop — the model answered in prose without calling the chat
+    // tool; the room never saw the reply. One nudge retry (only when this turn
+    // owes a visible reply — background turns are not nudged), then settle to
+    // the visible silence notice (2026-08-06 P0: k3 cold-cache incidents).
+    if (run.textOnlyStopSeen && turn.owesReply && turn.textRetries === 0) {
+      turn.textRetries++;
+      logger.warn("runtime:pi-sdk", "text-only stop (reply not delivered), nudging once", { model: run.model });
+      return WATCHDOG_TEXT_RETRY_PROMPT;
+    }
     return null;
   }
 
@@ -531,10 +584,15 @@ class PiSdkAgentHandle implements AgentHandle {
     return () => this.listeners.delete(fn);
   }
 
-  async prompt(message: string): Promise<void> {
+  async prompt(message: string, opts?: { owesReply?: boolean }): Promise<void> {
     if (message === "/compact") return this.compact();
-    this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
+    this.watchdogTurn = { interventions: 0, emptyRetries: 0, textRetries: 0, owesReply: opts?.owesReply ?? false };
     try {
+      // A: pre-run threshold — a cold-cache round can START above the action
+      // line (huge re-read), which mid-run checks never see. Compact first so
+      // the model doesn't burn its output budget on thinking over a bloated
+      // context and end with a text-only stop (2026-08-06 P0).
+      await this.maybeCompactPreRun();
       let next: string | null = message;
       while (next !== null) {
         this.startCompactionWatchdogRun();
