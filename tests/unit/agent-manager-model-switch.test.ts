@@ -536,21 +536,27 @@ describe("agent-manager model hot switch", () => {
 
   it("filters all member runtime failure system messages from activation prompts", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
+    const now = Date.now();
     messages = [
-      { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: Date.now() },
-      { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: Date.now() },
-      { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: Date.now() },
-      { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: hidden from pm too', mentions: [], ts: Date.now() },
-      { id: "task", type: "task_event", sender: "system", content: "[Task] qa moved task to review: **Check this**", mentions: [], ts: Date.now() },
-      { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: Date.now() },
-      { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: Date.now() },
+      { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: now, seq: 1 },
+      { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: now, seq: 2 },
+      { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: now, seq: 3 },
+      { id: "other", type: "chat", sender: "system", content: 'Member "qa" request failed. Error: hidden from pm too', mentions: [], ts: now, seq: 4 },
+      { id: "task", type: "task_event", sender: "system", content: "[Task] qa moved task to review: **Check this**", mentions: [], ts: now, seq: 5 },
+      { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: now, seq: 6 },
+      { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: now, seq: 7 },
     ];
 
     await manager.activateAgent("room", "pm");
 
+    // Hybrid: trigger injects in full; task/knowledge events become a one-line
+    // backlog hint (counted, not re-injected verbatim); failure notices are
+    // filtered from BOTH the hint and the trigger.
     expect(handles[0].promptCalls[0]).toContain("@pm continue");
-    expect(handles[0].promptCalls[0]).toContain("[Task] qa moved task to review");
-    expect(handles[0].promptCalls[0]).toContain("[Knowledge] qa updated document");
+    expect(handles[0].promptCalls[0]).toContain("you have 2 unread messages (No.5–No.6): system×2");
+    expect(handles[0].promptCalls[0]).toContain("incl. 1 task events, 1 knowledge updates");
+    expect(handles[0].promptCalls[0]).not.toContain("[Task] qa moved task to review");
+    expect(handles[0].promptCalls[0]).not.toContain("[Knowledge] qa updated document");
     expect(handles[0].promptCalls[0]).not.toContain("hidden from pm too");
     expect(handles[0].promptCalls[0]).not.toContain("context_length_exceeded");
     expect(handles[0].promptCalls[0]).not.toContain("model credential is no longer available");
