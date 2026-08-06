@@ -48,6 +48,7 @@ export const PARAM_DESCRIPTIONS = {
   before: "Only messages before this time: same format as 'after'",
   type: "Filter by message type (e.g. 'task_event', 'knowledge_event')",
   around_seq: "Return a window of messages centered on the message with this seq (use with limit to control window size)",
+  from_seq: "Return messages strictly after this seq (ascending) — reads the unread backlog the activation hint points at",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
   scope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",

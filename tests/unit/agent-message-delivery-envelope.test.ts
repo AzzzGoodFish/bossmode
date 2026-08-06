@@ -145,7 +145,7 @@ describe("agent delivery envelope formatting", () => {
     await shutdownAll();
   });
 
-  it("formats multiple messages as a shared transcript with per-message sub-headers", async () => {
+  it("hybrid: backlog compresses to one unread hint; trigger message injects in full", async () => {
     mocks.getMessagesSince.mockReturnValue([
       { id: "m1", sender: "user", content: "first", mentions: [], ts: 1, seq: 101 },
       { id: "m2", sender: "architect", content: "second", mentions: [], ts: 2, seq: 102 },
@@ -155,16 +155,19 @@ describe("agent delivery envelope formatting", () => {
     await activateAgent("room1", "pm");
 
     const sent = mocks.prompt.mock.calls[0][0] as string;
-    expect(sent).toContain('[Messages from room "bossmode dev"]');
-    expect(sent).toContain('[User `fish`, No.101');
-    expect(sent).toContain('[Member `architect`, No.102');
-    expect(sent).toContain('[User `fish`, No.103');
+    // Backlog hint: counts the two pre-trigger messages, user first
+    expect(sent).toContain("you have 2 unread messages (No.101\u2013No.102): user×1, architect×1");
+    expect(sent).toContain("query_room_messages (from_seq 100)");
+    // Trigger message injects in full (its own sub-header + content)
+    expect(sent).toContain('No.103');
     expect(sent).toContain("@pm status?");
-    expect(sent).not.toContain("Reply hint");
+    // Backlog bodies are NOT injected verbatim
+    expect(sent).not.toContain("first\n");
+    expect(sent).not.toContain("second");
     expect(sent).not.toContain("mentioned by");
   });
 
-  it("formats multiple non-mention messages as a shared transcript without any trigger-specific header", async () => {
+  it("hybrid: no mention trigger → newest message is the trigger, earlier ones become the hint", async () => {
     mocks.getMessagesSince.mockReturnValue([
       { id: "m1", sender: "user", content: "plain msg", mentions: [], ts: 1, seq: 201 },
       { id: "m2", sender: "architect", content: "also plain", mentions: [], ts: 2, seq: 202 },
@@ -172,10 +175,11 @@ describe("agent delivery envelope formatting", () => {
 
     await activateAgent("room1", "pm");
     const sent = mocks.prompt.mock.calls[0][0] as string;
-    expect(sent).toContain('[Messages from room "bossmode dev"]');
-    expect(sent).toContain('[User `fish`, No.201');
-    expect(sent).toContain('[Member `architect`, No.202');
+    // m1 = backlog hint, m2 = trigger full
+    expect(sent).toContain("you have 1 unread messages (No.201\u2013No.201): user×1");
+    expect(sent).toContain('No.202');
+    expect(sent).toContain("also plain");
+    expect(sent).not.toContain("plain msg");
     expect(sent).not.toContain("mentioned by");
-    expect(sent).not.toContain("Reply hint");
   });
 });

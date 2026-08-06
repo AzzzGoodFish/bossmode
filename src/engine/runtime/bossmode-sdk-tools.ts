@@ -63,6 +63,7 @@ export function createBossmodeSdkTools(opts: {
         before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
         type: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.type })),
         around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
+        from_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.from_seq })),
         limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
         output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
         scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),

@@ -230,11 +230,13 @@ export async function handleToolCallback(
         aroundSeq: params?.around_seq !== undefined ? Number(params.around_seq) : undefined,
         limit,
       };
+      const fromSeq = params?.from_seq !== undefined ? Number(params.from_seq) : undefined;
 
       // No search filters — keep original fast path (latest N messages)
       const hasFilter = searchOpts.query || searchOpts.from ||
         searchOpts.after !== undefined || searchOpts.before !== undefined ||
-        searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined;
+        searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined ||
+        fromSeq !== undefined;
 
       let messages: RoomMessage[];
       if (targetRoomId.startsWith("dm:")) {
@@ -260,6 +262,10 @@ export async function handleToolCallback(
           all = all.slice(-limit);
         }
         messages = all;
+      } else if (fromSeq !== undefined) {
+        // Backlog read (hybrid injection msg:#14818): messages strictly after
+        // from_seq, ascending — the actionable primitive the unread hint points at.
+        messages = messageStore.getMessages(targetRoomId, { fromSeq, limit });
       } else {
         messages = hasFilter
           ? messageStore.searchMessages(targetRoomId, searchOpts).messages
@@ -269,6 +275,23 @@ export async function handleToolCallback(
       // prompts); typed task/knowledge events stay. Same filter as the
       // activation-context injection path (fish 2026-08-04).
       messages = messages.filter((m) => !isSystemNoticeHiddenFromMembers(m));
+
+      // Read-to-clear (hybrid spec msg:#14818): any successful read of THIS
+      // member's own room advances the delivery cursor to the furthest message
+      // seen — the unread hint disappears on the next activation. Cross-scope
+      // reads and DM (which has no backlog semantics) never touch the cursor.
+      if (!targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
+        let maxSeq = -1;
+        let maxMsg: RoomMessage | null = null;
+        for (const m of messages) {
+          const seq = (m as { seq?: number }).seq ?? 0;
+          if (seq > maxSeq) {
+            maxSeq = seq;
+            maxMsg = m;
+          }
+        }
+        if (maxMsg) roomStore.setCursor(roomId, qActor.id, maxMsg.id);
+      }
 
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {

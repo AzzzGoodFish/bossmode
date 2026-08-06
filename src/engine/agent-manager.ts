@@ -86,6 +86,55 @@ function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string
   return messages.filter((message) => !isSystemNoticeHiddenFromMembers(message));
 }
 
+/** Last visible message that mentions this member (the @/! that fired the
+ * activation); -1 when nothing mentions (steer/system activations). */
+function lastMentionTriggerIndex(messages: RoomMessage[], memberName: string): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    const mentions = (m as { mentions?: string[] }).mentions ?? [];
+    const urgent = (m as { urgentMentions?: string[] }).urgentMentions ?? [];
+    if (mentions.includes(memberName) || urgent.includes(memberName)) return i;
+  }
+  return -1;
+}
+
+/** One-line unread-backlog hint for hybrid injection (fish-approved spec
+ * msg:#14818). Null when there is no backlog (the common path). Senders are
+ * user-first, then by count desc; task/knowledge event counts are omitted
+ * when zero; system notices are already filtered out upstream. */
+export function buildUnreadBacklogHint(backlog: RoomMessage[], opts?: { total?: number; fromSeq?: number }): string | null {
+  if (backlog.length === 0) return null;
+  const first = (backlog[0] as { seq?: number }).seq;
+  const last = (backlog[backlog.length - 1] as { seq?: number }).seq;
+  const bySender = new Map<string, number>();
+  let taskEvents = 0;
+  let knowledgeEvents = 0;
+  for (const m of backlog) {
+    const sender = m.sender || "unknown";
+    bySender.set(sender, (bySender.get(sender) ?? 0) + 1);
+    const type = (m as { type?: string }).type;
+    if (type === "task_event") taskEvents += 1;
+    else if (type === "knowledge_event") knowledgeEvents += 1;
+  }
+  const ordered = [...bySender.entries()].sort((a, b) => {
+    if (a[0] === "user") return -1;
+    if (b[0] === "user") return 1;
+    return b[1] - a[1];
+  });
+  const senders = ordered.map(([s, c]) => `${s}×${c}`).join(", ");
+  const events: string[] = [];
+  if (taskEvents > 0) events.push(`${taskEvents} task events`);
+  if (knowledgeEvents > 0) events.push(`${knowledgeEvents} knowledge updates`);
+  const eventClause = events.length > 0 ? ` — incl. ${events.join(", ")}` : "";
+  const total = opts?.total ?? backlog.length;
+  const truncated = total > backlog.length;
+  const fromSeq = opts?.fromSeq ?? (typeof first === "number" ? first - 1 : 0);
+  const range = truncated
+    ? `you have ${total} unread (latest ${backlog.length}, No.${first}–No.${last})`
+    : `you have ${backlog.length} unread messages (No.${first}–No.${last})`;
+  return `[Earlier in this room ${range}: ${senders}${eventClause}. Read them with query_room_messages (from_seq ${fromSeq}); reading marks them seen.]`;
+}
+
 interface PendingThinkingSwitch {
   thinkingLevel: string;
 }
@@ -911,22 +960,42 @@ async function activateAgentInternalContinue(
   const cursors = roomStore.getCursors(roomId);
   const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
   const allNewMessages = getMessagesSince(roomId, lastCursor);
-  const latestId = getLatestMessageId(roomId);
-  if (latestId) roomStore.setCursor(roomId, memberId, latestId);
   if (allNewMessages.length === 0) return;
 
   // Context limit
   const contextLimit = (member as any)?.contextLimit || 50;
   const visibleMessages = filterAgentVisibleMessages(allNewMessages, memberName);
-  if (visibleMessages.length === 0) return;
-  const newMessages = visibleMessages.length > contextLimit
-    ? visibleMessages.slice(-contextLimit)
-    : visibleMessages;
+  if (visibleMessages.length === 0) {
+    // Nothing member-visible; keep the cursor advancing (avoid re-filtering
+    // the same system notices on every activation).
+    const latestId = getLatestMessageId(roomId);
+    if (latestId) roomStore.setCursor(roomId, memberId, latestId);
+    return;
+  }
 
-  logger.info("agent", "incrementalMessages", { member: memberName, count: newMessages.length, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor });
+  // Hybrid injection (fish-approved spec msg:#14818): the trigger message
+  // (last one mentioning this member, else the newest) is injected in full;
+  // everything between the delivery cursor and the trigger compresses into a
+  // one-line unread hint the member may read via query_room_messages.
+  const triggerIdx = lastMentionTriggerIndex(visibleMessages, memberName);
+  const triggerIndex = triggerIdx >= 0 ? triggerIdx : visibleMessages.length - 1;
+  const trigger = visibleMessages[triggerIndex];
+  const backlog = visibleMessages.slice(0, triggerIndex);
+  const truncated = backlog.length > contextLimit;
+  const backlogLimited = truncated ? backlog.slice(-contextLimit) : backlog;
+  const unreadHint = buildUnreadBacklogHint(backlogLimited, truncated
+    ? { total: backlog.length, fromSeq: (backlog[0] as { seq?: number }).seq! - 1 }
+    : undefined);
+  const formattedTrigger = formatMessagesForAgent(roomId, [trigger], memberName, roomStore.getRoom(roomId)?.name || roomId);
+  const payload = opts.banner
+    ? `${opts.banner}\n\n${unreadHint ? `${unreadHint}\n\n` : ""}${formattedTrigger}`
+    : unreadHint ? `${unreadHint}\n\n${formattedTrigger}` : formattedTrigger;
 
-  const formattedMessages = formatMessagesForAgent(roomId, newMessages, memberName, roomStore.getRoom(roomId)?.name || roomId);
-  const payload = opts.banner ? `${opts.banner}\n\n${formattedMessages}` : formattedMessages;
+  // Cursor advances only to the trigger — the backlog stays unread until the
+  // member reads it (query_room_messages advances the cursor).
+  if (trigger.id) roomStore.setCursor(roomId, memberId, trigger.id);
+
+  logger.info("agent", "incrementalMessages", { member: memberName, count: backlogLimited.length + 1, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor, hybrid: true });
 
   setActivationSource(roomId, memberId, opts.source);
   if (opts.replyDebt) markPendingChatReply(instance, opts.trigger);
@@ -1359,6 +1428,12 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
   const userMessage = instruction;
 
   setActivationSource(roomId, instance.memberId, isSlashCommand ? "system" : "private_instruction");
+
+  // A steer is a delivery point (hybrid spec msg:#14818): the delivery cursor
+  // refreshes to the latest message so the next activation's backlog hint
+  // only covers what arrived after this steer.
+  const steerLatestId = getLatestMessageId(roomId);
+  if (steerLatestId) roomStore.setCursor(roomId, instance.memberId, steerLatestId);
 
   if (instance.compacting) {
     queueInput(instance, userMessage, "steer");

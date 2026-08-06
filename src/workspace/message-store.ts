@@ -61,7 +61,7 @@ export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">):
 }
 
 // 2c: getMessages
-export function getMessages(roomId: string, opts?: { limit?: number; before?: string; around?: string }): RoomMessage[] {
+export function getMessages(roomId: string, opts?: { limit?: number; before?: string; around?: string; fromSeq?: number }): RoomMessage[] {
   const path = messagesPath(roomId);
   if (!existsSync(path)) return [];
 
@@ -87,6 +87,14 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
     if (idx > 0) {
       messages = messages.slice(0, idx);
     }
+  }
+
+  // From-seq: messages strictly after the given seq (ascending backlog reads)
+  if (opts?.fromSeq !== undefined) {
+    const fsq = opts.fromSeq;
+    const idx = messages.findIndex((m) => (m as { seq?: number }).seq !== undefined && (m as { seq?: number }).seq! > fsq!);
+    if (idx === -1) return [];
+    messages = messages.slice(idx);
   }
 
   // Limit: return last N messages
