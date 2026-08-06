@@ -322,33 +322,6 @@ function isLengthStopReason(stopReason: unknown): boolean {
   return normalized === "length" || normalized.includes("max_tokens") || normalized.includes("max_output");
 }
 
-const ROOM_MARKER = "[room]";
-
-/**
- * Extract the room-bound portion of an assistant text per the [room] marker rule.
- * Scans backwards for the LAST *legal* marker — `[room]` immediately followed by a
- * newline — and returns the trimmed content after it. Occurrences of `[room]` with
- * no following newline (bare/inline mentions) are not markers and are skipped, so
- * talking about the feature inside a message cannot swallow the real one.
- * Content before the marker never reaches the room.
- */
-export function extractRoomMarkerText(text: string): string | null {
-  if (!text) return null;
-  let searchFrom = text.length;
-  while (searchFrom > 0) {
-    const idx = text.lastIndexOf(ROOM_MARKER, searchFrom - 1);
-    if (idx === -1) return null;
-    const after = text.slice(idx + ROOM_MARKER.length);
-    if (after.startsWith("\n") || after.startsWith("\r\n")) {
-      const body = after.replace(/^\r?\n/, "").trim();
-      return body.length > 0 ? body : null;
-    }
-    // Not a legal marker (no newline right after) — keep scanning earlier occurrences.
-    searchFrom = idx;
-  }
-  return null;
-}
-
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
   if (instance.queuedInputs.length === 0) return;
   if (instance.status === "working" || instance.dispatchState !== "idle") return;
@@ -1738,35 +1711,6 @@ function wireInstanceEvents(
       if (instance.lastMessageEndWasLength) {
         instance.lengthContinuationPending = true;
         logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
-      }
-      // [room] marker speech: if this message's text contains `[room]` followed by
-      // a newline, post the content after the last marker to the conversation.
-      // Checked on every message_end so members can speak while working, not just
-      // at turn end. Skipped on error turns and on length-truncated intermediate
-      // messages (the final settled message is the one that counts).
-      // In DM scope there are no room members to mention; the text lands in the
-      // member-owned DM store via the same scope-routed postMessage.
-      if (event.stopReason !== "error" && !instance.lastMessageEndWasLength) {
-        const roomText = extractRoomMarkerText(event.text || "");
-        if (roomText !== null) {
-          const members = roomStore.getRoomMembers(roomId);
-          const memberNames = members.map((m: any) => m.name);
-          const urgentMentions = parseUrgentMentions(roomText, memberNames);
-          const mentions = [...new Set([...parseMentions(roomText, memberNames), ...urgentMentions])];
-          const mentionMemberIds = mentions
-            .map((name) => roomStore.resolveRoomMemberRef(roomId, name)?.id)
-            .filter((id): id is string => Boolean(id));
-          const urgentMentionMemberIds = urgentMentions
-            .map((name) => roomStore.resolveRoomMemberRef(roomId, name)?.id)
-            .filter((id): id is string => Boolean(id));
-          postMessage(roomId, memberName, roomText, mentions, {
-            senderMemberId: memberId,
-            mentionMemberIds,
-            ...(urgentMentions.length > 0 ? { urgentMentions, urgentMentionMemberIds } : {}),
-          });
-          clearPendingChatReply(instance, "room_marker");
-          logger.info("agent", "roomMarkerPosted", { member: memberName, roomId, memberId });
-        }
       }
     }
 

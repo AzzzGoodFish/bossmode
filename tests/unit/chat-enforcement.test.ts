@@ -125,6 +125,21 @@ describe("chat enforcement pending reply", () => {
     expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
+  it("[room]-marked text is bare text after removal: not posted, silence visible (fish 2026-08-06)", async () => {
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "message_end", text: "Let me check...\n[room]\nFound it — the failure is in the token refresh.", stopReason: "stop" });
+      handle.emit({ type: "agent_end", messages: [] });
+    });
+
+    await activateAgent("room1", "developer");
+
+    // No room message was posted from the [room] text (marker mechanism removed)
+    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "developer", expect.stringContaining("Found it"), expect.anything());
+    // The text is invisible → the honest silence note fires (bare-text treatment)
+    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("does not warn when chat tool succeeds", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "tool_end", toolName: "response", toolCallId: "call-1", result: { ok: true }, isError: false });
