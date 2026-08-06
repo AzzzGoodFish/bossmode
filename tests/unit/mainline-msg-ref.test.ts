@@ -93,4 +93,45 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
     expect(entry.msgId).toBe(msg.id);
     expect(entry.summary).toContain("DM decision");
   });
+
+  it("loose msg forms resolve: No.n / #n / msg:n all map to seq; non-ref prose stays 'other'", async () => {
+    const { addMessage } = await import("../../src/workspace/message-store.js");
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const room = roomStore.createRoom("r2", dir, [], undefined);
+    const m1 = addMessage(room.id, { sender: "architect", content: "loose ref message", mentions: [] } as any);
+    const m2 = addMessage(room.id, { sender: "user", content: "another one", mentions: [] } as any);
+
+    const ml = await import("../../src/workspace/mainline-store.js");
+    const content = `## Focus\nShip.\n\n## Dynamic Index\n- No.${m1.seq} 附近 — natural language, capital No.\n- #${m2.seq} — bare hash\n- msg:${m1.seq} 这里 — numeric msg:\n- 11:44 那份 — time, must NOT become a ref\n- #abc — not digits, must NOT become a ref\n- No.abc — not digits, must NOT become a ref\n`;
+    const messages = ml.loadScopeMessages(room.id);
+    const resolved = ml.resolveMainlineRefs(room.id, content, messages);
+    const parsed = ml.parseMainline(resolved, ml.buildMsgLookup(messages));
+
+    const noEntry = parsed.index.find((e) => e.ref === `No.${m1.seq}`)!;
+    expect(noEntry.kind).toBe("msg");
+    expect(noEntry.stale).toBe(false);
+    expect(noEntry.msgId).toBe(m1.id);
+
+    const hashEntry = parsed.index.find((e) => e.ref === `#${m2.seq}`)!;
+    expect(hashEntry.kind).toBe("msg");
+    expect(hashEntry.msgId).toBe(m2.id);
+
+    const msgNumericEntry = parsed.index.find((e) => e.ref === `msg:${m1.seq}`)!;
+    expect(msgNumericEntry.kind).toBe("msg");
+    expect(msgNumericEntry.msgId).toBe(m1.id);
+
+    // Non-ref prose lines stay 'other' (never misread as a reference).
+    const others = parsed.index.filter((e) => e.kind === "other");
+    expect(others).toHaveLength(3);
+    expect(others.some((e) => e.note.includes("11:44"))).toBe(true);
+    expect(others.some((e) => e.note.includes("#abc"))).toBe(true);
+    expect(others.some((e) => e.note.includes("No.abc"))).toBe(true);
+  });
+
+  it("loose forms in Focus text are never parsed as references (index-context only)", async () => {
+    const ml = await import("../../src/workspace/mainline-store.js");
+    const content = `## Focus\nRemember No.14502 and #88 — prose, not refs.\n\n## Dynamic Index\n- task:task-x — t\n`;
+    const parsed = ml.parseMainline(content);
+    expect(parsed.index.some((e) => e.kind === "msg")).toBe(false);
+  });
 });
