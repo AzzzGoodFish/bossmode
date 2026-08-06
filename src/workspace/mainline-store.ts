@@ -231,12 +231,20 @@ type RefToken =
   | { kind: "msg-seq"; seq: number }
   | { kind: "msg-id"; id: string };
 
-/** Extract the leading reference token of an index line body, if it looks like one. */
+/** Extract the leading reference token of an index line body, if it looks like one.
+ * Loose msg forms (fish 2026-08-06): members write `msg:#n` / `msg:n` / `No.n` /
+ * `#n` in natural language instead of the canonical `msg:#<seq>`. All forms are
+ * recognized ONLY as the leading token of a ## Dynamic Index line — never in Focus
+ * text, never mid-line — so ordinary prose can't be misread as a reference.
+ * `msg:n` maps to seq (a numeric msg-id never exists; message ids are UUIDs). */
 export function parseIndexRef(body: string): { ref: RefToken; raw: string } | null {
   const token = body.trim().split(/\s+/)[0] || "";
   if (/^docs\/\S+$/.test(token)) return { ref: { kind: "docs", path: token }, raw: token };
   if (/^task:\S+$/.test(token)) return { ref: { kind: "task", id: token.slice("task:".length) }, raw: token };
   if (/^msg:#\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("msg:#".length), 10) }, raw: token };
+  if (/^msg:\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("msg:".length), 10) }, raw: token };
+  if (/^No\.\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("No.".length), 10) }, raw: token };
+  if (/^#\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice(1), 10) }, raw: token };
   if (/^msg:\S+$/.test(token)) return { ref: { kind: "msg-id", id: token.slice("msg:".length) }, raw: token };
   return null;
 }
