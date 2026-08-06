@@ -980,7 +980,9 @@ async function activateAgentInternalContinue(
   const triggerIdx = lastMentionTriggerIndex(visibleMessages, memberName);
   const triggerIndex = triggerIdx >= 0 ? triggerIdx : visibleMessages.length - 1;
   const trigger = visibleMessages[triggerIndex];
-  const backlog = visibleMessages.slice(0, triggerIndex);
+  // A member's own messages are never unread to itself (QA 2026-08-06): exclude
+  // them from the backlog so the hint does not ring forever with self-replies.
+  const backlog = visibleMessages.slice(0, triggerIndex).filter((m) => m.sender !== memberName);
   const truncated = backlog.length > contextLimit;
   const backlogLimited = truncated ? backlog.slice(-contextLimit) : backlog;
   const unreadHint = buildUnreadBacklogHint(backlogLimited, truncated
@@ -992,8 +994,16 @@ async function activateAgentInternalContinue(
     : unreadHint ? `${unreadHint}\n\n${formattedTrigger}` : formattedTrigger;
 
   // Cursor advances only to the trigger — the backlog stays unread until the
-  // member reads it (query_room_messages advances the cursor).
-  if (trigger.id) roomStore.setCursor(roomId, memberId, trigger.id);
+  // member reads it (query_room_messages advances the cursor). Own replies
+  // after the trigger are skipped too (they are not unread to their author).
+  let cursorTarget = trigger;
+  for (let i = allNewMessages.length - 1; i >= 0; i--) {
+    if (allNewMessages[i].sender === memberName) {
+      cursorTarget = allNewMessages[i];
+      break;
+    }
+  }
+  if (cursorTarget.id) roomStore.setCursor(roomId, memberId, cursorTarget.id);
 
   logger.info("agent", "incrementalMessages", { member: memberName, count: backlogLimited.length + 1, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor, hybrid: true });
 
