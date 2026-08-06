@@ -17,7 +17,6 @@ import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions, parseUrgentMentions } from "../communication/router.js";
-import { getActivationSource } from "./activation-context.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -83,6 +82,50 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
   return { mentions, mentionMemberIds: toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
 }
 
+// -- Final-text delivery (0.21 conditional delivery contract) --
+
+/**
+ * Response prefix: `response:` at the very start of a text segment.
+ * Case-insensitive; both half/full-width colons accepted (k3 writes Chinese
+ * colons); leading whitespace tolerated. Only matches the segment start — a
+ * mention inside the text never triggers.
+ */
+const RESPONSE_PREFIX_RE = /^\s*response\s*[:：]\s*/i;
+
+export function matchResponsePrefix(text: string): { matched: boolean; body: string } {
+  const m = RESPONSE_PREFIX_RE.exec(text);
+  if (!m) return { matched: false, body: text };
+  return { matched: true, body: text.slice(m[0].length) };
+}
+
+/**
+ * Deliver a member's text into the conversation (room or DM, same rule).
+ * Room scope: mention scan + senderMemberId resolution + messageMeta, then
+ * postMessage (mention activation handled by router listener). DM scope:
+ * direct postMessage, no mention routing.
+ * No attachments/artifacts — the response tool was removed with them.
+ */
+export function deliverMemberMessage(roomId: string, memberName: string, text: string): void {
+  // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
+  if (typeof roomId === "string" && roomId.startsWith("dm:")) {
+    postMessage(roomId, memberName, text);
+    logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, prefixed: true });
+    return;
+  }
+
+  const room = roomStore.getRoom(roomId);
+  const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+  const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, memberName) : undefined;
+  const info = room ? mentionInfoFromText(text, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
+
+  // Room message via message-bus (writes + broadcasts + notifies listeners)
+  // Mention activation is handled by router listener via message-bus.
+  const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: memberName, mentionMemberIds: info.mentionMemberIds, urgentMentions: info.urgentMentions, urgentMentionMemberIds: info.urgentMentionMemberIds, mentions: info.mentions });
+  if (meta) postMessage(roomId, memberName, text, info.mentions, meta);
+  else postMessage(roomId, memberName, text, info.mentions);
+  logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, prefixed: true });
+}
+
 function resolveTaskAssignee(roomId: string, value: unknown): { name: string; memberId: string } | undefined {
   const raw = String(value ?? "").trim();
   if (!raw) return undefined;
@@ -122,8 +165,7 @@ function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: 
 }
 
 /** Truncate a serialized tool result if it exceeds the limit. */
-import { processAgentAttachments } from "./agent-attachments.js";
-import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
+import type { RoomMessageAttachment } from "../shared/attachments.js";
 
 export function truncateToolResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
@@ -141,78 +183,6 @@ export async function handleToolCallback(
   logger.info("callback", "tool-callback", { tool, room: roomId, agent: agentName });
 
   switch (tool) {
-    case "response": {
-      const message = params?.message || "";
-      const source = getActivationSource(roomId, agentName);
-
-      const attachments: RoomMessageAttachment[] = [];
-      const artifacts = Array.isArray(params?.artifacts)
-        ? params.artifacts.map(String).map((value) => value.trim()).filter(Boolean)
-        : [];
-      // Process agent attachments (file paths → validate + copy → structured message metadata).
-      // Absolute source/store paths are not written to room-visible message JSON.
-      if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const outcomes = await processAgentAttachments(roomId, params.attachments.map(String));
-        const errors: string[] = [];
-        for (const o of outcomes) {
-          if (o.ok) {
-            const originalFilename = displayFilename(o.originalFilename);
-            attachments.push({
-              id: o.storedFilename,
-              storedFilename: o.storedFilename,
-              originalFilename,
-              size: o.size,
-              previewType: inferAttachmentPreviewType(o.storedFilename || originalFilename),
-            });
-          } else {
-            errors.push(`${o.path}: ${o.error}`);
-          }
-        }
-        if (errors.length > 0) {
-          const errorMsg = errors.join("; ");
-          return { ok: false, error: `Attachment failed: ${errorMsg}` };
-        }
-      }
-
-      // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
-      if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-        postMessage(roomId, agentName, message, [], {
-          ...(attachments.length ? { attachments } : {}),
-          ...(artifacts.length ? { artifacts } : {}),
-        });
-        return { ok: true };
-      }
-
-      const room = roomStore.getRoom(roomId);
-      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
-      const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
-      const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
-
-      // Room message via message-bus (writes + broadcasts + notifies listeners)
-      // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, artifacts, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions });
-      if (meta) postMessage(roomId, agentName, message, mentions, meta);
-      else postMessage(roomId, agentName, message, mentions);
-
-      return { ok: true };
-    }
-    case "mention": {
-      // Legacy — redirect to chat with textual @mention.
-      // Mention activation is handled by router listener.
-      const target = params?.agent || "";
-      const message = params?.message || "";
-      const content = target ? `@${target} ${message}`.trim() : message;
-      const room = roomStore.getRoom(roomId);
-      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
-      const info = room ? mentionInfoFromText(content, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
-      const mentions = info.mentions;
-      const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds: info.mentionMemberIds, urgentMentions: info.urgentMentions, urgentMentionMemberIds: info.urgentMentionMemberIds, mentions });
-      if (meta) postMessage(roomId, agentName, content, mentions, meta);
-      else postMessage(roomId, agentName, content, mentions);
-      return { ok: true };
-    }
     case "query_room_messages": {
       const qActor = resolveMemoryActor(roomId, agentName);
       if (!qActor) return { ok: false, error: "Current member is not in this room" };

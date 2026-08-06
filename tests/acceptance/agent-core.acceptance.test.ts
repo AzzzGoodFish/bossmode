@@ -311,7 +311,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       // First activation fails, second succeeds; chat-enforcement warning prompts are private follow-ups.
       let activationCallCount = 0;
       setMockPromptFn(vi.fn().mockImplementation((content: string) => {
-        if (!content.includes("ended your turn without calling the `response` tool")) activationCallCount++;
+        activationCallCount++;
         if (activationCallCount === 1) return Promise.reject(new Error("First attempt fails"));
         return Promise.resolve(undefined);
       }));

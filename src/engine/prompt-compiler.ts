@@ -99,7 +99,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Speak with the \`response\` tool — it is the only way your text reaches the room. Bare text is never visible to anyone.
+To speak in the room, start your text with \`response: \` — only texts with this prefix are posted (the prefix is stripped). Anything else you write is invisible. Your final text is your reply: if it lacks the prefix, no one will see it.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
 
@@ -150,7 +150,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Speak with the \`response\` tool — messages go directly to this private chat. There is **no** \`@\` routing in DM (you are already talking to the user).
+To reply in this private chat, start your text with \`response: \` — only prefixed texts are delivered (prefix stripped). No \`@\` routing in DM.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
 

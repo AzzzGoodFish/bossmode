@@ -24,6 +24,7 @@ import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
+import { matchResponsePrefix, deliverMemberMessage } from "./tools.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -165,6 +166,14 @@ interface AgentInstance {
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
+  /** Final-text delivery (0.21): per-turn completed text segments. `turnSegmentSeq`
+   * increments per completed message_end; `deliveredSegments` tracks which
+   * segments already went out via the mid-turn prefix path so the final
+   * settlement never double-posts. Both reset on agent_start. */
+  turnSegmentSeq: number;
+  deliveredSegments: Set<number>;
+  lastCompletedFinalText: string;
+  lastCompletedFinalSeq: number;
   /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
   compacting: boolean;
   /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
@@ -313,7 +322,7 @@ function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
   logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
 }
 
-const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result with a `response` call.";
+const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — start your final text with `response: ` so it reaches the room.";
 const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
 
 function isLengthStopReason(stopReason: unknown): boolean {
@@ -362,6 +371,23 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
     return;
   }
   if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
+  // Final-text delivery (0.21 conditional-delivery contract): the last
+  // *completed* text segment of the turn is the reply candidate. If it starts
+  // with `response:`, strip the prefix and deliver. Abort/error turns never
+  // deliver (skipChatWarning=true on abort; hadErrorInTurn on error). If the
+  // segment already went out via the mid-turn prefix path, don't double-post.
+  if (!opts.skipChatWarning && !instance.hadErrorInTurn) {
+    const seq = instance.lastCompletedFinalSeq;
+    const seg = instance.lastCompletedFinalText;
+    if (seq > 0 && seg && !instance.deliveredSegments.has(seq)) {
+      const m = matchResponsePrefix(seg);
+      if (m.matched && m.body.trim()) {
+        deliverMemberMessage(instance.roomId, instance.agentName, m.body.trim());
+        instance.deliveredSegments.add(seq);
+        clearPendingChatReply(instance, "final_text");
+      }
+    }
+  }
   if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn) {
     // Silence-visible: a turn ended without a chat reply. Do NOT run a hidden
     // follow-up prompt (that masked real failures and swallowed their events).
@@ -856,6 +882,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
+        turnSegmentSeq: 0,
+        deliveredSegments: new Set<number>(),
+        lastCompletedFinalText: "",
+        lastCompletedFinalSeq: 0,
         compacting: false,
         turnActive: false,
         unsubscribe: () => {},
@@ -1672,10 +1702,13 @@ function wireInstanceEvents(
 ): void {
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
-    if (event.type === "tool_end" && event.toolName === "response" && !(event as any).isError) {
-      clearPendingChatReply(instance, `tool:${event.toolName}`);
-    }
     if (event.type === "agent_start") {
+      // Fresh turn: reset final-text segment tracking (delivered segments and
+      // the seq counter) so each turn is numbered independently.
+      instance.turnSegmentSeq = 0;
+      instance.deliveredSegments.clear();
+      instance.lastCompletedFinalText = "";
+      instance.lastCompletedFinalSeq = 0;
       instance.turnActive = true;
       if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
       updateDispatchState(instance, "running", event.type);
@@ -1711,6 +1744,27 @@ function wireInstanceEvents(
       if (instance.lastMessageEndWasLength) {
         instance.lengthContinuationPending = true;
         logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+      }
+      // Final-text capture: only *completed* segments are candidates — length
+      // truncation, provider errors and aborts never are (their text is a
+      // broken fragment, not a reply). Mid-turn segments starting with the
+      // `response:` prefix are delivered immediately (stripped); the final
+      // settlement re-checks the last segment and never double-posts.
+      const aborted = event.stopReason === "aborted" || event.stopReason === "error" || Boolean((event as any).errorMessage);
+      if (!instance.lastMessageEndWasLength && !aborted) {
+        const text = (event.text || "").trim();
+        if (text) {
+          instance.turnSegmentSeq += 1;
+          const seq = instance.turnSegmentSeq;
+          instance.lastCompletedFinalText = text;
+          instance.lastCompletedFinalSeq = seq;
+          const m = matchResponsePrefix(text);
+          if (m.matched && m.body.trim()) {
+            instance.deliveredSegments.add(seq);
+            deliverMemberMessage(roomId, memberName, m.body.trim());
+            clearPendingChatReply(instance, "final_text_prefix");
+          }
+        }
       }
     }
 
@@ -1839,6 +1893,10 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
+        turnSegmentSeq: 0,
+        deliveredSegments: new Set<number>(),
+        lastCompletedFinalText: "",
+        lastCompletedFinalSeq: 0,
         compacting: false,
         turnActive: false,
         unsubscribe: () => {},
@@ -1915,8 +1973,8 @@ export async function activateDmMember(memberId: string): Promise<void> {
       .join("\n\n");
 
     const prompt = transcript
-      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message via the response tool.`
-      : `You are in a private chat with the user. They just opened the conversation. Greet briefly via the response tool if appropriate, or wait for their request.`;
+      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message — start your final text with \`response: \` so it is delivered.`
+      : `You are in a private chat with the user. They just opened the conversation. Greet briefly — start your final text with \`response: \` so it is delivered, or wait for their request.`;
 
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "dm-activate");

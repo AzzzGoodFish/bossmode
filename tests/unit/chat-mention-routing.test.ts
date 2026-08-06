@@ -48,7 +48,7 @@ vi.mock("../../src/knowledge/store.js", () => ({
 }));
 
 import { initRouter } from "../../src/communication/router.js";
-import { handleToolCallback } from "../../src/engine/tools.js";
+import { deliverMemberMessage } from "../../src/engine/tools.js";
 
 describe("chat mention routing", () => {
   let nextId = 1;
@@ -67,15 +67,12 @@ describe("chat mention routing", () => {
     }));
   });
 
-  it("activates exactly once when agent chat mentions another member", async () => {
+  it("activates exactly once when a member's final text mentions another member", async () => {
     const onMention = vi.fn();
     const onMentionAll = vi.fn();
     const unsubscribe = initRouter(onMention, onMentionAll);
 
-    await handleToolCallback("response", "room1", "architect", {
-      message: "@developer please implement",
-      mentions: ["developer"],
-    });
+    deliverMemberMessage("room1", "architect", "@developer please implement");
 
     expect(onMention).toHaveBeenCalledTimes(1);
     expect(onMention).toHaveBeenCalledWith("room1", "developer");
@@ -88,15 +85,9 @@ describe("chat mention routing", () => {
     const onMentionAll = vi.fn();
     const unsubscribe = initRouter(onMention, onMentionAll);
 
-    await handleToolCallback("response", "room1", "architect", {
-      message: "@architect self ping",
-      mentions: ["architect"],
-    });
+    deliverMemberMessage("room1", "architect", "@architect self ping");
 
-    await handleToolCallback("response", "room1", "developer", {
-      message: "@architect handing back",
-      mentions: ["architect"],
-    });
+    deliverMemberMessage("room1", "developer", "@architect handing back");
 
     expect(onMention).toHaveBeenCalledTimes(1);
     expect(onMention).toHaveBeenCalledWith("room1", "architect");

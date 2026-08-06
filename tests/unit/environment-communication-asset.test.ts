@@ -128,7 +128,7 @@ describe("environment-communication asset", () => {
     expect(ids).toContain("environment-communication");
     expect(compiled.fullPrompt).toContain("A colleague, not a system");
     // E&C sits after the DM Core's own Communication section.
-    const coreIdx = compiled.fullPrompt.indexOf("Speak with the `response` tool");
+    const coreIdx = compiled.fullPrompt.indexOf("start your text with `response: `");
     const ecIdx = compiled.fullPrompt.indexOf("A colleague, not a system");
     expect(coreIdx).toBeGreaterThan(-1);
     expect(coreIdx).toBeLessThan(ecIdx);

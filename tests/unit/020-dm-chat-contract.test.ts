@@ -57,9 +57,8 @@ describe("020 DM chat contract", () => {
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     const dmRoomId = `dm:${member.id}`;
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const result = (await handleToolCallback("response", dmRoomId, "architect", { message: "hello dm" })) as any;
-    expect(result.ok).toBe(true);
+    const { deliverMemberMessage } = await import("../../src/engine/tools.js");
+    deliverMemberMessage(dmRoomId, "architect", "hello dm");
 
     const store = await import("../../src/workspace/dm-message-store.js");
     const messages = store.readAllDmMessages(member.id);

@@ -36,7 +36,7 @@ vi.mock("../../src/knowledge/store.js", () => ({
 }));
 vi.mock("../../src/communication/ws.js", () => ({ broadcastToRoom: vi.fn() }));
 
-import { handleToolCallback } from "../../src/engine/tools.js";
+import { deliverMemberMessage } from "../../src/engine/tools.js";
 
 describe("tools chat textual @mention activation", () => {
   beforeEach(() => {
@@ -48,36 +48,27 @@ describe("tools chat textual @mention activation", () => {
     mocks.parseMentions.mockReturnValue([]);
   });
 
-  it("activates parsed @mentions from room message text", async () => {
+  it("activates parsed @mentions from room message text", () => {
     mocks.parseMentions.mockReturnValue(["developer"]);
 
-    const result = await handleToolCallback("response", "room1", "architect", {
-      message: "@developer please implement",
-    });
+    deliverMemberMessage("room1", "architect", "@developer please implement");
 
     expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer please implement", ["developer"]);
-    expect(result).toEqual({ ok: true });
   });
 
-  it("passes all parsed exact @mentions", async () => {
+  it("passes all parsed exact @mentions", () => {
     mocks.parseMentions.mockReturnValue(["developer", "qa"]);
 
-    const result = await handleToolCallback("response", "room1", "architect", {
-      message: "@developer @qa sync",
-    });
+    deliverMemberMessage("room1", "architect", "@developer @qa sync");
 
     expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer @qa sync", ["developer", "qa"]);
-    expect(result).toEqual({ ok: true });
   });
 
-  it("falls back to no activation when room lookup fails", async () => {
+  it("falls back to no activation when room lookup fails", () => {
     mocks.getRoom.mockReturnValue(null);
 
-    const result = await handleToolCallback("response", "room1", "architect", {
-      message: "@developer ping",
-    });
+    deliverMemberMessage("room1", "architect", "@developer ping");
 
     expect(mocks.postMessage).toHaveBeenCalledWith("room1", "architect", "@developer ping", []);
-    expect(result).toEqual({ ok: true });
   });
 });
