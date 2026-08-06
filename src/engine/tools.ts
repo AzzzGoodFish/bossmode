@@ -141,7 +141,7 @@ export async function handleToolCallback(
   logger.info("callback", "tool-callback", { tool, room: roomId, agent: agentName });
 
   switch (tool) {
-    case "chat": {
+    case "response": {
       const message = params?.message || "";
       const source = getActivationSource(roomId, agentName);
 

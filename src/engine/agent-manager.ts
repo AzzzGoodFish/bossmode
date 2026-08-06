@@ -264,7 +264,7 @@ function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
   logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
 }
 
-const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result with a `chat` call.";
+const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result with a `response` call.";
 const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
 
 function isLengthStopReason(stopReason: unknown): boolean {
@@ -804,7 +804,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           onChat: async (message: string) => {
             postMessage(roomId, memberName, message, [], { senderMemberId: memberId });
             const active = instances.get(key);
-            if (active) clearPendingChatReply(active, "callback:chat");
+            if (active) clearPendingChatReply(active, "callback:response");
           },
           onMention: async (targetMember: string, message: string) => {
             // Mention activation is handled by router listener via message-bus.
@@ -1607,7 +1607,7 @@ function wireInstanceEvents(
 ): void {
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
-    if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
+    if (event.type === "tool_end" && event.toolName === "response" && !(event as any).isError) {
       clearPendingChatReply(instance, `tool:${event.toolName}`);
     }
     if (event.type === "agent_start") {
@@ -1757,7 +1757,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
     const skills = resolveSkills(member, agentDef);
     const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
 
-    const syntheticRoomId = scopeId; // "dm:<memberId>" — tools/chat branch on this prefix
+    const syntheticRoomId = scopeId; // "dm:<memberId>" — tools/response branch on this prefix
 
     try {
       const handle = await runtime.createAgent({
@@ -1776,7 +1776,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
             // store, broadcasts to dm:<id> subscribers, and notifies listeners.
             postMessage(syntheticRoomId, member.name, message);
             const active = instances.get(key);
-            if (active) clearPendingChatReply(active, "callback:chat-dm");
+            if (active) clearPendingChatReply(active, "callback:response-dm");
           },
           onMention: async (_target: string, message: string) => {
             // DM has no @ routing — treat as normal chat.
@@ -1879,8 +1879,8 @@ export async function activateDmMember(memberId: string): Promise<void> {
       .join("\n\n");
 
     const prompt = transcript
-      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message via the chat tool.`
-      : `You are in a private chat with the user. They just opened the conversation. Greet briefly via the chat tool if appropriate, or wait for their request.`;
+      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message via the response tool.`
+      : `You are in a private chat with the user. They just opened the conversation. Greet briefly via the response tool if appropriate, or wait for their request.`;
 
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "dm-activate");

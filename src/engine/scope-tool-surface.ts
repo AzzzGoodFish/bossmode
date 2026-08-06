@@ -6,7 +6,7 @@
 import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 
 export type ScopeToolFamily =
-  | "chat"
+  | "response"
   | "memory"
   | "tasks"
   | "wait"
@@ -25,7 +25,7 @@ export interface ScopeToolSurface {
 }
 
 const DM_FAMILIES: ScopeToolFamily[] = [
-  "chat",
+  "response",
   "memory",
   "create_room",
   "edit_room",
@@ -34,7 +34,7 @@ const DM_FAMILIES: ScopeToolFamily[] = [
 ];
 
 const ROOM_FAMILIES: ScopeToolFamily[] = [
-  "chat",
+  "response",
   "memory",
   "tasks",
   "wait",
@@ -52,7 +52,7 @@ export function toolSurfaceForScope(scopeId: ScopeId, opts?: { isRoomLeader?: bo
       scopeId,
       kind: "dm",
       families: [...DM_FAMILIES],
-      summary: "DM: chat, memory, create/edit room, list members, history",
+      summary: "DM: response, memory, create/edit room, list members, history",
     };
   }
 
@@ -62,8 +62,8 @@ export function toolSurfaceForScope(scopeId: ScopeId, opts?: { isRoomLeader?: bo
     kind: "room",
     families,
     summary: opts?.isRoomLeader
-      ? "Room: chat, memory, tasks, wait, edit room (leader), history"
-      : "Room: chat, memory, tasks, wait, history",
+      ? "Room: response, memory, tasks, wait, edit room (leader), history"
+      : "Room: response, memory, tasks, wait, history",
   };
 }
 

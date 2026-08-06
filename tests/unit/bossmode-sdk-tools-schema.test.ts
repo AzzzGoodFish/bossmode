@@ -36,7 +36,7 @@ describe("createBossmodeSdkTools schema normalization", () => {
   });
 
   it("keeps genuinely required fields intact", () => {
-    const chat = tools.find((t) => t.name === "chat");
+    const chat = tools.find((t) => t.name === "response");
     expect((chat!.parameters as { required?: string[] }).required).toContain("message");
     const commentTask = tools.find((t) => t.name === "comment_task");
     expect((commentTask!.parameters as { required?: string[] }).required).toEqual(

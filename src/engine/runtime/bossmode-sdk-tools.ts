@@ -1,6 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { buildChatToolDescription, CHAT_MESSAGE_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
+import { buildResponseToolDescription, RESPONSE_MESSAGE_PARAM_DESCRIPTION } from "../../shared/response-tool-description.js";
 import {
   QUERY_ROOM_MESSAGES_DESCRIPTION,
   CREATE_TASK_DESCRIPTION,
@@ -38,17 +38,17 @@ export function createBossmodeSdkTools(opts: {
 
   const tools: ToolDefinition[] = [
     defineTool({
-      name: "chat",
-      label: "Chat",
-      description: buildChatToolDescription(opts.roomMembers.filter((m) => m !== opts.agentName).join(", ")),
+      name: "response",
+      label: "Response",
+      description: buildResponseToolDescription(opts.roomMembers.filter((m) => m !== opts.agentName).join(", ")),
       parameters: Type.Object({
-        message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
+        message: Type.String({ description: RESPONSE_MESSAGE_PARAM_DESCRIPTION }),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
         artifacts: Type.Optional(Type.Array(Type.String(), { description: "Document or file paths to show as previewable artifact chips on the room message." })),
       }),
       execute: async (_id, params) => {
-        const data = await call("chat", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Chat failed");
+        const data = await call("response", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "Response failed");
         return textResult("Message sent to room.");
       },
     }),

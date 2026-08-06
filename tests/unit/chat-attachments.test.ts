@@ -92,7 +92,7 @@ describe("chat attachment artifacts", () => {
     const missingPath = join(cwd, "missing.md");
     const room = roomStore.createRoom("Agent Missing Attach", cwd, drafts(["developer"]));
 
-    const result = await handleToolCallback("chat", room.id, "developer", {
+    const result = await handleToolCallback("response", room.id, "developer", {
       message: "should not send",
       attachments: [missingPath],
     }) as any;
@@ -121,7 +121,7 @@ describe("chat attachment artifacts", () => {
     const room = roomStore.createRoom("Agent Artifacts", cwd, drafts(["developer"]));
     knowledgeStore.addEntry("Artifact Doc", "# Artifact Doc\n\nBody", "developer", "agent-artifacts/doc.md");
 
-    const result = await handleToolCallback("chat", room.id, "developer", {
+    const result = await handleToolCallback("response", room.id, "developer", {
       message: "Delivered doc",
       artifacts: ["agent-artifacts/doc.md"],
     }) as any;
@@ -144,7 +144,7 @@ describe("chat attachment artifacts", () => {
     writeFileSync(sourcePath, "<h1>Agent Note</h1>", "utf8");
     const room = roomStore.createRoom("Agent Attach", cwd, drafts(["developer"]));
 
-    const result = await handleToolCallback("chat", room.id, "developer", {
+    const result = await handleToolCallback("response", room.id, "developer", {
       message: "attached",
       attachments: [sourcePath],
     }) as any;

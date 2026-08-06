@@ -26,7 +26,7 @@ describe("chat tool textual @mention activation", () => {
     const { handleToolCallback } = await import("../src/engine/tools.js");
 
     parseMentions.mockReturnValue(["developer"]);
-    const result = await handleToolCallback("chat", "room-1", "architect", {
+    const result = await handleToolCallback("response", "room-1", "architect", {
       message: "@developer please implement",
       target: "room",
     });
@@ -40,7 +40,7 @@ describe("chat tool textual @mention activation", () => {
     const { handleToolCallback } = await import("../src/engine/tools.js");
 
     parseMentions.mockReturnValue([]);
-    const result = await handleToolCallback("chat", "room-1", "architect", {
+    const result = await handleToolCallback("response", "room-1", "architect", {
       message: "developer mentioned as reference",
       target: "room",
     });
@@ -53,7 +53,7 @@ describe("chat tool textual @mention activation", () => {
     const { handleToolCallback } = await import("../src/engine/tools.js");
 
     getRoom.mockReturnValue(null);
-    const result = await handleToolCallback("chat", "room-1", "architect", {
+    const result = await handleToolCallback("response", "room-1", "architect", {
       message: "@developer",
       target: "room",
     });
