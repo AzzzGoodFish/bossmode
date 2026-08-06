@@ -55,6 +55,19 @@ describe("environment-communication asset", () => {
     expect(existsSync(join(tmpDir, "prompt-assets", "environment-communication.md"))).toBe(false);
   });
 
+  it("default wording is one-sentence-per-line (no hard-wrapped continuation lines)", async () => {
+    const asset = await import("../../src/workspace/environment-communication-asset.js");
+    const content = asset.DEFAULT_ENVIRONMENT_COMMUNICATION;
+    const lines = content.split("\n");
+    // No indented continuation lines (fish 2026-08-06: hard wraps broke sentences).
+    expect(lines.filter((l) => /^ {2,}/.test(l))).toEqual([]);
+    // Exactly the 8 communication items, each on its own line.
+    expect(lines.filter((l) => /^[0-9]\./.test(l))).toHaveLength(8);
+    // Content words unchanged (only line layout differs from the original draft).
+    expect(content).toContain("Never \"see above\"");
+    expect(content).toContain("Plain IS the right voice in technical work");
+  });
+
   it("save materializes a user file and makes it authoritative; reset restores default", async () => {
     const asset = await import("../../src/workspace/environment-communication-asset.js");
     const saved = asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
