@@ -995,14 +995,21 @@ async function activateAgentInternalContinue(
 
   // Cursor advances only to the trigger — the backlog stays unread until the
   // member reads it (query_room_messages advances the cursor). Own replies
-  // after the trigger are skipped too (they are not unread to their author).
-  let cursorTarget = trigger;
+  // are skipped too (they are not unread to their author), but NEVER at the
+  // cost of regressing below the trigger: a self message that precedes the
+  // trigger belongs to an earlier turn the cursor already passed. The cursor
+  // target is the later of (trigger, last own message after it) — closed
+  // interval: the trigger itself is consumed (QA 2026-08-06 phantom unread).
+  let cursorTarget: RoomMessage = trigger;
+  let lastSelfIdx = -1;
   for (let i = allNewMessages.length - 1; i >= 0; i--) {
     if (allNewMessages[i].sender === memberName) {
-      cursorTarget = allNewMessages[i];
+      lastSelfIdx = i;
       break;
     }
   }
+  const triggerIdxInBatch = allNewMessages.findIndex((m) => m.id === trigger.id);
+  if (lastSelfIdx > triggerIdxInBatch) cursorTarget = allNewMessages[lastSelfIdx];
   if (cursorTarget.id) roomStore.setCursor(roomId, memberId, cursorTarget.id);
 
   logger.info("agent", "incrementalMessages", { member: memberName, count: backlogLimited.length + 1, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor, hybrid: true });

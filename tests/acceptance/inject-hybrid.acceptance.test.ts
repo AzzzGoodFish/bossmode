@@ -104,5 +104,16 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
     expect(third).toContain("@pm third?");
     expect(third).not.toContain("unread messages"); // own reply excluded
     expect(third).not.toContain("PONG SELF");
+
+    // Round 4 — the phantom-unread regression (QA 2026-08-06): the cursor must
+    // land ON the trigger (closed interval), never regress below it via the
+    // self-skip. The previous trigger must not re-appear as unread.
+    prompts.length = 0;
+    await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "@pm fourth?" } });
+    await waitForPrompt(1);
+    const fourth = prompts[prompts.length - 1];
+    expect(fourth).toContain("@pm fourth?");
+    expect(fourth).not.toContain("unread messages"); // no phantom previous trigger
+    expect(fourth).not.toContain("@pm third?");
   });
 });
