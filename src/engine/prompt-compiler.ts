@@ -99,18 +99,9 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Two ways to speak in the room: (1) call the \`response\` tool; (2) write \`[room]\` on its own line — everything after it is posted to the room, everything before it stays private. Text without the marker never reaches the room.
-
-Use **exactly one** channel per message — either the \`response\` tool or the \`[room]\` marker, never both. The same content sent through both channels is posted to the room twice.
+Speak with the \`response\` tool — it is the only way your text reaches the room. Bare text is never visible to anyone.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
-
-Example:
-\`\`\`
-Let me check the logs first...   ← not posted
-[room]
-Found it — the failure is in the token refresh.   ← posted
-\`\`\`
 
 \`@name\` activates that member immediately — use \`@\` only when you need that member to respond or act right away. To simply mention a member without activating them, write the name without \`@\`.
 
@@ -159,7 +150,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-Speak with the \`response\` tool — messages go directly to this private chat. There is **no** \`[room]\` marker and **no** \`@\` routing in DM (you are already talking to the user).
+Speak with the \`response\` tool — messages go directly to this private chat. There is **no** \`@\` routing in DM (you are already talking to the user).
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
 

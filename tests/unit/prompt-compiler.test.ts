@@ -114,13 +114,14 @@ describe("prompt compiler", () => {
     expect(compiled.fullPrompt).toContain("x".repeat(5_000));
   });
 
-  it("core carries the Communication section (response tool + [room] marker + activation rules) and no stale footer/chat lines", async () => {
+  it("core carries the Communication section (single response channel, no [room] marker) and no stale footer/chat lines", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("## Communication");
-    expect(compiled.fullPrompt).toContain("call the `response` tool");
-    expect(compiled.fullPrompt).toContain("[room]");
-    expect(compiled.fullPrompt).toContain("Text without the marker never reaches the room.");
+    expect(compiled.fullPrompt).toContain("Speak with the `response` tool");
+    expect(compiled.fullPrompt).toContain("the only way your text reaches the room");
+    expect(compiled.fullPrompt).not.toContain("[room]");
+    expect(compiled.fullPrompt).not.toContain("Text without the marker");
     // Activation rules (fish 0.18.9): @ = immediate activate; plain name = mention only;
     // multiple @ are parallel; sequential work hands off one at a time.
     expect(compiled.fullPrompt).toContain("`@name` activates that member immediately");

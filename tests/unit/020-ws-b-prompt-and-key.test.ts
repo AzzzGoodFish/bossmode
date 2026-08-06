@@ -83,14 +83,15 @@ describe("020 WS-B prompt + instanceKey", () => {
       "room-principles",
     ]);
     expect(compiled.envPrompt).toContain("group chat room");
-    expect(compiled.envPrompt).toContain("[room]");
+    expect(compiled.envPrompt).toContain("Speak with the `response` tool");
+    expect(compiled.envPrompt).not.toContain("[room]");
     expect(compiled.fullPrompt).toContain("I am careful.");
     expect(compiled.fullPrompt).toContain("Always test.");
     expect(compiled.fullPrompt).toContain("Ship 0.20");
     expect(compiled.fullPrompt).toContain("Be kind.");
   });
 
-  it("compileMemberPromptForScope (dm) has no room marker / @ routing and no room principles", async () => {
+  it("compileMemberPromptForScope (dm) has no @ routing and no room principles", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
 
@@ -107,10 +108,9 @@ describe("020 WS-B prompt + instanceKey", () => {
 
     expect(compiled.envPrompt).toContain("private chat");
     expect(compiled.envPrompt).toContain("create_room");
-    // Mentions the absence of room marker / @ routing — not the room protocol itself
-    expect(compiled.envPrompt).toMatch(/no.*\[room\]/i);
+    // No @ routing in DM; no [room] marker mention at all (feature removed)
     expect(compiled.envPrompt).toMatch(/no.*@/i);
-    expect(compiled.envPrompt).not.toContain("write \`[room]\`");
+    expect(compiled.envPrompt).not.toContain("[room]");
     const roomSection = compiled.sections.find((s) => s.id === "room-principles");
     expect(roomSection?.included).toBe(false);
   });
