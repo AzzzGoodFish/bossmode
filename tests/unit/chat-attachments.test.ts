@@ -80,4 +80,90 @@ describe("chat attachment artifacts", () => {
     expect(unsafe.status).not.toBe(200);
   });
 
+  it("agent chat fails atomically when any attachment path is missing", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
+    const missingPath = join(cwd, "missing.md");
+    const room = roomStore.createRoom("Agent Missing Attach", cwd, drafts(["developer"]));
+
+    const result = await handleToolCallback("chat", room.id, "developer", {
+      message: "should not send",
+      attachments: [missingPath],
+    }) as any;
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(missingPath);
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
+
+    const chatTool = createBossmodeSdkTools({ roomId: room.id, agentName: "developer", roomMembers: ["developer"] })[0];
+    await expect(chatTool.execute("call-1", {
+      message: "should not report sent",
+      target: "room",
+      attachments: [missingPath],
+    })).rejects.toThrow(missingPath);
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
+  });
+
+  it("agent chat can add previewable message artifact references", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const knowledgeStore = await import("../../src/knowledge/store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-artifacts-"));
+    const room = roomStore.createRoom("Agent Artifacts", cwd, drafts(["developer"]));
+    knowledgeStore.addEntry("Artifact Doc", "# Artifact Doc\n\nBody", "developer", "agent-artifacts/doc.md");
+
+    const result = await handleToolCallback("chat", room.id, "developer", {
+      message: "Delivered doc",
+      artifacts: ["agent-artifacts/doc.md"],
+    }) as any;
+    expect(result.ok).toBe(true);
+
+    const [message] = messageStore.getMessages(room.id, { limit: 1 });
+    expect(message.content).toBe("Delivered doc");
+    expect(message.artifacts).toEqual(["agent-artifacts/doc.md"]);
+  });
+
+  it("agent chat attachments use structured metadata and do not leak source/store absolute paths in message JSON", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-"));
+    const sourcePath = join(cwd, "agent-note.html");
+    writeFileSync(sourcePath, "<h1>Agent Note</h1>", "utf8");
+    const room = roomStore.createRoom("Agent Attach", cwd, drafts(["developer"]));
+
+    const result = await handleToolCallback("chat", room.id, "developer", {
+      message: "attached",
+      attachments: [sourcePath],
+    }) as any;
+    expect(result.ok).toBe(true);
+
+    const [message] = messageStore.getMessages(room.id, { limit: 1 });
+    const serialized = JSON.stringify(message);
+    expect(message.content).toBe("attached");
+    expect(serialized).not.toContain(sourcePath);
+    expect(serialized).not.toContain(cwd);
+    expect(serialized).not.toContain(".bossmode-attachments");
+    expect(message.attachments?.[0]).toEqual(expect.objectContaining({
+      originalFilename: "agent-note.html",
+      previewType: "html",
+    }));
+    expect(message.attachments?.[0].storedFilename).toMatch(/^[a-f0-9]{12}\.html$/);
+    expect(message.attachments?.[0].storedFilename).not.toContain("/");
+
+    // Test mock config path is isolated and not serialized accidentally.
+    expect(serialized).not.toContain(getTestBossmodeDir());
+  });
 });

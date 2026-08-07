@@ -99,7 +99,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-To speak in the room, start your text with \`response: \` — only texts with this prefix are posted (the prefix is stripped). Anything else you write is invisible. Your final text is your reply: if it lacks the prefix, no one will see it.
+Speak with the \`chat\` tool — it is the only way your messages reach the room. Texts outside tool calls are invisible work notes, with one exception: when a reply is expected (you'll see a [REPLY EXPECTED] note) and your turn ends without a chat call, your final completed text is posted automatically.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
 
@@ -150,7 +150,7 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 
 ## Communication
 
-To reply in this private chat, start your text with \`response: \` — only prefixed texts are delivered (prefix stripped). No \`@\` routing in DM.
+Reply with the \`chat\` tool — messages go directly to this private chat. No \`@\` routing. If your turn ends without a chat call, your final text is posted automatically.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
 

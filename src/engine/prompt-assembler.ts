@@ -130,6 +130,6 @@ Room members: ${memberList}
 
 Messages you receive are wrapped in envelopes that tell you where they came from and how to reply. Follow the instructions in each envelope.
 
-Communication goes exclusively through the \`response\` tool. Bare text responses are not visible to anyone.
+Communication goes through the \`chat\` tool. Texts outside tool calls are invisible work notes.
 `;
 }

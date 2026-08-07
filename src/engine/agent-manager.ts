@@ -24,7 +24,7 @@ import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
-import { matchResponsePrefix, deliverMemberMessage } from "./tools.js";
+import { deliverMemberMessage } from "./tools.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -166,12 +166,11 @@ interface AgentInstance {
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
-  /** Final-text delivery (0.21): per-turn completed text segments. `turnSegmentSeq`
-   * increments per completed message_end; `deliveredSegments` tracks which
-   * segments already went out via the mid-turn prefix path so the final
-   * settlement never double-posts. Both reset on agent_start. */
+  /** Final-text fallback: per-turn completed text segments. `turnSegmentSeq`
+   * increments per completed message_end; `lastCompletedFinalText`/Seq hold the
+   * last completed segment — the fallback candidate when a debt turn ends
+   * without a chat call. Both reset on agent_start. */
   turnSegmentSeq: number;
-  deliveredSegments: Set<number>;
   lastCompletedFinalText: string;
   lastCompletedFinalSeq: number;
   /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
@@ -322,7 +321,7 @@ function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
   logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
 }
 
-const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — start your final text with `response: ` so it reaches the room.";
+const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat` tool.";
 const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
 
 function isLengthStopReason(stopReason: unknown): boolean {
@@ -371,21 +370,18 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
     return;
   }
   if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
-  // Final-text delivery (0.21 conditional-delivery contract): the last
-  // *completed* text segment of the turn is the reply candidate. If it starts
-  // with `response:`, strip the prefix and deliver. Abort/error turns never
-  // deliver (skipChatWarning=true on abort; hadErrorInTurn on error). If the
-  // segment already went out via the mid-turn prefix path, don't double-post.
-  if (!opts.skipChatWarning && !instance.hadErrorInTurn) {
-    const seq = instance.lastCompletedFinalSeq;
+  // Final-text fallback (fish 2026-08-07): a turn that owed a reply and never
+  // called chat posts its last *completed* text segment verbatim, marked
+  // autoDelivered. Abort/error turns never fall back (skipChatWarning=true on
+  // abort; hadErrorInTurn on error). Length-truncated segments are not
+  // candidates (the continuation path above runs first; the continuation's
+  // completed segment is). The fallback clears the debt, so the silence
+  // warning below only fires when there was no text at all.
+  if (!opts.skipChatWarning && !instance.hadErrorInTurn && instance.pendingChatReply) {
     const seg = instance.lastCompletedFinalText;
-    if (seq > 0 && seg && !instance.deliveredSegments.has(seq)) {
-      const m = matchResponsePrefix(seg);
-      if (m.matched && m.body.trim()) {
-        deliverMemberMessage(instance.roomId, instance.agentName, m.body.trim());
-        instance.deliveredSegments.add(seq);
-        clearPendingChatReply(instance, "final_text");
-      }
+    if (seg) {
+      deliverMemberMessage(instance.roomId, instance.agentName, seg, { autoDelivered: true });
+      clearPendingChatReply(instance, "final_text_fallback");
     }
   }
   if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn) {
@@ -852,7 +848,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
           onChat: async (message: string) => {
             postMessage(roomId, memberName, message, [], { senderMemberId: memberId });
             const active = instances.get(key);
-            if (active) clearPendingChatReply(active, "callback:response");
+            if (active) clearPendingChatReply(active, "callback:chat");
           },
           onMention: async (targetMember: string, message: string) => {
             // Mention activation is handled by router listener via message-bus.
@@ -883,7 +879,6 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
         turnSegmentSeq: 0,
-        deliveredSegments: new Set<number>(),
         lastCompletedFinalText: "",
         lastCompletedFinalSeq: 0,
         compacting: false,
@@ -915,8 +910,19 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
 // -- Activation --
 
-export async function activateAgent(roomId: string, memberRef: string): Promise<void> {
-  return activateAgentInternal(roomId, memberRef, { source: "room_mention", replyDebt: true, trigger: "activate" });
+export async function activateAgent(roomId: string, memberRef: string, ctx?: { needResponse?: boolean; senderName?: string }): Promise<void> {
+  // Reply-debt semantics (fish 2026-08-07): user @ always owes a reply; a
+  // member @ owes one only when the sender set need_response (FYI channel
+  // otherwise — activated, no debt, no fallback). System/absent ctx keeps the
+  // legacy behavior: debt on activation.
+  const isUser = ctx?.senderName === "user";
+  const replyDebt = isUser || !ctx ? true : !!ctx.needResponse;
+  const banner = ctx && replyDebt
+    ? isUser
+      ? "[REPLY EXPECTED] Respond using the chat tool."
+      : `[REPLY EXPECTED] ${ctx.senderName} expects your reply — respond with the chat tool.`
+    : undefined;
+  return activateAgentInternal(roomId, memberRef, { source: "room_mention", replyDebt, trigger: "activate", banner });
 }
 
 async function activateAgentInternal(
@@ -1053,14 +1059,14 @@ async function activateAgentInternalContinue(
 
 // -- @all broadcast --
 
-export async function activateAll(roomId: string): Promise<void> {
+export async function activateAll(roomId: string, ctx?: { needResponse?: boolean; senderName?: string }): Promise<void> {
   const room = roomStore.getRoom(roomId);
   if (!room) return;
   const activations = roomStore.getRoomMembers(roomId).map((member) => {
     const key = instanceKey(roomId, member.id);
     const instance = instances.get(key);
     if (instance && (instance.status === "working" || instance.dispatchState !== "idle")) return Promise.resolve();
-    return activateAgent(roomId, member.id);
+    return activateAgent(roomId, member.id, ctx);
   });
   await Promise.allSettled(activations);
 }
@@ -1702,11 +1708,14 @@ function wireInstanceEvents(
 ): void {
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
+    // A successful chat call settles the reply debt — the fallback only fires
+    // when the debt is still pending at settlement (no chat was called).
+    if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
+      clearPendingChatReply(instance, `tool:${event.toolName}`);
+    }
     if (event.type === "agent_start") {
-      // Fresh turn: reset final-text segment tracking (delivered segments and
-      // the seq counter) so each turn is numbered independently.
+      // Fresh turn: reset final-text segment tracking so each turn is numbered independently.
       instance.turnSegmentSeq = 0;
-      instance.deliveredSegments.clear();
       instance.lastCompletedFinalText = "";
       instance.lastCompletedFinalSeq = 0;
       instance.turnActive = true;
@@ -1745,25 +1754,17 @@ function wireInstanceEvents(
         instance.lengthContinuationPending = true;
         logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
       }
-      // Final-text capture: only *completed* segments are candidates — length
-      // truncation, provider errors and aborts never are (their text is a
-      // broken fragment, not a reply). Mid-turn segments starting with the
-      // `response:` prefix are delivered immediately (stripped); the final
-      // settlement re-checks the last segment and never double-posts.
+      // Final-text capture: only *completed* segments are fallback candidates —
+      // length truncation, provider errors and aborts never are (their text is
+      // a broken fragment, not a reply). The final settlement posts the last
+      // completed segment only when the reply debt is still pending.
       const aborted = event.stopReason === "aborted" || event.stopReason === "error" || Boolean((event as any).errorMessage);
       if (!instance.lastMessageEndWasLength && !aborted) {
         const text = (event.text || "").trim();
         if (text) {
           instance.turnSegmentSeq += 1;
-          const seq = instance.turnSegmentSeq;
           instance.lastCompletedFinalText = text;
-          instance.lastCompletedFinalSeq = seq;
-          const m = matchResponsePrefix(text);
-          if (m.matched && m.body.trim()) {
-            instance.deliveredSegments.add(seq);
-            deliverMemberMessage(roomId, memberName, m.body.trim());
-            clearPendingChatReply(instance, "final_text_prefix");
-          }
+          instance.lastCompletedFinalSeq = instance.turnSegmentSeq;
         }
       }
     }
@@ -1847,7 +1848,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
     const skills = resolveSkills(member, agentDef);
     const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
 
-    const syntheticRoomId = scopeId; // "dm:<memberId>" — tools/response branch on this prefix
+    const syntheticRoomId = scopeId; // "dm:<memberId>" — tools/chat branch on this prefix
 
     try {
       const handle = await runtime.createAgent({
@@ -1866,7 +1867,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
             // store, broadcasts to dm:<id> subscribers, and notifies listeners.
             postMessage(syntheticRoomId, member.name, message);
             const active = instances.get(key);
-            if (active) clearPendingChatReply(active, "callback:response-dm");
+            if (active) clearPendingChatReply(active, "callback:chat-dm");
           },
           onMention: async (_target: string, message: string) => {
             // DM has no @ routing — treat as normal chat.
@@ -1894,7 +1895,6 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
         turnSegmentSeq: 0,
-        deliveredSegments: new Set<number>(),
         lastCompletedFinalText: "",
         lastCompletedFinalSeq: 0,
         compacting: false,
@@ -1973,8 +1973,8 @@ export async function activateDmMember(memberId: string): Promise<void> {
       .join("\n\n");
 
     const prompt = transcript
-      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message — start your final text with \`response: \` so it is delivered.`
-      : `You are in a private chat with the user. They just opened the conversation. Greet briefly — start your final text with \`response: \` so it is delivered, or wait for their request.`;
+      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message with the chat tool.`
+      : `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
 
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "dm-activate");

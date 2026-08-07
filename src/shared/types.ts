@@ -491,6 +491,10 @@ export interface RoomMessage {
   artifacts?: string[];
   /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
   attachments?: RoomMessageAttachment[];
+  /** Sender asked @-mentioned recipients to reply (chat tool need_response=true). */
+  needResponse?: boolean;
+  /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */
+  autoDelivered?: boolean;
 }
 
 // -- Agent Status --

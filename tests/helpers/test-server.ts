@@ -133,8 +133,8 @@ export async function createTestServer(): Promise<TestServer> {
 
   // Initialize message router — wire @mentions to engine
   initRouter(
-    (roomId, memberName) => { activateAgent(roomId, memberName).catch(() => {}); },
-    (roomId) => { activateAll(roomId).catch(() => {}); },
+    (roomId, memberName, ctx) => { activateAgent(roomId, memberName, ctx).catch(() => {}); },
+    (roomId, ctx) => { activateAll(roomId, ctx).catch(() => {}); },
     (roomId, memberRef, urgentByName) => { interruptAgent(roomId, memberRef, urgentByName).catch(() => {}); },
   );
 
