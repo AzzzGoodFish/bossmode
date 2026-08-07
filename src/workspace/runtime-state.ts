@@ -23,8 +23,10 @@ export interface MountStale {
 export interface RuntimeStateEntry {
   /** sha1 of bossmode-core + environment-communication + tool schema — code-owned contract parts only. */
   contractFingerprint?: string;
-  /** Last fingerprint the user was notified about (one-shot drift guard). */
-  driftNotified?: string;
+  /** Member-facing contract version stored at last compile (drives the startup drift dialog). */
+  contractVersion?: number;
+  /** Last version the user was notified about (one-shot drift guard). */
+  driftNotified?: number;
   /** Mount config changed since last reload/reset; instance still runs the old mounts. */
   staleMounts?: MountStale;
 }
@@ -71,15 +73,15 @@ export function updateRuntimeStateEntry(scopeId: string, memberId: string, patch
   writeRuntimeState(scopeId, state);
 }
 
-export function setContractFingerprint(scopeId: string, memberId: string, fingerprint: string): void {
+export function setContractFingerprint(scopeId: string, memberId: string, fingerprint: string, contractVersion: number): void {
   const entry = getRuntimeStateEntry(scopeId, memberId);
   // Refreshing the fingerprint clears any pending contract drift notification.
-  updateRuntimeStateEntry(scopeId, memberId, { ...entry, contractFingerprint: fingerprint, driftNotified: undefined });
+  updateRuntimeStateEntry(scopeId, memberId, { ...entry, contractFingerprint: fingerprint, contractVersion, driftNotified: undefined });
 }
 
-export function markDriftNotified(scopeId: string, memberId: string, fingerprint: string): void {
+export function markDriftNotified(scopeId: string, memberId: string, version: number): void {
   const entry = getRuntimeStateEntry(scopeId, memberId);
-  updateRuntimeStateEntry(scopeId, memberId, { ...entry, driftNotified: fingerprint });
+  updateRuntimeStateEntry(scopeId, memberId, { ...entry, driftNotified: version });
 }
 
 export function markStaleMounts(scopeId: string, memberId: string, fields: string[]): void {

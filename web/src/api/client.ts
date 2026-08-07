@@ -1021,7 +1021,7 @@ export interface ContractDriftEntry {
   memberId: string;
   scopeId: string;
   scopeLabel: string;
-  currentFingerprint: string;
+  currentVersion: number;
   alreadyNotified: boolean;
 }
 

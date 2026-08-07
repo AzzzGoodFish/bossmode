@@ -238,7 +238,7 @@ addRoute("POST", "/api/rooms/:id/contract-drift/dismiss", async (_req, res, para
   const drift = computeContractDrift(params.id);
   const { markDriftNotified } = await import("../workspace/runtime-state.js");
   for (const d of drift) {
-    if (!d.alreadyNotified) markDriftNotified(scopeId, d.memberId, d.currentFingerprint);
+    if (!d.alreadyNotified) markDriftNotified(scopeId, d.memberId, d.currentVersion);
   }
   // Broadcast refreshed status so the frontend picks up stale=contract red dots immediately.
   for (const d of drift) {

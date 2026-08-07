@@ -25,6 +25,7 @@ import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../worksp
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import { deliverMemberMessage } from "./tools.js";
+import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
 import {
   wrapRoomContextMessage,
@@ -799,7 +800,8 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
     const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
-    setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint);
+    setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+    clearStaleMounts(`room:${roomId}`, memberId);
 
     // Resolve skills: member config takes precedence over agent definition; global skills pool only.
     const skills = resolveSkills(member, agentDef);
@@ -1314,9 +1316,9 @@ export interface ContractDriftEntry {
   memberId: string;
   scopeId: string;
   scopeLabel: string;
-  /** Current build's fingerprint (to record on dismiss). */
-  currentFingerprint: string;
-  /** True if the user already dismissed a notification for this exact drift. */
+  /** Current build's contract version. */
+  currentVersion: number;
+  /** True if the user already dismissed a notification for this exact version. */
   alreadyNotified: boolean;
 }
 
@@ -1336,39 +1338,34 @@ export function computeContractDrift(roomId: string): ContractDriftEntry[] {
   const drift: ContractDriftEntry[] = [];
   for (const m of members) {
     const entry = state[`${scopeId}:${m.id}`];
-    if (!entry?.contractFingerprint) continue; // first install / no record
-    // Recompile to get the current-build fingerprint for this member.
-    const member = resolveRoomMember(roomId, m.id);
-    if (!member) continue;
-    const agentDef = loadAgentDefinition(member.agent);
-    if (!agentDef) continue;
-    let currentFp: string;
-    try {
-      const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
-      const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
-      currentFp = compiled.contractFingerprint;
-    } catch {
-      continue; // compile failed — don't block, skip
-    }
-    if (entry.contractFingerprint !== currentFp) {
+    if (!entry?.contractVersion) continue; // first install / no record
+    if (entry.contractVersion < MEMBER_CONTRACT_VERSION) {
       drift.push({
         memberName: m.name,
         memberId: m.id,
         scopeId,
         scopeLabel: room.name,
-        currentFingerprint: currentFp,
-        alreadyNotified: entry.driftNotified === currentFp,
+        currentVersion: MEMBER_CONTRACT_VERSION,
+        alreadyNotified: entry.driftNotified === MEMBER_CONTRACT_VERSION,
       });
     }
   }
   return drift;
 }
 
-/** Mount-stale info for a member in a scope (for status badges + WS). */
+/** Mount-stale info for a member in a scope (for status badges + WS).
+ * Suppresses staleMounts for members with no live instance (activation = fresh mounts).
+ */
 export function getMemberStale(scopeId: string, memberId: string): { mounts?: { since: number; fields: string[] }; contract?: boolean } | null {
   const entry = getRuntimeStateEntry(scopeId, memberId);
   const out: { mounts?: { since: number; fields: string[] }; contract?: boolean } = {};
-  if (entry.staleMounts) out.mounts = { since: entry.staleMounts.since, fields: entry.staleMounts.fields };
+  // Liveness suppression: only surface mount staleness when the member has a
+  // running instance whose old mounts haven't been picked up yet.
+  if (entry.staleMounts) {
+    const ref = parseScopeId(scopeId);
+    const key = ref?.kind === "dm" ? instanceKey(scopeId, memberId) : instanceKey(ref!.roomId, memberId);
+    if (instances.has(key)) out.mounts = { since: entry.staleMounts.since, fields: entry.staleMounts.fields };
+  }
   if (entry.driftNotified) out.contract = true;
   return (out.mounts || out.contract) ? out : null;
 }
@@ -1686,7 +1683,20 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   if (!instance) {
-    return { ok: true, reloaded: false, message: "Member is not running. Latest configuration will apply on next activation." };
+    // No running instance: reload is a no-op semantically (activation creates
+    // fresh with current code/config), but we still refresh the contract
+    // fingerprint+version and clear stale markers so the UI doesn't show
+    // a false "needs reload" badge for a member that will auto-pick-up.
+    try {
+      const agentDef2 = loadAgentDefinition(member.agent);
+      if (agentDef2) {
+        const docsRoot2 = join(getBossmodeDir(), "knowledge", "docs");
+        const compiled2 = compileMemberPrompt({ room, member, agentDef: agentDef2, docsRoot: docsRoot2 });
+        setContractFingerprint(`room:${roomId}`, memberId, compiled2.contractFingerprint, MEMBER_CONTRACT_VERSION);
+      }
+    } catch { /* compile failed — best effort */ }
+    clearStaleMounts(`room:${roomId}`, memberId);
+    return { ok: true, reloaded: false, message: "Member is not running — marked up to date; latest prompt, skills and tools apply on next activation." };
   }
   if (instance.status === "working" || instance.dispatchState !== "idle" || instance.promptInFlight) {
     throw new Error("Member is busy. Reload when the current turn is idle.");
@@ -1712,7 +1722,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     skillNames: skills,
   });
   // Reload picked up new contract + mounts: refresh fingerprint, clear stale.
-  setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint);
+  setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
   clearStaleMounts(`room:${roomId}`, memberId);
   emitAgentLocalEvent(roomId, memberId, { type: "system", text: "Reloaded member resources in place." });
   logger.info("agent", "member resources reloaded", { roomId, member: member.name, memberId, skills: skills.length });
@@ -1947,7 +1957,8 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
       docsRoot: docsRootPath,
       activeScopes: buildDmScopeLabels(memberId, scopeId),
     });
-    setContractFingerprint(scopeId, memberId, compiled.contractFingerprint);
+    setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+    clearStaleMounts(scopeId, memberId);
 
     const skills = resolveSkills(member, agentDef);
     const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);

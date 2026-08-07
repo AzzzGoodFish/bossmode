@@ -4,16 +4,16 @@
  * Reset, or Keep per member, then applies.
  *
  * Data: GET /api/rooms/:id/contract-drift → ContractDriftEntry[]
- * Actions: reloadMemberResources / resetAgentSession per member, then
+ * Actions: resetAgentSession per member (Reset), then
  * dismissContractDrift to clear the one-shot notification.
  */
 import { useState, useCallback } from "react";
 import type { ContractDriftEntry } from "../api/client";
-import { reloadMemberResources, resetAgentSession } from "../api/client";
+import { resetAgentSession } from "../api/client";
 import { Sheet } from "./Sheet";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 
-type Choice = "reload" | "reset" | "keep";
+type Choice = "reset" | "keep";
 
 interface DriftMember extends ContractDriftEntry {
   status: string;
@@ -43,34 +43,28 @@ export function ContractDriftDialog({
   }, []);
 
   const pending = members.filter((m) => !resolved.has(m.memberName));
-  const reloadCount = pending.filter((m) => choices[m.memberName] === "reload").length;
   const resetCount = pending.filter((m) => choices[m.memberName] === "reset").length;
-  const totalCount = reloadCount + resetCount;
 
-  const applyLabel = totalCount === 0
+  const applyLabel = resetCount === 0
     ? "Nothing to apply"
-    : [reloadCount && `Reload ${reloadCount}`, resetCount && `Reset ${resetCount}`].filter(Boolean).join(" · ") + (totalCount > 1 ? " members" : " member");
+    : `Reset ${resetCount} ${resetCount > 1 ? "members" : "member"}`;
 
   const handleApply = useCallback(async () => {
     setApplying(true);
-    const targets = pending.filter((m) => choices[m.memberName] !== "keep");
+    const targets = pending.filter((m) => choices[m.memberName] === "reset");
     for (const m of targets) {
       try {
-        if (choices[m.memberName] === "reset") {
-          await resetAgentSession(roomId, m.memberName);
-        } else {
-          await reloadMemberResources(roomId, m.memberName);
-        }
+        await resetAgentSession(roomId, m.memberName);
         setResolved((prev) => new Set(prev).add(m.memberName));
       } catch (err) {
-        console.error(`Failed to ${choices[m.memberName]} ${m.memberName}`, err);
-        onError?.(`Couldn't ${choices[m.memberName]} ${m.memberName} — try again from the member panel.`);
+        console.error(`Failed to reset ${m.memberName}`, err);
+        onError?.(`Couldn't reset ${m.memberName} — try again from the member panel.`);
       }
     }
     setApplying(false);
     onApplied();
     onClose();
-  }, [pending, choices, roomId, onApplied, onClose]);
+  }, [pending, choices, roomId, onApplied, onClose, onError]);
 
   return (
     <Sheet open onClose={onClose} size="lg">
@@ -84,10 +78,7 @@ export function ContractDriftDialog({
           Bossmode updated
         </div>
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-3">
-          <b className="text-ink-1 font-semibold">{pending.length} {pending.length === 1 ? "member" : "members"}</b>{" "}
-          {pending.length === 1 ? "is" : "are"} running sessions from before this update.{" "}
-          <b className="text-ink-1 font-semibold">Reload applies the new version now and keeps the conversation</b>{" "}
-          — enough for most updates. They'd also pick it up automatically on their next activation.
+          <b className="text-ink-1 font-semibold">{pending.length} {pending.length === 1 ? "member" : "members"}</b> have sessions from before this contract update. The new version takes effect automatically on their next activation. If this update changed how members converse, or a session is misbehaving, <b className="text-ink-1 font-semibold">Reset</b> gives it a clean start — memory lives in chat, tasks, Library and principles, unaffected.
         </p>
       </div>
 
@@ -95,7 +86,7 @@ export function ContractDriftDialog({
         {members.map((m) => {
           const busy = m.status === "working";
           const done = resolved.has(m.memberName);
-          const choice = choices[m.memberName] ?? "reload";
+          const choice = choices[m.memberName] ?? "keep";
           return (
             <div key={m.memberId} className={`flex items-center gap-2.5 px-3 py-2.5 border-b border-line-soft last:border-b-0 bg-surface-1 ${busy ? "opacity-75" : ""}`}>
               <StaffBadge name={m.memberName} status={statusFromAgent(m.status)} size="sm" />
@@ -114,22 +105,21 @@ export function ContractDriftDialog({
                 ) : busy ? (
                   <div className="text-right">
                     <div className="flex gap-0.5 rounded-lg border border-line-soft bg-inset p-0.5">
-                      <button disabled className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-ink-3 opacity-40">Reload</button>
-                      <button disabled className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-ink-3 opacity-40">Reset</button>
                       <button disabled className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-ink-3 opacity-40">Keep</button>
+                      <button disabled className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-ink-3 opacity-40">Reset</button>
                     </div>
                     <div className="text-[10px] text-ink-4 mt-1">Working now — act when idle</div>
                   </div>
                 ) : (
                   <div className="flex gap-0.5 rounded-lg border border-line-soft bg-inset p-0.5">
-                    {(["reload", "reset", "keep"] as const).map((c) => (
+                    {(["keep", "reset"] as const).map((c) => (
                       <button
                         key={c}
                         onClick={() => setChoice(m.memberName, c)}
                         className={`rounded-md px-2.5 py-1 text-[11.5px] font-semibold whitespace-nowrap transition-colors ${choice === c ? "bg-surface-1 text-ink-1 border border-line-soft shadow-sm" : "text-ink-3 border border-transparent"}`}
-                        title={c === "reload" ? "Apply now, keep conversation" : c === "reset" ? "Fresh session — for contract updates or misbehaving sessions" : "Apply automatically on next activation"}
+                        title={c === "reset" ? "Fresh session — for contract updates or misbehaving sessions" : "Apply automatically on next activation"}
                       >
-                        {c === "reload" ? "Reload" : c === "reset" ? "Reset" : "Keep"}
+                        {c === "reset" ? "Reset" : "Keep"}
                       </button>
                     ))}
                   </div>
@@ -142,16 +132,12 @@ export function ContractDriftDialog({
 
       <div className="mx-5 mt-3 flex flex-col gap-1.5">
         <div className="flex gap-2 text-[11px] text-ink-3 leading-relaxed items-start">
-          <span className="shrink-0 mt-0.5 text-ink-4">↻</span>
-          <span><b className="text-ink-2 font-semibold">Reload</b> (recommended) — new version takes effect now, conversation kept. Enough even for contract updates; the prompt cache is rebuilt, so the next reply may be slower.</span>
-        </div>
-        <div className="flex gap-2 text-[11px] text-ink-3 leading-relaxed items-start">
           <span className="shrink-0 mt-0.5 text-ink-4">⟲</span>
-          <span><b className="text-ink-2 font-semibold">Reset session</b> — clean start. Worth it when an update reworks the conversation contract, or a session is misbehaving. Only in-flight context is lost — memory lives in chat, tasks, Library, principles.</span>
+          <span><b className="text-ink-2 font-semibold">Reset session</b> — clean start. Worth it when an update reworks the conversation contract (like this week's chat-tool switch), or a session is misbehaving. Only in-flight context is lost — memory lives in chat, tasks, Library, principles.</span>
         </div>
         <div className="flex gap-2 text-[11px] text-ink-3 leading-relaxed items-start">
           <span className="shrink-0 mt-0.5 text-ink-4">○</span>
-          <span><b className="text-ink-2 font-semibold">Keep</b> — do nothing now. The new version applies automatically on the member's next activation.</span>
+          <span><b className="text-ink-2 font-semibold">Keep</b> (default) — do nothing. The new version applies automatically on the member's next activation.</span>
         </div>
       </div>
 
@@ -159,7 +145,7 @@ export function ContractDriftDialog({
         <button onClick={onClose} className="text-ink-3 text-[13px] px-3 py-2 hover:text-ink-1">Later</button>
         <button
           onClick={handleApply}
-          disabled={applying || totalCount === 0}
+          disabled={applying || resetCount === 0}
           className="rounded-lg bg-accent text-accent-contrast text-[13px] font-semibold px-4 py-2 disabled:opacity-45 hover:opacity-90"
         >
           {applying ? <span className="inline-block w-[11px] h-[11px] rounded-full border-2 border-white/30 border-t-white animate-spin align-text-bottom" /> : " "}
