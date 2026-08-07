@@ -6,7 +6,7 @@
 export function buildChatToolDescription(memberList: string): string {
   return `Post a message to the room.
 
-- message (required): text content. @name activates that member and asks for a reply; @name must exactly match a member name; a plain name never activates.
+- message (required): text content. @name activates that member (exact name match required; a plain name never activates). Pair with need_response=true to ask them to reply.
 - attachments (optional): local file paths, copied to the room's attachment store.
 - artifacts (optional): file paths shown as previewable chips on the message.
 - need_response (optional, default false): when true, each @-mentioned member is asked to reply.
@@ -14,4 +14,4 @@ export function buildChatToolDescription(memberList: string): string {
 Room members: ${memberList}`;
 }
 
-export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member and requests a reply; a plain name does not.";
+export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member; a plain name does not.";
