@@ -6,6 +6,7 @@ import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
 import { ContractDriftDialog } from "../components/ContractDriftDialog";
+import { StalePill } from "../components/StalePill";
 import { Search, Plus, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
@@ -153,8 +154,13 @@ export function Main({
 
   const closeDrift = useCallback(() => {
     setDriftOpen(false);
-    if (selectedRoomId) dismissContractDrift(selectedRoomId).catch(() => {});
-  }, [selectedRoomId]);
+    if (selectedRoomId) {
+      dismissContractDrift(selectedRoomId).then(() => {
+        // The dismiss endpoint broadcasts stale status via WS; also reload to pick up agentStale.
+        reloadRoom();
+      }).catch(() => {});
+    }
+  }, [selectedRoomId, reloadRoom]);
   const displayMemberInfos = useMemo(() => {
     // 0.20: compose from room.globalMemberIds + contacts (roomMembers array is being removed — G3 debt ②).
     if (room?.globalMemberIds?.length) {
@@ -331,6 +337,7 @@ export function Main({
         </div>
 
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          <StalePill roomId={room.id} staleMembers={staleMembers} agentStatus={displayAgentStatus} />
           <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
             {reconnecting && <span className="text-[10px] text-think animate-pulse hidden sm:block">reconnecting</span>}
             {!connected && !reconnecting && <span className="text-[10px] text-blocked hidden sm:block">offline</span>}
@@ -493,6 +500,7 @@ export function Main({
           members={driftMembers}
           onClose={closeDrift}
           onApplied={() => { reloadRoom(); }}
+          onError={(msg) => toast(msg, "error")}
         />
       )}
     </>

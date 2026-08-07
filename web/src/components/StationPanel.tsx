@@ -372,7 +372,7 @@ This clears the member's working session memory and starts fresh. Room messages 
                   className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   title={`Configure ${name} · ${statusLabel(status)}`}
                 >
-                  <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? (staleMembers[name].contract ? "App updated — Reload to apply" : "Configuration changed — Reload to apply") : ""} />
+                  <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
                 </button>
                 <div className="flex-1 min-w-0">
                   <button
@@ -1141,7 +1141,7 @@ export function MemberConfigPanel({
       <div className="px-5 pt-5 flex flex-col gap-4 shrink-0">
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" stale={!!stale} staleTitle={stale ? (stale.contract ? "App updated — Reload to apply" : "Configuration changed — Reload to apply") : ""} />
+            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" stale={!!stale} staleTitle={stale ? [stale.contract && "App updated", stale.mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {editingName ? (
@@ -1318,7 +1318,10 @@ export function MemberConfigPanel({
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
                     <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, principles, mainline and tools without clearing the conversation.</div>
-                    {stale && <div className="flex items-center gap-1.5 mt-1 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />{stale.contract ? "App updated — Reload to apply" : `${(stale.mounts?.fields || []).map(f => f === "mcpServers" ? "MCP servers" : "Extensions").join(" · ")} changed — Reload to apply.`}</div>}
+                    {stale && <div className="mt-1">
+                      {stale.contract && <div className="flex items-center gap-1.5 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />App updated — Reload to apply; Reset if the update reworked the conversation contract.</div>}
+                      {stale.mounts && <div className="flex items-center gap-1.5 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />{(stale.mounts.fields || []).map(f => f === "mcpServers" ? "MCP servers" : "Extensions").join(" · ")} changed — Reload to apply.</div>}
+                    </div>}
                   </div>
                   <button
                     type="button"

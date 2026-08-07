@@ -10,7 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -34,6 +34,7 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
     const rooms = roomStore.listRoomsStrict().map((room) => ({
       ...room,
       agentStatuses: getRoomAgentStatuses(room.id),
+      agentStale: getRoomAgentStale(room.id),
     }));
     sendJson(res, 200, rooms);
   } catch (err) {
@@ -200,7 +201,8 @@ addRoute("GET", "/api/rooms/:id", async (_req, res, params) => {
     return;
   }
   const agentStatuses = getRoomAgentStatuses(params.id);
-  sendJson(res, 200, { ...room, agentStatuses });
+  const agentStale = getRoomAgentStale(params.id);
+  sendJson(res, 200, { ...room, agentStatuses, agentStale });
 });
 
 addRoute("DELETE", "/api/rooms/:id", async (_req, res, params) => {
@@ -237,6 +239,11 @@ addRoute("POST", "/api/rooms/:id/contract-drift/dismiss", async (_req, res, para
   const { markDriftNotified } = await import("../workspace/runtime-state.js");
   for (const d of drift) {
     if (!d.alreadyNotified) markDriftNotified(scopeId, d.memberId, d.currentFingerprint);
+  }
+  // Broadcast refreshed status so the frontend picks up stale=contract red dots immediately.
+  for (const d of drift) {
+    const member = roomStore.getRoomMembers(params.id).find((m) => m.id === d.memberId);
+    if (member) broadcastMemberStatus(params.id, member.id);
   }
   sendJson(res, 200, { ok: true });
 });

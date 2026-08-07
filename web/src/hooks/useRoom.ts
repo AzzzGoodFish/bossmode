@@ -80,6 +80,7 @@ export function useRoom(roomId: string | null) {
         const status: AgentStatusMap = {};
         for (const m of r.members) status[m] = (r.agentStatuses?.[m] as AgentStatusMap[string]) || "inactive";
         setAgentStatus(status);
+        setStaleMembers((r as any).agentStale || {});
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -143,6 +144,7 @@ export function useRoom(roomId: string | null) {
       const status: AgentStatusMap = {};
       for (const m of r.members) status[m] = (r.agentStatuses?.[m] as AgentStatusMap[string]) || "inactive";
       setAgentStatus(status);
+      setStaleMembers((r as any).agentStale || {});
     } catch (err) {
       console.error("Failed to reload room:", err);
     }

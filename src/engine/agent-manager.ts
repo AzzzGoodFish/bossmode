@@ -1244,6 +1244,17 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
   return result;
 }
 
+/** Stale info for all room members (for initial GET /api/rooms/:id load). */
+export function getRoomAgentStale(roomId: string): Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }> {
+  const result: Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }> = {};
+  const scopeId = `room:${roomId}`;
+  for (const member of roomStore.getRoomMembers(roomId)) {
+    const stale = getMemberStale(scopeId, member.id);
+    if (stale) result[member.name] = stale;
+  }
+  return result;
+}
+
 // -- Member status report (member_status tool) --
 
 export interface MemberStatusEntry {

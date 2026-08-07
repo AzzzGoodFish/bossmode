@@ -24,11 +24,13 @@ export function ContractDriftDialog({
   members,
   onClose,
   onApplied,
+  onError,
 }: {
   roomId: string;
   members: DriftMember[];
   onClose: () => void;
   onApplied: () => void;
+  onError?: (msg: string) => void;
 }) {
   const [choices, setChoices] = useState<Record<string, Choice>>(() =>
     Object.fromEntries(members.map((m) => [m.memberName, "reload" as Choice])),
@@ -62,6 +64,7 @@ export function ContractDriftDialog({
         setResolved((prev) => new Set(prev).add(m.memberName));
       } catch (err) {
         console.error(`Failed to ${choices[m.memberName]} ${m.memberName}`, err);
+        onError?.(`Couldn't ${choices[m.memberName]} ${m.memberName} — try again from the member panel.`);
       }
     }
     setApplying(false);
@@ -145,6 +148,10 @@ export function ContractDriftDialog({
         <div className="flex gap-2 text-[11px] text-ink-3 leading-relaxed items-start">
           <span className="shrink-0 mt-0.5 text-ink-4">⟲</span>
           <span><b className="text-ink-2 font-semibold">Reset session</b> — clean start. Worth it when an update reworks the conversation contract, or a session is misbehaving. Only in-flight context is lost — memory lives in chat, tasks, Library, principles.</span>
+        </div>
+        <div className="flex gap-2 text-[11px] text-ink-3 leading-relaxed items-start">
+          <span className="shrink-0 mt-0.5 text-ink-4">○</span>
+          <span><b className="text-ink-2 font-semibold">Keep</b> — do nothing now. The new version applies automatically on the member's next activation.</span>
         </div>
       </div>
 
