@@ -121,7 +121,7 @@ describe("router urgent split", () => {
     expect(onUrgent).toHaveBeenCalledTimes(1);
     expect(onUrgent).toHaveBeenCalledWith("room-a", "rm_pm", "qa");
     expect(onMention).toHaveBeenCalledTimes(1);
-    expect(onMention).toHaveBeenCalledWith("room-a", "rm_devben");
+    expect(onMention).toHaveBeenCalledWith("room-a", "rm_devben", expect.objectContaining({ senderName: "qa" }));
     unsub();
   });
 
@@ -147,7 +147,7 @@ describe("router urgent split", () => {
       urgentMentions: ["pm"],
       urgentMentionMemberIds: ["rm_pm"],
     });
-    expect(onMention).toHaveBeenCalledWith("room-a", "rm_pm");
+    expect(onMention).toHaveBeenCalledWith("room-a", "rm_pm", expect.objectContaining({ senderName: "qa" }));
     unsub2();
   });
 });

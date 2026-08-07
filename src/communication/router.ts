@@ -67,32 +67,42 @@ export function parseUrgentMentionMemberIds(content: string, roomMembers: RoomMe
     .filter((id): id is string => Boolean(id));
 }
 
+/** Activation context passed to mention callbacks (from the routed message). */
+export interface MentionActivationCtx {
+  /** Sender asked the @-mentioned recipients to reply (chat need_response=true). */
+  needResponse?: boolean;
+  /** Message sender name ("user" for user posts). */
+  senderName: string;
+}
+
 /** Initialize router: subscribe to message-bus, invoke callbacks on @mention / !urgent */
 export function initRouter(
-  onMention: (roomId: string, memberRef: string) => void,
-  onMentionAll: (roomId: string) => void,
+  onMention: (roomId: string, memberRef: string, ctx: MentionActivationCtx) => void,
+  onMentionAll: (roomId: string, ctx: MentionActivationCtx) => void,
   onUrgentMention?: (roomId: string, memberRef: string, urgentByName: string) => void,
 ): () => void {
   return onMessage((roomId, message) => {
     if (message.mentions.length === 0 && (!message.mentionMemberIds || message.mentionMemberIds.length === 0)) return;
 
-    logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds });
+    logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds, needResponse: message.needResponse === true });
+
+    const ctx: MentionActivationCtx = { needResponse: message.needResponse === true, senderName: message.sender };
 
     if (message.mentions.includes("all")) {
-      onMentionAll(roomId);
+      onMentionAll(roomId, ctx);
     } else if (message.mentionMemberIds?.length) {
       for (const memberId of message.mentionMemberIds) {
         if (memberId === message.senderMemberId) continue;
         if (message.urgentMentionMemberIds?.includes(memberId) && onUrgentMention) {
           onUrgentMention(roomId, memberId, message.sender);
         } else {
-          onMention(roomId, memberId);
+          onMention(roomId, memberId, ctx);
         }
       }
     } else {
       for (const name of message.mentions) {
         if (name === message.sender) continue;
-        onMention(roomId, name);
+        onMention(roomId, name, ctx);
       }
     }
   });

@@ -83,7 +83,7 @@ describe("020 WS-B prompt + instanceKey", () => {
       "room-principles",
     ]);
     expect(compiled.envPrompt).toContain("group chat room");
-    expect(compiled.envPrompt).toContain("start your text with `response: `");
+    expect(compiled.envPrompt).toContain("Speak with the `chat` tool");
     expect(compiled.envPrompt).not.toContain("[room]");
     expect(compiled.fullPrompt).toContain("I am careful.");
     expect(compiled.fullPrompt).toContain("Always test.");

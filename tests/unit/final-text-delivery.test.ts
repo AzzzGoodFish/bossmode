@@ -93,7 +93,6 @@ vi.mock("../../src/engine/event-handler.js", () => ({
 
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
-import { matchResponsePrefix } from "../../src/engine/tools.js";
 
 async function setup() {
   await shutdownAll();
@@ -110,38 +109,17 @@ async function setup() {
   initAgentManager(registry);
 }
 
-function deliveredMessages(): string[] {
+function deliveredMessages(): Array<{ text: string; extra?: Record<string, unknown> }> {
   return state.postMessage.mock.calls
     .filter((c: any[]) => c[0] === "room1" && c[1] === "developer")
-    .map((c: any[]) => c[2]);
+    .map((c: any[]) => ({ text: c[2], extra: c[4] }));
 }
 
-describe("response prefix matching", () => {
-  it("matches lowercase half-width colon", () => {
-    expect(matchResponsePrefix("response: hi")).toEqual({ matched: true, body: "hi" });
-  });
+function silenceNoteCalls() {
+  return state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "system" && String(c[2]).includes("finished without replying"));
+}
 
-  it("matches uppercase and full-width colon (k3 Chinese habit)", () => {
-    expect(matchResponsePrefix("Response：你好")).toEqual({ matched: true, body: "你好" });
-    expect(matchResponsePrefix("RESPONSE: 收到")).toEqual({ matched: true, body: "收到" });
-  });
-
-  it("tolerates leading whitespace and spaces around the colon", () => {
-    expect(matchResponsePrefix("  response : done")).toEqual({ matched: true, body: "done" });
-  });
-
-  it("does not trigger on a mention inside the text", () => {
-    expect(matchResponsePrefix("we discussed the response: prefix earlier")).toEqual({ matched: false, body: expect.any(String) });
-    expect(matchResponsePrefix("see response: above")).toEqual({ matched: false, body: expect.any(String) });
-  });
-
-  it("returns empty body when only the prefix is present", () => {
-    expect(matchResponsePrefix("response:")).toEqual({ matched: true, body: "" });
-    expect(matchResponsePrefix("Response： ")).toEqual({ matched: true, body: "" });
-  });
-});
-
-describe("final-text delivery (0.21 conditional delivery)", () => {
+describe("final-text fallback (chat need_response debt turn)", () => {
   beforeEach(async () => {
     state.sourceAgent = "developer";
     state.promptImpl = vi.fn(async () => {});
@@ -151,80 +129,135 @@ describe("final-text delivery (0.21 conditional delivery)", () => {
     await setup();
   });
 
-  it("delivers a mid-turn prefixed segment immediately and the final prefixed text once more", async () => {
+  it("delivers the last completed text verbatim when a debt turn never calls chat — autoDelivered, debt cleared, no silence note", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response: 收到，开查", stopReason: "stop" });
-      handle.emit({ type: "message_end", text: "response: 最终结果在这", stopReason: "stop" });
+      handle.emit({ type: "message_end", text: "I checked the logs. The fix is in place.", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    // Both prefixed segments go out; the final one is not double-posted.
-    expect(deliveredMessages()).toEqual(["收到，开查", "最终结果在这"]);
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    const delivered = deliveredMessages();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].text).toBe("I checked the logs. The fix is in place.");
+    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
+    expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("mid-turn prefixed delivery clears the debt: unprefixed final text adds nothing, no silence note", async () => {
+  it("a successful chat call clears the debt: bare final text is NOT fallback-posted, no silence note", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response: 收到，开查", stopReason: "stop" });
-      handle.emit({ type: "message_end", text: "总结完毕，细节如上", stopReason: "stop" });
+      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "c1", result: {}, isError: false });
+      handle.emit({ type: "message_end", text: "done — sent via chat", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toEqual(["收到，开查"]);
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("an error turn delivers nothing and posts no silence note (error notice already shown)", async () => {
+  it("a failed chat call does NOT clear the debt: the fallback still posts the final text", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response: partial before crash", stopReason: "stop" });
+      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "c1", result: { ok: false, error: "boom" }, isError: true });
+      handle.emit({ type: "message_end", text: "chat failed but here is the result anyway", stopReason: "stop" });
+      handle.emit({ type: "agent_end", messages: [] });
+    });
+
+    await activateAgent("room1", "developer");
+
+    const delivered = deliveredMessages();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].text).toBe("chat failed but here is the result anyway");
+    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
+    expect(silenceNoteCalls()).toHaveLength(0);
+  });
+
+  it("FYI turn (no debt): bare text is NOT delivered and no silence note fires", async () => {
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "message_end", text: "noting this for later", stopReason: "stop" });
+      handle.emit({ type: "agent_end", messages: [] });
+    });
+
+    await activateAgent("room1", "developer", { needResponse: false, senderName: "qa" });
+
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(0);
+  });
+
+  it("user @ carries debt: bare text fallback-posted with [REPLY EXPECTED] banner in the payload", async () => {
+    const payloads: string[] = [];
+    state.promptImpl = vi.fn(async (msg: string) => {
+      payloads.push(msg);
+      handle.emit({ type: "message_end", text: "bare text reply to the user", stopReason: "stop" });
+      handle.emit({ type: "agent_end", messages: [] });
+    });
+
+    await activateAgent("room1", "developer", { needResponse: true, senderName: "user" });
+
+    expect(payloads[0]).toContain("[REPLY EXPECTED] Respond using the chat tool.");
+    const delivered = deliveredMessages();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].text).toBe("bare text reply to the user");
+    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
+  });
+
+  it("member need_response @ carries the sender-named banner and debt", async () => {
+    const payloads: string[] = [];
+    state.promptImpl = vi.fn(async (msg: string) => {
+      payloads.push(msg);
+      handle.emit({ type: "agent_end", messages: [] });
+    });
+
+    await activateAgent("room1", "developer", { needResponse: true, senderName: "qa" });
+
+    expect(payloads[0]).toContain("[REPLY EXPECTED] qa expects your reply — respond with the chat tool.");
+    // No text and debt pending → silence note.
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
+  });
+
+  it("an error turn falls back to nothing: no delivery, no silence note (error notice already shown)", async () => {
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "message_end", text: "partial before crash", stopReason: "stop" });
       handle.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "provider exploded" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    // The mid-turn prefixed segment was already delivered (it completed before the error).
-    expect(deliveredMessages()).toEqual(["partial before crash"]);
-    // The failed final segment is not a completed segment → nothing at settlement,
-    // and hadErrorInTurn suppresses the silence note (system error notice covers it).
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("abort (dispatchState aborting) delivers nothing at settlement", async () => {
+  it("abort (dispatchState aborting) does not fall back", async () => {
     state.promptImpl = vi.fn(async () => {
-      // Simulate an urgent interrupt: the abort path marks the instance aborting
-      // before settlement runs.
       const { abortAgent } = await import("../../src/engine/agent-manager.js");
       void abortAgent("room1", "developer");
-      handle.emit({ type: "message_end", text: "response: I'll get right on it", stopReason: "stop" });
+      handle.emit({ type: "message_end", text: "I'll get right on it", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    // The prefixed segment completed before the interrupt → already delivered mid-turn.
-    expect(deliveredMessages()).toEqual(["I'll get right on it"]);
+    expect(deliveredMessages()).toHaveLength(0);
   });
 
-  it("no delivery at all when the turn ends with an aborted message_end fragment", async () => {
+  it("a turn ending with an aborted message_end fragment has no completed segment → silence note", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response: this fragment was cut off by abort", stopReason: "aborted" });
+      handle.emit({ type: "message_end", text: "this fragment was cut off by abort", stopReason: "aborted" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    // stopReason aborted → not a completed segment → nothing delivered.
-    expect(deliveredMessages()).toEqual([]);
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("final text with @mention routes the mention (activation handled by router)", async () => {
+  it("fallback text with @mention routes the mention (activation handled by router)", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response: @qa please verify", stopReason: "stop" });
+      handle.emit({ type: "message_end", text: "@qa please verify the fallback", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
@@ -232,20 +265,45 @@ describe("final-text delivery (0.21 conditional delivery)", () => {
 
     const calls = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(calls).toHaveLength(1);
-    expect(calls[0][2]).toBe("@qa please verify");
+    expect(calls[0][2]).toBe("@qa please verify the fallback");
     // mentions list carries the target for the router listener.
     expect(calls[0][3]).toEqual(["qa"]);
+    // The mention inside a fallback delivery does NOT carry needResponse (FYI for the target).
+    expect(calls[0][4]).not.toMatchObject({ needResponse: true });
   });
 
-  it("empty prefix body is not delivered and falls into the silence branch", async () => {
+  it("a debt turn with no text at all falls into the silence branch", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "response:", stopReason: "stop" });
+      handle.emit({ type: "message_end", text: "", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toEqual([]);
-    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(deliveredMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
+  });
+
+  it("length-truncated segment is not a fallback candidate; the continuation's completed text is", async () => {
+    state.promptImpl = vi.fn(async () => {
+      const call = handle.prompt.mock.calls.length;
+      if (call === 1) {
+        handle.emit({ type: "message_end", text: "", stopReason: "max_output_tokens" });
+        handle.emit({ type: "agent_end" });
+      } else if (call === 2) {
+        handle.emit({ type: "message_end", text: "Full result after continuation.", stopReason: "stop" });
+        handle.emit({ type: "agent_end" });
+      }
+    });
+
+    await activateAgent("room1", "developer");
+
+    expect(handle.prompt).toHaveBeenCalledTimes(2);
+    expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
+    expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
+    const delivered = deliveredMessages();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].text).toBe("Full result after continuation.");
+    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
   });
 });

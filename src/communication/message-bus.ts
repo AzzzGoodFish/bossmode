@@ -30,7 +30,7 @@ export function postMessage(
   sender: string,
   content: string,
   mentions: string[] = [],
-  extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds">>,
+  extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "autoDelivered">>,
 ): RoomMessage {
   // Scope-aware egress: a "dm:<memberId>" conversation address routes to the
   // member-owned DM store (never to a phantom rooms/dm:<id>/messages.jsonl).

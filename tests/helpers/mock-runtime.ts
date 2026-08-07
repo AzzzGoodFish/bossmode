@@ -15,6 +15,14 @@ export let mockSteerFn = vi.fn();
 export let mockAbortFn = vi.fn();
 export let mockIsWorking = false;
 
+// Live mock handles — acceptance tests emit stream events (message_end/tool_end)
+// from inside mockPromptFn via emitMockEvent to exercise final-text fallback.
+const liveHandles: MockAgentHandle[] = [];
+
+export function emitMockEvent(event: AgentStreamEvent): void {
+  for (const h of liveHandles) h.emit(event);
+}
+
 export function setMockPromptFn(fn: any): void { mockPromptFn = fn; }
 export function setMockSteerFn(fn: any): void { mockSteerFn = fn; }
 export function setMockIsWorking(v: boolean): void { mockIsWorking = v; }
@@ -24,10 +32,15 @@ export function resetMocks(): void {
   mockSteerFn = vi.fn();
   mockAbortFn = vi.fn();
   mockIsWorking = false;
+  liveHandles.length = 0;
 }
 
 export class MockAgentHandle implements AgentHandle {
   private listeners = new Set<(event: AgentStreamEvent) => void>();
+
+  constructor() {
+    liveHandles.push(this);
+  }
 
   get isWorking(): boolean {
     return mockIsWorking;

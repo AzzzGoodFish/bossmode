@@ -200,13 +200,13 @@ export function startServer(opts: ServerOptions): Promise<void> {
 
   // Initialize communication router — wire @mentions to engine activation
   const unsubscribeRouter = initRouter(
-    (roomId, memberName) => {
-      activateAgent(roomId, memberName).catch((err) => {
+    (roomId, memberName, ctx) => {
+      activateAgent(roomId, memberName, ctx).catch((err) => {
         logger.error("router", "activate failed", { roomId, member: memberName, error: String(err) });
       });
     },
-    (roomId) => {
-      activateAll(roomId).catch((err) => {
+    (roomId, ctx) => {
+      activateAll(roomId, ctx).catch((err) => {
         logger.error("router", "activateAll failed", { roomId, error: String(err) });
       });
     },

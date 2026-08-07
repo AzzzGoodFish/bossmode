@@ -75,7 +75,7 @@ describe("chat mention routing", () => {
     deliverMemberMessage("room1", "architect", "@developer please implement");
 
     expect(onMention).toHaveBeenCalledTimes(1);
-    expect(onMention).toHaveBeenCalledWith("room1", "developer");
+    expect(onMention).toHaveBeenCalledWith("room1", "developer", expect.objectContaining({ senderName: "architect" }));
     expect(onMentionAll).not.toHaveBeenCalled();
     unsubscribe();
   });
@@ -90,7 +90,7 @@ describe("chat mention routing", () => {
     deliverMemberMessage("room1", "developer", "@architect handing back");
 
     expect(onMention).toHaveBeenCalledTimes(1);
-    expect(onMention).toHaveBeenCalledWith("room1", "architect");
+    expect(onMention).toHaveBeenCalledWith("room1", "architect", expect.objectContaining({ senderName: "developer" }));
     unsubscribe();
   });
 });
