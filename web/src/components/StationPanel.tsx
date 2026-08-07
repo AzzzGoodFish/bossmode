@@ -20,6 +20,7 @@ import { ActivityTab } from "./ActivityTab";
 interface StationPanelProps {
   members: string[];
   agentStatus: AgentStatusMap;
+  staleMembers?: Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }>;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
   onOpenMcpSettings?: () => void;
@@ -102,7 +103,7 @@ export function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, staleMembers, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -371,7 +372,7 @@ This clears the member's working session memory and starts fresh. Room messages 
                   className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   title={`Configure ${name} · ${statusLabel(status)}`}
                 >
-                  <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" />
+                  <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? (staleMembers[name].contract ? "App updated — Reload to apply" : "Configuration changed — Reload to apply") : ""} />
                 </button>
                 <div className="flex-1 min-w-0">
                   <button
@@ -515,6 +516,7 @@ This clears the member's working session memory and starts fresh. Room messages 
             roomId={roomId}
             member={memberInfos[selectedMember]}
             status={agentStatus[selectedMember] || "inactive"}
+            stale={staleMembers?.[selectedMember]}
             contextUsage={contextUsage[selectedMember]}
             existingMemberNames={members}
             models={models}
@@ -992,6 +994,7 @@ export function MemberConfigPanel({
   onRestart,
   onResetSession,
   onToggleMcp,
+  stale,
   installedExtensions,
   extensionsLoadStatus,
   onRetryExtensions,
@@ -1022,6 +1025,7 @@ export function MemberConfigPanel({
   onRestart: () => void;
   onResetSession: () => void;
   onToggleMcp: (server: string) => void;
+  stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean };
   installedExtensions: ExtensionRecord[];
   extensionsLoadStatus: "loading" | "ready" | "error";
   onRetryExtensions: () => void;
@@ -1137,7 +1141,7 @@ export function MemberConfigPanel({
       <div className="px-5 pt-5 flex flex-col gap-4 shrink-0">
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
+            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" stale={!!stale} staleTitle={stale ? (stale.contract ? "App updated — Reload to apply" : "Configuration changed — Reload to apply") : ""} />
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {editingName ? (
@@ -1194,6 +1198,7 @@ export function MemberConfigPanel({
             >
               {label}
               {key === "assets" && badgeCount !== null ? <span className="ml-1 text-[11px] font-normal text-ink-4">{badgeCount}</span> : null}
+              {key === "session" && stale ? <span className="inline-block ml-1 w-1.5 h-1.5 rounded-full bg-blocked align-middle" title="Reload needed" /> : null}
             </button>
           ))}
         </div>
@@ -1313,13 +1318,15 @@ export function MemberConfigPanel({
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
                     <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, principles, mainline and tools without clearing the conversation.</div>
+                    {stale && <div className="flex items-center gap-1.5 mt-1 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />{stale.contract ? "App updated — Reload to apply" : `${(stale.mounts?.fields || []).map(f => f === "mcpServers" ? "MCP servers" : "Extensions").join(" · ")} changed — Reload to apply.`}</div>}
                   </div>
                   <button
                     type="button"
                     onClick={() => { void Promise.resolve(onReload()).finally(() => setActiveToolsReloadKey((k) => k + 1)); }}
-                    className="shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                    className="relative shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                   >
                     Reload
+                    {stale && <span className="stale-dot" style={{ top: -3, right: -3 }} />}
                   </button>
                 </div>
                 <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">

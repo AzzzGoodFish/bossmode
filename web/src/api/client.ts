@@ -1014,6 +1014,31 @@ export async function resetAgentSession(
   });
 }
 
+// ── Contract drift + mount-stale (auto-reload prompt, fish 2026-08-07) ──
+
+export interface ContractDriftEntry {
+  memberName: string;
+  memberId: string;
+  scopeId: string;
+  scopeLabel: string;
+  currentFingerprint: string;
+  alreadyNotified: boolean;
+}
+
+export async function getContractDrift(roomId: string): Promise<ContractDriftEntry[]> {
+  const res = await apiFetch(`/api/rooms/${roomId}/contract-drift`);
+  return (res as { drift: ContractDriftEntry[] }).drift;
+}
+
+export async function dismissContractDrift(roomId: string): Promise<void> {
+  await apiFetch(`/api/rooms/${roomId}/contract-drift/dismiss`, { method: "POST" });
+}
+
+export interface StaleInfo {
+  mounts?: { since: number; fields: string[] };
+  contract?: boolean;
+}
+
 export async function getAgentEvents(roomId: string, agentName: string): Promise<unknown[]> {
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events`);
 }

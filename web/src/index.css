@@ -143,6 +143,15 @@
 .badge-ring.ring-blocked::after { border-color: var(--blocked); opacity: 1; }
 .badge-ring.ring-boss::after { border-color: var(--accent); opacity: 0.7; }
 
+/* Stale dot — red badge on StaffBadge / buttons / tabs when a member needs reload */
+.stale-dot {
+  position: absolute; top: -2px; right: -2px;
+  width: 8px; height: 8px; border-radius: 9999px;
+  background: var(--blocked);
+  box-shadow: 0 0 0 2px var(--surface-1);
+  z-index: 2;
+}
+
 .think-level-default { color: var(--ink-4); }
 .think-level-minimal { color: color-mix(in oklab, var(--ink-3) 76%, var(--accent) 24%); }
 .think-level-low { color: color-mix(in oklab, var(--accent) 66%, var(--ink-3) 34%); }

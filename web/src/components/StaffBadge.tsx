@@ -38,12 +38,17 @@ export function StaffBadge({
   status = "idle",
   size = "md",
   avatar,
+  stale = false,
+  staleTitle = "",
   className = "",
 }: {
   name: string;
   status?: BadgeStatus;
   size?: keyof typeof SIZE;
   avatar?: string;
+  /** Show a red dot indicating the member needs a reload (mount/contract stale). */
+  stale?: boolean;
+  staleTitle?: string;
   className?: string;
 }) {
   const s = SIZE[size];
@@ -62,6 +67,12 @@ export function StaffBadge({
       >
         {avatar ? <span>{avatar}</span> : name.charAt(0).toUpperCase()}
       </div>
+      {stale && (
+        <span
+          className="stale-dot on"
+          title={staleTitle || "Reload needed"}
+        />
+      )}
     </div>
   );
 }

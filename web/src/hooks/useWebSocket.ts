@@ -3,7 +3,7 @@ import { getToken } from "../api/client";
 
 export type WsEvent =
   | { type: "room:message"; roomId: string; message: any }
-  | { type: "agent:status"; roomId: string; agent: string; status: string }
+  | { type: "agent:status"; roomId: string; agent: string; status: string; stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean } }
   | { type: "agent:event"; roomId: string; agent: string; event: unknown }
   | {
       type: "agent:context_usage";

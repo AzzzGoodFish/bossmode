@@ -5,11 +5,15 @@ import { useEdgeSwipe } from "../hooks/useEdgeSwipe";
 import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
+import { ContractDriftDialog } from "../components/ContractDriftDialog";
 import { Search, Plus, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
   inviteRoomMember,
+  getContractDrift,
+  dismissContractDrift,
+  type ContractDriftEntry,
 } from "../api/client";
 import { useRoom } from "../hooks/useRoom";
 import { useGlobalMembers } from "../hooks/useGlobalMembers";
@@ -109,6 +113,7 @@ export function Main({
     room,
     messages,
     agentStatus,
+    staleMembers,
     contextUsage,
     loading,
     hasMore,
@@ -123,6 +128,33 @@ export function Main({
   } = useRoom(selectedRoomId);
 
   const globalMembers = useGlobalMembers();
+
+  // ── Contract drift detection (auto-reload prompt) ──
+  const [driftMembers, setDriftMembers] = useState<Array<ContractDriftEntry & { status: string }>>([]);
+  const [driftOpen, setDriftOpen] = useState(false);
+  useEffect(() => {
+    if (!selectedRoomId) { setDriftMembers([]); setDriftOpen(false); return; }
+    let cancelled = false;
+    getContractDrift(selectedRoomId)
+      .then((entries) => {
+        if (cancelled) return;
+        const withStatus = entries.map((e) => ({
+          ...e,
+          status: agentStatus[e.memberName] ?? "inactive",
+        }));
+        // Only show the modal for entries not already notified.
+        const unnotified = withStatus.filter((e) => !e.alreadyNotified);
+        setDriftMembers(unnotified);
+        setDriftOpen(unnotified.length > 0);
+      })
+      .catch(() => { /* quiet — don't block on API failure */ });
+    return () => { cancelled = true; };
+  }, [selectedRoomId]);
+
+  const closeDrift = useCallback(() => {
+    setDriftOpen(false);
+    if (selectedRoomId) dismissContractDrift(selectedRoomId).catch(() => {});
+  }, [selectedRoomId]);
   const displayMemberInfos = useMemo(() => {
     // 0.20: compose from room.globalMemberIds + contacts (roomMembers array is being removed — G3 debt ②).
     if (room?.globalMemberIds?.length) {
@@ -375,6 +407,7 @@ export function Main({
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}
+            staleMembers={staleMembers}
             contextUsage={displayContextUsage}
             roomId={room.id}
             onJumpToMessage={jumpToMessage}
@@ -391,6 +424,7 @@ export function Main({
             <StationPanel
               members={displayMembers}
               agentStatus={displayAgentStatus}
+              staleMembers={staleMembers}
               contextUsage={displayContextUsage}
               roomId={room.id}
               onJumpToMessage={jumpToMessage}
@@ -452,6 +486,14 @@ export function Main({
       )}
       {showAddMember && (
         <AddMemberDialog currentMemberIds={displayMemberInfos.map((m) => m.id)} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />
+      )}
+      {driftOpen && driftMembers.length > 0 && selectedRoomId && (
+        <ContractDriftDialog
+          roomId={selectedRoomId}
+          members={driftMembers}
+          onClose={closeDrift}
+          onApplied={() => { reloadRoom(); }}
+        />
       )}
     </>
   );
