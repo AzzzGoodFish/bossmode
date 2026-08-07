@@ -10,7 +10,7 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -210,6 +210,34 @@ addRoute("DELETE", "/api/rooms/:id", async (_req, res, params) => {
     return;
   }
   roomStore.deleteRoom(params.id);
+  sendJson(res, 200, { ok: true });
+});
+
+// Contract drift detection (auto-reload prompt, fish 2026-08-07): list members
+// whose stored fingerprint doesn't match the current build.
+addRoute("GET", "/api/rooms/:id/contract-drift", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const drift = computeContractDrift(params.id);
+  sendJson(res, 200, { drift });
+});
+
+// Dismiss a contract-drift notification (user clicked "稍后" / "Reset").
+addRoute("POST", "/api/rooms/:id/contract-drift/dismiss", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) {
+    sendJson(res, 404, { error: "Room not found" });
+    return;
+  }
+  const scopeId = `room:${params.id}`;
+  const drift = computeContractDrift(params.id);
+  const { markDriftNotified } = await import("../workspace/runtime-state.js");
+  for (const d of drift) {
+    if (!d.alreadyNotified) markDriftNotified(scopeId, d.memberId, d.currentFingerprint);
+  }
   sendJson(res, 200, { ok: true });
 });
 
@@ -696,6 +724,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     if (hasMcpServers) nonModelPatch.mcpServers = patch.mcpServers;
     if (hasExtensions) nonModelPatch.extensions = patch.extensions;
     persistRoomMemberConfigPatch(params.id, currentMemberRef, nonModelPatch);
+    if (hasMcpServers || hasExtensions) broadcastMemberStatus(params.id, currentMemberRef);
   }
   try {
     if (hasModel || hasCredential) {

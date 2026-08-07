@@ -25,6 +25,7 @@ import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../worksp
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import { deliverMemberMessage } from "./tools.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -798,6 +799,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
     const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
+    setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint);
 
     // Resolve skills: member config takes precedence over agent definition; global skills pool only.
     const skills = resolveSkills(member, agentDef);
@@ -1251,6 +1253,8 @@ export interface MemberStatusEntry {
   status: AgentStatus;
   /** Live instances only: which scopes this member is active in, with per-scope status. */
   activeScopes: Array<{ scope: string; status: AgentStatus }>;
+  /** Mount/contract stale markers for badges (auto-reload prompt). */
+  stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean };
 }
 
 /**
@@ -1288,7 +1292,91 @@ export function getRoomMemberStatusReport(roomId: string, memberRef?: string): M
       if (inst.status === "working") status = "working";
       else if (status === "inactive") status = "idle";
     }
-    return { name: m.name, memberId: m.id, status, activeScopes };
+    return { name: m.name, memberId: m.id, status, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
+  });
+}
+
+// -- Contract drift + mount stale (auto-reload prompt, fish 2026-08-07) --
+
+export interface ContractDriftEntry {
+  memberName: string;
+  memberId: string;
+  scopeId: string;
+  scopeLabel: string;
+  /** Current build's fingerprint (to record on dismiss). */
+  currentFingerprint: string;
+  /** True if the user already dismissed a notification for this exact drift. */
+  alreadyNotified: boolean;
+}
+
+/**
+ * Detect contract drift for a room's members: compare the stored fingerprint
+ * (from the build that last compiled each member's prompt) against the
+ * *current* build's fingerprint. A mismatch means bossmode was updated (core
+ * tools/prompt changed) while the member's session was running with the old
+ * contract. Called at daemon boot to populate the startup drift dialog.
+ */
+export function computeContractDrift(roomId: string): ContractDriftEntry[] {
+  const room = roomStore.getRoom(roomId);
+  if (!room) return [];
+  const members = roomStore.getRoomMembers(roomId);
+  const scopeId = `room:${roomId}`;
+  const state = readRuntimeState(scopeId);
+  const drift: ContractDriftEntry[] = [];
+  for (const m of members) {
+    const entry = state[`${scopeId}:${m.id}`];
+    if (!entry?.contractFingerprint) continue; // first install / no record
+    // Recompile to get the current-build fingerprint for this member.
+    const member = resolveRoomMember(roomId, m.id);
+    if (!member) continue;
+    const agentDef = loadAgentDefinition(member.agent);
+    if (!agentDef) continue;
+    let currentFp: string;
+    try {
+      const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+      const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
+      currentFp = compiled.contractFingerprint;
+    } catch {
+      continue; // compile failed — don't block, skip
+    }
+    if (entry.contractFingerprint !== currentFp) {
+      drift.push({
+        memberName: m.name,
+        memberId: m.id,
+        scopeId,
+        scopeLabel: room.name,
+        currentFingerprint: currentFp,
+        alreadyNotified: entry.driftNotified === currentFp,
+      });
+    }
+  }
+  return drift;
+}
+
+/** Mount-stale info for a member in a scope (for status badges + WS). */
+export function getMemberStale(scopeId: string, memberId: string): { mounts?: { since: number; fields: string[] }; contract?: boolean } | null {
+  const entry = getRuntimeStateEntry(scopeId, memberId);
+  const out: { mounts?: { since: number; fields: string[] }; contract?: boolean } = {};
+  if (entry.staleMounts) out.mounts = { since: entry.staleMounts.since, fields: entry.staleMounts.fields };
+  if (entry.driftNotified) out.contract = true;
+  return (out.mounts || out.contract) ? out : null;
+}
+
+/** Broadcast a status refresh for a room member (stale badges update live). */
+export function broadcastMemberStatus(roomId: string, memberRef: string): void {
+  const member = resolveRoomMember(roomId, memberRef);
+  if (!member) return;
+  const key = instanceKey(roomId, member.id);
+  const instance = instances.get(key);
+  const status = instance?.status ?? "inactive";
+  const stale = getMemberStale(`room:${roomId}`, member.id) ?? undefined;
+  broadcastToRoom(roomId, {
+    type: "agent:status",
+    roomId,
+    agent: member.name,
+    ...memberIdentityMeta(member.name, member.id),
+    status,
+    ...(stale ? { stale } : {}),
   });
 }
 
@@ -1612,6 +1700,9 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     skillPaths,
     skillNames: skills,
   });
+  // Reload picked up new contract + mounts: refresh fingerprint, clear stale.
+  setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint);
+  clearStaleMounts(`room:${roomId}`, memberId);
   emitAgentLocalEvent(roomId, memberId, { type: "system", text: "Reloaded member resources in place." });
   logger.info("agent", "member resources reloaded", { roomId, member: member.name, memberId, skills: skills.length });
   return { ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." };
@@ -1630,6 +1721,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   clearActivationSource(roomId, memberId);
   sessionStore.clearSession(roomId, memberId, runtime);
   roomStore.setCursor(roomId, memberId, null);
+  clearRuntimeStateEntry(`room:${roomId}`, memberId);
   if (memberId !== agentName) {
     sessionStore.deleteSessionEntry(roomId, agentName);
     roomStore.deleteCursor(roomId, agentName);
@@ -1844,6 +1936,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
       docsRoot: docsRootPath,
       activeScopes: buildDmScopeLabels(memberId, scopeId),
     });
+    setContractFingerprint(scopeId, memberId, compiled.contractFingerprint);
 
     const skills = resolveSkills(member, agentDef);
     const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);

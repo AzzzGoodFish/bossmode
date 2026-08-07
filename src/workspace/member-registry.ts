@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
+import { markStaleMounts } from "./runtime-state.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 
 export interface MemberGlobalConfig {
@@ -271,11 +272,33 @@ export function applyMemberConfigPatch(
   for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
     if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
   }
+  const mountFieldsChanged: string[] = [];
   for (const key of ["mcpServers", "extensions"] as const) {
-    if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
+    if (key in patch) {
+      (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
+      mountFieldsChanged.push(key);
+    }
   }
   if (Object.keys(globalPatch).length > 0) updateMember(id, { global: globalPatch as Partial<MemberGlobalConfig> });
   if (Object.keys(scopePatch).length > 0) patchScopeOverride(id, scopeId, scopePatch as MemberScopeOverride);
+
+  // Auto-reload prompt (fish 2026-08-07): mount config changed → mark the
+  // affected member(s) stale so the UI can show reload badges. Scope override
+  // change marks just this member; global change marks all members inheriting
+  // the default (those without their own scope override for the field).
+  if (mountFieldsChanged.length > 0) {
+    if (rec.unifiedExtensions) {
+      // Global change: mark all members that inherit the global default.
+      for (const m of listMembers()) {
+        const hasOverride = m.scopeOverrides?.[scopeId]?.["mcpServers"] !== undefined
+          || m.scopeOverrides?.[scopeId]?.["extensions"] !== undefined;
+        if (!hasOverride) markStaleMounts(scopeId, m.id, mountFieldsChanged);
+      }
+    } else {
+      markStaleMounts(scopeId, id, mountFieldsChanged);
+    }
+  }
+
   return getMember(id)!;
 }
 

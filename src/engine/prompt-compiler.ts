@@ -39,6 +39,8 @@ export interface CompiledMemberPrompt {
   fullPrompt: string;
   sections: CompiledPromptSection[];
   manifestHash: string;
+  /** Contract fingerprint: sha1 of code-owned prompt parts (core + environment-communication + scope-kind tool set). Excludes memory assets. */
+  contractFingerprint: string;
 }
 
 function hashContent(content: string): string {
@@ -284,6 +286,13 @@ export function compileMemberPromptForScope(args: {
 
   const fullPrompt = [agentPrompt, ...appendSystemPrompt].filter((part) => part.trim().length > 0).join("\n\n");
   const manifestHash = hashContent(JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))));
+  // Contract fingerprint (fish 2026-08-07): only code-owned parts — core prompt +
+  // environment-communication asset + scope-kind (determines the tool set).
+  // Memory assets (persona/principles/mainline) are excluded — they change
+  // daily and must not trigger a contract-drift prompt.
+  const contractFingerprint = createHash("sha1")
+    .update(`${ref.kind}\n${corePrompt}\n${ecAsset.content}`)
+    .digest("hex");
   logger.info("agent", "compilePrompt", {
     member: args.memberName,
     memberId: args.memberId,
@@ -302,6 +311,7 @@ export function compileMemberPromptForScope(args: {
     fullPrompt,
     sections,
     manifestHash,
+    contractFingerprint,
   };
 }
 
