@@ -955,6 +955,9 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/reload", async (_req, res, params
 
   try {
     const result = await reloadMemberResources(params.id, member.id);
+    // Broadcast refreshed status so the frontend clears stale badges immediately
+    // (especially for un-activated members whose status doesn't otherwise change).
+    broadcastMemberStatus(params.id, member.id);
     logger.info("api", "POST /api/rooms/:id/agents/:agent/reload", { agent: params.agent, roomId: params.id, reloaded: result.reloaded });
     sendJson(res, 200, result);
   } catch (err: any) {
