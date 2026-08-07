@@ -24,16 +24,6 @@ export function StalePill({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
 
-  const pending = Object.entries(staleMembers);
-  if (pending.length === 0) return null;
-
-  const hasContract = pending.some(([, s]) => s.contract);
-
-  const fieldLabel = (fields: string[] = []) => {
-    const map: Record<string, string> = { mcpServers: "MCP servers", extensions: "Extensions", unifiedExtensions: "Extensions" };
-    return [...new Set(fields.map((f) => map[f] || f))].join(" · ");
-  };
-
   const handleReload = useCallback(async (name: string) => {
     setBusy((prev) => new Set(prev).add(name));
     try {
@@ -45,6 +35,16 @@ export function StalePill({
       setOpen(false);
     }
   }, [roomId]);
+
+  const pending = Object.entries(staleMembers);
+  if (pending.length === 0) return null;
+
+  const hasContract = pending.some(([, s]) => s.contract);
+
+  const fieldLabel = (fields: string[] = []) => {
+    const map: Record<string, string> = { mcpServers: "MCP servers", extensions: "Extensions", unifiedExtensions: "Extensions" };
+    return [...new Set(fields.map((f) => map[f] || f))].join(" · ");
+  };
 
   return (
     <div className="relative shrink-0">
