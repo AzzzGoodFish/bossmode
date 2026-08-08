@@ -200,11 +200,8 @@ function TurnBlock({ index, events, query }: { index: number; events: AgentEvent
     }
     return m;
   }, [events]);
-  // Separate orphan tool_end events (no matching tool_start in this turn).
-  const orphanToolEnds = useMemo(() => {
-    const startIds = new Set(events.filter(e => e.type === "tool_start" && e.toolCallId).map(e => e.toolCallId!));
-    return events.filter(e => e.type === "tool_end" && e.toolCallId && !startIds.has(e.toolCallId));
-  }, [events]);
+  // Orphan tool_end events (no matching tool_start) pass through the filter
+  // and render as standalone cards via EventRow.
   return <section className="space-y-[7px]"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.filter(e => e.type !== "tool_end" || !e.toolCallId || !events.some(s => s.type === "tool_start" && s.toolCallId === e.toolCallId)).map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} toolEnd={event.type === "tool_start" && event.toolCallId ? toolEndMap[event.toolCallId] : undefined} query={query} />)}</section>;
 }
 
@@ -212,9 +209,9 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
   const summary = summarizeAgentEvent(event);
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  if (event.type === "tool_end" && !toolEnd) return null; // paired tool_end handled by tool_start
+  if (event.type === "tool_end") return <ToolCard event={event} toolEnd={event} diff={diff} time={time} query={query} />;
   if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
-  if (event.type === "tool_start" || (event.type === "tool_end" && !event.toolCallId)) {
+  if (event.type === "tool_start") {
     return <ToolCard event={event} toolEnd={toolEnd} diff={diff} time={time} query={query} />;
   }
   if (event.type === "compaction_start" || event.type === "compaction_end") {
