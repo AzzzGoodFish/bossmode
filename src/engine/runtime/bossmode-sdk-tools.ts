@@ -44,7 +44,6 @@ export function createBossmodeSdkTools(opts: {
       parameters: Type.Object({
         message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
-        artifacts: Type.Optional(Type.Array(Type.String(), { description: "Document or file paths to show as previewable artifact chips on the room message." })),
         need_response: Type.Optional(Type.Boolean({ description: "Set true when you need the @-mentioned member's reply to move your work forward — their reply is then guaranteed to reach the room, even if they don't call chat. Default false = FYI, no reply expected." })),
       }),
       execute: async (_id, params) => {

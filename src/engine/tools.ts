@@ -177,9 +177,6 @@ export async function handleToolCallback(
       const needResponse = params?.need_response === true;
 
       const attachments: RoomMessageAttachment[] = [];
-      const artifacts = Array.isArray(params?.artifacts)
-        ? params.artifacts.map(String).map((value) => value.trim()).filter(Boolean)
-        : [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
@@ -209,7 +206,6 @@ export async function handleToolCallback(
       if (typeof roomId === "string" && roomId.startsWith("dm:")) {
         postMessage(roomId, agentName, message, [], {
           ...(attachments.length ? { attachments } : {}),
-          ...(artifacts.length ? { artifacts } : {}),
         });
         return { ok: true, ...(needResponse ? { note: "no @target — need_response ignored" } : {}) };
       }
@@ -222,7 +218,7 @@ export async function handleToolCallback(
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, artifacts, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse });
+      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse });
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 

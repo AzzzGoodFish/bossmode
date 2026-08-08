@@ -140,7 +140,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(false);
   });
 
-  it("④ chat tool is back with attachments/artifacts; need_response with no @target is ignored with a note", async () => {
+  it("④ chat tool is back with attachments; need_response with no @target is ignored with a note", async () => {
     const room = await createRoomWithMembers("ftd-chat-tool", ["pm"]);
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
@@ -149,14 +149,8 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     const chatTool = createBossmodeSdkTools({ roomId: room.id, agentName: "pm", roomMembers: ["pm"] })[0];
     expect(chatTool.name).toBe("chat");
     expect(JSON.stringify(chatTool.parameters)).toContain("need_response");
-
-    const artifactRes = await handleToolCallback("chat", room.id, "pm", { message: "Delivered doc", artifacts: ["agent-artifacts/doc.md"] });
-    expect((artifactRes as any).ok).toBe(true);
-
-    const messages = await roomMessages(room.id);
-    const msg = messages.find((m: any) => m.sender === "pm");
-    expect(msg.content).toBe("Delivered doc");
-    expect(msg.artifacts).toEqual(["agent-artifacts/doc.md"]);
+    // artifacts param removed from chat tool.
+    expect(JSON.stringify(chatTool.parameters)).not.toContain("artifacts");
 
     // need_response without @target → posted normally, note attached.
     const noTarget = await handleToolCallback("chat", room.id, "pm", { message: "plain post", need_response: true });
