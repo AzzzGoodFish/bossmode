@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import PrismLight from "react-syntax-highlighter/dist/esm/prism-light";
 const SyntaxHighlighter = PrismLight;
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -14,6 +15,7 @@ import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown
 import { useMemo } from "react";
 import type { Components } from "react-markdown";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
+import { remarkAutolinkFix } from "../utils/remark-autolink-fix";
 
 SyntaxHighlighter.registerLanguage("tsx", tsx);
 SyntaxHighlighter.registerLanguage("typescript", typescript);
@@ -182,7 +184,7 @@ export function Markdown({ content, mentions, urgentMentions, members, loginName
     [names.join("\0"), (urgentMentions ?? []).join("\0"), loginName],
   );
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, plugin]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly, remarkAutolinkFix, plugin]} components={components}>
       {content}
     </ReactMarkdown>
   );
