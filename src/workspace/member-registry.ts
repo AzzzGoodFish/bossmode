@@ -283,20 +283,11 @@ export function applyMemberConfigPatch(
   if (Object.keys(scopePatch).length > 0) patchScopeOverride(id, scopeId, scopePatch as MemberScopeOverride);
 
   // Auto-reload prompt (fish 2026-08-07): mount config changed → mark the
-  // affected member(s) stale so the UI can show reload badges. Scope override
-  // change marks just this member; global change marks all members inheriting
-  // the default (those without their own scope override for the field).
+  // affected member stale so the UI shows a reload badge.
+  // A member's mount config is their own (0.20+): changing A's mounts never
+  // affects B. Only mark the member being edited.
   if (mountFieldsChanged.length > 0) {
-    if (rec.unifiedExtensions) {
-      // Global change: mark all members that inherit the global default.
-      for (const m of listMembers()) {
-        const hasOverride = m.scopeOverrides?.[scopeId]?.["mcpServers"] !== undefined
-          || m.scopeOverrides?.[scopeId]?.["extensions"] !== undefined;
-        if (!hasOverride) markStaleMounts(scopeId, m.id, mountFieldsChanged);
-      }
-    } else {
-      markStaleMounts(scopeId, id, mountFieldsChanged);
-    }
+    markStaleMounts(scopeId, id, mountFieldsChanged);
   }
 
   return getMember(id)!;
