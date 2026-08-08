@@ -193,6 +193,17 @@ export function latestActionSummary(events: AgentEvent[]): ActionSummary {
 
 export function eventSearchText(event: AgentEvent): string {
   const obj = argsObject(event.args);
+  let resultText: string | undefined;
+  if (event.result !== undefined) {
+    if (typeof event.result === "string") resultText = event.result;
+    else {
+      const r = event.result as Record<string, unknown>;
+      if (Array.isArray(r?.content)) {
+        resultText = (r.content as Array<Record<string, unknown>>).map((c) => String(c.text || "")).join(" ");
+      } else if (r?.message) resultText = String(r.message);
+      else if (r?.error) resultText = String(r.error);
+    }
+  }
   return [
     event.type,
     event.toolName,
@@ -210,6 +221,7 @@ export function eventSearchText(event: AgentEvent): string {
     event.errorMessage,
     event.text,
     event.thinking,
+    resultText,
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
