@@ -12,7 +12,7 @@ const TEXT_ARTIFACT_EXTS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".bash", ".json", ".yaml", ".yml",
   ".toml", ".xml", ".css", ".scss", ".sql", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cs",
   ".rb", ".php", ".swift", ".kt", ".vue", ".ini", ".conf", ".cfg", ".env", ".properties",
-  ".diff", ".patch", ".csv", ".tsv", ".log", ".proto",
+  ".diff", ".patch", ".csv", ".tsv", ".log", ".proto", ".txt
 ]);
 const TEXT_ARTIFACT_FILENAMES = new Set(["dockerfile", "makefile", ".gitignore", ".dockerignore"]);
 const ARTIFACT_MIME: Record<string, string> = {
