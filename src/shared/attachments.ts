@@ -1,4 +1,4 @@
-export type AttachmentPreviewType = "image" | "markdown" | "html" | "download";
+export type AttachmentPreviewType = "image" | "markdown" | "html" | "text" | "download";
 
 export interface RoomMessageAttachment {
   id: string;
@@ -12,6 +12,15 @@ export interface RoomMessageAttachment {
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 const MARKDOWN_EXTS = new Set([".md", ".markdown"]);
 const HTML_EXTS = new Set([".html", ".htm"]);
+const TEXT_EXTS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".bash", ".json", ".yaml", ".yml",
+  ".toml", ".xml", ".css", ".scss", ".sql", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cs",
+  ".rb", ".php", ".swift", ".kt", ".vue", ".ini", ".conf", ".cfg", ".env", ".properties",
+  ".diff", ".patch", ".csv", ".tsv", ".log", ".proto",
+]);
+const TEXT_FILENAMES = new Set([
+  "dockerfile", "makefile", ".gitignore", ".dockerignore",
+]);
 
 export function filenameExt(filename: string): string {
   const clean = String(filename || "").split(/[\\/]/).pop() || "";
@@ -24,6 +33,10 @@ export function inferAttachmentPreviewType(filename: string): AttachmentPreviewT
   if (IMAGE_EXTS.has(ext)) return "image";
   if (MARKDOWN_EXTS.has(ext)) return "markdown";
   if (HTML_EXTS.has(ext)) return "html";
+  if (TEXT_EXTS.has(ext)) return "text";
+  // Special-case files with no extension or dotfile names.
+  const base = (String(filename || "").split(/[\\/]/).pop() || "").toLowerCase();
+  if (TEXT_FILENAMES.has(base)) return "text";
   return "download";
 }
 

@@ -8,6 +8,13 @@ import type { Room } from "../shared/types.js";
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const TEXT_ARTIFACT_EXTS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".bash", ".json", ".yaml", ".yml",
+  ".toml", ".xml", ".css", ".scss", ".sql", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cs",
+  ".rb", ".php", ".swift", ".kt", ".vue", ".ini", ".conf", ".cfg", ".env", ".properties",
+  ".diff", ".patch", ".csv", ".tsv", ".log", ".proto",
+]);
+const TEXT_ARTIFACT_FILENAMES = new Set(["dockerfile", "makefile", ".gitignore", ".dockerignore"]);
 const ARTIFACT_MIME: Record<string, string> = {
   ".md": "text/markdown; charset=utf-8",
   ".markdown": "text/markdown; charset=utf-8",
@@ -31,7 +38,7 @@ function fileTitle(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-type ArtifactFileType = "md" | "html" | "image";
+type ArtifactFileType = "md" | "html" | "image" | "text";
 
 type ResolvedArtifactFile = {
   originalPath: string;
@@ -50,6 +57,16 @@ function artifactTypeForExt(ext: string): ArtifactFileType | null {
   if (ext === ".md" || ext === ".markdown") return "md";
   if (ext === ".html" || ext === ".htm") return "html";
   if (ext === ".png") return "image";
+  if (TEXT_ARTIFACT_EXTS.has(ext)) return "text";
+  return null;
+}
+
+/** Resolve artifact type including special filenames (Dockerfile, Makefile, etc). */
+function artifactTypeForFile(filename: string, ext: string): ArtifactFileType | null {
+  const byExt = artifactTypeForExt(ext);
+  if (byExt) return byExt;
+  const base = (filename.split(/[\\/]/).pop() || "").toLowerCase();
+  if (TEXT_ARTIFACT_FILENAMES.has(base)) return "text";
   return null;
 }
 
@@ -59,7 +76,7 @@ function resolveArtifactFile(room: Room, originalPath: string): ArtifactResolveR
 
   const normalized = normalizeArtifactRef(originalPath);
   const ext = extname(normalized.path).toLowerCase();
-  const type = artifactTypeForExt(ext);
+  const type = artifactTypeForFile(normalized.path, ext);
   if (!type || !ARTIFACT_MIME[ext]) return { ok: false, status: 400, error: `Unsupported artifact type: ${originalPath}` };
 
   const allowedPrefixes = [
@@ -106,7 +123,7 @@ addRoute("GET", "/api/rooms/:id/artifact-raw", async (req, res, params) => {
   if (!resolved.ok) { sendJson(res, resolved.status, { error: resolved.error }); return; }
 
   res.writeHead(200, {
-    "Content-Type": ARTIFACT_MIME[resolved.file.ext] || "application/octet-stream",
+    "Content-Type": ARTIFACT_MIME[resolved.file.ext] || (resolved.file.type === "text" ? "text/plain; charset=utf-8" : "application/octet-stream"),
     "Content-Length": resolved.file.size,
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",
@@ -121,7 +138,7 @@ addRoute("GET", "/api/rooms/:id/artifact-preview", async (req, res, params) => {
   const url = new URL(req.url || "", "http://localhost");
   const originalPath = (url.searchParams.get("path") || "").trim();
   const normalized = normalizeArtifactRef(originalPath);
-  const normalizedType = artifactTypeForExt(extname(normalized.path).toLowerCase());
+  const normalizedType = artifactTypeForFile(normalized.path, extname(normalized.path).toLowerCase());
 
   if (normalizedType && normalizedType !== "image") {
     const entry = knowledgeStore.getEntry(normalized.path);

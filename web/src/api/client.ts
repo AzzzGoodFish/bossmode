@@ -633,7 +633,7 @@ export async function getKnowledgeRawBlob(path: string): Promise<Blob> {
 }
 
 export interface ArtifactPreviewData {
-  type: "md" | "html" | "image";
+  type: "md" | "html" | "image" | "text";
   originalPath: string;
   path: string;
   title: string;

@@ -45,6 +45,37 @@ function artifactKind(path: string): "md" | "html" | "other" {
   return "other";
 }
 
+// Ext → Prism language mapping for text preview.
+const EXT_TO_LANG: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "javascript",
+  ".py": "python", ".sh": "bash", ".bash": "bash", ".json": "json",
+  ".yaml": "yaml", ".yml": "yaml", ".xml": "xml", ".css": "css", ".scss": "scss",
+  ".sql": "sql", ".go": "go", ".rs": "rust", ".java": "java", ".c": "c",
+  ".cpp": "cpp", ".cs": "csharp", ".rb": "ruby", ".php": "php",
+  ".swift": "swift", ".kt": "kotlin", ".vue": "vue", ".md": "markdown",
+  ".diff": "diff", ".patch": "diff",
+};
+
+function extToLanguage(filename: string): string | undefined {
+  const clean = filename.split(/[\\/]/).pop() || "";
+  const idx = clean.lastIndexOf(".");
+  if (idx < 0) {
+    const lower = clean.toLowerCase();
+    if (lower === "dockerfile" || lower === "makefile" || lower === ".gitignore") return "bash";
+    return undefined;
+  }
+  return EXT_TO_LANG[clean.slice(idx).toLowerCase()];
+}
+
+function TextPreview({ title, content }: { title: string; content: string }) {
+  const lang = extToLanguage(title);
+  return (
+    <pre className="rounded-lg border border-line bg-inset overflow-auto" style={{ maxHeight: "70vh" }}>
+      <code className={`language-${lang || "none"} text-[11px] leading-relaxed block p-3 text-ink-2 whitespace-pre-wrap break-words`}>{content}</code>
+    </pre>
+  );
+}
+
 function artifactName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
@@ -230,6 +261,21 @@ function ArtifactPreviewBody({ load, htmlMode }: { load: LoadState; htmlMode: "p
     return (
       <div className="px-4 py-3 text-sm text-ink-1 leading-relaxed preview-markdown">
         <Markdown content={data.content} />
+      </div>
+    );
+  }
+  if (data.type === "text") {
+    const MAX_RENDER = 200_000;
+    const truncated = data.content.length > MAX_RENDER;
+    const body = truncated ? data.content.slice(0, MAX_RENDER) : data.content;
+    return (
+      <div className="m-3">
+        <TextPreview title={data.title} content={body} />
+        {truncated && (
+          <div className="mt-2 text-[11px] text-ink-4">
+            Showing first {MAX_RENDER.toLocaleString()} chars · full content available via download.
+          </div>
+        )}
       </div>
     );
   }
