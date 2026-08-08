@@ -168,12 +168,13 @@ addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_req, res
     return;
   }
 
-  const ext = extname(params.filename).toLowerCase();
-  const type = ext === ".md" || ext === ".markdown" ? "md" : ext === ".html" || ext === ".htm" ? "html" : [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext) ? "image" : null;
-  if (!type) {
+  const type = inferAttachmentPreviewType(params.filename);
+  if (type === "download") {
     sendJson(res, 400, { error: "Attachment is download-only" });
     return;
   }
+  // Map our preview types to the API response shape (text stays as "text").
+  const apiType = type === "markdown" ? "md" : type;
 
   const size = statSync(absPath).size;
   if (size > MAX_ATTACHMENT_PREVIEW_BYTES) {
@@ -182,10 +183,10 @@ addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_req, res
   }
 
   sendJson(res, 200, {
-    type,
+    type: apiType,
     originalPath: params.filename,
     path: params.filename,
     title: params.filename,
-    content: type === "image" ? `/api/rooms/${params.id}/attachments/${params.filename}` : readFileSync(absPath, "utf8"),
+    content: apiType === "image" ? `/api/rooms/${params.id}/attachments/${params.filename}` : readFileSync(absPath, "utf8"),
   });
 });

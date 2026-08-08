@@ -912,7 +912,7 @@ export interface KnowledgeEventMeta {
   outsideRoomDocsPath?: boolean;
 }
 
-export type AttachmentPreviewType = "image" | "markdown" | "html" | "download";
+export type AttachmentPreviewType = "image" | "markdown" | "html" | "text" | "download";
 
 export interface RoomMessageAttachment {
   id: string;

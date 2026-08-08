@@ -77,7 +77,9 @@ function resolveArtifactFile(room: Room, originalPath: string): ArtifactResolveR
   const normalized = normalizeArtifactRef(originalPath);
   const ext = extname(normalized.path).toLowerCase();
   const type = artifactTypeForFile(normalized.path, ext);
-  if (!type || !ARTIFACT_MIME[ext]) return { ok: false, status: 400, error: `Unsupported artifact type: ${originalPath}` };
+  if (!type) return { ok: false, status: 400, error: `Unsupported artifact type: ${originalPath}` };
+  // text type resolves MIME via fallback, not the static ARTIFACT_MIME map.
+  if (!ARTIFACT_MIME[ext] && type !== "text") return { ok: false, status: 400, error: `Unsupported artifact type: ${originalPath}` };
 
   const allowedPrefixes = [
     safeRealpath(knowledgeStore._internal.docsRoot()),

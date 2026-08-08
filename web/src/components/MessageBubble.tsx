@@ -3,6 +3,7 @@ import { FileText, FileCode, Image as ImageIcon, Eye, Download, X } from "lucide
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
+import { inferAttachmentPreviewType } from "../../../src/shared/attachments";
 
 interface MessageBubbleProps {
   sender: string;
@@ -41,11 +42,7 @@ function extOf(path: string): string {
 }
 
 function inferPreviewType(path: string): RoomMessageAttachment["previewType"] {
-  const ext = extOf(path);
-  if (IMAGE_EXTS.has(ext)) return "image";
-  if (MARKDOWN_EXTS.has(ext)) return "markdown";
-  if (HTML_EXTS.has(ext)) return "html";
-  return "download";
+  return inferAttachmentPreviewType(path);
 }
 
 /** Build API URL for an attachment given roomId (or "dm:<memberId>" for DM scope). Falls back to legacy roomId-from-path. */
@@ -193,7 +190,7 @@ function MessageWithAttachments({
   const bodyText = textSegments.map((s) => s.text).join("\n\n").trim();
   const hasBody = bodyText.length > 0;
   const renderAttachments: RenderAttachment[] = attachments?.length ? attachments : legacySegments.map(legacyToAttachment);
-  const documentPreviewAttachments = renderAttachments.filter((a) => a.previewType === "markdown" || a.previewType === "html");
+  const documentPreviewAttachments = renderAttachments.filter((a) => a.previewType === "markdown" || a.previewType === "html" || a.previewType === "text");
 
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
 
@@ -243,7 +240,7 @@ function AttachmentRow({
   const url = attachmentUrl(attachment.legacyPath || attachment.storedFilename, roomId);
   const previewType = attachment.previewType || inferPreviewType(attachment.storedFilename || name);
   const isImage = previewType === "image";
-  const canDocumentPreview = previewType === "markdown" || previewType === "html";
+  const canDocumentPreview = previewType === "markdown" || previewType === "html" || previewType === "text";
   const Icon = isImage ? ImageIcon : previewType === "html" ? FileCode : FileText;
   const iconColor = isImage || canDocumentPreview ? "text-accent-ink" : "text-ink-3";
 
