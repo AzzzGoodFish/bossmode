@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
@@ -192,18 +192,30 @@ function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
 
 function TurnBlock({ index, events, query }: { index: number; events: AgentEvent[]; query: string }) {
   const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
-  return <section className="space-y-[7px]"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} query={query} />)}</section>;
+  // Build a toolCallId → tool_end map so tool_start rows can show their result.
+  const toolEndMap = useMemo(() => {
+    const m: Record<string, AgentEvent> = {};
+    for (const e of events) {
+      if (e.type === "tool_end" && e.toolCallId) m[e.toolCallId] = e;
+    }
+    return m;
+  }, [events]);
+  // Separate orphan tool_end events (no matching tool_start in this turn).
+  const orphanToolEnds = useMemo(() => {
+    const startIds = new Set(events.filter(e => e.type === "tool_start" && e.toolCallId).map(e => e.toolCallId!));
+    return events.filter(e => e.type === "tool_end" && e.toolCallId && !startIds.has(e.toolCallId));
+  }, [events]);
+  return <section className="space-y-[7px]"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.filter(e => e.type !== "tool_end" || !e.toolCallId || !events.some(s => s.type === "tool_start" && s.toolCallId === e.toolCallId)).map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} toolEnd={event.type === "tool_start" && event.toolCallId ? toolEndMap[event.toolCallId] : undefined} query={query} />)}</section>;
 }
 
-function EventRow({ event, query }: { event: AgentEvent; query: string }) {
+function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: AgentEvent; query: string }) {
   const summary = summarizeAgentEvent(event);
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  if (event.type === "tool_end") return null;
+  if (event.type === "tool_end" && !toolEnd) return null; // paired tool_end handled by tool_start
   if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
-  if (event.type === "tool_start") {
-    const tool = toolDisplay(event.toolName, event.args);
-    return <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]"><div className="flex items-center gap-2"><span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink">TOOL·{tool.label}</span><span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>{diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}<span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span></div><pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre></div>;
+  if (event.type === "tool_start" || (event.type === "tool_end" && !event.toolCallId)) {
+    return <ToolCard event={event} toolEnd={toolEnd} diff={diff} time={time} query={query} />;
   }
   if (event.type === "compaction_start" || event.type === "compaction_end") {
     const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
@@ -218,6 +230,88 @@ function EventRow({ event, query }: { event: AgentEvent; query: string }) {
     </>;
   }
   return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.label} {summary.detail} <span className="font-mono text-ink-4">{time}</span></div>;
+}
+
+const MAX_RESULT_RENDER = 50_000;
+
+function resultToText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object") {
+    // Tool results are { content: [{ type: "text", text }] } or plain objects.
+    const r = result as Record<string, unknown>;
+    if (Array.isArray(r.content)) {
+      const texts = (r.content as Array<Record<string, unknown>>).map((c) => String(c.text || "")).filter(Boolean);
+      if (texts.length) return texts.join("\n");
+    }
+    if (r.message && typeof r.message === "string") return r.message;
+    if (r.error && typeof r.error === "string") return r.error;
+  }
+  try { return JSON.stringify(result, null, 2); } catch { return String(result); }
+}
+
+function isMarkdownResult(toolName: string | undefined, text: string): boolean {
+  if (!toolName) return false;
+  const mdTools = ["read", "read_memory", "read_file", "query_room_messages", "get_task", "list_tasks"];
+  if (mdTools.includes(toolName)) return true;
+  // Heuristic: starts with markdown-ish content.
+  return /^(#|\*\*|\d+\.|- |```|\|)/m.test(text.slice(0, 200));
+}
+
+function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; toolEnd?: AgentEvent; diff: ReturnType<typeof diffStatForTool>; time: string; query: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [mode, setMode] = useState<"raw" | "preview">("raw");
+  const tool = toolDisplay(event.toolName, event.args);
+  const isError = toolEnd?.isError;
+  const isRunning = !toolEnd && event.type === "tool_start";
+
+  const resultText = toolEnd ? resultToText(toolEnd.result) : "";
+  const resultSize = resultText.length;
+  const truncated = resultSize > MAX_RESULT_RENDER;
+  const displayText = truncated ? resultText.slice(0, MAX_RESULT_RENDER) : resultText;
+  const canPreview = !isError && isMarkdownResult(event.toolName, resultText);
+  const summaryText = resultText.slice(0, 120).replace(/\n/g, " ").trim();
+
+  const statusIcon = isError ? "✗" : isRunning ? "●" : toolEnd ? "✓" : "";
+  const statusColor = isError ? "text-blocked" : isRunning ? "text-think animate-pulse" : "text-onair";
+  const cardBorder = isError ? "border-blocked/30" : "border-line-soft";
+
+  return (
+    <div className={`rounded-[10px] border ${cardBorder} bg-surface-1 px-3 py-[9px]`}>
+      <button onClick={() => toolEnd && setExpanded(v => !v)} className={`w-full text-left ${toolEnd ? "cursor-pointer" : "cursor-default"}`}>
+        <div className="flex items-center gap-2">
+          {toolEnd && <ChevronDown size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />}
+          <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink">TOOL·{tool.label}</span>
+          <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
+          {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
+          {statusIcon && <span className={`text-[10px] font-bold shrink-0 ${statusColor}`} title={isError ? "error" : isRunning ? "running" : "done"}>{statusIcon} {toolEnd && !isError && `${(resultSize / 1024).toFixed(1)}k`}{isError && `${(resultSize / 1024).toFixed(1)}k`}</span>}
+          <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
+        </div>
+      </button>
+      {/* Collapsed: args + result summary */}
+      {!expanded && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>}
+      {!expanded && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
+      {/* Expanded: args + full result */}
+      {expanded && <>
+        <div className="mt-2">
+          <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4 mb-1">Arguments</div>
+          <pre className="bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>
+        </div>
+        {resultText && (
+          <div className={`mt-2 ${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30" : ""}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">{isError ? "Error" : "Result"}</div>
+              {canPreview && <div className="flex gap-0.5 rounded-md border border-line-soft bg-inset p-0.5 ml-auto"><button onClick={(e) => { e.stopPropagation(); setMode("raw"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Raw</button><button onClick={(e) => { e.stopPropagation(); setMode("preview"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Preview</button></div>}
+            </div>
+            {mode === "preview" && canPreview
+              ? <div className="text-[12px] text-ink-2 max-h-[320px] overflow-y-auto"><Markdown content={displayText} /></div>
+              : <pre className={`rounded-[7px] px-[9px] py-[7px] text-[10.5px] ${isError ? "text-blocked" : "text-ink-2"} max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words`}>{displayText}</pre>
+            }
+            {truncated && <div className="mt-1 text-[10px] text-ink-4">Showing first {(MAX_RESULT_RENDER / 1000).toFixed(0)}k chars · full content in event log.</div>}
+          </div>
+        )}
+      </>}
+    </div>
+  );
 }
 
 function highlight(text: string, query: string): ReactNode {
