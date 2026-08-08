@@ -284,29 +284,32 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
           <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
         </div>
       </button>
-      {/* Collapsed: args + result summary */}
-      {!expanded && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>}
+      {/* Collapsed: one-line result summary only (fish: 收起=工具名+摘要; args live in the expanded body) */}
       {!expanded && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
-      {/* Expanded: args + full result */}
-      {expanded && <>
-        <div className="mt-2">
-          <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4 mb-1">Arguments</div>
-          <pre className="bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>
-        </div>
-        {resultText && (
-          <div className={`mt-2 ${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30" : ""}`}>
-            <div className="flex items-center gap-2 mb-1">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">{isError ? "Error" : "Result"}</div>
-              {canPreview && <div className="flex gap-0.5 rounded-md border border-line-soft bg-inset p-0.5 ml-auto"><button onClick={(e) => { e.stopPropagation(); setMode("raw"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Raw</button><button onClick={(e) => { e.stopPropagation(); setMode("preview"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Preview</button></div>}
+      {/* Expanded: unified dropdown area — inset container + surface wells (Session & tools card language) */}
+      {expanded && (
+        <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
+          {event.args !== undefined && (
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4 mb-1">Arguments</div>
+              <pre className="bg-surface-1 border border-line-soft rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>
             </div>
-            {mode === "preview" && canPreview
-              ? <div className="text-[12px] text-ink-2 max-h-[320px] overflow-y-auto"><Markdown content={displayText} /></div>
-              : <pre className={`rounded-[7px] px-[9px] py-[7px] text-[10.5px] ${isError ? "text-blocked" : "text-ink-2"} max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words`}>{displayText}</pre>
-            }
-            {truncated && <div className="mt-1 text-[10px] text-ink-4">Showing first {(MAX_RESULT_RENDER / 1000).toFixed(0)}k chars · full content in event log.</div>}
-          </div>
-        )}
-      </>}
+          )}
+          {resultText && (
+            <div className={`${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30 p-1.5" : ""}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">{isError ? "Error" : "Result"}</div>
+                {canPreview && <div className="flex gap-0.5 rounded-md border border-line-soft bg-surface-1 p-0.5 ml-auto"><button onClick={(e) => { e.stopPropagation(); setMode("raw"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Raw</button><button onClick={(e) => { e.stopPropagation(); setMode("preview"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Preview</button></div>}
+              </div>
+              {mode === "preview" && canPreview
+                ? <div className="text-[12px] text-ink-2 max-h-[320px] overflow-y-auto bg-surface-1 border border-line-soft rounded-[7px] px-[9px] py-[7px]"><Markdown content={displayText} /></div>
+                : <pre className={`rounded-[7px] px-[9px] py-[7px] text-[10.5px] ${isError ? "text-blocked" : "text-ink-2 bg-surface-1 border border-line-soft"} max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words`}>{displayText}</pre>
+              }
+              {truncated && <div className="mt-1 text-[10px] text-ink-4">Showing first {(MAX_RESULT_RENDER / 1000).toFixed(0)}k chars · full content in event log.</div>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
