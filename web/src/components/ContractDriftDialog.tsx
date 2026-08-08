@@ -33,7 +33,7 @@ export function ContractDriftDialog({
   onError?: (msg: string) => void;
 }) {
   const [choices, setChoices] = useState<Record<string, Choice>>(() =>
-    Object.fromEntries(members.map((m) => [m.memberName, "reload" as Choice])),
+    Object.fromEntries(members.map((m) => [m.memberName, "keep" as Choice])),
   );
   const [applying, setApplying] = useState(false);
   const [resolved, setResolved] = useState<Set<string>>(new Set());
