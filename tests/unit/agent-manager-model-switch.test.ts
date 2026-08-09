@@ -325,7 +325,9 @@ describe("agent-manager model hot switch", () => {
     await pending;
     expect(first.promptCalls.length).toBeGreaterThan(baseline + 1);
     expect(first.promptCalls[first.promptCalls.length - 1]).toContain("are you there");
-    expect(manager.getAgentStatus("room", "pm")).toBe("idle");
+    // Queue drained into a live prompt → the pipeline continues publicly as working
+    // (no idle flash when work continues — fish 2026-08-09 idle rule).
+    expect(manager.getAgentStatus("room", "pm")).toBe("working");
   });
 
   it("queues activation during a threshold auto-compaction instead of steering or prompting immediately", async () => {
@@ -630,6 +632,10 @@ describe("agent-manager model hot switch", () => {
     const first = handles[0];
 
     first.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "502 upstream_error" });
+    // pi always follows a failed message_end with agent_end (retry budget exhausted
+    // here: no willRetry) — the system notice is deferred to that final agent_end
+    // so retry storms post one notice, not one per attempt (fish 2026-08-09).
+    first.emit({ type: "agent_end" });
 
     expect(loggerError).toHaveBeenCalledWith("agent", "member request failed", expect.objectContaining({ roomId: "room", member: "pm", memberId: "pm", error: "502 upstream_error" }));
     expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" request failed. Error: 502 upstream_error');
