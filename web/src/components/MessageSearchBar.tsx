@@ -80,9 +80,15 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
   // Immediate search on filter change
   useEffect(() => { doSearch(); }, [from, dateRange, doSearch]);
 
-  // Focus on open + Escape handler
+  // Focus once on mount only — must NOT depend on onClose (ChatArea passes an
+  // inline arrow; every WS message re-renders ChatArea → new onClose identity →
+  // effect re-runs → steals focus from the composer). Fish 2026-08-09.
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // Escape closes search; re-bind when onClose identity changes.
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
