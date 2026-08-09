@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
@@ -407,16 +407,16 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
     <div className={`rounded-[10px] border ${cardBorder} bg-surface-1 px-3 py-[9px]`}>
       <button onClick={() => toolEnd && setExpanded(v => !v)} className={`w-full text-left ${toolEnd ? "cursor-pointer" : "cursor-default"}`}>
         <div className="flex items-center gap-2">
-          {toolEnd && <ChevronDown size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />}
+          {toolEnd && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
           <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink">TOOL·{tool.label}</span>
           <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
           {statusIcon && <span className={`text-[10px] font-bold shrink-0 ${statusColor}`} title={isError ? "error" : isRunning ? "running" : "done"}>{statusIcon} {toolEnd && !isError && `${(resultSize / 1024).toFixed(1)}k`}{isError && `${(resultSize / 1024).toFixed(1)}k`}</span>}
           <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
         </div>
+        {/* Collapsed: whole card face toggles — header row + one-line summary both live inside the button (fish: 点击区域太小). args/result stay in the expanded body. */}
+        {!expanded && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
       </button>
-      {/* Collapsed: one-line result summary only (fish: 收起=工具名+摘要; args live in the expanded body) */}
-      {!expanded && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
       {/* Expanded: unified dropdown area — inset container + surface wells (Session & tools card language) */}
       {expanded && (
         <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
