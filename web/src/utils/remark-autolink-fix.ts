@@ -45,10 +45,22 @@ export const remarkAutolinkFix: Plugin<[], Root> = () => {
 
       if (trimmed) {
         node.url = url;
-        // If the node has no text children (autolink literal), also fix the
-        // displayed text to match.
-        if (!node.children || node.children.length === 0) {
-          // autolink literal nodes carry the URL as text; nothing to fix.
+        // Also trim the displayed text children to match the shortened URL.
+        // remark-gfm autolink-literal creates a single text child whose value
+        // equals the original (pre-trim) URL — it still carries the trailing
+        // CJK/markdown chars in the visible text.
+        if (node.children) {
+          for (const child of node.children) {
+            if (child.type === "text" && typeof child.value === "string") {
+              let text = child.value;
+              const cjkText = text.slice(8).match(CJK_BOUNDARY);
+              if (cjkText && cjkText.index !== undefined) {
+                text = text.slice(0, 8 + cjkText.index);
+              }
+              text = text.replace(TRAILING_STRIP, "");
+              child.value = text;
+            }
+          }
         }
       }
     });
