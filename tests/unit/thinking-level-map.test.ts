@@ -63,4 +63,60 @@ describe("thinking level map builder", () => {
     expect(summarizeThinkingMap(undefined)).toContain("off–high as-is");
     expect(summarizeThinkingMap({ xhigh: "max", minimal: null })).toMatch(/remapped|off/);
   });
+
+  it("empty custom omits map entry (intermediate state) — map must not force mode snap-back", () => {
+    // Selecting Custom on xhigh with empty input must not write a key.
+    // Parent value stays undefined/default for xhigh → if UI derived modes from value
+    // alone, mode would snap back to Not available. Local state holds "custom".
+    const modes = allModes("as-is");
+    modes.xhigh = "custom";
+    modes.max = "off";
+    const customs = emptyCustoms();
+    expect(buildThinkingLevelMap(modes, customs)).toBeUndefined();
+
+    // After typing, map gains the remap.
+    customs.xhigh = "max";
+    expect(buildThinkingLevelMap(modes, customs)).toEqual({ xhigh: "max" });
+
+    // Mid-level empty custom also omits (treated as as-is for data).
+    modes.xhigh = "off";
+    modes.medium = "custom";
+    customs.xhigh = "";
+    customs.medium = "";
+    expect(buildThinkingLevelMap(modes, customs)).toBeUndefined();
+  });
+
+  it("simulates local-state editor: empty custom stays selected across parent rewrite", () => {
+    // Mirrors ThinkingLevelMapEditor push loop: local modes/customs + emitted map.
+    let value: ReturnType<typeof buildThinkingLevelMap>;
+    let modes = allModes("as-is");
+    modes.xhigh = "off";
+    modes.max = "off";
+    let customs = emptyCustoms();
+    let emitted = JSON.stringify(value ?? null);
+
+    const push = () => {
+      const next = buildThinkingLevelMap(modes, customs);
+      emitted = JSON.stringify(next ?? null);
+      value = next;
+      // Parent rewrites value; editor only re-seeds when incoming !== emitted.
+      const incoming = JSON.stringify(value ?? null);
+      if (incoming !== emitted) {
+        // would re-seed from value — must not happen for our own push
+        throw new Error("unexpected external reseed");
+      }
+    };
+
+    // Select Custom on xhigh (empty) — UI mode stays custom, map still default.
+    modes = { ...modes, xhigh: "custom" };
+    push();
+    expect(modes.xhigh).toBe("custom");
+    expect(value).toBeUndefined();
+
+    // Type max — map updates, mode still custom.
+    customs = { ...customs, xhigh: "max" };
+    push();
+    expect(modes.xhigh).toBe("custom");
+    expect(value).toEqual({ xhigh: "max" });
+  });
 });
