@@ -184,18 +184,35 @@ function normalizeOptionalBaseUrl(baseUrl: string | undefined): string | undefin
   return trimmed;
 }
 
+const THINKING_LEVEL_MAP_KEYS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function validateThinkingLevelMap(raw: unknown): ModelDefinitionConfig["thinkingLevelMap"] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("thinkingLevelMap must be an object");
+  const out: NonNullable<ModelDefinitionConfig["thinkingLevelMap"]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!THINKING_LEVEL_MAP_KEYS.has(key)) throw new Error(`Unknown thinking level in map: ${key}`);
+    if (value !== null && typeof value !== "string") throw new Error(`thinkingLevelMap.${key} must be a string or null`);
+    if (typeof value === "string" && !value.trim()) throw new Error(`thinkingLevelMap.${key} cannot be empty (use null to disable)`);
+    out[key as keyof typeof out] = value === null ? null : value.trim();
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function validateModel(model: ModelDefinitionConfig): ModelDefinitionConfig {
   if (!model.id?.trim()) throw new Error("model id is required");
   if (model.contextWindow !== undefined && (!Number.isInteger(model.contextWindow) || model.contextWindow <= 0)) throw new Error("contextWindow must be a positive integer");
   if (model.maxTokens !== undefined && (!Number.isInteger(model.maxTokens) || model.maxTokens <= 0)) throw new Error("maxTokens must be a positive integer");
+  const thinkingLevelMap = validateThinkingLevelMap(model.thinkingLevelMap);
   const input = model.input?.length ? model.input : undefined;
-  const { input: _input, ...rest } = model;
+  const { input: _input, thinkingLevelMap: _map, ...rest } = model;
   return {
     ...rest,
     id: model.id.trim(),
     name: model.name?.trim() || undefined,
     ...(input ? { input } : {}),
-    ...modelSdkMetadata(model),
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    ...modelSdkMetadata({ ...model, thinkingLevelMap }),
     metadataSource: model.metadataSource || (model.contextWindow || model.maxTokens || model.reasoning !== undefined ? "endpoint" : "unknown"),
   };
 }

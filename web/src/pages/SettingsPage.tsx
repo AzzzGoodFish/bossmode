@@ -38,6 +38,7 @@ import {
   uninstallExtension,
 } from "../api/client";
 import { Sheet } from "../components/Sheet";
+import { ThinkingLevelMapEditor } from "../components/ThinkingLevelMapEditor";
 import { UsagePage } from "./UsagePage";
 import { useDialog } from "../components/dialogs";
 import type { SettingsSection } from "../components/Sidebar";
@@ -1279,10 +1280,15 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     const current = modelCustomizations(form);
     updateModelCustomizations({ ...current, addedModels: [...(current.addedModels || []), { id: "", metadataSource: "unknown" }] });
   };
-  const updateCustomModel = (index: number, patch: Partial<ModelDefinitionConfig>) => {
+  const updateCustomModel = (index: number, patch: Partial<ModelDefinitionConfig> & { thinkingLevelMap?: ModelDefinitionConfig["thinkingLevelMap"] }) => {
     const current = modelCustomizations(form);
     const next = [...(current.addedModels || [])];
-    next[index] = { ...next[index], ...patch };
+    const merged: ModelDefinitionConfig = { ...next[index], ...patch };
+    // Explicit undefined means "omit field" (full-default thinking map).
+    if ("thinkingLevelMap" in patch && patch.thinkingLevelMap === undefined) {
+      delete merged.thinkingLevelMap;
+    }
+    next[index] = merged;
     updateModelCustomizations({ ...current, addedModels: next });
   };
   const removeCustomModel = (index: number) => {
@@ -1410,6 +1416,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                         <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => updateCustomModel(i, { input: e.target.checked ? ["text", "image"] : undefined })} />
                         Supports image input
                       </label>
+                      <ThinkingLevelMapEditor
+                        value={m.thinkingLevelMap}
+                        onChange={(thinkingLevelMap) => updateCustomModel(i, { thinkingLevelMap })}
+                      />
                     </div>
                   ))}
                 </div>
@@ -1429,6 +1439,16 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                     <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, input: e.target.checked ? ["text", "image"] : undefined }; setForm({ ...form, models }); }} />
                     Supports image input
                   </label>
+                  <ThinkingLevelMapEditor
+                    value={m.thinkingLevelMap}
+                    onChange={(thinkingLevelMap) => {
+                      const models = [...form.models];
+                      const next = { ...m, thinkingLevelMap };
+                      if (thinkingLevelMap === undefined) delete next.thinkingLevelMap;
+                      models[i] = next;
+                      setForm({ ...form, models });
+                    }}
+                  />
                   {m.contextWindow ? <div className="text-[11px] text-ink-3">{`${Math.round(m.contextWindow / 1000)}k context${m.maxTokens ? ` · ${Math.round(m.maxTokens / 1000)}k max output` : ""}`}</div> : null}
                   <button type="button" className="text-xs text-blocked" onClick={() => setForm({ ...form, models: form.models.filter((_, idx) => idx !== i) })}>Remove</button>
                 </div>)}
