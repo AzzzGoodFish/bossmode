@@ -9,7 +9,7 @@
  * WS room:message on dm:<memberId>.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelRight } from "lucide-react";
+import { PanelRight, Search, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
@@ -44,6 +44,8 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [contextUsage, setContextUsage] = useState<ContextUsageData | undefined>();
   const [models, setModels] = useState<AvailableModelOption[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
@@ -125,7 +127,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
     },
     [dmRoomId],
   );
-  const { subscribeRoom, unsubscribeRoom } = useWebSocket({ onEvent: handleWsEvent });
+  const { subscribeRoom, unsubscribeRoom, connected, reconnecting } = useWebSocket({ onEvent: handleWsEvent });
   useEffect(() => {
     subscribeRoom(dmRoomId);
     return () => unsubscribeRoom(dmRoomId);
@@ -325,6 +327,15 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             </span>
           </button>
           <div className="ml-auto flex items-center gap-1 shrink-0">
+            <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
+              {reconnecting && <span className="text-[10px] text-think animate-pulse hidden sm:block">reconnecting</span>}
+              {!connected && !reconnecting && <span className="text-[10px] text-blocked hidden sm:block">offline</span>}
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${connected ? "bg-onair" : reconnecting ? "bg-think animate-pulse" : "bg-blocked"}`} />
+              {connected && <span className="text-[10px] text-ink-4 hidden sm:block">live</span>}
+            </span>
+            <button onClick={() => { setSearchOpen(v => !v); setSearchQuery(""); }} className={toolBtn} title="Search messages">
+              <Search size={13} />
+            </button>
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}
@@ -335,6 +346,24 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             </button>
           </div>
         </div>
+
+        {/* DM search bar — client-side filter (DM conversations are small enough) */}
+        {searchOpen && (
+          <div className="border-b border-line px-4 py-2 flex items-center gap-2 bg-surface-1 shrink-0">
+            <Search size={13} className="text-ink-4 shrink-0" />
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter messages…"
+              className="flex-1 bg-transparent text-[13px] text-ink-1 placeholder:text-ink-4 outline-none"
+            />
+            {searchQuery && <span className="text-[10px] text-ink-4 shrink-0">{messages ? messages.filter(m => (m.content || "").toLowerCase().includes(searchQuery.toLowerCase())).length : 0} matches</span>}
+            <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className={toolBtn} title="Close search">
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         {/* messages — room chat message language */}
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-w-0 px-4 py-3">
@@ -353,8 +382,9 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             </div>
           ) : (
             <div>
-              {messages.map((msg, i) => {
-                const prev = i > 0 ? messages[i - 1] : null;
+              {(searchOpen && searchQuery.trim() ? messages.filter(m => (m.content || "").toLowerCase().includes(searchQuery.toLowerCase())) : messages).map((msg, i, arr) => {
+                const list = searchOpen && searchQuery.trim() ? arr : messages;
+                const prev = i > 0 ? list[i - 1] : null;
                 const showDateSep = shouldShowDateSeparator(prev, msg);
                 const grouped = isGroupedWithPrev(prev, msg);
                 const time = new Date(msg.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
