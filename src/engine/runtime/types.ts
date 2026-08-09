@@ -124,7 +124,7 @@ export interface MemberActiveToolInfo {
 
 export type AgentStreamEvent =
   | { type: "agent_start" }
-  | { type: "agent_end" }
+  | { type: "agent_end"; willRetry?: boolean }
   | { type: "message_start" }
   | { type: "message_update"; text?: string; thinking?: string }
   | { type: "message_end"; text: string; usage?: TokenUsage; stopReason?: string; errorMessage?: string; model?: string }

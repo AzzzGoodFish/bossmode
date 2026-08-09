@@ -13,7 +13,7 @@ function textFromMessage(msg: any): string {
 export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
   switch (raw?.type) {
     case "agent_start": return { type: "agent_start" };
-    case "agent_end": return { type: "agent_end" };
+    case "agent_end": return { type: "agent_end", willRetry: !!raw.willRetry };
     case "message_start":
       return raw.message?.role === "assistant" ? { type: "message_start" } : null;
     case "message_update": {

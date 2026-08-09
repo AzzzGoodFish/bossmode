@@ -167,6 +167,8 @@ interface AgentInstance {
   hadErrorInTurn: boolean;
   /** Last turn failure text for wait() error-idle wake. Cleared at next runPrompt start. */
   lastTurnError: string | null;
+  /** Defer system error notice until final agent_end (suppress during willRetry). */
+  pendingErrorNotice: string | null;
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
@@ -301,7 +303,12 @@ function flushQueuedInputs(instance: AgentInstance, trigger: string): void {
   if (instance.queuedInputs.length === 0) return;
   const queued = instance.queuedInputs.splice(0);
   logger.info("agent", "flushQueuedInputs", { member: instance.agentName, count: queued.length, trigger });
-  for (const input of queued) instance.handle.steer(input);
+  // Activity: each flushed input is a mid-turn injection — same user_steer event as
+  // live steer (fish 2026-08-09: in-flight @ was invisible in Activity).
+  for (const input of queued) {
+    emitAgentLocalEvent(instance.roomId, instance.memberId, { type: "user_steer", text: input });
+    instance.handle.steer(input);
+  }
 }
 
 function queueInput(instance: AgentInstance, input: string, trigger: string): void {
@@ -336,9 +343,12 @@ function isLengthStopReason(stopReason: unknown): boolean {
   return normalized === "length" || normalized.includes("max_tokens") || normalized.includes("max_output");
 }
 
-function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): void {
-  if (instance.queuedInputs.length === 0) return;
-  if (instance.status === "working" || instance.dispatchState !== "idle") return;
+/** Drain queued mid-turn inputs into a fresh prompt. Returns true if a new prompt was started. */
+function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): boolean {
+  if (instance.queuedInputs.length === 0) return false;
+  // After agent_end, turnActive is false while public status may still read "working"
+  // until transition — gate on turn/dispatch, not public status (fish 2026-08-09).
+  if (instance.turnActive || instance.promptInFlight || instance.dispatchState !== "idle") return false;
   const queued = instance.queuedInputs.splice(0);
   const message = queued.join("\n\n");
   logger.info("agent", "drainQueuedInputsAsPrompt", { member: instance.agentName, count: queued.length, trigger });
@@ -346,6 +356,7 @@ function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): vo
     logger.error("agent", "queued prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
     postMessage(instance.roomId, "system", `Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(err)}`);
   });
+  return true;
 }
 
 async function maybeRunLengthContinuation(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<boolean> {
@@ -372,7 +383,12 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
   updateDispatchState(instance, "idle", trigger);
   applyPendingAfterPromptSettlement(instance, trigger);
   if (instance.queuedInputs.length > 0) {
-    drainQueuedInputsAsPrompt(instance, trigger);
+    // Continue the pipeline without leaving a durable public idle (wait consumer).
+    if (drainQueuedInputsAsPrompt(instance, trigger)) {
+      if (instance.status === "idle") {
+        transition(instance, instance.roomId, instance.agentName, "working", `${trigger}_drain`);
+      }
+    }
     return;
   }
   if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
@@ -410,6 +426,7 @@ async function runPrompt(
   instance.promptInFlight = true;
   instance.hadErrorInTurn = false;
   instance.lastTurnError = null;
+  instance.pendingErrorNotice = null;
   instance.lastMessageEndWasLength = false;
   instance.lengthContinuationPending = false;
   if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
@@ -904,6 +921,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         pendingChatReply: false,
         hadErrorInTurn: false,
         lastTurnError: null,
+        pendingErrorNotice: null,
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
@@ -1070,6 +1088,8 @@ async function activateAgentInternalContinue(
   }
 
   if (instance.status === "working") {
+    // Mid-turn @ — record as user_steer so Activity shows the injection (architect 2026-08-09).
+    emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
     instance.handle.steer(payload);
     return;
   }
@@ -1566,10 +1586,6 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
   const agentName = instance?.agentName || memberRef;
   if (!instance) throw new Error(`Cannot steer agent "${agentName}": not found`);
 
-  const steerEvent: AgentHistoryEvent = { type: "user_steer", text: instruction };
-  instance.eventBuffer.push(steerEvent);
-  try { appendEventToDisk(roomId, instance.memberId, steerEvent); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId: instance.memberId, error: String(err) }); }
-
   // Slash commands (e.g. /compact, /model) are transparently forwarded to the runtime.
   // Plain instructions are sent as-is — the private-message envelope and reply footer
   // were removed along with private chat (stream 1 envelope normalization).
@@ -1584,12 +1600,15 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
   const steerLatestId = getLatestMessageId(roomId);
   if (steerLatestId) roomStore.setCursor(roomId, instance.memberId, steerLatestId);
 
+  // Emit user_steer only at actual delivery (steer/prompt). Queued paths emit on
+  // flushQueuedInputs so Activity never double-counts the same injection.
   if (instance.compacting) {
     queueInput(instance, userMessage, "steer");
     return;
   }
 
   if (instance.status === "working") {
+    emitAgentLocalEvent(roomId, instance.memberId, { type: "user_steer", text: userMessage });
     instance.handle.steer(userMessage);
     return;
   }
@@ -1599,6 +1618,7 @@ export async function steerAgent(roomId: string, memberRef: string, instruction:
     return;
   }
 
+  emitAgentLocalEvent(roomId, instance.memberId, { type: "user_steer", text: userMessage });
   await runPrompt(instance, userMessage, "steer", (err) => {
     logger.error("agent", "steer error", { agent: agentName, error: formatRuntimeErrorMessage(err) });
   });
@@ -1855,6 +1875,7 @@ function wireInstanceEvents(
     }
     if (event.type === "agent_start") {
       // Fresh turn: reset final-text segment tracking so each turn is numbered independently.
+      // Note: pi session retries also emit agent_start; segment reset is intentional per attempt.
       instance.turnSegmentSeq = 0;
       instance.lastCompletedFinalText = "";
       instance.lastCompletedFinalSeq = 0;
@@ -1863,15 +1884,38 @@ function wireInstanceEvents(
       updateDispatchState(instance, "running", event.type);
       flushQueuedInputs(instance, event.type);
     } else if (event.type === "agent_end") {
-      // Public status may become idle here, but the SDK run can still be finalizing.
-      // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
-      instance.turnActive = false;
-      if (!instance.promptInFlight) {
-        updateDispatchState(instance, "idle", event.type);
-        applyPendingAfterPromptSettlement(instance, event.type);
-        drainQueuedInputsAsPrompt(instance, event.type);
-      } else if (instance.dispatchState === "idle") {
-        applyPendingAfterPromptSettlement(instance, event.type);
+      // pi session-level retry: willRetry agent_end is not a real turn end — keep
+      // turnActive/dispatch/queue as-is so public status stays working and wait
+      // does not wake on the retry gap (fish 2026-08-09 experiment).
+      if (event.willRetry) {
+        instance.pendingErrorNotice = null; // suppress mid-retry error system messages
+        logger.info("agent", "agent_end_willRetry", { member: memberName, roomId, memberId });
+      } else {
+        // Final agent_end for this attempt budget — settle deferred error notice once.
+        if (instance.pendingErrorNotice) {
+          postMessage(roomId, "system", instance.pendingErrorNotice);
+          instance.pendingErrorNotice = null;
+        }
+        // Public status may become idle here, but the SDK run can still be finalizing.
+        // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
+        instance.turnActive = false;
+        if (!instance.promptInFlight) {
+          updateDispatchState(instance, "idle", event.type);
+          applyPendingAfterPromptSettlement(instance, event.type);
+          // Queue non-empty → continue without public idle flash (wait stays asleep).
+          if (drainQueuedInputsAsPrompt(instance, event.type)) {
+            (event as any)._skipIdleTransition = true;
+          }
+        } else {
+          // prompt() still settling — if more work is queued, skip idle now; finalize
+          // will drain after prompt resolves (same "queue empty" idle rule).
+          if (instance.queuedInputs.length > 0) {
+            (event as any)._skipIdleTransition = true;
+          }
+          if (instance.dispatchState === "idle") {
+            applyPendingAfterPromptSettlement(instance, event.type);
+          }
+        }
       }
     } else if (event.type === "compaction_start") {
       instance.compacting = true;
@@ -1886,7 +1930,13 @@ function wireInstanceEvents(
       updateDispatchState(instance, "idle", event.type);
       instance.queuedInputs = [];
     }
-    if (newStatus) transition(instance, roomId, memberName, newStatus, event.type);
+    if (newStatus) {
+      if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
+        // drained next prompt — stay working publicly
+      } else {
+        transition(instance, roomId, memberName, newStatus, event.type);
+      }
+    }
 
     if (event.type === "message_end") {
       instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
@@ -1917,7 +1967,9 @@ function wireInstanceEvents(
         ? ` Error: ${formattedError}`
         : " An unrecoverable provider error occurred.";
       logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
-      postMessage(roomId, "system", `Member "${memberName}" request failed.${detail}`);
+      // Defer system notice until final agent_end — willRetry attempts stay silent
+      // so a retry storm posts one death notice, not one per attempt (fish 2026-08-09).
+      instance.pendingErrorNotice = `Member "${memberName}" request failed.${detail}`;
     }
 
     // Unexpected runtime exit: notify the conversation and drop the dead
@@ -2043,6 +2095,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         pendingChatReply: false,
         hadErrorInTurn: false,
         lastTurnError: null,
+        pendingErrorNotice: null,
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
