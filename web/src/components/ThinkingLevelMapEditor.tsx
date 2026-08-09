@@ -8,8 +8,11 @@
  *   Not available  — write null (mid) or omit (xhigh/max)
  *
  * Full defaults (off–high as-is, xhigh/max unavailable) → undefined map (field omitted).
+ *
+ * Modes/customs live in local state so "Custom value…" with an empty input stays
+ * selected (intermediate UI state). Empty custom still omits the map entry.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelDefinitionConfig } from "../api/client";
 
 export type ThinkingLevelKey = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -38,6 +41,18 @@ export function customValueFromMap(map: LevelMap | undefined, level: ThinkingLev
   return typeof v === "string" && v !== level ? v : "";
 }
 
+function modesFromMap(map: LevelMap | undefined): Record<ThinkingLevelKey, LevelMode> {
+  const m = {} as Record<ThinkingLevelKey, LevelMode>;
+  for (const level of THINKING_LEVEL_KEYS) m[level] = levelModeFromMap(map, level);
+  return m;
+}
+
+function customsFromMap(map: LevelMap | undefined): Record<ThinkingLevelKey, string> {
+  const m = {} as Record<ThinkingLevelKey, string>;
+  for (const level of THINKING_LEVEL_KEYS) m[level] = customValueFromMap(map, level);
+  return m;
+}
+
 /** Convert UI state → map. Returns undefined when fully default (omit field). */
 export function buildThinkingLevelMap(
   modes: Record<ThinkingLevelKey, LevelMode>,
@@ -54,7 +69,7 @@ export function buildThinkingLevelMap(
         touched = true;
       } else {
         const raw = (customs[level] || "").trim();
-        if (!raw) continue; // empty custom falls back to as-is
+        if (!raw) continue; // empty custom: keep UI mode, omit entry
         out[level] = raw;
         touched = true;
       }
@@ -66,7 +81,7 @@ export function buildThinkingLevelMap(
         touched = true;
       } else {
         const raw = (customs[level] || "").trim();
-        if (!raw) continue;
+        if (!raw) continue; // empty custom: keep UI mode, omit entry
         out[level] = raw;
         touched = true;
       }
@@ -75,19 +90,27 @@ export function buildThinkingLevelMap(
   return touched ? out : undefined;
 }
 
-export function summarizeThinkingMap(map: LevelMap | undefined): string {
+/** Summary from local modes — empty Custom still counts as available (unlock intent) but not remapped until filled. */
+export function summarizeThinkingModes(
+  modes: Record<ThinkingLevelKey, LevelMode>,
+  customs: Record<ThinkingLevelKey, string>,
+): string {
   let available = 0;
   let remapped = 0;
   let disabled = 0;
+  let allDefault = true;
   for (const level of THINKING_LEVEL_KEYS) {
-    const mode = levelModeFromMap(map, level);
-    if (mode === "off") disabled += 1;
-    else {
-      available += 1;
-      if (mode === "custom") remapped += 1;
+    const mode = modes[level] ?? (MID_LEVELS.has(level) ? "as-is" : "off");
+    const defaultMode: LevelMode = MID_LEVELS.has(level) ? "as-is" : "off";
+    if (mode !== defaultMode) allDefault = false;
+    if (mode === "off") {
+      disabled += 1;
+      continue;
     }
+    available += 1;
+    if (mode === "custom" && (customs[level] || "").trim()) remapped += 1;
   }
-  if (!map || Object.keys(map).length === 0) {
+  if (allDefault) {
     return `${available} available · off–high as-is`;
   }
   const parts = [`${available} available`];
@@ -96,10 +119,18 @@ export function summarizeThinkingMap(map: LevelMap | undefined): string {
   return parts.join(" · ");
 }
 
+export function summarizeThinkingMap(map: LevelMap | undefined): string {
+  return summarizeThinkingModes(modesFromMap(map), customsFromMap(map));
+}
+
+function serializeMap(map: LevelMap | undefined): string {
+  return JSON.stringify(map ?? null);
+}
+
 const selectCls =
-  "bg-inset border border-line rounded px-2 py-1.5 text-xs text-ink-1 focus:outline-none focus:border-line-strong cursor-pointer";
+  "bg-inset border border-line-soft rounded-md px-1.5 py-1 text-[11px] text-ink-2 focus:outline-none focus:border-line-strong cursor-pointer w-full";
 const inputCls =
-  "w-full bg-inset border border-line rounded px-2 py-1.5 text-xs text-ink-1 font-mono focus:outline-none focus:border-line-strong";
+  "w-full bg-inset border border-[rgba(47,184,170,0.4)] rounded-md px-2 py-1 text-[11px] text-ink-1 font-mono focus:outline-none focus:border-accent placeholder:text-ink-4";
 
 export function ThinkingLevelMapEditor({
   value,
@@ -109,77 +140,105 @@ export function ThinkingLevelMapEditor({
   onChange: (next: LevelMap | undefined) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const modes = useMemo(() => {
-    const m = {} as Record<ThinkingLevelKey, LevelMode>;
-    for (const level of THINKING_LEVEL_KEYS) m[level] = levelModeFromMap(value, level);
-    return m;
+  const [modes, setModes] = useState<Record<ThinkingLevelKey, LevelMode>>(() => modesFromMap(value));
+  const [customs, setCustoms] = useState<Record<ThinkingLevelKey, string>>(() => customsFromMap(value));
+  // Track last map we pushed so external value reloads re-seed local state without
+  // wiping the empty-custom intermediate state after our own onChange.
+  const emittedRef = useRef(serializeMap(value));
+
+  useEffect(() => {
+    const incoming = serializeMap(value);
+    if (incoming === emittedRef.current) return;
+    emittedRef.current = incoming;
+    setModes(modesFromMap(value));
+    setCustoms(customsFromMap(value));
   }, [value]);
-  const customs = useMemo(() => {
-    const m = {} as Record<ThinkingLevelKey, string>;
-    for (const level of THINKING_LEVEL_KEYS) m[level] = customValueFromMap(value, level);
-    return m;
-  }, [value]);
+
+  const push = (nextModes: Record<ThinkingLevelKey, LevelMode>, nextCustoms: Record<ThinkingLevelKey, string>) => {
+    const next = buildThinkingLevelMap(nextModes, nextCustoms);
+    emittedRef.current = serializeMap(next);
+    onChange(next);
+  };
 
   const setMode = (level: ThinkingLevelKey, mode: LevelMode) => {
     const nextModes = { ...modes, [level]: mode };
     const nextCustoms = { ...customs };
     if (mode !== "custom") nextCustoms[level] = "";
-    onChange(buildThinkingLevelMap(nextModes, nextCustoms));
+    setModes(nextModes);
+    setCustoms(nextCustoms);
+    push(nextModes, nextCustoms);
   };
 
   const setCustom = (level: ThinkingLevelKey, raw: string) => {
     const nextCustoms = { ...customs, [level]: raw };
     const nextModes = { ...modes, [level]: "custom" as LevelMode };
-    onChange(buildThinkingLevelMap(nextModes, nextCustoms));
+    setModes(nextModes);
+    setCustoms(nextCustoms);
+    push(nextModes, nextCustoms);
   };
 
-  const summary = summarizeThinkingMap(value);
+  const summary = summarizeThinkingModes(modes, customs);
 
   return (
-    <div className="border border-line-soft rounded-lg overflow-hidden">
+    <div className="border-t border-line-soft pt-2">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-2/60 cursor-pointer"
+        className="w-full flex items-center gap-2 py-0.5 text-left bg-transparent border-0 cursor-pointer"
       >
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-ink-1">Thinking levels</div>
-          <div className="text-[11px] text-ink-3 truncate mt-0.5">{summary}</div>
-        </div>
-        <span className="text-ink-4 text-[11px] shrink-0">{open ? "▲" : "▼"}</span>
+        <span
+          className={`text-ink-4 text-[10px] shrink-0 transition-transform duration-100 ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        >
+          ▶
+        </span>
+        <span className="text-xs font-semibold text-ink-2 shrink-0">Thinking levels</span>
+        <span className="text-[11px] text-ink-4 font-mono truncate min-w-0">{summary}</span>
       </button>
       {open && (
-        <div className="border-t border-line-soft px-3 py-2 space-y-2 bg-inset/40">
-          <p className="text-[11px] text-ink-3 leading-relaxed">
-            Control which thinking levels appear for this model and what value is sent to the provider.
-            Leave mid-levels as-is unless your endpoint uses different names. xhigh/max stay off until you enable them.
+        <div className="pt-1">
+          <p className="text-[11px] text-ink-4 leading-relaxed my-1 mb-2">
+            What this model offers, and the exact value sent to your provider. Defaults match pi&apos;s built-in behavior — most endpoints need no changes.
           </p>
-          {THINKING_LEVEL_KEYS.map((level) => {
-            const mode = modes[level];
-            return (
-              <div key={level} className="flex flex-wrap items-center gap-2">
-                <code className="text-[11px] font-mono text-ink-2 w-16 shrink-0">{level}</code>
-                <select
-                  className={selectCls}
-                  value={mode}
-                  onChange={(e) => setMode(level, e.target.value as LevelMode)}
+          <div className="flex flex-col gap-1">
+            {THINKING_LEVEL_KEYS.map((level) => {
+              const mode = modes[level];
+              const dim = mode === "off";
+              return (
+                <div
+                  key={level}
+                  className="grid items-center gap-2 py-0.5"
+                  style={{ gridTemplateColumns: "74px 148px 1fr" }}
                 >
-                  <option value="as-is">As-is</option>
-                  <option value="custom">Custom value…</option>
-                  <option value="off">Not available</option>
-                </select>
-                {mode === "custom" && (
-                  <input
-                    className={`${inputCls} flex-1 min-w-[8rem]`}
-                    value={customs[level]}
-                    onChange={(e) => setCustom(level, e.target.value)}
-                    placeholder={`e.g. ${level === "xhigh" ? "max" : level}`}
-                    spellCheck={false}
-                  />
-                )}
-              </div>
-            );
-          })}
+                  <code className={`text-[11.5px] font-mono ${dim ? "text-ink-4" : "text-ink-2"}`}>{level}</code>
+                  <select
+                    className={selectCls}
+                    value={mode}
+                    onChange={(e) => setMode(level, e.target.value as LevelMode)}
+                  >
+                    <option value="as-is">As-is</option>
+                    <option value="custom">Custom value…</option>
+                    <option value="off">Not available</option>
+                  </select>
+                  {mode === "custom" ? (
+                    <input
+                      className={inputCls}
+                      value={customs[level]}
+                      onChange={(e) => setCustom(level, e.target.value)}
+                      placeholder={`e.g. ${level === "xhigh" ? "max" : level}`}
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <span />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10.5px] text-ink-4 mt-2 leading-relaxed">
+            xhigh / max stay hidden from the level picker until you map or enable them here. Setting a level to{" "}
+            <b className="font-semibold">Not available</b> hides it.
+          </p>
         </div>
       )}
     </div>
