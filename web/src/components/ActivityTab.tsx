@@ -35,6 +35,17 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
   const [query, setQuery] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledToLatestRef = useRef(false);
+
+  /** All-stream visibility. Streaming deltas (message_update/tool_update) and
+   * message_start markers are noise; a bare message_end from a pure tool-call
+   * round (no text, no thinking) carries no information either — excluded per
+   * fish 2026-08-09. message_end WITH text/thinking still renders as the
+   * REPLY/THINKING cards. */
+  const isAllStreamEvent = (event: AgentEvent): boolean => {
+    if (event.type === "message_update" || event.type === "tool_update" || event.type === "message_start") return false;
+    if (event.type === "message_end" && !event.text && !event.thinking) return false;
+    return true;
+  };
   // Synchronous re-entry guard — React state alone can miss a second scroll
   // event that fires before the next render (QA noted this under synthetic
   // scrollTop assignment; real wheel gestures were fine, but a ref is cheap insurance).
@@ -126,12 +137,12 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
       if (filter === "tools" && !isToolEvent(event) && !isCompactionEvent(event)) return false;
       if (filter === "replies" && !isReplyEvent(event)) return false;
       if (q && !eventSearchText(event).includes(q)) return false;
-      return event.type !== "message_update" && event.type !== "tool_update" && event.type !== "message_start";
+      return isAllStreamEvent(event);
     });
   }, [events, filter, query]);
 
   const counts = useMemo(() => ({
-    all: events.filter((e) => e.type !== "message_update" && e.type !== "tool_update" && e.type !== "message_start").length,
+    all: events.filter(isAllStreamEvent).length,
     tools: events.filter((event) => isToolEvent(event) || isCompactionEvent(event)).length,
     replies: events.filter(isReplyEvent).length,
   }), [events]);
