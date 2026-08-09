@@ -150,6 +150,48 @@ describe("waitForMember", () => {
     if (outcome.ok) expect(outcome.reason).toBe("idle");
   });
 
+  it("resolves with reason error when target idles after turn failure", async () => {
+    const pending = waitForMember({
+      roomId: "room-a",
+      waiterMemberId: "rm_pm",
+      waiterName: "pm",
+      targetMemberId: "rm_qa",
+      targetName: "qa",
+      targetStatus: "working",
+      timeoutMinutes: 5,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    notifyMemberIdle("room-a", "rm_qa", { error: "request failed. Error: terminated" });
+    const outcome = await pending;
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.reason).toBe("error");
+      expect(outcome.detail).toMatch(/terminated/i);
+      expect(outcome.detail).toMatch(/No output produced/i);
+      expect(outcome.detail).toMatch(/verify status/i);
+    }
+  });
+
+  it("does not wake on idle notify for a different member (transient retry stays working)", async () => {
+    const pending = waitForMember({
+      roomId: "room-a",
+      waiterMemberId: "rm_pm",
+      waiterName: "pm",
+      targetMemberId: "rm_qa",
+      targetName: "qa",
+      targetStatus: "working",
+      timeoutMinutes: 5,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    // Other member idling / error must not settle this wait — target still working (retry).
+    notifyMemberIdle("room-a", "rm_dev", { error: "terminated" });
+    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+    notifyMemberIdle("room-a", "rm_qa");
+    const outcome = await pending;
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.reason).toBe("idle");
+  });
+
   it("resolves on @mention of the waiter (mention_interrupt) after one tick — no abort", async () => {
     const pending = waitForMember({
       roomId: "room-a",

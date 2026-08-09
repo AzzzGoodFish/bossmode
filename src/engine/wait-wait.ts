@@ -4,21 +4,26 @@
 // Resolves when ANY of:
 //   1. target posts an agent-authored room message
 //   2. target transitions to idle (or is already idle at call time)
-//   3. waiter is @-mentioned → settle mention_interrupt (no abort; message arrives via steer)
-//   4. timeout (default 30 min, max 360)
-//   5. user Stop → abortAgent settles wait first, then aborts the turn
+//   3. target transitions to idle after a turn error → reason "error"
+//   4. waiter is @-mentioned → settle mention_interrupt (no abort; message arrives via steer)
+//   5. timeout (default 30 min, max 360)
+//   6. user Stop → abortAgent settles wait first, then aborts the turn
 //
 // One wait per waiter at a time. Cursor is NOT advanced — normal activation owns that.
 //
 // @-while-waiting (fish 0.19.6): standard activation steers the message first (cursor
 // advances once); wait settles mention_interrupt one tick later so the next model
 // request sees tool-result then steered user message. Wait never carries message body.
+//
+// Error idle (fish 2026-08-09): target turn failure (e.g. request terminated) still
+// flips status to idle — waiter must learn it was an error exit with no output, not a
+// normal completion. Transient provider retries keep status working and do not wake wait.
 
 import { onMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 
-export type WaitReason = "message" | "idle" | "mention_interrupt" | "timeout";
+export type WaitReason = "message" | "idle" | "error" | "mention_interrupt" | "timeout";
 
 export interface WaitResult {
   ok: true;
@@ -54,8 +59,8 @@ interface ActiveWait {
 /** roomId:waiterMemberId → active wait */
 const activeWaits = new Map<string, ActiveWait>();
 
-/** Idle listeners: roomId:targetMemberId → Set of callbacks */
-const idleListeners = new Map<string, Set<() => void>>();
+/** Idle listeners: roomId:targetMemberId → Set of callbacks (error text when turn failed). */
+const idleListeners = new Map<string, Set<(info?: { error?: string }) => void>>();
 
 function waitKey(roomId: string, waiterMemberId: string): string {
   return `${roomId}:${waiterMemberId}`;
@@ -100,7 +105,7 @@ function detachIdleListener(wait: ActiveWait): void {
   const set = idleListeners.get(ik);
   if (!set) return;
   // Find and remove the callback that belongs to this wait (stored on wait via symbol)
-  const cb = (wait as any)._idleCb as (() => void) | undefined;
+  const cb = (wait as any)._idleCb as ((info?: { error?: string }) => void) | undefined;
   if (cb) set.delete(cb);
   if (set.size === 0) idleListeners.delete(ik);
 }
@@ -108,12 +113,13 @@ function detachIdleListener(wait: ActiveWait): void {
 /**
  * Notify waiters that a member became idle.
  * Wired from agent-manager.transition() when newStatus === "idle".
+ * Pass `error` when the just-finished turn failed so wait settles with reason "error".
  */
-export function notifyMemberIdle(roomId: string, memberId: string): void {
+export function notifyMemberIdle(roomId: string, memberId: string, info?: { error?: string }): void {
   const set = idleListeners.get(idleKey(roomId, memberId));
   if (!set || set.size === 0) return;
   for (const cb of [...set]) {
-    try { cb(); } catch (err) {
+    try { cb(info); } catch (err) {
       logger.error("wait", "idle listener error", { error: String(err) });
     }
   }
@@ -220,8 +226,18 @@ export function waitForMember(args: {
       });
     });
 
-    // 2) Target becomes idle
-    const onIdle = () => {
+    // 2) Target becomes idle (normal or after turn error)
+    const onIdle = (info?: { error?: string }) => {
+      const errText = typeof info?.error === "string" ? info.error.trim() : "";
+      if (errText) {
+        finish({
+          ok: true,
+          reason: "error",
+          target: targetName,
+          detail: `${targetName}'s last turn ended with an error (${errText}). No output produced — verify status before continuing.`,
+        });
+        return;
+      }
       finish({
         ok: true,
         reason: "idle",
