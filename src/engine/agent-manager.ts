@@ -165,6 +165,8 @@ interface AgentInstance {
   pendingCredentialRefresh?: PendingCredentialRefresh;
   pendingChatReply: boolean;
   hadErrorInTurn: boolean;
+  /** Last turn failure text for wait() error-idle wake. Cleared at next runPrompt start. */
+  lastTurnError: string | null;
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
@@ -277,8 +279,10 @@ function transition(
   logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
   // Notify blocking wait() callers when a member becomes idle.
+  // If the turn just failed, pass lastTurnError so wait settles with reason "error".
   if (newStatus === "idle") {
-    try { notifyMemberIdle(roomId, instance.memberId); } catch { /* ignore */ }
+    const error = instance.lastTurnError || undefined;
+    try { notifyMemberIdle(roomId, instance.memberId, error ? { error } : undefined); } catch { /* ignore */ }
   }
 }
 
@@ -405,6 +409,7 @@ async function runPrompt(
   updateDispatchState(instance, "promptSubmitted", trigger);
   instance.promptInFlight = true;
   instance.hadErrorInTurn = false;
+  instance.lastTurnError = null;
   instance.lastMessageEndWasLength = false;
   instance.lengthContinuationPending = false;
   if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
@@ -424,9 +429,18 @@ async function runPrompt(
     await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
   } catch (err: any) {
     instance.promptInFlight = false;
+    const formatted = formatRuntimeErrorMessage(err).trim() || "prompt failed";
+    instance.hadErrorInTurn = true;
+    instance.lastTurnError = formatted;
     onError(err);
     updateDispatchState(instance, "idle", `${trigger}_prompt_error`);
     instance.queuedInputs = [];
+    // Ensure public status goes idle so wait listeners wake with the error mark.
+    if (instance.status !== "idle") {
+      transition(instance, instance.roomId, instance.agentName, "idle", `${trigger}_prompt_error`);
+    } else {
+      try { notifyMemberIdle(instance.roomId, instance.memberId, { error: formatted }); } catch { /* ignore */ }
+    }
   }
 }
 
@@ -889,6 +903,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
         queuedInputs: [],
         pendingChatReply: false,
         hadErrorInTurn: false,
+        lastTurnError: null,
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
@@ -1897,6 +1912,7 @@ function wireInstanceEvents(
     if (event.type === "message_end" && event.stopReason === "error") {
       instance.hadErrorInTurn = true;
       const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
+      instance.lastTurnError = formattedError || "unrecoverable provider error";
       const detail = formattedError
         ? ` Error: ${formattedError}`
         : " An unrecoverable provider error occurred.";
@@ -1909,6 +1925,14 @@ function wireInstanceEvents(
     if (event.type === "runtime_exit" && event.unexpected) {
       const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
       const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
+      instance.hadErrorInTurn = true;
+      instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
+      // Wake waiters with error before tearing down (processEvent does not idle this path).
+      if (instance.status !== "idle") {
+        transition(instance, roomId, memberName, "idle", event.type);
+      } else {
+        try { notifyMemberIdle(roomId, instance.memberId, { error: instance.lastTurnError }); } catch { /* ignore */ }
+      }
       postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
       logger.warn("agent", "instance removed after unexpected exit", {
         member: memberName, roomId, code: event.code, signal: event.signal,
@@ -2018,6 +2042,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
         queuedInputs: [],
         pendingChatReply: false,
         hadErrorInTurn: false,
+        lastTurnError: null,
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
