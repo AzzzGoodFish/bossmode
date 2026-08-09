@@ -353,7 +353,7 @@ export function healMissingIndexedSeqs(
       continue; // tolerate corrupt trailing line — same as backfill
     }
     seq += 1;
-    const ts = typeof event.ts === "number" ? event.ts : lastTs ?? 0;
+    const ts: number = typeof event.ts === "number" ? event.ts : (lastTs ?? 0);
     lastTs = ts;
 
     if (!INDEXED_ACTIVITY_TYPES.has(event.type)) continue;
