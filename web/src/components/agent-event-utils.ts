@@ -124,6 +124,32 @@ export function formatToolArgsPreview(args: unknown): string {
   return JSON.stringify(sanitizeArgPreview(args), null, 2);
 }
 
+/** Full-depth redact without preview truncation — for the expandable Arguments panel. */
+function sanitizeArgsFull(value: unknown, depth = 0): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") return redactSensitiveString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeArgsFull(item, depth + 1));
+  if (typeof value === "object") {
+    if (depth > 12) return "…";
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        SENSITIVE_ARG_KEY.test(key) ? "[redacted]" : sanitizeArgsFull(item, depth + 1),
+      ]),
+    );
+  }
+  return String(value);
+}
+
+export function formatToolArgsFull(args: unknown): string {
+  return JSON.stringify(sanitizeArgsFull(args), null, 2);
+}
+
+export function getSanitizedArgs(args: unknown): unknown {
+  return sanitizeArgsFull(args);
+}
+
 export function compactionReasonLabel(reason: unknown): string {
   if (reason === "threshold") return "auto · threshold";
   if (reason === "overflow") return "context overflow";
@@ -181,6 +207,7 @@ export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
   }
   if (event.type === "agent_reply") return { kind: "reply", label: "REPLY", detail: truncateText(event.text, 78), ts };
   if (event.type === "user_steer") return { kind: "reply", label: "STEER", detail: truncateText(event.text, 78), ts };
+  if (event.type === "user_prompt") return { kind: "system", label: "USER PROMPT", detail: truncateText(event.text, 78), ts };
   if (event.type === "agent_start") return { kind: "system", label: "TURN", detail: "Agent started", ts };
   if (event.type === "agent_end") return { kind: "system", label: "TURN", detail: "Agent finished", ts };
   return { kind: "system", label: event.type.toUpperCase(), detail: truncateText(event.text ?? event.type, 78), ts };

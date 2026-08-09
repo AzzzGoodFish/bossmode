@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
-import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsPreview, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
 const PAGE_SIZE = 120;
@@ -209,6 +209,7 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
   const summary = summarizeAgentEvent(event);
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
+  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query={query} />;
   if (event.type === "tool_end") return <ToolCard event={event} toolEnd={event} diff={diff} time={time} query={query} />;
   if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
   if (event.type === "tool_start") {
@@ -230,6 +231,136 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
 }
 
 const MAX_RESULT_RENDER = 50_000;
+const ARGS_CLAMP_LINES = 12;
+const PROMPT_CLAMP_LINES = 4;
+
+function UserPromptCard({ event, time, query }: { event: AgentEvent; time: string; query: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = String(event.text || "");
+  const lines = text.split("\n");
+  const clamped = lines.length > PROMPT_CLAMP_LINES && !expanded;
+  const body = clamped ? lines.slice(0, PROMPT_CLAMP_LINES).join("\n") : text;
+  return (
+    <div className="rounded-[10px] border border-accent/30 bg-accent-dim/20 px-3 py-[9px]">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px]">USER PROMPT</span>
+        <span className="text-[10px] text-ink-4">· fish</span>
+        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
+      </div>
+      <div className="text-[12.5px] text-ink-2 whitespace-pre-wrap break-words">{highlight(body, query)}</div>
+      {lines.length > PROMPT_CLAMP_LINES && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1.5 text-[11px] font-semibold text-accent-ink hover:underline cursor-pointer"
+        >
+          {expanded ? "Show less ↑" : `Show more (${lines.length} lines) ↓`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function countLines(text: string): number {
+  return text ? text.split("\n").length : 0;
+}
+
+function ArgsPanel({ args }: { args: unknown }) {
+  const [view, setView] = useState<"structured" | "json">("structured");
+  const [showAll, setShowAll] = useState(false);
+  const sanitized = getSanitizedArgs(args);
+  const jsonText = formatToolArgsFull(args);
+  const truncated = jsonText.length > MAX_RESULT_RENDER;
+  const displayJson = truncated ? jsonText.slice(0, MAX_RESULT_RENDER) : jsonText;
+  const lineCount = countLines(jsonText);
+  const charLabel = jsonText.length >= 1000 ? `${(jsonText.length / 1000).toFixed(1)}k chars` : `${jsonText.length} chars`;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">
+          Arguments{lineCount > 1 ? <span className="font-mono font-normal normal-case tracking-normal text-ink-4"> · {lineCount} lines · {charLabel}</span> : null}
+        </div>
+        <div className="flex gap-0.5 rounded-md border border-line-soft bg-surface-1 p-0.5 ml-auto">
+          <button type="button" onClick={() => setView("structured")} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${view === "structured" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Structured</button>
+          <button type="button" onClick={() => setView("json")} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${view === "json" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>JSON</button>
+        </div>
+      </div>
+      <div className="relative rounded-[7px] border border-line-soft bg-surface-1 overflow-hidden" style={{ borderLeft: "2px solid var(--accent, #2fb8aa)" }}>
+        {view === "json" ? (
+          <pre className={`px-[9px] py-[7px] text-[10.5px] text-ink-2 whitespace-pre-wrap break-words overflow-y-auto ${showAll ? "max-h-[320px]" : "max-h-[${ARGS_CLAMP_LINES * 1.4}em]"}`} style={showAll ? { maxHeight: 320 } : { maxHeight: ARGS_CLAMP_LINES * 16 }}>{displayJson}</pre>
+        ) : (
+          <div className="px-[9px] py-[7px] overflow-y-auto" style={showAll ? { maxHeight: 320 } : { maxHeight: ARGS_CLAMP_LINES * 16 }}>
+            <StructuredArgs value={sanitized} depth={0} />
+          </div>
+        )}
+        {!showAll && lineCount > ARGS_CLAMP_LINES && (
+          <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface-1 to-transparent pointer-events-none" />
+        )}
+      </div>
+      {lineCount > ARGS_CLAMP_LINES && (
+        <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-1 text-[11px] font-semibold text-accent-ink hover:underline cursor-pointer">
+          {showAll ? "Collapse ↑" : `Show all ${lineCount} lines ↓`}
+        </button>
+      )}
+      {truncated && view === "json" && <div className="mt-1 text-[10px] text-ink-4">Showing first {(MAX_RESULT_RENDER / 1000).toFixed(0)}k chars · full content in event log.</div>}
+    </div>
+  );
+}
+
+function StructuredArgs({ value, depth }: { value: unknown; depth: number }) {
+  if (value == null) return <span className="text-ink-4 italic text-[11px]">null</span>;
+  if (typeof value === "boolean") return <span className="text-[11px] font-mono" style={{ color: "#a78bfa" }}>{String(value)}</span>;
+  if (typeof value === "number") return <span className="text-[11px] font-mono text-think">{value}</span>;
+  if (typeof value === "string") {
+    const lines = value.split("\n");
+    if (lines.length <= 1 && value.length < 80) {
+      return <span className="text-[11px] text-onair font-mono break-all">"{value}"</span>;
+    }
+    return (
+      <pre className="mt-0.5 text-[11px] text-ink-2 whitespace-pre-wrap break-words bg-inset/60 rounded px-2 py-1.5 border border-line-soft/60">{value}</pre>
+    );
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-ink-4 text-[11px]">[]</span>;
+    return (
+      <div className="space-y-1" style={{ paddingLeft: depth > 0 ? 12 : 0 }}>
+        {value.map((item, i) => (
+          <div key={i} className="flex gap-1.5 items-start">
+            <span className="text-[10px] font-mono text-ink-4 shrink-0 pt-0.5">[{i}]</span>
+            <div className="min-w-0 flex-1"><StructuredArgs value={item} depth={depth + 1} /></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return <span className="text-ink-4 text-[11px]">{"{}"}</span>;
+    return (
+      <div className="space-y-1" style={{ paddingLeft: depth > 0 ? 12 : 0 }}>
+        {entries.map(([key, item]) => {
+          const isScalar = item == null || typeof item === "string" || typeof item === "number" || typeof item === "boolean";
+          const shortScalar = isScalar && (item == null || typeof item !== "string" || (item.length < 80 && !item.includes("\n")));
+          return (
+            <div key={key} className={shortScalar ? "flex gap-2 items-baseline" : ""}>
+              <span className="text-[11px] font-mono text-accent-ink shrink-0">{key}</span>
+              {shortScalar ? (
+                <>
+                  <span className="text-ink-4 text-[10px]">:</span>
+                  <StructuredArgs value={item} depth={depth + 1} />
+                </>
+              ) : (
+                <div className="mt-0.5"><StructuredArgs value={item} depth={depth + 1} /></div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  return <span className="text-[11px] text-ink-2">{String(value)}</span>;
+}
 
 function resultToText(result: unknown): string {
   if (typeof result === "string") return result;
@@ -289,12 +420,7 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
       {/* Expanded: unified dropdown area — inset container + surface wells (Session & tools card language) */}
       {expanded && (
         <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
-          {event.args !== undefined && (
-            <div>
-              <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4 mb-1">Arguments</div>
-              <pre className="bg-surface-1 border border-line-soft rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words">{formatToolArgsPreview(event.args)}</pre>
-            </div>
-          )}
+          {event.args !== undefined && <ArgsPanel args={event.args} />}
           {resultText && (
             <div className={`${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30 p-1.5" : ""}`}>
               <div className="flex items-center gap-2 mb-1">

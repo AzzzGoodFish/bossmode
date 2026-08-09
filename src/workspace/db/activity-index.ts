@@ -30,6 +30,9 @@ export const INDEXED_ACTIVITY_TYPES = new Set([
   "tool_end",
   "compaction_start",
   "compaction_end",
+  "user_prompt",
+  "user_steer",
+  "system",
 ]);
 
 function agentEventsPath(roomId: string, memberId: string): string {
