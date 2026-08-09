@@ -283,6 +283,12 @@ export function handleAgentEvent(
   }
 
   if (processedEvent.type === "agent_end") {
+    // pi session-level retry: agent_end.willRetry means another attempt is imminent.
+    // Do not flip public status to idle or refresh context mid-retry (fish 2026-08-09).
+    if (processedEvent.willRetry) {
+      logger.info("agent", "statusChange", { agent: agentName, status: "working", reason: "agent_end_willRetry" });
+      return undefined;
+    }
     logger.info("agent", "statusChange", { agent: agentName, status: "idle" });
     // Proactively refresh context usage cache at turn end as a fallback.
     refreshContextUsage(roomId, memberId || agentName);

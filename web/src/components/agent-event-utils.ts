@@ -264,8 +264,9 @@ export function isReplyEvent(event: AgentEvent): boolean {
   // The Replies filter should only surface events with actual reply content —
   // a message_end from a pure tool-call round (no text, no thinking) carries
   // nothing, so it's excluded here; the All stream hides it too (fish 2026-08-09).
+  // user_steer is user-input family (with user_prompt), not a reply — All only.
   if (event.type === "message_end") return Boolean(event.text || event.thinking);
-  return event.type === "agent_reply" || event.type === "user_steer";
+  return event.type === "agent_reply";
 }
 
 export function diffStatForTool(event: AgentEvent): { added: number; removed: number } | null {

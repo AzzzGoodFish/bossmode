@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import { Brain, ChevronRight, MessageSquareText, Search, User } from "lucide-react";
 import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
@@ -220,7 +220,8 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
   const summary = summarizeAgentEvent(event);
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query={query} />;
+  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query={query} label="USER PROMPT" />;
+  if (event.type === "user_steer") return <UserPromptCard event={event} time={time} query={query} label="STEER" />;
   if (event.type === "tool_end") return <ToolCard event={event} toolEnd={event} diff={diff} time={time} query={query} />;
   if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
   if (event.type === "tool_start") {
@@ -233,9 +234,28 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
   if (event.type === "message_end" && (event.thinking || event.text)) {
     // Both cards render when a message carries thinking and text (thinking-enabled
     // members must not have their reply silently swallowed).
+    // Identity (designer activity-card-identity-v1): Brain+dim italic thinking,
+    // MessageSquareText reply — restrained, no new card shells.
     return <>
-      {event.thinking ? <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px] text-xs text-ink-3"><span className="font-extrabold text-think tracking-[0.08em] uppercase text-[9.5px]">THINKING</span><div className="mt-[6px] text-[12.5px] text-ink-2 whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div></div> : null}
-      {event.text ? <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]"><div className="flex items-center gap-2 mb-1"><span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px]">REPLY</span><span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span></div><div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={String(event.text)} /></div></div> : null}
+      {event.thinking ? (
+        <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px] text-xs text-ink-3">
+          <div className="flex items-center gap-1.5">
+            <Brain size={10} className="text-think shrink-0" aria-hidden />
+            <span className="font-extrabold text-think tracking-[0.08em] uppercase text-[9.5px]">THINKING</span>
+          </div>
+          <div className="mt-[6px] text-[12.5px] text-ink-3 italic whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div>
+        </div>
+      ) : null}
+      {event.text ? (
+        <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
+          <div className="flex items-center gap-2 mb-1">
+            <MessageSquareText size={10} className="text-onair shrink-0" aria-hidden />
+            <span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px]">REPLY</span>
+            <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
+          </div>
+          <div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={String(event.text)} /></div>
+        </div>
+      ) : null}
     </>;
   }
   return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.label} {summary.detail} <span className="font-mono text-ink-4">{time}</span></div>;
@@ -245,17 +265,32 @@ const MAX_RESULT_RENDER = 50_000;
 const ARGS_CLAMP_LINES = 12;
 const PROMPT_CLAMP_LINES = 4;
 
-function UserPromptCard({ event, time, query }: { event: AgentEvent; time: string; query: string }) {
+function UserPromptCard({
+  event,
+  time,
+  query,
+  label = "USER PROMPT",
+}: {
+  event: AgentEvent;
+  time: string;
+  query: string;
+  /** USER PROMPT (turn start) or STEER (mid-turn inject) — same teal family card. */
+  label?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const text = String(event.text || "");
   const lines = text.split("\n");
   const clamped = lines.length > PROMPT_CLAMP_LINES && !expanded;
   const body = clamped ? lines.slice(0, PROMPT_CLAMP_LINES).join("\n") : text;
+  const from = typeof (event as { from?: unknown }).from === "string"
+    ? String((event as { from?: string }).from).trim()
+    : "";
   return (
     <div className="rounded-[10px] border border-accent/30 bg-accent-dim/20 px-3 py-[9px]">
       <div className="flex items-center gap-2 mb-1">
-        <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px]">USER PROMPT</span>
-        <span className="text-[10px] text-ink-4">· fish</span>
+        <User size={10} className="text-accent-ink shrink-0" aria-hidden />
+        <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px]">{label}</span>
+        {from ? <span className="text-[10px] text-ink-4">· {from}</span> : null}
         <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
       </div>
       <div className="text-[12.5px] text-ink-2 whitespace-pre-wrap break-words">{highlight(body, query)}</div>
@@ -419,7 +454,7 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
       <button onClick={() => toolEnd && setExpanded(v => !v)} className={`w-full text-left ${toolEnd ? "cursor-pointer" : "cursor-default"}`}>
         <div className="flex items-center gap-2">
           {toolEnd && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
-          <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink">TOOL·{tool.label}</span>
+          <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-3">TOOL·{tool.label}</span>
           <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
           {statusIcon && <span className={`text-[10px] font-bold shrink-0 ${statusColor}`} title={isError ? "error" : isRunning ? "running" : "done"}>{statusIcon} {toolEnd && !isError && `${(resultSize / 1024).toFixed(1)}k`}{isError && `${(resultSize / 1024).toFixed(1)}k`}</span>}
