@@ -408,6 +408,16 @@ async function runPrompt(
   instance.lastMessageEndWasLength = false;
   instance.lengthContinuationPending = false;
   if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
+  // Activity panel: emit the full composed prompt for user-facing activations
+  // (activate / dm-activate / queued). Steer has its own user_steer event;
+  // length_continuation is a system prompt, not a user message.
+  if (trigger === "activate" || trigger === "dm-activate" || trigger === "queued") {
+    emitAgentLocalEvent(instance.roomId, instance.memberId, {
+      type: "user_prompt",
+      text: message,
+      trigger,
+    });
+  }
   try {
     await instance.handle.prompt(message);
     instance.promptInFlight = false;
@@ -1512,11 +1522,13 @@ export function getAgentEventHistory(roomId: string, memberRef: string): AgentHi
 }
 
 function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHistoryEvent): void {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const agentName = member?.name || memberRef;
-  const key = instanceKey(roomId, memberId);
-  const instance = instances.get(key);
+  const member = roomId.startsWith("dm:") ? null : resolveRoomMember(roomId, memberRef);
+  // Prefer live instance identity (covers dm: scope where room lookup fails).
+  const keyHint = instanceKey(roomId, member?.id || memberRef);
+  const instance = instances.get(keyHint)
+    || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
+  const memberId = member?.id || instance?.memberId || memberRef;
+  const agentName = member?.name || instance?.agentName || memberRef;
   if (instance) instance.eventBuffer.push(event);
   try { appendEventToDisk(roomId, memberId, event); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
   broadcastToAgentSubscribers(roomId, agentName, {

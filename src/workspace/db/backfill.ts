@@ -59,6 +59,9 @@ const INDEXED_TYPES = new Set([
   "tool_end",
   "compaction_start",
   "compaction_end",
+  "user_prompt",
+  "user_steer",
+  "system",
 ]);
 
 function utcDate(tsMs: number): string {

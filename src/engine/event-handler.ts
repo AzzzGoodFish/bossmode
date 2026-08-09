@@ -17,6 +17,7 @@ import { indexAppendedEvent } from "../workspace/db/activity-index.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
+  | { type: "user_prompt"; text: string; trigger: string; ts?: number }
   | { type: "user_steer"; text: string; ts?: number }
   | { type: "agent_reply"; text: string; ts?: number }
   | { type: "system"; text: string; ts?: number };
