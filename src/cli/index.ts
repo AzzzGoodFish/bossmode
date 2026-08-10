@@ -173,8 +173,8 @@ async function cmdOn(flags: Record<string, string>): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error("Daemon startup timed out (5s)"));
-      }, 5000);
+        reject(new Error("Daemon startup timed out (30s)"));
+      }, 30000);
 
       child.on("message", (msg: any) => {
         clearTimeout(timeout);
