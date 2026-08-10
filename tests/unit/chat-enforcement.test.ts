@@ -164,7 +164,7 @@ describe("chat enforcement pending reply", () => {
       handle.emit({ type: "agent_end", messages: [] });
     });
 
-    await activateAgent("room1", "developer", { needResponse: false, senderName: "qa" });
+    await activateAgent("room1", "developer", { needResponse: [], senderName: "qa" });
 
     // No debt → the text stays invisible (work note), and no silence note fires.
     expect(handle.prompt).toHaveBeenCalledTimes(1);

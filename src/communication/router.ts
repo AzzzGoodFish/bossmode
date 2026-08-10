@@ -69,8 +69,11 @@ export function parseUrgentMentionMemberIds(content: string, roomMembers: RoomMe
 
 /** Activation context passed to mention callbacks (from the routed message). */
 export interface MentionActivationCtx {
-  /** Sender asked the @-mentioned recipients to reply (chat need_response=true). */
-  needResponse?: boolean;
+  /**
+   * Member names who owe a reply (chat need_response string[]).
+   * Undefined/empty = FYI. User sender still always debts (activateAgent).
+   */
+  needResponse?: string[];
   /** Message sender name ("user" for user posts). */
   senderName: string;
 }
@@ -84,9 +87,13 @@ export function initRouter(
   return onMessage((roomId, message) => {
     if (message.mentions.length === 0 && (!message.mentionMemberIds || message.mentionMemberIds.length === 0)) return;
 
-    logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds, needResponse: message.needResponse === true });
+    logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds, needResponse: message.needResponse });
 
-    const ctx: MentionActivationCtx = { needResponse: message.needResponse === true, senderName: message.sender };
+    const needList = Array.isArray(message.needResponse) ? message.needResponse.filter((n) => typeof n === "string" && n.trim()) : undefined;
+    const ctx: MentionActivationCtx = {
+      ...(needList && needList.length ? { needResponse: needList } : {}),
+      senderName: message.sender,
+    };
 
     if (message.mentions.includes("all")) {
       onMentionAll(roomId, ctx);

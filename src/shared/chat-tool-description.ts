@@ -6,11 +6,11 @@
 export function buildChatToolDescription(memberList: string): string {
   return `Post a message to the room.
 
-- message (required): text content. @name activates that member (exact match required; a plain name never activates). Set need_response=true when you need their reply.
+- message (required): text content. @name activates that member (exact match required; a plain name never activates).
 - attachments (optional): local file paths, copied to the room's attachment store.
-- need_response (optional, default false): Set true when you need the @-mentioned member's reply to move your work forward — their reply is then guaranteed to reach the room, even if they don't call chat. Default false = FYI, no reply expected.
+- need_response (optional): member name list who must reply. Omit = FYI (no reply expected). When set, only listed @-mentioned members owe a reply (guaranteed to reach the room even without chat). Other @-mentions stay FYI.
 
 Room members: ${memberList}`;
 }
 
-export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member (exact match required; a plain name never activates). Set need_response=true when you need their reply.";
+export const CHAT_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member (exact match required; a plain name never activates). Optional need_response lists who must reply.";
