@@ -284,7 +284,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
             <button
               onClick={handleSessionResumeToggle}
               disabled={runtimeSaving}
-              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
+              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
                 runtimeSettings.sessionResume ? "bg-accent" : "bg-surface-3"
               }`}
             >
@@ -309,7 +309,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
             <button
               onClick={handlePiBuiltinPromptToggle}
               disabled={runtimeSaving}
-              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
+              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
                 runtimeSettings.piBuiltinPrompt ? "bg-accent" : "bg-surface-3"
               }`}
             >
@@ -710,7 +710,7 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
             <button
               onClick={() => setEnabled(!enabled)}
               disabled={!settings || saving}
-              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
+              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
               aria-label={enabled ? "Disable MCP servers" : "Enable MCP servers"}
             >
               <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
