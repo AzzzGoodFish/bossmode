@@ -24,6 +24,44 @@ import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, Runt
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
+
+/**
+ * Resolve systemPrompt vs appendSystemPrompt for pi DefaultResourceLoader.
+ * piBuiltinPrompt ON + non-general: keep pi built-in system prompt, put role
+ * prompt first in append. Otherwise replace system prompt with role (status quo).
+ * Exported for unit tests.
+ */
+export function resolvePiSystemPromptSources(args: {
+  agentPrompt: string;
+  appendSystemPrompt: string[];
+  agentTemplate: string;
+  piBuiltinPrompt: boolean;
+}): { systemPrompt: string | undefined; appendSystemPrompt: string[] } {
+  const rolePrompt = args.agentPrompt.trim();
+  const appends = args.appendSystemPrompt.filter((v) => !!v && v.trim().length > 0);
+  const useBuiltin = args.piBuiltinPrompt === true && args.agentTemplate !== "general";
+  if (useBuiltin) {
+    // undefined systemPrompt → pi keeps its built-in; role rides append head.
+    return {
+      systemPrompt: undefined,
+      appendSystemPrompt: rolePrompt ? [rolePrompt, ...appends] : appends,
+    };
+  }
+  return {
+    systemPrompt: rolePrompt || undefined,
+    appendSystemPrompt: appends,
+  };
+}
+
+function readPiBuiltinPromptFlag(): boolean {
+  try {
+    return readConfig().runtime?.piBuiltinPrompt === true;
+  } catch {
+    return false;
+  }
+}
+
+
 /** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
 function classifyToolSource(
   name: string,
@@ -678,8 +716,15 @@ class PiSdkAgentHandle implements AgentHandle {
       ? [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)), mcpSettings.adapterPath]
       : [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p))];
     const loader = this.resourceLoader as any;
-    loader.systemPromptSource = opts.agentPrompt.trim() || undefined;
-    loader.appendSystemPromptSource = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
+    const appendBase = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
+    const promptSources = resolvePiSystemPromptSources({
+      agentPrompt: opts.agentPrompt,
+      appendSystemPrompt: appendBase,
+      agentTemplate: opts.member.agent || "",
+      piBuiltinPrompt: readPiBuiltinPromptFlag(),
+    });
+    loader.systemPromptSource = promptSources.systemPrompt;
+    loader.appendSystemPromptSource = promptSources.appendSystemPrompt;
     loader.additionalSkillPaths = opts.skillPaths;
     loader.additionalExtensionPaths = activeExtensionPaths;
 
@@ -722,7 +767,8 @@ class PiSdkAgentHandle implements AgentHandle {
       throw new Error("Reload could not apply MCP access.");
     }
 
-    this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
+    // Panel metadata: bossmode segments only (role + original appends), not pi built-in.
+    this.runtimeParams.systemPrompt = [opts.agentPrompt.trim(), ...appendBase].filter(Boolean).join("\n\n");
     this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
     this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths];
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
@@ -874,10 +920,17 @@ export class PiSdkRuntime implements AgentRuntime {
     }
 
     const rolePrompt = opts.agentPrompt.trim();
-    const appendSystemPrompt = (opts.appendSystemPrompt && opts.appendSystemPrompt.length > 0
+    const appendBase = (opts.appendSystemPrompt && opts.appendSystemPrompt.length > 0
       ? opts.appendSystemPrompt
       : [opts.envPrompt, opts.rulesPrompt]
     ).filter((v): v is string => !!v && v.trim().length > 0);
+    const promptSources = resolvePiSystemPromptSources({
+      agentPrompt: opts.agentPrompt,
+      appendSystemPrompt: appendBase,
+      agentTemplate: opts.member.agent || "",
+      piBuiltinPrompt: readPiBuiltinPromptFlag(),
+    });
+    const appendSystemPrompt = promptSources.appendSystemPrompt;
     const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     // Only extensions explicitly enabled on this member (default empty = none).
@@ -894,7 +947,7 @@ export class PiSdkRuntime implements AgentRuntime {
       noSkills: true,
       additionalSkillPaths: skillPaths,
       additionalExtensionPaths: activeExtensionPaths,
-      systemPrompt: rolePrompt || undefined,
+      systemPrompt: promptSources.systemPrompt,
       appendSystemPrompt,
     });
     await resourceLoader.reload();
@@ -935,7 +988,8 @@ export class PiSdkRuntime implements AgentRuntime {
     const runtimeParams: AgentRuntimeParams = {
       model: resolvedModel,
       thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
-      systemPrompt: [rolePrompt, ...appendSystemPrompt].filter(Boolean).join("\n\n"),
+      // Panel metadata: bossmode-composed segments only (never pi built-in text).
+      systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
       skills: opts.skillNames ?? skillPaths,
       extensions: ["bossmode-sdk-tools", ...activeExtensionPaths],
       credentialId: piConfig.profile?.id,

@@ -36,6 +36,7 @@ export function readConfig(): BossmodeConfig {
   parsed.runtime = {
     ...(parsed.runtime || {}),
     sessionResume: (parsed.runtime?.sessionResume ?? legacySessionResume) !== false,
+    piBuiltinPrompt: parsed.runtime?.piBuiltinPrompt === true,
   };
   return parsed;
 }
@@ -86,7 +87,7 @@ export function getDefaultConfig(): BossmodeConfig {
     auth: { username: "", passwordHash: "" },
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
-    runtime: { sessionResume: true, codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
+    runtime: { sessionResume: true, piBuiltinPrompt: false, codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
     mcp: { enabled: false },
   };
 }

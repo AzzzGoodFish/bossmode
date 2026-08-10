@@ -61,6 +61,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     sessionResume: settings.sessionResume !== false,
+    piBuiltinPrompt: settings.piBuiltinPrompt === true,
     codexTransport: settings.codexTransport || "auto",
     websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
     httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
@@ -87,6 +88,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const { toast, confirm } = useDialog();
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
+    piBuiltinPrompt: false,
     codexTransport: "auto",
     websocketConnectTimeoutMs: 15000,
   });
@@ -197,6 +199,10 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     await handleRuntimeChange({ sessionResume: !runtimeSettings.sessionResume });
   };
 
+  const handlePiBuiltinPromptToggle = async () => {
+    await handleRuntimeChange({ piBuiltinPrompt: !runtimeSettings.piBuiltinPrompt });
+  };
+
   const handleRuntimeNetworkSave = async () => {
     const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 15000;
     const wsSeconds = Math.round(websocketConnectTimeoutMs / 1000);
@@ -285,6 +291,31 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
                   runtimeSettings.sessionResume ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Use pi built-in system prompt</div>
+              <div className="text-xs text-ink-3 mt-0.5">
+                When on, non-general agents keep pi&apos;s built-in system prompt and Bossmode role text is appended.
+                General agents are unchanged. Reload member after changing.
+              </div>
+            </div>
+            <button
+              onClick={handlePiBuiltinPromptToggle}
+              disabled={runtimeSaving}
+              className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-60 ${
+                runtimeSettings.piBuiltinPrompt ? "bg-accent" : "bg-surface-3"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  runtimeSettings.piBuiltinPrompt ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </button>

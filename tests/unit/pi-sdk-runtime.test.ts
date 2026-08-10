@@ -689,6 +689,101 @@ describe("PiSdkRuntime", () => {
 
 });
 
+describe("piBuiltinPrompt system prompt routing", () => {
+  // Shares the PiSdkRuntime suite mocks (resourceLoaderCtor, createAgentSession, etc.)
+  // by living in the same file after those vi.mock declarations.
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-builtin-"));
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    openedSessionModel = null;
+    openedLeafEntry = null;
+    activeToolNames = [];
+    ignoreActiveToolChanges = false;
+    vi.clearAllMocks();
+    settingsGetTransport.mockReturnValue("auto");
+    settingsGetWebSocketConnectTimeoutMs.mockReturnValue(60000);
+    modelRegistryGetApiKeyAndHeaders.mockResolvedValue({ ok: true, apiKey: "sk-test" });
+    settingsGetHttpIdleTimeoutMs.mockReturnValue(600000);
+    settingsGetCompactionSettings.mockReturnValue({ enabled: true, reserveTokens: 1000, keepRecentTokens: 20000 });
+    createAgentSession.mockResolvedValue({
+      session: {
+        subscribe: vi.fn(() => vi.fn()),
+        prompt: vi.fn(),
+        steer: vi.fn(),
+        abort: vi.fn(),
+        abortCompaction: vi.fn(),
+        abortBranchSummary: vi.fn(),
+        dispose: vi.fn(),
+        reload: vi.fn(),
+        compact: vi.fn(),
+        setModel: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        setActiveToolsByName: vi.fn((names: string[]) => { if (!ignoreActiveToolChanges) activeToolNames = names; }),
+        getActiveToolNames: vi.fn(() => activeToolNames),
+        getAllTools: vi.fn(() => activeToolNames.map((name: string) => ({ name }))),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: {
+          setFlagValue: sessionExtensionSetFlagValue,
+          emit: sessionExtensionEmit,
+          hasHandlers: sessionExtensionHasHandlers,
+        },
+        sessionId: "session-a",
+        sessionFile: join(dir, "session.json"),
+        thinkingLevel: "off",
+        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
+      },
+    });
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("on + non-general: systemPrompt undefined, role heads append", async () => {
+    bossmodeConfig = { runtime: { sessionResume: true, piBuiltinPrompt: true }, mcp: { enabled: false } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await new PiSdkRuntime().createAgent(baseOpts({
+      member: { id: "dev", name: "developer", agent: "developer", runtime: "pi-cli", model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", thinkingLevel: "off" },
+      agentPrompt: "ROLE_DEV",
+      appendSystemPrompt: ["ENV_BLOCK"],
+    }));
+    expect(resourceLoaderCtor).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: undefined,
+      appendSystemPrompt: ["ROLE_DEV", "ENV_BLOCK"],
+    }));
+  });
+
+  it("on + general: keeps replace mode", async () => {
+    bossmodeConfig = { runtime: { sessionResume: true, piBuiltinPrompt: true }, mcp: { enabled: false } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await new PiSdkRuntime().createAgent(baseOpts({
+      member: { id: "g", name: "helper", agent: "general", runtime: "pi-cli", model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", thinkingLevel: "off" },
+      agentPrompt: "ROLE_GENERAL",
+      appendSystemPrompt: ["ENV_BLOCK"],
+    }));
+    expect(resourceLoaderCtor).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: "ROLE_GENERAL",
+      appendSystemPrompt: ["ENV_BLOCK"],
+    }));
+  });
+
+  it("off: role is systemPrompt (status quo)", async () => {
+    bossmodeConfig = { runtime: { sessionResume: true, piBuiltinPrompt: false }, mcp: { enabled: false } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await new PiSdkRuntime().createAgent(baseOpts({
+      agentPrompt: "ROLE_PM",
+      appendSystemPrompt: ["ENV_BLOCK"],
+    }));
+    expect(resourceLoaderCtor).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: "ROLE_PM",
+      appendSystemPrompt: ["ENV_BLOCK"],
+    }));
+  });
+});
+
+
 // -- Compaction watchdog action (2026-07-29 k3 empty-response loop fix) --
 
 interface WatchdogMock {

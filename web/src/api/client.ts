@@ -1137,6 +1137,8 @@ export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "ss
 
 export interface RuntimeSettings {
   sessionResume: boolean;
+  /** Keep pi built-in system prompt; bossmode role goes to append (non-general only). */
+  piBuiltinPrompt?: boolean;
   codexTransport?: PiTransportSetting;
   websocketConnectTimeoutMs?: number;
   httpIdleTimeoutMs?: number | null;

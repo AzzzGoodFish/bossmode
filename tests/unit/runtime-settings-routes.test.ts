@@ -76,8 +76,31 @@ describe("runtime settings routes", () => {
     }));
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, {
       sessionResume: true,
+      piBuiltinPrompt: false,
       codexTransport: "websocket-cached",
       websocketConnectTimeoutMs: 60000,
     });
   });
 });
+
+  it("persists piBuiltinPrompt toggle", async () => {
+    const config = {
+      auth: { username: "u", passwordHash: "h" },
+      apiKeys: {},
+      defaults: { host: "127.0.0.1", port: 8080 },
+      runtime: { sessionResume: true },
+    };
+    readConfigMock.mockReturnValue(config);
+    parseBodyMock.mockResolvedValue({ piBuiltinPrompt: true });
+
+    const handler = routes.get("PUT /api/settings/runtime");
+    await handler({} as any, {} as any, {});
+
+    expect(writeConfigMock).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: expect.objectContaining({ piBuiltinPrompt: true }),
+    }));
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
+      piBuiltinPrompt: true,
+      sessionResume: true,
+    }));
+  });
