@@ -69,11 +69,6 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
       .then((progress) => {
         state.progress = progress;
         state.status = "ready";
-        // Fresh backfill already covers INDEXED_TYPES; heal is a cheap no-op
-        // but keeps the "every startup" path uniform for tests/ops.
-        void import("./activity-index.js")
-          .then(({ healAllMissingIndexedSeqs }) => healAllMissingIndexedSeqs(db))
-          .catch((err) => logger.error("db", "post-backfill activity heal failed", { error: String(err) }));
       })
       .catch((err) => {
         state.status = "error";
@@ -82,14 +77,9 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
       });
   } else {
     state.status = "ready";
-    // Existing DB: catch-up only advances the watermark tail. Historical gaps
-    // (types added to INDEXED after watermark passed) need a seq-diff heal.
-    // Async — never block startup. Data-driven, no marker (fish 2026-08-09).
-    void import("./activity-index.js")
-      .then(({ healAllMissingIndexedSeqs }) => healAllMissingIndexedSeqs(db))
-      .catch((err) => {
-        logger.error("db", "startup activity heal failed", { error: String(err) });
-      });
+    // No startup scan: historical projection gaps (e.g. event types added to
+    // INDEXED_TYPES after their watermark passed) are repaired on demand via
+    // `bossmode heal-activity` (fish 2026-08-10: don't pay the scan every boot).
   }
 
   return db;
