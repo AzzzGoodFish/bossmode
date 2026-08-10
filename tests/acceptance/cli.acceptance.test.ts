@@ -74,7 +74,7 @@ function runCli(args: string, env?: Record<string, string>): { stdout: string; s
       {
         cwd: process.cwd(),
         timeout: 8000,
-        env: { ...process.env, BOSSMODE_DIR: TEST_DIR, ...env },
+        env: { ...process.env, BOSSMODE_DIR: TEST_DIR, BOSSMODE_ON_TIMEOUT_MS: "5000", ...env },
         encoding: "utf-8",
       },
     );

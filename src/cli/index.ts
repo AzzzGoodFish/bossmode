@@ -172,9 +172,10 @@ async function cmdOn(flags: Record<string, string>): Promise<void> {
   // Wait for daemon to confirm startup (or fail)
   try {
     await new Promise<void>((resolve, reject) => {
+      const onTimeoutMs = Math.max(1000, parseInt(process.env.BOSSMODE_ON_TIMEOUT_MS || "30000", 10) || 30000);
       const timeout = setTimeout(() => {
-        reject(new Error("Daemon startup timed out (30s)"));
-      }, 30000);
+        reject(new Error(`Daemon startup timed out (${Math.round(onTimeoutMs / 1000)}s)`));
+      }, onTimeoutMs);
 
       child.on("message", (msg: any) => {
         clearTimeout(timeout);
