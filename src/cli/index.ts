@@ -260,6 +260,30 @@ function cmdStatus(): void {
   }
 }
 
+
+async function cmdHealActivity(): Promise<void> {
+  // Projection must be initialized so getProjectionDb() resolves the live db.
+  const { initProjection } = await import("../workspace/db/projection.js");
+  const { healAllMissingIndexedSeqs } = await import("../workspace/db/activity-index.js");
+  const db = initProjection();
+  if (!db) {
+    console.error("Activity projection is unavailable (node:sqlite disabled or DB open failed).");
+    process.exit(1);
+  }
+  // Wait for any background backfill to finish so heal sees a stable baseline.
+  // (heal is a no-op for seqs backfill already covered, but avoid interleaving.)
+  const { getBackfillStatus } = await import("../workspace/db/projection.js");
+  for (let i = 0; i < 600; i++) {
+    const st = getBackfillStatus();
+    if (st.status !== "running") break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  console.log("Healing Activity projection (scanning jsonl, inserting missing index rows)...");
+  const summary = healAllMissingIndexedSeqs(db);
+  console.log(`Done. rooms scanned: members=${summary.members}, rows healed=${summary.healed}, token rows=${summary.tokenRows}, skipped name-keyed=${summary.skippedNameKeyed}.`);
+  console.log("Idempotent: re-running is safe and a no-op when nothing is missing.");
+}
+
 function showHelp(): void {
   console.log(`
 Usage: bossmode <command> [options]
@@ -268,6 +292,8 @@ Commands:
   on          Start the bossmode server (daemon mode)
   off         Stop the bossmode server
   status      Show server status
+  heal-activity   Repair Activity projection gaps (run once after upgrade)
+
 
 Options (for 'on'):
   --host <host>   Bind address (default: 127.0.0.1)
@@ -305,6 +331,9 @@ async function main(): Promise<void> {
       break;
     case "status":
       cmdStatus();
+      break;
+    case "heal-activity":
+      await cmdHealActivity();
       break;
     case "help":
     default:

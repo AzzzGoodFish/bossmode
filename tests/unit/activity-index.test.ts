@@ -316,3 +316,37 @@ describe("activity-index (S3)", () => {
     expect(String(steers[0].text)).toContain("id-keyed-steer");
     expect(String(steers[0].text)).not.toContain("name-keyed-steer-should-skip");
   });
+
+  it("startup initProjection does NOT trigger heal (heal is a manual CLI command)", async () => {
+    const roomId = "room-no-startup-heal";
+    const memberId = "rm_nosh";
+    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
+    writeEventsFile(roomId, memberId, [
+      ev("agent_start", base),
+      ev("user_steer", base + 1, { text: "should stay un-indexed until manual heal" }),
+      ev("agent_end", base + 2),
+    ]);
+
+    // Backfill establishes baseline + watermark; steers indexed since user_steer is now in INDEXED_TYPES.
+    const { rebuildProjection, getProjectionDb } = await import("../../src/workspace/db/projection.js");
+    await rebuildProjection();
+    const db = getProjectionDb()!;
+
+    // Simulate the production gap: drop user_steer rows, leave watermark past them.
+    db.run("DELETE FROM activity_events WHERE room_id = ? AND type = ?", roomId, "user_steer");
+
+    // A fresh initProjection (existing DB path) must NOT heal the gap back.
+    const { initProjection } = await import("../../src/workspace/db/projection.js");
+    initProjection();
+    // initProjection is sync but the existing-DB path no longer schedules any heal.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const steers = db
+      .all<{ type: string }>("SELECT type FROM activity_events WHERE room_id = ? AND type = ?", roomId, "user_steer");
+    expect(steers).toHaveLength(0); // gap persists — heal is opt-in now
+
+    // Manual heal still repairs it.
+    const { healAllMissingIndexedSeqs } = await import("../../src/workspace/db/activity-index.js");
+    const summary = healAllMissingIndexedSeqs(db);
+    expect(summary.healed).toBe(1);
+  });
