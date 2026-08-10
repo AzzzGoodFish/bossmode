@@ -103,14 +103,14 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     });
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const res = await handleToolCallback("chat", room.id, "pm", { message: "@qa verify the fallback", need_response: true });
+    const res = await handleToolCallback("chat", room.id, "pm", { message: "@qa verify the fallback", need_response: ["qa"] });
     expect((res as any).ok).toBe(true);
 
     await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "qa"));
     const messages = await roomMessages(room.id);
     // pm's chat message carries needResponse.
     const pmMsg = messages.find((m: any) => m.sender === "pm");
-    expect(pmMsg.needResponse).toBe(true);
+    expect(pmMsg.needResponse).toEqual(["qa"]);
     // qa's activation payload has the sender-named banner.
     expect(prompts.some((p) => p.includes("[REPLY EXPECTED] pm expects your reply — respond with the chat tool."))).toBe(true);
     // qa never called chat → bare text fallback-posted.
@@ -153,7 +153,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     expect(JSON.stringify(chatTool.parameters)).not.toContain("artifacts");
 
     // need_response without @target → posted normally, note attached.
-    const noTarget = await handleToolCallback("chat", room.id, "pm", { message: "plain post", need_response: true });
+    const noTarget = await handleToolCallback("chat", room.id, "pm", { message: "plain post", need_response: ["qa"] });
     expect((noTarget as any).ok).toBe(true);
     expect((noTarget as any).note).toContain("no @target");
   });

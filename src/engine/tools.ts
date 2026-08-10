@@ -142,17 +142,48 @@ function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): b
   return task.assignee === assigneeRef;
 }
 
-function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; mentions?: string[]; needResponse?: boolean; autoDelivered?: boolean }) {
-  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; needResponse?: boolean; autoDelivered?: boolean } = {};
+function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; mentions?: string[]; needResponse?: string[]; autoDelivered?: boolean }) {
+  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; needResponse?: string[]; autoDelivered?: boolean } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
   if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
   if (meta.mentionMemberIds?.length && meta.mentionMemberIds.join("\0") !== (meta.mentions || []).join("\0")) out.mentionMemberIds = meta.mentionMemberIds;
   if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
   if (meta.urgentMentionMemberIds?.length) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
-  if (meta.needResponse) out.needResponse = true;
+  if (meta.needResponse?.length) out.needResponse = meta.needResponse;
   if (meta.autoDelivered) out.autoDelivered = true;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Parse chat need_response: string[] of member names. Invalid type → error string. */
+export function parseNeedResponseParam(
+  raw: unknown,
+  roomMembers: Array<{ id: string; name: string }>,
+  mentionedNames: string[],
+  mentionedIds: string[],
+): { ok: true; names: string[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, names: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "need_response must be an array of member names (e.g. [\"developer\"])" };
+  }
+  const mentionedNameSet = new Set(mentionedNames);
+  const mentionedIdSet = new Set(mentionedIds);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string" || !item.trim()) {
+      return { ok: false, error: "need_response entries must be non-empty member name strings" };
+    }
+    const ref = item.trim();
+    const member = roomMembers.find((m) => m.name === ref || m.id === ref);
+    if (!member) continue; // unknown name — ignore
+    // Only @-mentioned members can carry debt (activation gate).
+    if (!mentionedNameSet.has(member.name) && !mentionedIdSet.has(member.id)) continue;
+    if (seen.has(member.name)) continue;
+    seen.add(member.name);
+    out.push(member.name);
+  }
+  return { ok: true, names: out };
 }
 
 /** Truncate a serialized tool result if it exceeds the limit. */
@@ -174,7 +205,6 @@ export async function handleToolCallback(
   switch (tool) {
     case "chat": {
       const message = params?.message || "";
-      const needResponse = params?.need_response === true;
 
       const attachments: RoomMessageAttachment[] = [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
@@ -207,7 +237,8 @@ export async function handleToolCallback(
         postMessage(roomId, agentName, message, [], {
           ...(attachments.length ? { attachments } : {}),
         });
-        return { ok: true, ...(needResponse ? { note: "no @target — need_response ignored" } : {}) };
+        const hasNeed = Array.isArray(params?.need_response) && params.need_response.length > 0;
+        return { ok: true, ...(hasNeed ? { note: "no @target — need_response ignored" } : {}) };
       }
 
       const room = roomStore.getRoom(roomId);
@@ -216,14 +247,23 @@ export async function handleToolCallback(
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
       const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
 
+      const parsedNeed = parseNeedResponseParam(params?.need_response, roomMembers, mentions, mentionMemberIds);
+      if (!parsedNeed.ok) return { ok: false, error: parsedNeed.error };
+      const needResponse = parsedNeed.names;
+
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
       const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse });
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
-      if (needResponse && info.mentionMemberIds.length === 0) {
-        return { ok: true, note: "no @target — need_response ignored" };
+      if (Array.isArray(params?.need_response) && params.need_response.length > 0 && needResponse.length === 0) {
+        return {
+          ok: true,
+          note: info.mentionMemberIds.length === 0
+            ? "no @target — need_response ignored"
+            : "need_response matched no @-mentioned members — treated as FYI",
+        };
       }
       return { ok: true };
     }

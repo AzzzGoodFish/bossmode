@@ -957,13 +957,19 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
 // -- Activation --
 
-export async function activateAgent(roomId: string, memberRef: string, ctx?: { needResponse?: boolean; senderName?: string }): Promise<void> {
-  // Reply-debt semantics (fish 2026-08-07): user @ always owes a reply; a
-  // member @ owes one only when the sender set need_response (FYI channel
-  // otherwise — activated, no debt, no fallback). System/absent ctx keeps the
-  // legacy behavior: debt on activation.
+export async function activateAgent(roomId: string, memberRef: string, ctx?: { needResponse?: string[]; senderName?: string }): Promise<void> {
+  // Reply-debt semantics (fish 2026-08-10):
+  // - user @ always owes a reply (mapped as all mentioned internally)
+  // - member @ owes only when this member's name is in need_response string[]
+  // - omit need_response = FYI (activated, no debt, no fallback)
+  // - system/absent ctx keeps debt on activation
   const isUser = ctx?.senderName === "user";
-  const replyDebt = isUser || !ctx ? true : !!ctx.needResponse;
+  const member = resolveRoomMember(roomId, memberRef);
+  const memberName = member?.name || memberRef;
+  const memberId = member?.id || memberRef;
+  const list = Array.isArray(ctx?.needResponse) ? ctx!.needResponse! : [];
+  const listed = list.some((n) => n === memberName || n === memberId || n === memberRef);
+  const replyDebt = isUser || !ctx ? true : listed;
   const banner = ctx && replyDebt
     ? isUser
       ? "[REPLY EXPECTED] Respond using the chat tool."
@@ -1108,7 +1114,7 @@ async function activateAgentInternalContinue(
 
 // -- @all broadcast --
 
-export async function activateAll(roomId: string, ctx?: { needResponse?: boolean; senderName?: string }): Promise<void> {
+export async function activateAll(roomId: string, ctx?: { needResponse?: string[]; senderName?: string }): Promise<void> {
   const room = roomStore.getRoom(roomId);
   if (!room) return;
   const activations = roomStore.getRoomMembers(roomId).map((member) => {

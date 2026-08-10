@@ -179,7 +179,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
       handle.emit({ type: "agent_end", messages: [] });
     });
 
-    await activateAgent("room1", "developer", { needResponse: false, senderName: "qa" });
+    await activateAgent("room1", "developer", { needResponse: [], senderName: "qa" });
 
     expect(deliveredMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(0);
@@ -193,7 +193,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
       handle.emit({ type: "agent_end", messages: [] });
     });
 
-    await activateAgent("room1", "developer", { needResponse: true, senderName: "user" });
+    await activateAgent("room1", "developer", { needResponse: ["developer"], senderName: "user" });
 
     expect(payloads[0]).toContain("[REPLY EXPECTED] Respond using the chat tool.");
     const delivered = deliveredMessages();
@@ -209,7 +209,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
       handle.emit({ type: "agent_end", messages: [] });
     });
 
-    await activateAgent("room1", "developer", { needResponse: true, senderName: "qa" });
+    await activateAgent("room1", "developer", { needResponse: ["developer"], senderName: "qa" });
 
     expect(payloads[0]).toContain("[REPLY EXPECTED] qa expects your reply — respond with the chat tool.");
     // No text and debt pending → silence note.
@@ -269,7 +269,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
     // mentions list carries the target for the router listener.
     expect(calls[0][3]).toEqual(["qa"]);
     // The mention inside a fallback delivery does NOT carry needResponse (FYI for the target).
-    expect(calls[0][4]).not.toMatchObject({ needResponse: true });
+    expect(calls[0][4]?.needResponse).toBeUndefined();
   });
 
   it("a debt turn with no text at all falls into the silence branch", async () => {
