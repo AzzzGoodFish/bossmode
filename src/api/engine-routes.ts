@@ -258,6 +258,7 @@ function normalizeRuntimeSettings(runtime: any = {}) {
     : undefined;
   return {
     sessionResume: runtime.sessionResume !== false,
+    piBuiltinPrompt: runtime.piBuiltinPrompt === true,
     codexTransport: transport,
     websocketConnectTimeoutMs,
     ...(httpIdleTimeoutMs !== undefined ? { httpIdleTimeoutMs } : {}),
@@ -276,12 +277,21 @@ addRoute("GET", "/api/settings/runtime", async (_req, res) => {
 
 // PUT /api/settings/runtime — update runtime behavior settings
 addRoute("PUT", "/api/settings/runtime", async (req, res) => {
-  const body = (await parseBody(req)) as { sessionResume?: boolean; codexTransport?: PiTransportSetting; websocketConnectTimeoutMs?: number | null; httpIdleTimeoutMs?: number | null };
+  const body = (await parseBody(req)) as {
+    sessionResume?: boolean;
+    piBuiltinPrompt?: boolean;
+    codexTransport?: PiTransportSetting;
+    websocketConnectTimeoutMs?: number | null;
+    httpIdleTimeoutMs?: number | null;
+  };
   try {
     const config = readConfig();
     const runtime = {
       ...(config.runtime || {}),
       sessionResume: body.sessionResume === undefined ? config.runtime?.sessionResume !== false : body.sessionResume !== false,
+      piBuiltinPrompt: body.piBuiltinPrompt === undefined
+        ? config.runtime?.piBuiltinPrompt === true
+        : body.piBuiltinPrompt === true,
     };
     if (body.codexTransport !== undefined) {
       if (!VALID_PI_TRANSPORTS.has(body.codexTransport)) {
