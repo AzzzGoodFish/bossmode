@@ -2340,7 +2340,8 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
         memberId,
         cwd: room.cwd || process.cwd(),
         seedMode: "fork",
-        anchorExcerpt: topicRec.guideText,
+        // Must be the stored anchor excerpt — never the guide text (fish/architect 2026-08-18).
+        anchorExcerpt: topicRec.anchorExcerpt,
       });
       if (fork.mode === "fork" && fork.sessionFile) {
         resumeSession = { sessionId: fork.sessionId, sessionFile: fork.sessionFile };

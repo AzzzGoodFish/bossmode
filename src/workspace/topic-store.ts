@@ -30,6 +30,13 @@ export interface TopicRecord {
   participants: string[];
   /** Pre-generated guide blurb (English) shared by all members entering the topic. */
   guideText?: string;
+  /** Normalized first 80 chars of the anchor message — used to locate the fork leaf. */
+  anchorExcerpt?: string;
+}
+
+/** Normalize + clip an anchor message for fork leaf matching (plan §2.2). */
+export function normalizeAnchorExcerpt(content: string, max = 80): string {
+  return String(content || "").replace(/\s+/g, " ").trim().slice(0, max).trim();
 }
 
 function topicsRoot(roomId: string): string {
@@ -130,6 +137,7 @@ export interface CreateTopicInput {
   anchorSeq?: number;
   seedMode?: TopicSeedMode;
   guideText?: string;
+  anchorExcerpt?: string;
 }
 
 export function createTopic(input: CreateTopicInput): TopicRecord {
@@ -146,6 +154,7 @@ export function createTopic(input: CreateTopicInput): TopicRecord {
     seedMode: input.seedMode === "fork" ? "fork" : "fresh",
     participants: [],
     ...(input.guideText ? { guideText: input.guideText } : {}),
+    ...(input.anchorExcerpt ? { anchorExcerpt: normalizeAnchorExcerpt(input.anchorExcerpt) } : {}),
   };
   saveTopic(topic);
   logger.info("topic", "created", { roomId: topic.roomId, topicId: topic.id, seedMode: topic.seedMode });

@@ -1093,6 +1093,7 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
     anchorSeq: anchor.seq,
     seedMode,
     guideText,
+    anchorExcerpt: topicStore.normalizeAnchorExcerpt(anchor.content || ""),
   });
 
   // Opening card on the room stream (batch 1: plain system message; batch 3 upgrades UI card).

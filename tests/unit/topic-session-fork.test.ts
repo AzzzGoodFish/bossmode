@@ -20,6 +20,7 @@ import {
   forkRoomSessionPrefix,
 } from "../../src/engine/topic-session-fork.js";
 import { saveSession } from "../../src/workspace/session-store.js";
+import { createTopic, getTopic, normalizeAnchorExcerpt } from "../../src/workspace/topic-store.js";
 
 function userEntry(id: string, text: string, parentId: string | null = null) {
   return {
@@ -39,6 +40,16 @@ describe("pickForkLeafId / extractPrefixSummary", () => {
       userEntry("e3", "later chatter", "e2"),
     ];
     expect(pickForkLeafId(entries, "flaky test in auth")).toBe("e2");
+  });
+
+  it("guideText never matches — that was the batch-2 bug; last-user fallback would fire", () => {
+    const entries = [
+      userEntry("e1", "Please investigate the flaky test in auth", null),
+      userEntry("e2", "later chatter after topic was created", "e1"),
+    ];
+    const guide = "[Topic guide] Title: Flaky | Anchor: Please investigate the flaky test in auth";
+    expect(pickForkLeafId(entries, guide)).toBe("e2"); // wrong leaf if we passed guideText
+    expect(pickForkLeafId(entries, "Please investigate the flaky test in auth")).toBe("e1");
   });
 
   it("falls back to last user entry when excerpt misses", () => {
@@ -130,5 +141,32 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
     expect(r.prefixSummary).toMatch(/flaky test|User:/);
     // Room source file still exists untouched (at least same path).
     expect(existsSync(srcFile!)).toBe(true);
+  });
+
+  it("createTopic stores 80-char anchorExcerpt; that excerpt hits the mid entry, not last", () => {
+    const long =
+      "Please investigate the flaky test in auth module before we ship the RC " +
+      "and also do many other words that would be clipped at eighty characters XXXXXXXXXXX";
+    const topic = createTopic({
+      roomId: "roomA",
+      title: "Flaky",
+      anchorMessageId: "msg-anchor",
+      seedMode: "fork",
+      guideText: "[Topic guide] Title: Flaky | Anchor: " + long,
+      anchorExcerpt: normalizeAnchorExcerpt(long),
+    });
+    const stored = getTopic("roomA", topic.id);
+    expect(stored?.anchorExcerpt).toBeTruthy();
+    expect(stored!.anchorExcerpt!.length).toBeLessThanOrEqual(80);
+    expect(stored!.anchorExcerpt).toMatch(/flaky test in auth/);
+    expect(stored!.anchorExcerpt).not.toMatch(/\[Topic guide\]/);
+
+    const entries = [
+      userEntry("e1", "unrelated earlier", null),
+      userEntry("e2", long, "e1"),
+      userEntry("e3", "room chatter AFTER the topic was opened", "e2"),
+    ];
+    expect(pickForkLeafId(entries, stored!.anchorExcerpt)).toBe("e2");
+    expect(pickForkLeafId(entries, stored!.guideText)).toBe("e3");
   });
 });
