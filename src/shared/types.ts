@@ -505,6 +505,11 @@ export interface RoomMessage {
   needResponse?: string[];
   /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */
   autoDelivered?: boolean;
+  /**
+   * This message replies to another message in the same scope (chat tool reply_to).
+   * seq for display/jump; messageId is the stable anchor.
+   */
+  replyTo?: { seq: number; messageId: string };
 }
 
 // -- Agent Status --

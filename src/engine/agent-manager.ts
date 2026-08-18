@@ -23,6 +23,7 @@ import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId 
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
+import { readAllMessages } from "../workspace/message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import { deliverMemberMessage } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
@@ -781,9 +782,26 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
     return { msg: m, role: resolveSenderRole(m.sender) as SenderRole };
   });
 
+  // Resolve replyTo targets from the full scope so quotes work even when the
+  // original is outside the current activation window (plan-reply-to-v1 §3).
+  let scopeById: Map<string, RoomMessage> | null = null;
+  const lookup = (ref: { seq: number; messageId: string }): RoomMessage | undefined => {
+    if (!scopeById) {
+      try {
+        const all = roomId.startsWith("dm:")
+          ? readAllDmMessages(roomId.slice("dm:".length))
+          : readAllMessages(roomId);
+        scopeById = new Map(all.map((m) => [m.id, m]));
+      } catch {
+        scopeById = new Map();
+      }
+    }
+    return scopeById.get(ref.messageId);
+  };
+
   // Single message → single-message envelope.
   if (items.length === 1) {
-    return wrapRoomContextMessage(items[0].msg, roomName, items[0].role);
+    return wrapRoomContextMessage(items[0].msg, roomName, items[0].role, lookup);
   }
 
   // Multiple messages → shared transcript envelope (each message keeps its own
@@ -791,6 +809,7 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
   return wrapRoomMessagesTranscript(
     items.map((i) => ({ msg: i.msg, role: i.role })),
     roomName,
+    lookup,
   );
 }
 

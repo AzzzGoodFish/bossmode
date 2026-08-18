@@ -45,6 +45,7 @@ export function createBossmodeSdkTools(opts: {
         message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
         need_response: Type.Optional(Type.Array(Type.String(), { description: "Member names who must reply. Omit = FYI. Only listed @-mentioned members owe a reply debt." })),
+        reply_to: Type.Optional(Type.String({ description: "Reference a message in this scope as msg:#<seq>. Posts a quote of the original; target must exist here." })),
       }),
       execute: async (_id, params) => {
         const data = await call("chat", params as any) as any;
