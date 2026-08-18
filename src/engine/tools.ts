@@ -13,7 +13,7 @@ import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../works
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { resolveTopicRoomId } from "../workspace/topic-store.js";
+import { resolveTopicRoomId, resolveOwningRoomId, readAllTopicMessages } from "../workspace/topic-store.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
@@ -213,10 +213,16 @@ export function excerptForReply(content: string, max = REPLY_EXCERPT_MAX): strin
   return oneLine.slice(0, max - 1) + "…";
 }
 
-/** Look up messages in the current conversation scope (room uuid or dm:<id>). */
-function loadScopeMessages(scopeId: string): RoomMessage[] {
+/** Look up messages in the current conversation scope (room uuid / dm:<id> / topic:<id>). */
+export function loadScopeMessages(scopeId: string): RoomMessage[] {
   if (scopeId.startsWith("dm:")) {
     return readAllDmMessages(scopeId.slice("dm:".length));
+  }
+  if (scopeId.startsWith("topic:")) {
+    const topicId = scopeId.slice("topic:".length);
+    const parent = resolveOwningRoomId(scopeId);
+    if (!parent || parent.startsWith("topic:")) return [];
+    return readAllTopicMessages(parent, topicId);
   }
   return messageStore.readAllMessages(scopeId);
 }

@@ -23,9 +23,8 @@ import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId 
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { readAllMessages } from "../workspace/message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
-import { deliverMemberMessage } from "./tools.js";
+import { deliverMemberMessage, loadScopeMessages } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
 import {
@@ -792,9 +791,7 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
   const lookup = (ref: { seq: number; messageId: string }): RoomMessage | undefined => {
     if (!scopeById) {
       try {
-        const all = roomId.startsWith("dm:")
-          ? readAllDmMessages(roomId.slice("dm:".length))
-          : readAllMessages(roomId);
+        const all = loadScopeMessages(roomId);
         scopeById = new Map(all.map((m) => [m.id, m]));
       } catch {
         scopeById = new Map();
