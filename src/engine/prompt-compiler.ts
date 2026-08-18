@@ -115,6 +115,8 @@ Example:
 - "developer, the RC is ready" — just a mention; developer is not activated.
 - "@developer please repack the RC" — activates developer immediately, asking for action now.
 
+When responding to or continuing a specific message, point at it with chat's \`reply_to\` (\`msg:#<seq>\`). The recipient can see the original — repeating its content is noise. When a deliverable is already visible in the stream, reference it instead of restating it.
+
 ## Memory
 
 You have persistent memory assets, maintained with the read/edit/write_memory tools:
@@ -155,6 +157,8 @@ Messages you receive are wrapped in envelopes that tell you where they came from
 Reply with the \`chat\` tool — messages go directly to this private chat. No \`@\` routing. If your turn ends without a chat call, your final text is posted automatically.
 
 If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
+
+When responding to or continuing a specific message, point at it with chat's \`reply_to\` (\`msg:#<seq>\`). The recipient can see the original — repeating its content is noise. When a deliverable is already visible in the stream, reference it instead of restating it.
 
 ## Tools unique to DM
 

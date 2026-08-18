@@ -142,8 +142,30 @@ function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): b
   return task.assignee === assigneeRef;
 }
 
-function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; senderName?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; mentions?: string[]; needResponse?: string[]; autoDelivered?: boolean }) {
-  const out: { attachments?: RoomMessageAttachment[]; artifacts?: string[]; senderMemberId?: string; mentionMemberIds?: string[]; urgentMentions?: string[]; urgentMentionMemberIds?: string[]; needResponse?: string[]; autoDelivered?: boolean } = {};
+function messageMeta(meta: {
+  attachments?: RoomMessageAttachment[];
+  artifacts?: string[];
+  senderMemberId?: string;
+  senderName?: string;
+  mentionMemberIds?: string[];
+  urgentMentions?: string[];
+  urgentMentionMemberIds?: string[];
+  mentions?: string[];
+  needResponse?: string[];
+  autoDelivered?: boolean;
+  replyTo?: { seq: number; messageId: string };
+}) {
+  const out: {
+    attachments?: RoomMessageAttachment[];
+    artifacts?: string[];
+    senderMemberId?: string;
+    mentionMemberIds?: string[];
+    urgentMentions?: string[];
+    urgentMentionMemberIds?: string[];
+    needResponse?: string[];
+    autoDelivered?: boolean;
+    replyTo?: { seq: number; messageId: string };
+  } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
   if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
@@ -152,7 +174,41 @@ function messageMeta(meta: { attachments?: RoomMessageAttachment[]; artifacts?: 
   if (meta.urgentMentionMemberIds?.length) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
   if (meta.needResponse?.length) out.needResponse = meta.needResponse;
   if (meta.autoDelivered) out.autoDelivered = true;
+  if (meta.replyTo) out.replyTo = meta.replyTo;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const REPLY_TO_RE = /^msg:#(\d+)$/i;
+const REPLY_EXCERPT_MAX = 200;
+
+/** Parse chat reply_to (`msg:#<seq>`). Validates the target exists in the given scope. */
+export function parseReplyToParam(
+  raw: unknown,
+  scopeMessages: RoomMessage[],
+): { ok: true; replyTo: { seq: number; messageId: string } } | { ok: false; error: string } | { ok: true; replyTo: undefined } {
+  if (raw === undefined || raw === null || raw === "") return { ok: true, replyTo: undefined };
+  if (typeof raw !== "string") return { ok: false, error: "reply_to must be a string like msg:#123" };
+  const m = raw.trim().match(REPLY_TO_RE);
+  if (!m) return { ok: false, error: "reply_to must match msg:#<seq> (e.g. msg:#42)" };
+  const seq = Number(m[1]);
+  if (!Number.isInteger(seq) || seq < 1) return { ok: false, error: `reply_to seq out of range: ${m[1]}` };
+  const target = scopeMessages.find((msg) => msg.seq === seq);
+  if (!target) return { ok: false, error: `reply_to target not found in current scope: msg:#${seq}` };
+  return { ok: true, replyTo: { seq, messageId: target.id } };
+}
+
+export function excerptForReply(content: string, max = REPLY_EXCERPT_MAX): string {
+  const oneLine = String(content || "").replace(/\s+/g, " ").trim();
+  if (oneLine.length <= max) return oneLine;
+  return oneLine.slice(0, max - 1) + "…";
+}
+
+/** Look up messages in the current conversation scope (room uuid or dm:<id>). */
+function loadScopeMessages(scopeId: string): RoomMessage[] {
+  if (scopeId.startsWith("dm:")) {
+    return readAllDmMessages(scopeId.slice("dm:".length));
+  }
+  return messageStore.readAllMessages(scopeId);
 }
 
 /** Parse chat need_response: string[] of member names. Invalid type → error string. */
@@ -232,11 +288,19 @@ export async function handleToolCallback(
         }
       }
 
+      // Resolve reply_to against the current conversation scope (room or dm).
+      const scopeMessages = loadScopeMessages(roomId);
+      const parsedReply = parseReplyToParam(params?.reply_to, scopeMessages);
+      if (!parsedReply.ok) return { ok: false, error: parsedReply.error };
+      const replyTo = parsedReply.replyTo;
+
       // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
       if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-        postMessage(roomId, agentName, message, [], {
-          ...(attachments.length ? { attachments } : {}),
+        const dmMeta = messageMeta({
+          attachments,
+          replyTo,
         });
+        postMessage(roomId, agentName, message, [], dmMeta || {});
         const hasNeed = Array.isArray(params?.need_response) && params.need_response.length > 0;
         return { ok: true, ...(hasNeed ? { note: "no @target — need_response ignored" } : {}) };
       }
@@ -253,7 +317,7 @@ export async function handleToolCallback(
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse });
+      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse, replyTo });
       if (meta) postMessage(roomId, agentName, message, mentions, meta);
       else postMessage(roomId, agentName, message, mentions);
 
@@ -356,8 +420,26 @@ export async function handleToolCallback(
         return { ok: true, path: filePath, count: messages.length, format: "markdown" };
       }
 
-      // Default: inline text (may be truncated by MAX_RESULT_CHARS)
-      return messages.map((m) => ({ sender: m.sender, content: m.content, ts: m.ts, seq: m.seq }));
+      // Default: inline text (may be truncated by MAX_RESULT_CHARS).
+      // Include replyTo + short quote excerpt when present (plan-reply-to-v1 §3).
+      const byId = new Map(messages.map((m) => [m.id, m]));
+      // Also index full scope for resolving reply targets outside the page window.
+      const scopeAll = loadScopeMessages(targetRoomId);
+      const scopeById = new Map(scopeAll.map((m) => [m.id, m]));
+      return messages.map((m) => {
+        const base: Record<string, unknown> = { sender: m.sender, content: m.content, ts: m.ts, seq: m.seq };
+        if (m.replyTo) {
+          const target = scopeById.get(m.replyTo.messageId) || byId.get(m.replyTo.messageId);
+          base.replyTo = {
+            seq: m.replyTo.seq,
+            messageId: m.replyTo.messageId,
+            ...(target
+              ? { sender: target.sender, excerpt: excerptForReply(target.content) }
+              : { unavailable: true }),
+          };
+        }
+        return base;
+      });
     }
     case "read_memory": {
       const actor = resolveMemoryActor(roomId, agentName);
