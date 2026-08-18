@@ -2325,6 +2325,40 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
     const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
     const syntheticRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
 
+    // Batch 2: prefix-fork the room session when seedMode=fork (degrades to fresh).
+    const { getTopic, saveTopic } = await import("../workspace/topic-store.js");
+    const { forkRoomSessionPrefix, getTopicSession } = await import("./topic-session-fork.js");
+    const topicRec = getTopic(parentRoomId, topicId);
+    const existingTopicSession = getTopicSession(parentRoomId, topicId, memberId);
+    let resumeSession = existingTopicSession?.sessionFile
+      ? { sessionId: existingTopicSession.sessionId, sessionFile: existingTopicSession.sessionFile }
+      : undefined;
+    if (!resumeSession && topicRec?.seedMode === "fork") {
+      const fork = forkRoomSessionPrefix({
+        parentRoomId,
+        topicId,
+        memberId,
+        cwd: room.cwd || process.cwd(),
+        seedMode: "fork",
+        anchorExcerpt: topicRec.guideText,
+      });
+      if (fork.mode === "fork" && fork.sessionFile) {
+        resumeSession = { sessionId: fork.sessionId, sessionFile: fork.sessionFile };
+        if (fork.prefixSummary && topicRec && !topicRec.guideText?.includes(fork.prefixSummary.slice(0, 40))) {
+          const { buildTopicGuideText } = await import("../workspace/topic-store.js");
+          topicRec.guideText = buildTopicGuideText({
+            title: topicRec.title,
+            roomName: room.name,
+            roomId: parentRoomId,
+            anchorExcerpt: "",
+            seedMode: "fork",
+            prefixSummary: fork.prefixSummary,
+          });
+          saveTopic(topicRec);
+        }
+      }
+    }
+
     try {
       const handle = await runtime.createAgent({
         cwd: room.cwd || process.cwd(),
@@ -2336,6 +2370,15 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
         skillPaths,
         skillNames: skills,
         roomMembers: room.members,
+        resumeSession,
+        onSessionChanged: (session) => {
+          void import("./topic-session-fork.js").then(({ saveTopicSession }) => {
+            saveTopicSession(parentRoomId, topicId, memberId, {
+              sessionId: session.sessionId,
+              sessionFile: session.sessionFile,
+            });
+          });
+        },
         callbacks: {
           onChat: async (message: string) => {
             postMessage(syntheticRoomId, member!.name, message);

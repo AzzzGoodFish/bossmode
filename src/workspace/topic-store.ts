@@ -217,12 +217,15 @@ export function buildTopicGuideText(args: {
   roomId: string;
   anchorExcerpt: string;
   seedMode: TopicSeedMode;
+  prefixSummary?: string;
 }): string {
   const excerpt = String(args.anchorExcerpt || "").replace(/\s+/g, " ").trim().slice(0, 280);
   const progress =
-    args.seedMode === "fresh"
-      ? "(fresh session — background is this guide only; room history is available via query tools)"
-      : "(fork seed will attach in batch 2; for now this guide carries the anchor context)";
+    args.prefixSummary && args.prefixSummary.trim()
+      ? args.prefixSummary.trim()
+      : args.seedMode === "fresh"
+        ? "(fresh session — background is this guide only; room history is available via query tools)"
+        : "(forked room prefix — see session history; room stream via query tools)";
   return [
     `[Topic guide] Title: ${args.title} | Anchor: ${excerpt || "(empty)"}`,
     `Room progress before this topic: ${progress}`,
