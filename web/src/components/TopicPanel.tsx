@@ -127,6 +127,8 @@ function useTopicStream(roomId: string, topicId: string) {
   const [topic, setTopic] = useState<TopicRecord | null>(null);
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [notFound, setNotFound] = useState(false);
+  /** Topic-scoped member status (agent:status broadcasts on topic:<id>, same scope as messages). */
+  const [statusByName, setStatusByName] = useState<Record<string, string>>({});
   const scopeId = `topic:${topicId}`;
 
   useEffect(() => {
@@ -147,9 +149,14 @@ function useTopicStream(roomId: string, topicId: string) {
       if (event.type === "room:message" && event.roomId === scopeId) {
         const msg = event.message as RoomMessage;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        // A fresh message can mean a new participant joined — refetch the record lazily.
+        getTopic(roomId, topicId).then((t) => setTopic(t.topic)).catch(() => {});
+      }
+      if (event.type === "agent:status" && event.roomId === scopeId) {
+        setStatusByName((prev) => ({ ...prev, [event.agent]: event.status }));
       }
     },
-    [scopeId],
+    [scopeId, roomId, topicId],
   );
   const { subscribeRoom, unsubscribeRoom } = useWebSocket({ onEvent: handleWsEvent });
   useEffect(() => {
@@ -170,7 +177,7 @@ function useTopicStream(roomId: string, topicId: string) {
     setTopic(res.topic);
   }, [roomId, topicId]);
 
-  return { topic, messages, notFound, send, endTopic };
+  return { topic, messages, notFound, send, endTopic, statusByName };
 }
 
 function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
@@ -266,14 +273,14 @@ function TopicStream({
   );
 }
 
-function ParticipantChips({ topic, memberInfos, agentStatus }: { topic: TopicRecord | null; memberInfos: Array<Pick<MemberInfo, "id" | "name">>; agentStatus: Record<string, string> }) {
+function ParticipantChips({ topic, memberInfos, statusByName }: { topic: TopicRecord | null; memberInfos: Array<Pick<MemberInfo, "id" | "name">>; statusByName: Record<string, string> }) {
   if (!topic || topic.participants.length === 0) return null;
   const nameOf = (id: string) => memberInfos.find((m) => m.id === id)?.name ?? id;
   return (
     <>
       {topic.participants.map((pid) => {
         const name = nameOf(pid);
-        const working = agentStatus[name] === "working";
+        const working = statusByName[name] === "working";
         return (
           <span key={pid} className={`inline-flex items-center gap-1.5 text-[10.5px] rounded-full px-2 py-0.5 border ${working ? "text-ink-2 border-onair/30 bg-surface-2" : "text-ink-3 border-line-soft bg-surface-2"}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${working ? "bg-onair animate-pulse" : "bg-ink-4"}`} />
@@ -304,7 +311,7 @@ export function TopicPanel({
   onExpand: () => void;
   onClose: () => void;
 }) {
-  const { topic, messages, notFound, send, endTopic } = useTopicStream(roomId, topicId);
+  const { topic, messages, notFound, send, endTopic, statusByName } = useTopicStream(roomId, topicId);
   const [ending, setEnding] = useState(false);
 
   return (
@@ -337,7 +344,7 @@ export function TopicPanel({
         </div>
         {(topic?.participants.length ?? 0) > 0 && (
           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-            <ParticipantChips topic={topic} memberInfos={memberInfos} agentStatus={agentStatus} />
+            <ParticipantChips topic={topic} memberInfos={memberInfos} statusByName={statusByName} />
           </div>
         )}
       </div>
@@ -365,7 +372,7 @@ export function TopicSurface({
   onCollapse: () => void;
   onClose: () => void;
 }) {
-  const { topic, messages, notFound, send, endTopic } = useTopicStream(roomId, topicId);
+  const { topic, messages, notFound, send, endTopic, statusByName } = useTopicStream(roomId, topicId);
   const [ending, setEnding] = useState(false);
 
   return (
@@ -412,7 +419,7 @@ export function TopicSurface({
           <h5 className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4 mt-4 mb-2">Participants</h5>
           {topic && topic.participants.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              <ParticipantChips topic={topic} memberInfos={memberInfos} agentStatus={agentStatus} />
+              <ParticipantChips topic={topic} memberInfos={memberInfos} statusByName={statusByName} />
             </div>
           ) : (
             <div className="text-[11px] text-ink-4">No members yet — @ one in the stream.</div>
