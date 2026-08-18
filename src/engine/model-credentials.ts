@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -14,10 +14,13 @@ import {
   getCatalog,
   getCatalogModels,
   commitRemoteCatalog,
+  commitProviderOverlays,
+  getProviderOverlays,
   retainLastGoodCatalog,
   formatCatalogFreshness,
   type CatalogRefreshSource,
   type CatalogSnapshot,
+  type ProviderModelsStoreEntry,
 } from "./model-catalog.js";
 
 export type { CatalogRefreshSource, CatalogSnapshot };
@@ -1255,15 +1258,22 @@ function parsePiDevProviderCatalog(providerId: string, value: unknown): any[] {
     .map((model: Record<string, unknown>) => ({ ...model, provider: providerId, id: String(model.id) }));
 }
 
-async function fetchPiDevProviderModels(providerId: string, signal?: AbortSignal): Promise<any[]> {
+async function fetchPiDevProviderModels(
+  providerId: string,
+  signal?: AbortSignal,
+): Promise<{ models: any[]; lastModified: number; etag?: string }> {
   const url = new URL(`/api/models/providers/${encodeURIComponent(providerId)}`, PI_DEV_CATALOG_BASE);
   const response = await fetch(url, {
     headers: { accept: "application/json" },
     signal,
   });
-  if (response.status === 404 || response.status === 501) return [];
+  if (response.status === 404 || response.status === 501) return { models: [], lastModified: 0 };
   if (!response.ok) throw new Error(`pi.dev catalog ${providerId}: HTTP ${response.status}`);
-  return parsePiDevProviderCatalog(providerId, await response.json());
+  const models = parsePiDevProviderCatalog(providerId, await response.json());
+  const parsedLm = Date.parse(response.headers.get("last-modified") ?? "");
+  const lastModified = Number.isFinite(parsedLm) && !Number.isNaN(parsedLm) ? parsedLm : Date.now();
+  const etag = response.headers.get("etag") ?? undefined;
+  return { models, lastModified, ...(etag ? { etag } : {}) };
 }
 
 /**
@@ -1301,16 +1311,18 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const merged = new Map<string, any>(bundled.map((m) => [`${m.provider}/${m.id}`, m]));
+    const providerFetchMeta = new Map<string, { lastModified: number; etag?: string; models: any[] }>();
     let providersFetched = 0;
     let lastError: string | undefined;
     try {
       for (const providerId of providerIds) {
         if (controller.signal.aborted) break;
         try {
-          const remoteModels = await fetchPiDevProviderModels(providerId, controller.signal);
-          if (remoteModels.length === 0) continue;
+          const remote = await fetchPiDevProviderModels(providerId, controller.signal);
+          if (remote.models.length === 0) continue;
           providersFetched += 1;
-          for (const model of remoteModels) {
+          providerFetchMeta.set(providerId, remote);
+          for (const model of remote.models) {
             merged.set(`${model.provider}/${model.id}`, model);
           }
         } catch (err) {
@@ -1341,6 +1353,15 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     // Evidence gate only affects logging; content is still the merged candidate.
     const hasEvidence = catalogHasRemoteEvidence(bundled, candidate);
     commitRemoteCatalog(candidate, fetchedAt);
+    // Build per-provider models-store overlays (pi FileModelsStore shape) and distribute
+    // to all member agentDirs so offline runtimes pick up new models (e.g. grok-4.6).
+    const overlays = buildProviderOverlaysFromFetch(candidate, providerFetchMeta, fetchedAt);
+    commitProviderOverlays(overlays);
+    try {
+      distributeModelsStoreOverlays(overlays);
+    } catch (err) {
+      logger.warn("catalog", "models-store distribute failed", { error: String(err) });
+    }
     if (!hasEvidence) {
       logger.info("catalog", "remote refresh matched bundled metadata; overlay still committed for freshness", {
         modelCount: candidate.length,
@@ -2028,6 +2049,133 @@ export function buildAllProvidersCatalog(preferredProfileId?: string): Record<st
   return providers;
 }
 
+
+/** Build pi ModelsStoreEntry map from flat catalog + per-provider fetch metadata. */
+export function buildProviderOverlaysFromFetch(
+  models: any[],
+  fetchMeta: Map<string, { lastModified: number; etag?: string; models: any[] }>,
+  fetchedAt: number,
+): Record<string, ProviderModelsStoreEntry> {
+  const byProvider = new Map<string, any[]>();
+  for (const m of models) {
+    const p = m?.provider ? String(m.provider) : "";
+    if (!p) continue;
+    if (!byProvider.has(p)) byProvider.set(p, []);
+    byProvider.get(p)!.push(m);
+  }
+  const out: Record<string, ProviderModelsStoreEntry> = {};
+  for (const [providerId, providerModels] of byProvider) {
+    const meta = fetchMeta.get(providerId);
+    // Prefer fetch-time models for that provider when available (exact remote shard).
+    const modelsForEntry = meta?.models?.length ? meta.models : providerModels;
+    let lastModified = meta?.lastModified && meta.lastModified > 0 ? meta.lastModified : fetchedAt;
+    // Must beat pi's builtinModelDataGeneratedAt or remoteModels() returns [].
+    if (!lastModified || lastModified <= 0) lastModified = Date.now();
+    out[providerId] = {
+      models: modelsForEntry,
+      lastModified,
+      checkedAt: fetchedAt,
+      ...(meta?.etag ? { etag: meta.etag } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * Enumerate member runtime agentDirs under getBossmodePiRuntimeRoot():
+ *   <root>/<roomSeg>/<memberSeg>/
+ *   <root>/members/<memberSeg>/dm/
+ */
+export function listMemberAgentDirs(root: string = getBossmodePiRuntimeRoot()): string[] {
+  const dirs: string[] = [];
+  if (!existsSync(root)) return dirs;
+  let top: string[] = [];
+  try {
+    top = readdirSync(root);
+  } catch {
+    return dirs;
+  }
+  for (const name of top) {
+    const topPath = join(root, name);
+    let st;
+    try { st = statSync(topPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    if (name === "members") {
+      // DM agentDirs: members/<id>/dm
+      let memberNames: string[] = [];
+      try { memberNames = readdirSync(topPath); } catch { continue; }
+      for (const mid of memberNames) {
+        const dmDir = join(topPath, mid, "dm");
+        try {
+          if (statSync(dmDir).isDirectory()) dirs.push(dmDir);
+        } catch { /* skip */ }
+      }
+      continue;
+    }
+    // Room agentDirs: <room>/<member>
+    let members: string[] = [];
+    try { members = readdirSync(topPath); } catch { continue; }
+    for (const mid of members) {
+      const agentDir = join(topPath, mid);
+      try {
+        if (!statSync(agentDir).isDirectory()) continue;
+        // Heuristic: agentDir has models.json or is a leaf runtime dir
+        if (existsSync(join(agentDir, "models.json")) || existsSync(join(agentDir, "models-store.json"))) {
+          dirs.push(agentDir);
+        } else {
+          // Still include empty-looking dirs that look like member slots (not nested further)
+          dirs.push(agentDir);
+        }
+      } catch { /* skip */ }
+    }
+  }
+  return dirs;
+}
+
+/** Write models-store.json (pi FileModelsStore whole-file shape: providerId → entry). */
+export function writeModelsStoreFile(agentDir: string, overlays: Record<string, ProviderModelsStoreEntry>): void {
+  if (!overlays || Object.keys(overlays).length === 0) return;
+  mkdirSync(agentDir, { recursive: true });
+  writePrivateJson(join(agentDir, "models-store.json"), overlays);
+}
+
+/**
+ * Distribute models-store overlays to every known member agentDir and refresh
+ * live runtimes (disk-only). Failures are warned, never thrown.
+ */
+export function distributeModelsStoreOverlays(
+  overlays: Record<string, ProviderModelsStoreEntry> = getProviderOverlays(),
+): { dirs: number; written: number } {
+  if (!overlays || Object.keys(overlays).length === 0) return { dirs: 0, written: 0 };
+  const dirs = listMemberAgentDirs();
+  let written = 0;
+  for (const dir of dirs) {
+    try {
+      writeModelsStoreFile(dir, overlays);
+      written += 1;
+    } catch (err) {
+      logger.warn("catalog", "models-store write failed", { agentDir: dir, error: String(err) });
+    }
+  }
+  // Live instances: disk-only registry refresh so new overlay is picked up without Reload.
+  void refreshLiveInstanceModelRegistries().catch((err) => {
+    logger.warn("catalog", "live registry refresh after distribute failed", { error: String(err) });
+  });
+  logger.info("catalog", "models-store distributed", { dirs: dirs.length, written, providers: Object.keys(overlays).length });
+  return { dirs: dirs.length, written };
+}
+
+async function refreshLiveInstanceModelRegistries(): Promise<void> {
+  try {
+    const { refreshAllInstanceModelRegistries } = await import("./agent-manager.js");
+    if (typeof refreshAllInstanceModelRegistries === "function") {
+      await refreshAllInstanceModelRegistries();
+    }
+  } catch (err) {
+    logger.warn("catalog", "could not refresh live instance registries", { error: String(err) });
+  }
+}
+
 export function exportPiConfigForMember(args: {
   roomId: string;
   memberName: string;
@@ -2051,6 +2199,15 @@ export function exportPiConfigForMember(args: {
   writePrivateJson(join(agentDir, "models.json"), {
     providers: buildAllProvidersCatalog(profile.id),
   });
+
+  // Seed pi models-store.json overlay so builtin providers pick up remote catalog
+  // models (e.g. xai/grok-4.6) offline via withRemoteCatalog (fish 2026-08-18).
+  try {
+    const overlays = getProviderOverlays();
+    if (Object.keys(overlays).length > 0) writeModelsStoreFile(agentDir, overlays);
+  } catch (err) {
+    logger.warn("catalog", "models-store seed on export failed", { agentDir, error: String(err) });
+  }
 
   return { agentDir, extensionPaths: [], profile: sanitizeProfile(profile) };
 }
