@@ -38,6 +38,16 @@ export interface DiskCatalogCache {
 }
 
 const CACHE_FILE = "pi-catalog-remote.json";
+/** Per-provider pi models-store overlays (written to member agentDirs). */
+const OVERLAYS_FILE = "pi-models-store-overlays.json";
+
+/** Shape matches pi-ai ModelsStoreEntry (models-store.json per-provider value). */
+export interface ProviderModelsStoreEntry {
+  models: any[];
+  lastModified?: number;
+  checkedAt?: number;
+  etag?: string;
+}
 
 let bundledLoader: () => any[] = () => [];
 let testModels: any[] | null = null;
@@ -46,6 +56,8 @@ let networkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource
 /** In-memory remote overlay — only replaced on successful refresh / disk hydrate. */
 let remoteModels: any[] | null = null;
 let remoteFetchedAt: number | null = null;
+/** Per-provider models-store entries for member agentDir distribution. */
+let providerOverlays: Record<string, ProviderModelsStoreEntry> | null = null;
 
 function cachePath(): string {
   return join(getBossmodeDir(), CACHE_FILE);
@@ -114,15 +126,22 @@ function writeDiskCache(models: any[], fetchedAt: number): void {
 
 /** Offline hydrate: load last-good remote from disk into memory (no network). Idempotent. */
 export function hydrateCatalogFromDisk(): void {
-  if (remoteModels && remoteModels.length > 0) return;
+  if (remoteModels && remoteModels.length > 0) {
+    hydrateProviderOverlaysFromDisk();
+    return;
+  }
   const cached = readDiskCache();
-  if (!cached) return;
+  if (!cached) {
+    hydrateProviderOverlaysFromDisk();
+    return;
+  }
   remoteModels = cached.models;
   remoteFetchedAt = cached.fetchedAt;
   logger.info("catalog", "hydrated remote catalog from disk", {
     modelCount: cached.models.length,
     fetchedAt: cached.updatedAt,
   });
+  hydrateProviderOverlaysFromDisk();
 }
 
 /**
@@ -204,6 +223,94 @@ export function retainLastGoodCatalog(reason: string, error?: string): CatalogSn
 export function clearRemoteCatalogMemoryForTests(): void {
   remoteModels = null;
   remoteFetchedAt = null;
+  providerOverlays = null;
+}
+
+function overlaysPath(): string {
+  return join(getBossmodeDir(), OVERLAYS_FILE);
+}
+
+function readOverlaysDisk(): Record<string, ProviderModelsStoreEntry> | null {
+  try {
+    const path = overlaysPath();
+    if (!existsSync(path)) return null;
+    const data = JSON.parse(readFileSync(path, "utf-8"));
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    return data as Record<string, ProviderModelsStoreEntry>;
+  } catch {
+    return null;
+  }
+}
+
+function writeOverlaysDisk(overlays: Record<string, ProviderModelsStoreEntry>): void {
+  try {
+    ensureBossmodeDir();
+    writePrivateJsonAtomic(overlaysPath(), overlays);
+  } catch (err) {
+    logger.warn("catalog", "failed to write models-store overlays cache", { error: String(err) });
+  }
+}
+
+/** Install per-provider models-store overlays (memory + disk). Call on successful pi.dev refresh. */
+export function commitProviderOverlays(overlays: Record<string, ProviderModelsStoreEntry>): void {
+  if (!overlays || typeof overlays !== "object") return;
+  providerOverlays = overlays;
+  writeOverlaysDisk(overlays);
+  logger.info("catalog", "provider models-store overlays committed", {
+    providers: Object.keys(overlays).length,
+  });
+}
+
+/** Offline hydrate overlays from disk (idempotent). */
+export function hydrateProviderOverlaysFromDisk(): void {
+  if (providerOverlays && Object.keys(providerOverlays).length > 0) return;
+  const disk = readOverlaysDisk();
+  if (!disk) return;
+  providerOverlays = disk;
+  logger.info("catalog", "hydrated provider models-store overlays from disk", {
+    providers: Object.keys(disk).length,
+  });
+}
+
+/**
+ * Effective per-provider overlays for member agentDir models-store.json.
+ * Prefers last committed overlay; if missing, synthesizes from CatalogStore models
+ * using fetchedAt as lastModified (must beat pi builtin generatedAt).
+ */
+export function getProviderOverlays(): Record<string, ProviderModelsStoreEntry> {
+  if (providerOverlays && Object.keys(providerOverlays).length > 0) {
+    return providerOverlays;
+  }
+  const disk = readOverlaysDisk();
+  if (disk && Object.keys(disk).length > 0) {
+    providerOverlays = disk;
+    return disk;
+  }
+  // Synthesize from flat catalog so export still seeds something after hydrate-only.
+  const snap = getCatalog();
+  if (snap.source !== "remote" || !snap.models.length) return {};
+  const lastModified = snap.fetchedAt && snap.fetchedAt > 0 ? snap.fetchedAt : Date.now();
+  const checkedAt = lastModified;
+  const byProvider = new Map<string, any[]>();
+  for (const m of snap.models) {
+    const p = m?.provider ? String(m.provider) : "";
+    if (!p) continue;
+    if (!byProvider.has(p)) byProvider.set(p, []);
+    byProvider.get(p)!.push(m);
+  }
+  const out: Record<string, ProviderModelsStoreEntry> = {};
+  for (const [providerId, models] of byProvider) {
+    out[providerId] = { models, lastModified, checkedAt };
+  }
+  return out;
+}
+
+export function clearProviderOverlaysMemoryForTests(): void {
+  providerOverlays = null;
+}
+
+export function setProviderOverlaysMemoryForTests(overlays: Record<string, ProviderModelsStoreEntry> | null): void {
+  providerOverlays = overlays;
 }
 
 /** Test helper — seed memory overlay without disk write. */

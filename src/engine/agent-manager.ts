@@ -681,6 +681,34 @@ function applyPendingCredentialRefresh(instance: AgentInstance, trigger: string)
   });
 }
 
+/**
+ * Disk-only model registry refresh for every live instance (catalog models-store
+ * distribute path). Failures are logged per-instance and never thrown.
+ */
+export async function refreshAllInstanceModelRegistries(): Promise<{ refreshed: number; failed: number }> {
+  let refreshed = 0;
+  let failed = 0;
+  await Promise.all(Array.from(instances.values()).map(async (instance) => {
+    if (!instance.handle.refreshModelRegistry) return;
+    try {
+      await withTimeout(
+        Promise.resolve(instance.handle.refreshModelRegistry({ allowNetwork: false })),
+        CREDENTIAL_REFRESH_TIMEOUT_MS,
+        "catalog models-store registry refresh",
+      );
+      refreshed += 1;
+    } catch (err) {
+      failed += 1;
+      logger.warn("agent", "catalogRegistryRefreshFailed", {
+        member: instance.agentName,
+        roomId: instance.roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }));
+  return { refreshed, failed };
+}
+
 export async function invalidateModelCredentialProfile(profileId: string, providerSlug: string, changeType: PendingCredentialRefresh["changeType"] = "profileUpdated"): Promise<Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }>> {
   const pending = { profileId, providerSlug, changeType };
   const targets = Array.from(instances.values()).filter((instance) => instanceUsesCredentialProfile(instance, profileId));
