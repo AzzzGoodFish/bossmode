@@ -16,7 +16,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
-import { parseMentions, parseUrgentMentions } from "../communication/router.js";
+import { parseMentions, parseUrgentMentions, initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
@@ -44,6 +44,7 @@ import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
+import { resolveTopicRoomId } from "../workspace/topic-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -2519,6 +2520,82 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
   } finally {
     clearActivationSource(scopeId, memberName);
   }
+}
+
+/** Abort a live topic instance, then re-activate in-topic (urgent !). */
+async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string): Promise<void> {
+  const roomMember = resolveRoomMember(parentRoomId, memberRef);
+  const memberId = roomMember?.id || memberRef;
+  const memberName = roomMember?.name || memberRef;
+  const key = topicInstanceKey(topicId, memberId);
+  const instance = instances.get(key);
+  if (instance && instance.status === "working") {
+    try { settleWaitOnAbort(`topic:${topicId}`, memberId); } catch { /* ignore */ }
+    try { instance.handle.abort(); } catch { /* ignore */ }
+    updateDispatchState(instance, "aborting", "urgent_interrupt");
+    postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
+  }
+  await activateTopicMember(parentRoomId, topicId, memberRef);
+}
+
+async function activateAllTopicMembers(parentRoomId: string, topicId: string): Promise<void> {
+  for (const m of roomStore.getRoomMembers(parentRoomId)) {
+    await activateTopicMember(parentRoomId, topicId, m.id);
+  }
+}
+
+/** Single mention-router wiring for production server + acceptance tests (no topic: leak into room getOrCreate). */
+export function wireMentionRouter(): () => void {
+  return initRouter(
+    (scopeId, memberRef, ctx) => {
+      if (scopeId.startsWith("topic:")) {
+        const topicId = scopeId.slice("topic:".length);
+        const parent = resolveTopicParent(topicId);
+        if (!parent) return;
+        activateTopicMember(parent, topicId, memberRef).catch((err) => {
+          logger.error("router", "topic activate failed", { topicId, member: memberRef, error: String(err) });
+        });
+        return;
+      }
+      activateAgent(scopeId, memberRef, ctx).catch((err) => {
+        logger.error("router", "activate failed", { roomId: scopeId, member: memberRef, error: String(err) });
+      });
+    },
+    (scopeId, ctx) => {
+      if (scopeId.startsWith("topic:")) {
+        const topicId = scopeId.slice("topic:".length);
+        const parent = resolveTopicParent(topicId);
+        if (!parent) return;
+        activateAllTopicMembers(parent, topicId).catch((err) => {
+          logger.error("router", "topic activateAll failed", { topicId, error: String(err) });
+        });
+        return;
+      }
+      activateAll(scopeId, ctx).catch((err) => {
+        logger.error("router", "activateAll failed", { roomId: scopeId, error: String(err) });
+      });
+    },
+    (scopeId, memberRef, urgentByName) => {
+      if (scopeId.startsWith("topic:")) {
+        const topicId = scopeId.slice("topic:".length);
+        const parent = resolveTopicParent(topicId);
+        if (!parent) return;
+        interruptTopicMember(parent, topicId, memberRef, urgentByName).catch((err) => {
+          logger.error("router", "topic urgent interrupt failed", { topicId, member: memberRef, error: String(err) });
+        });
+        return;
+      }
+      interruptAgent(scopeId, memberRef, urgentByName).catch((err) => {
+        logger.error("router", "urgent interrupt failed", { roomId: scopeId, member: memberRef, error: String(err) });
+      });
+    },
+  );
+}
+
+function resolveTopicParent(topicId: string): string | null {
+  const parent = resolveTopicRoomId(topicId);
+  if (!parent) logger.error("router", "topic parent room not found", { topicId });
+  return parent;
 }
 
 // -- Shutdown --

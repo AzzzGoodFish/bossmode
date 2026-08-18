@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { getBossmodeDir, ensureBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
+import { resolveOwningRoomId } from "../workspace/topic-store.js";
 import { logger } from "../foundation/logger.js";
 import {
   setBundledCatalogLoader,
@@ -419,8 +420,9 @@ export function getMemberActiveCredentialOverride(roomId: string, memberId: stri
  * Member-scoped store — live-reads the member's current credential binding
  * per request, with an optional instance-level override (see setMemberActiveCredentialOverride).
  *
- * Scope-aware (0.20 G2):
+ * Scope-aware (0.20 G2 + 0.21 topic):
  * - roomId starting with `dm:` → resolve via member-registry getEffectiveConfig
+ * - roomId starting with `topic:` → parent-room member + effective config `room:<parent>`
  * - otherwise → room member binding (resolveRoomMember), as before
  *
  * Override is **augment** semantics (2026-07-30 fish self-test): for a requested
@@ -433,6 +435,10 @@ class MemberCredentialStore implements CredentialStore {
 
   private isDmScope(): boolean {
     return typeof this.roomId === "string" && this.roomId.startsWith("dm:");
+  }
+
+  private isTopicScope(): boolean {
+    return typeof this.roomId === "string" && this.roomId.startsWith("topic:");
   }
 
   /** Lazy import keeps model-credentials free of hard edges into resolvers. */
@@ -452,19 +458,22 @@ class MemberCredentialStore implements CredentialStore {
         return null;
       }
     }
+    const lookupRoomId = this.isTopicScope()
+      ? (await import("../workspace/topic-store.js")).resolveOwningRoomId(this.roomId)
+      : this.roomId;
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
-    const member = resolveRoomMember(this.roomId, this.memberId);
+    const member = resolveRoomMember(lookupRoomId, this.memberId);
     // G3: when ID-linked to a global member, effective-config is authority (global over room shadow).
     // Room-local credentialId only used when no global link exists (legacy rooms).
     let credentialId: string | null = null;
     if (member) {
       try {
         const roomStore = await import("../workspace/room-store.js");
-        const room = roomStore.getRoom(this.roomId);
+        const room = roomStore.getRoom(lookupRoomId);
         const globalId = room ? roomStore.resolveGlobalMemberId(room, member) : null;
         if (globalId) {
           const { getEffectiveConfig } = await import("../workspace/member-registry.js");
-          const scopeId = `room:${this.roomId}`;
+          const scopeId = `room:${lookupRoomId}`;
           const eff = getEffectiveConfig(globalId, scopeId);
           credentialId = eff.credentialId || null;
         }
@@ -2176,6 +2185,25 @@ async function refreshLiveInstanceModelRegistries(): Promise<void> {
   }
 }
 
+function safeFsSegment(s: string): string {
+  return String(s || "_").replace(/[^a-zA-Z0-9._-]+/g, "_");
+}
+
+/** pi agentDir for a scope. Topic instances nest under the parent room — never a `topic:` phantom. */
+export function resolvePiAgentDir(roomIdOrScope: string, memberIdOrName: string): string {
+  const safeMember = safeFsSegment(memberIdOrName);
+  const root = getBossmodePiRuntimeRoot();
+  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("dm:")) {
+    return join(root, "members", safeMember, "dm");
+  }
+  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("topic:")) {
+    const topicId = roomIdOrScope.slice("topic:".length);
+    const parent = resolveOwningRoomId(roomIdOrScope);
+    return join(root, safeFsSegment(parent), safeMember, `topic-${safeFsSegment(topicId)}`);
+  }
+  return join(root, safeFsSegment(roomIdOrScope), safeMember);
+}
+
 export function exportPiConfigForMember(args: {
   roomId: string;
   memberName: string;
@@ -2185,12 +2213,7 @@ export function exportPiConfigForMember(args: {
   const profile = resolveCredentialProfileForModel({ modelRef: args.modelRef, credentialId: args.credentialId });
   if (!profile) return null;
 
-  const safeMember = args.memberName.replace(/[^a-zA-Z0-9._-]+/g, "_");
-  // 0.20 DM sessions live under members/<id>/dm/ (contract §6).
-  const isDm = typeof args.roomId === "string" && args.roomId.startsWith("dm:");
-  const agentDir = isDm
-    ? join(getBossmodePiRuntimeRoot(), "members", safeMember, "dm")
-    : join(getBossmodePiRuntimeRoot(), args.roomId.replace(/[^a-zA-Z0-9._-]+/g, "_"), safeMember);
+  const agentDir = resolvePiAgentDir(args.roomId, args.memberName);
   mkdirSync(agentDir, { recursive: true });
 
   // Materialize ALL enabled providers (endpoint + model metadata only). Auth is

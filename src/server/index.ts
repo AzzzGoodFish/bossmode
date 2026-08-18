@@ -20,8 +20,7 @@ import { runSummaryRemovalMigration } from "../workspace/summary-removal-migrati
 import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, activateAgent, interruptAgent, activateAll } from "../engine/agent-manager.js";
-import { initRouter } from "../communication/router.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
@@ -198,24 +197,8 @@ export function startServer(opts: ServerOptions): Promise<void> {
     logger.info("server", "cursors reset — session resume disabled", { resetCount });
   }
 
-  // Initialize communication router — wire @mentions to engine activation
-  const unsubscribeRouter = initRouter(
-    (roomId, memberName, ctx) => {
-      activateAgent(roomId, memberName, ctx).catch((err) => {
-        logger.error("router", "activate failed", { roomId, member: memberName, error: String(err) });
-      });
-    },
-    (roomId, ctx) => {
-      activateAll(roomId, ctx).catch((err) => {
-        logger.error("router", "activateAll failed", { roomId, error: String(err) });
-      });
-    },
-    (roomId, memberRef, urgentByName) => {
-      interruptAgent(roomId, memberRef, urgentByName).catch((err) => {
-        logger.error("router", "urgent interrupt failed", { roomId, member: memberRef, error: String(err) });
-      });
-    },
-  );
+  // Initialize communication router — topic: scopes dispatch to activateTopicMember.
+  const unsubscribeRouter = wireMentionRouter();
 
   // One-shot migration: drop legacy watches.json (async watch → blocking wait).
   // No dual-mode / no fallback — leftover subscriptions are cleared with a room note.

@@ -16,7 +16,7 @@ import { existsSync, openSync, readSync, closeSync, readFileSync } from "node:fs
 import { join } from "node:path";
 import { getProjectionDb } from "./projection.js";
 import { getWatermark, setWatermark } from "./watermark.js";
-import { getBossmodeDir } from "../../shared/config.js";
+import { agentEventsDirForScope } from "../topic-store.js";
 import { logger } from "../../foundation/logger.js";
 import type { BossmodeDb } from "./sqlite.js";
 
@@ -36,7 +36,7 @@ export const INDEXED_ACTIVITY_TYPES = new Set([
 ]);
 
 function agentEventsPath(roomId: string, memberId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "agent-events", `${memberId}.jsonl`);
+  return join(agentEventsDirForScope(roomId), `${memberId}.jsonl`);
 }
 
 interface ActivityRow {
