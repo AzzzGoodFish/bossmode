@@ -27,6 +27,8 @@ vi.mock("../../src/engine/agent-manager.js", () => ({
   getActiveInstanceCount: vi.fn(() => 0),
   activateAgent: vi.fn(async () => {}),
   activateAll: vi.fn(async () => {}),
+  // server/index.ts now wires mentions via agent-manager (topic-aware dispatch).
+  wireMentionRouter: vi.fn(() => () => {}),
 }));
 vi.mock("../../src/communication/router.js", () => ({ initRouter: vi.fn(() => () => {}) }));
 vi.mock("../../src/communication/message-bus.js", () => ({ postMessage: vi.fn() }));

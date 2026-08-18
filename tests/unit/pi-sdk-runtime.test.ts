@@ -52,6 +52,9 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
   createMemberCredentialStore: (roomId: string, memberId: string) => ({ kind: "credentials", roomId, memberId }),
+  // Faithful room-scope shape (topic/dm branches not exercised in this suite).
+  resolvePiAgentDir: (roomIdOrScope: string, memberIdOrName: string) =>
+    join(dir, "pi-agent", "runtime", String(roomIdOrScope).replace(/[^a-zA-Z0-9._-]+/g, "_"), String(memberIdOrName).replace(/[^a-zA-Z0-9._-]+/g, "_")),
 }));
 
 // Live customTools factory — sole source for "bossmode" classification (no static name whitelist).
