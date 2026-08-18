@@ -995,6 +995,10 @@ export async function sendTopicMessage(roomId: string, topicId: string, content:
   return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages`, { method: "POST", body: JSON.stringify({ content, ...(replyTo ? { replyTo } : {}) }) });
 }
 
+export async function closeTopic(roomId: string, topicId: string): Promise<{ topic: TopicRecord; scopeId: string }> {
+  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/close`, { method: "POST" });
+}
+
 export interface MessageSearchResult {
   total: number;
   messages: RoomMessage[];

@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2, MessagesSquare, X } from "lucide-react";
-import { createTopic, getTopic, getTopicMessages, sendTopicMessage, getUsername, type MemberInfo, type RoomMessage, type TopicRecord } from "../api/client";
+import { closeTopic, createTopic, getTopic, getTopicMessages, sendTopicMessage, getUsername, type MemberInfo, type RoomMessage, type TopicRecord } from "../api/client";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
@@ -165,7 +165,12 @@ function useTopicStream(roomId: string, topicId: string) {
     [roomId, topicId],
   );
 
-  return { topic, messages, notFound, send };
+  const endTopic = useCallback(async () => {
+    const res = await closeTopic(roomId, topicId);
+    setTopic(res.topic);
+  }, [roomId, topicId]);
+
+  return { topic, messages, notFound, send, endTopic };
 }
 
 function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
@@ -299,7 +304,8 @@ export function TopicPanel({
   onExpand: () => void;
   onClose: () => void;
 }) {
-  const { topic, messages, notFound, send } = useTopicStream(roomId, topicId);
+  const { topic, messages, notFound, send, endTopic } = useTopicStream(roomId, topicId);
+  const [ending, setEnding] = useState(false);
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-surface-1 border-l border-line" data-testid="topic-panel">
@@ -312,6 +318,16 @@ export function TopicPanel({
               {topic?.anchorSeq !== undefined ? `anchored #${topic.anchorSeq}` : "…"}
             </div>
           </div>
+          {topic?.status === "active" && (
+            <button
+              type="button"
+              disabled={ending}
+              onClick={() => { setEnding(true); void endTopic().finally(() => setEnding(false)); }}
+              className="shrink-0 px-2 py-1 rounded text-[11px] font-semibold text-ink-2 border border-line-soft hover:bg-surface-2 cursor-pointer disabled:opacity-40"
+            >
+              {ending ? "Ending…" : "End topic"}
+            </button>
+          )}
           <button onClick={onExpand} title="Expand to surface" aria-label="Expand to surface" className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
             <Maximize2 size={13} />
           </button>
@@ -349,7 +365,8 @@ export function TopicSurface({
   onCollapse: () => void;
   onClose: () => void;
 }) {
-  const { topic, messages, notFound, send } = useTopicStream(roomId, topicId);
+  const { topic, messages, notFound, send, endTopic } = useTopicStream(roomId, topicId);
+  const [ending, setEnding] = useState(false);
 
   return (
     <SurfaceShell
@@ -358,9 +375,21 @@ export function TopicSurface({
       title={topic?.title ?? "Topic"}
       meta={topic?.anchorSeq !== undefined ? <span className="hidden sm:block font-mono text-[10px] text-ink-4">anchored #{topic.anchorSeq}</span> : undefined}
       actions={
-        <button onClick={onCollapse} title="Collapse to panel" aria-label="Collapse to panel" className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
-          <Minimize2 size={13} />
-        </button>
+        <>
+          {topic?.status === "active" && (
+            <button
+              type="button"
+              disabled={ending}
+              onClick={() => { setEnding(true); void endTopic().finally(() => setEnding(false)); }}
+              className="shrink-0 px-2 py-1 rounded text-[11px] font-semibold text-ink-2 border border-line-soft hover:bg-surface-2 cursor-pointer disabled:opacity-40"
+            >
+              {ending ? "Ending…" : "End topic"}
+            </button>
+          )}
+          <button onClick={onCollapse} title="Collapse to panel" aria-label="Collapse to panel" className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
+            <Minimize2 size={13} />
+          </button>
+        </>
       }
       onClose={onClose}
     >

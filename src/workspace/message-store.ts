@@ -151,6 +151,21 @@ export function getLatestMessageId(roomId: string): string | null {
 }
 
 // Used by archive-store: overwrite messages file with kept messages
+/** Patch one persisted message in place (used to flip a topic opened card to closed). */
+export function updateMessage(
+  roomId: string,
+  messageId: string,
+  patch: Partial<RoomMessage>,
+): RoomMessage | null {
+  const all = readAllMessages(roomId);
+  const idx = all.findIndex((m) => m.id === messageId);
+  if (idx < 0) return null;
+  const next = { ...all[idx], ...patch, id: all[idx].id, seq: all[idx].seq, ts: all[idx].ts };
+  all[idx] = next;
+  overwriteMessages(roomId, all);
+  return next;
+}
+
 export function overwriteMessages(roomId: string, messages: RoomMessage[]): void {
   const path = messagesPath(roomId);
   writeFileSync(path, messages.map((m) => JSON.stringify(limitRuntimeFailureRoomMessage(m))).join("\n") + "\n", "utf-8");

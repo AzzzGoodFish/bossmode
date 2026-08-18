@@ -1882,6 +1882,24 @@ export function getActiveInstanceCount(): number {
   return instances.size;
 }
 
+/** Tear down every live instance for a topic after End topic (plan §2.1). */
+export function destroyTopicInstances(topicId: string): number {
+  const prefix = `topic:${topicId}:`;
+  let n = 0;
+  for (const [key, instance] of [...instances.entries()]) {
+    if (!key.startsWith(prefix) && instance.scopeId !== `topic:${topicId}`) continue;
+    try { instance.handle.abort(); } catch { /* ignore */ }
+    try { instance.handle.destroy(); } catch { /* ignore */ }
+    try { instance.unsubscribe(); } catch { /* ignore */ }
+    instances.delete(key);
+    contextUsageCache.delete(key);
+    contextCompactionWarningCache.delete(key);
+    n += 1;
+  }
+  logger.info("agent", "topic instances destroyed", { topicId, count: n });
+  return n;
+}
+
 // -- DM activation (0.20, no @ required) -------------------------------------
 
 function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
