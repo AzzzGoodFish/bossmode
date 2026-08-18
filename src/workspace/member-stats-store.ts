@@ -5,7 +5,7 @@
 // member's entire agent-events JSONL on every request.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { agentEventsDirForScope } from "./topic-store.js";
 import { logger } from "../foundation/logger.js";
 
 export interface MemberStats {
@@ -23,7 +23,7 @@ function emptyStats(): MemberStats {
 }
 
 function statsPath(roomId: string, memberRef: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "agent-events", `${memberRef}.stats.json`);
+  return join(agentEventsDirForScope(roomId), `${memberRef}.stats.json`);
 }
 
 export function readMemberStats(roomId: string, memberRef: string): MemberStats {

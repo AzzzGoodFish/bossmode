@@ -16,7 +16,8 @@ import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
-import { getBossmodePiRuntimeRoot, exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore } from "../model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore, resolvePiAgentDir } from "../model-credentials.js";
+import { resolveOwningRoomId } from "../../workspace/topic-store.js";
 import { listInstalledExtensions, resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
@@ -190,7 +191,8 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }
   ensureBossmodeMcpDirs();
-  const scoped = writeScopedMcpConfig({ roomId: args.roomId, memberId: args.member.id, serverNames: assignedServers });
+  const mcpRoomId = args.roomId.startsWith("topic:") ? resolveOwningRoomId(args.roomId) : args.roomId;
+  const scoped = writeScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id, serverNames: assignedServers });
   if (scoped.serverNames.length === 0) {
     logger.warn("runtime:pi-sdk", "mcp scoped config has no valid assigned servers", { roomId: args.roomId, member: args.member.name, assignedServers });
     return { enabled: false, configPath: scoped.configPath, runtimeDir, serverNames: [] };
@@ -849,12 +851,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
     const resolvedModel = `${provider}/${modelId}`;
 
-    const safeMember = safeSegment(opts.member.id);
-    // 0.20: DM runtime under members/<id>/dm/; room under <roomId>/<memberId>/.
-    const isDm = typeof opts.roomId === "string" && opts.roomId.startsWith("dm:");
-    const defaultAgentDir = isDm
-      ? join(getBossmodePiRuntimeRoot(), "members", safeMember, "dm")
-      : join(getBossmodePiRuntimeRoot(), safeSegment(opts.roomId), safeMember);
+    const defaultAgentDir = resolvePiAgentDir(opts.roomId, opts.member.id);
     const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
     const sessionDir = join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });

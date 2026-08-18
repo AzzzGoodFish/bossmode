@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync, statSync } from "n
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
-import { getBossmodeDir } from "../shared/config.js";
+import { agentEventsDirForScope } from "../workspace/topic-store.js";
 import { refreshContextUsage } from "./agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../workspace/room-store.js";
@@ -25,7 +25,7 @@ export type AgentHistoryEvent =
 // -- Event persistence (JSONL) --
 
 function agentEventsDir(roomId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "agent-events");
+  return agentEventsDirForScope(roomId);
 }
 
 function agentEventsPath(roomId: string, agentName: string): string {

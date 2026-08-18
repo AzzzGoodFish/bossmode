@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rea
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir, getRoomsDir } from "./room-store.js";
+import { getBossmodeDir } from "../shared/config.js";
 import { parseJsonlLines } from "../shared/jsonl.js";
 import type { RoomMessage } from "../shared/types.js";
 import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
@@ -43,8 +44,30 @@ function topicsRoot(roomId: string): string {
   return join(roomDir(roomId), "topics");
 }
 
-function topicDir(roomId: string, topicId: string): string {
+export function topicDir(roomId: string, topicId: string): string {
   return join(topicsRoot(roomId), topicId);
+}
+
+/** Parent room uuid for a topic: scope or bare topic id. Other scopes pass through. */
+export function resolveOwningRoomId(roomIdOrScope: string): string {
+  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("topic:")) {
+    const parent = resolveTopicRoomId(roomIdOrScope.slice("topic:".length));
+    if (parent) return parent;
+  }
+  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("room:")) {
+    return roomIdOrScope.slice("room:".length);
+  }
+  return roomIdOrScope;
+}
+
+/** Event history dir: topic events live under the parent room, never rooms/topic:<id>/. */
+export function agentEventsDirForScope(roomIdOrScope: string): string {
+  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("topic:")) {
+    const topicId = roomIdOrScope.slice("topic:".length);
+    const parent = resolveTopicRoomId(topicId);
+    if (parent) return join(topicDir(parent, topicId), "agent-events");
+  }
+  return join(getBossmodeDir(), "rooms", roomIdOrScope, "agent-events");
 }
 
 function ensureTopicDir(roomId: string, topicId: string): string {

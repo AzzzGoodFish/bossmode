@@ -1172,23 +1172,16 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
     ...parseMentionMemberIds(content, roomMembers),
     ...parseUrgentMentionMemberIds(content, roomMembers),
   ])];
+  const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
 
   // Post into topic scope — never the parent room stream.
+  // Activation is solely the mention-router (wireMentionRouter → activateTopicMember).
   const message = postMessage(scopeId, "user", content, mentions, {
     mentionMemberIds,
     ...(replyTo ? { replyTo } : {}),
     ...(urgentMentions.length ? { urgentMentions } : {}),
+    ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
   });
-
-  // Activate mentioned members into the topic instance (fresh seed batch 1).
-  for (const mid of mentionMemberIds) {
-    try {
-      const { activateTopicMember } = await import("../engine/agent-manager.js");
-      await activateTopicMember(params.id, topic.id, mid);
-    } catch (err) {
-      logger.error("api", "topic activate failed", { topicId: topic.id, memberId: mid, error: String(err) });
-    }
-  }
 
   sendJson(res, 200, message);
 });

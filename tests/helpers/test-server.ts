@@ -120,9 +120,8 @@ export interface TestServer {
 export async function createTestServer(): Promise<TestServer> {
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/communication/ws.js");
-  const { initAgentManager, activateAgent, activateAll, interruptAgent } = await import("../../src/engine/agent-manager.js");
+  const { initAgentManager, wireMentionRouter } = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
-  const { initRouter } = await import("../../src/communication/router.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
   // Initialize mock runtime for tests
@@ -131,12 +130,8 @@ export async function createTestServer(): Promise<TestServer> {
   registry.register(new MockRuntime("pi-cli"));
   initAgentManager(registry);
 
-  // Initialize message router — wire @mentions to engine
-  initRouter(
-    (roomId, memberName, ctx) => { activateAgent(roomId, memberName, ctx).catch(() => {}); },
-    (roomId, ctx) => { activateAll(roomId, ctx).catch(() => {}); },
-    (roomId, memberRef, urgentByName) => { interruptAgent(roomId, memberRef, urgentByName).catch(() => {}); },
-  );
+  // Same mention-router as production — topic: must not hit room getOrCreate.
+  wireMentionRouter();
 
   const server = http.createServer(async (req, res) => {
     const handled = await handleApiRequest(req, res);
