@@ -43,6 +43,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   const [messages, setMessages] = useState<DmMessage[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [replyQuote, setReplyQuote] = useState<{ seq: number; messageId: string; sender: string; excerpt: string } | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -151,8 +152,8 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   }, []);
 
   const send = useCallback(
-    async (text: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => {
-      const msg = await sendDmMessage(memberId, text, attachments);
+    async (text: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>, replyTo?: { seq: number }) => {
+      const msg = await sendDmMessage(memberId, text, attachments, replyTo);
       setMessages((prev) => {
         if (prev?.some((m) => m.id === msg.id)) return prev;
         return [...(prev ?? []), msg];
@@ -405,6 +406,14 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
                       roomId={`dm:${memberId}`}
                       messageId={msg.id}
                       attachments={msg.attachments}
+                      quote={resolveDmQuote(messages ?? [], msg)}
+                      onJumpToMessage={(targetId) => void jumpToMessage(targetId)}
+                      onReply={msg.sender !== "system" ? () => setReplyQuote({
+                        seq: msg.seq ?? 0,
+                        messageId: msg.id,
+                        sender: msg.sender === "user" ? "you" : msg.sender,
+                        excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "",
+                      }) : undefined}
                     />
                     {msg.artifacts?.length ? (
                       <MessageArtifactChips messageId={msg.id} artifacts={msg.artifacts} />
@@ -418,13 +427,15 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
 
         {/* composer — room MessageInput; no @ in DM (everything activates the member) */}
         <MessageInput
-          onSend={send}
+          onSend={(text, atts) => { const q = replyQuote; setReplyQuote(null); return send(text, atts, q ? { seq: q.seq } : undefined); }}
           members={[]}
           draftKey={`dm:${memberId}`}
           hideMentions
           uploadScope={`dm:${memberId}`}
           placeholder={`Message ${member.name}… (no @ needed in DM)`}
           onError={(m) => setError(`Couldn't send. ${m}`)}
+          quote={replyQuote}
+          onClearQuote={() => setReplyQuote(null)}
         />
       </div>
 
@@ -474,4 +485,13 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
       )}
     </div>
   );
+}
+
+/** Resolve a quote target against loaded DM messages (plan-reply-to-v1). */
+function resolveDmQuote(messages: DmMessage[], msg: DmMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
+  if (!msg.replyTo) return undefined;
+  const target = messages.find((m) => m.id === msg.replyTo!.messageId) ?? messages.find((m) => m.seq === msg.replyTo!.seq);
+  if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
+  const firstLine = String(target.content || "").split("\n").find((l) => l.trim()) ?? "";
+  return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
 }

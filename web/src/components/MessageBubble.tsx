@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileText, FileCode, Image as ImageIcon, Eye, Download, X } from "lucide-react";
+import { FileText, FileCode, Image as ImageIcon, Eye, Download, X, CornerUpLeft, MessagesSquare } from "lucide-react";
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
@@ -25,6 +25,12 @@ interface MessageBubbleProps {
   attachments?: RoomMessageAttachment[];
   onPreviewAttachment?: (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => void;
   activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
+  /** Quote reply (plan-reply-to-v1): resolved target for the quote block. */
+  quote?: { seq: number; messageId: string; sender?: string; excerpt?: string };
+  onJumpToMessage?: (messageId: string) => void;
+  /** Hover action bar (prototype topic-threads-v1 spec ①): reply + create topic. */
+  onReply?: () => void;
+  onCreateTopic?: () => void;
 }
 
 /** Regex to match attachment lines: Attachment: [original filename: xxx](path) */
@@ -83,7 +89,7 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 }
 
 export function MessageBubble({
-  sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
+  sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply, onCreateTopic,
 }: MessageBubbleProps) {
   const isUser = sender === "user";
   const isSystem = sender === "system";
@@ -106,7 +112,21 @@ export function MessageBubble({
   const hasAttachments = ATTACHMENT_RE_M.test(content) || (attachments?.length ?? 0) > 0;
 
   return (
-    <div className={`group flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-surface-2/40 transition-colors`}>
+    <div className={`group relative flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-surface-2/40 transition-colors`}>
+      {(onReply || onCreateTopic) && (
+        <div className="absolute -top-3 right-2 z-10 hidden group-hover:flex items-center bg-surface-1 border border-line rounded-lg shadow-pop p-0.5">
+          {onReply && (
+            <button type="button" onClick={onReply} title="Reply" aria-label="Reply" className="w-7 h-[26px] flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
+              <CornerUpLeft size={13} />
+            </button>
+          )}
+          {onCreateTopic && (
+            <button type="button" onClick={onCreateTopic} title="New topic" aria-label="New topic" className="w-7 h-[26px] flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
+              <MessagesSquare size={13} />
+            </button>
+          )}
+        </div>
+      )}
       {grouped
         ? <div className="w-8 shrink-0" />
         : <div className={`w-8 h-8 rounded-full ${avatarBg} border flex items-center justify-center text-xs ${avatarText} font-semibold shrink-0 mt-0.5`}>
@@ -120,6 +140,21 @@ export function MessageBubble({
             <span className={`text-sm font-semibold ${nameColor}`}>{displayName}</span>
             {time && <span className="text-[11px] text-ink-4 tabular-nums">{time}</span>}
           </div>
+        )}
+
+        {quote && (
+          <button
+            type="button"
+            onClick={() => onJumpToMessage?.(quote.messageId)}
+            title={onJumpToMessage ? "Jump to original message" : undefined}
+            className={`block max-w-[460px] mb-1.5 text-left border-l-2 border-accent bg-accent-dim/60 rounded-r-lg px-2.5 py-1 ${onJumpToMessage ? "cursor-pointer hover:bg-accent-dim" : "cursor-default"}`}
+          >
+            <span className="text-[12px] text-ink-3">
+              <span className="font-semibold text-accent-ink">{quote.sender ?? "message"}</span>
+              <span className="font-mono text-[10px] text-ink-4 ml-1.5">#{quote.seq}</span>
+              {quote.excerpt && <span className="block truncate">{quote.excerpt}</span>}
+            </span>
+          </button>
         )}
 
         {hasAttachments ? (

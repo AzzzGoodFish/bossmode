@@ -491,9 +491,10 @@ export interface RoomMessage {
   urgentMentions?: string[];
   urgentMentionMemberIds?: string[];
   ts: number;
-  type?: "task_event" | "knowledge_event";
+  type?: "task_event" | "knowledge_event" | "topic_event";
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
+  topic_event_meta?: TopicEventMeta;
   /** Message-level deliverable/document references previewable through artifact-preview. */
   artifacts?: string[];
   /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
@@ -593,6 +594,20 @@ export interface TaskEventMeta {
   actor: string;
   /** Short excerpt of the task description / comment body, surfaced inline in chat. */
   snippet?: string;
+}
+
+// -- Topic activity (plan-topic-threads-v1: room stream keeps only these two cards) --
+
+export interface TopicEventMeta {
+  action: "opened" | "closed";
+  topicId: string;
+  title: string;
+  anchorSeq?: number;
+  anchorMessageId?: string;
+  anchorExcerpt?: string;
+  actor: string;
+  /** Closed cards carry the auto summary (batch 4 writes it). */
+  summary?: string;
 }
 
 // -- Knowledge activity (agent doc writes surfaced into chat) --

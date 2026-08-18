@@ -31,7 +31,7 @@ export function postMessage(
   sender: string,
   content: string,
   mentions: string[] = [],
-  extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "autoDelivered" | "replyTo">>,
+  extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "autoDelivered" | "replyTo">>,
 ): RoomMessage {
   // Scope-aware egress:
   // - dm:<memberId> → member-owned DM store
