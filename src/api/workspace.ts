@@ -10,6 +10,8 @@ import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
+import * as topicStore from "../workspace/topic-store.js";
+import { scopeIdOf } from "../shared/conversation-ref.js";
 import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
@@ -1050,3 +1052,111 @@ addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
   sendJson(res, 200, result);
 });
 // Attachment routes moved to src/api/uploads.ts (stream-based)
+
+// ── Topics (plan-topic-threads-v1 batch 1) ──
+
+addRoute("GET", "/api/rooms/:id/topics", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const topics = topicStore.listTopics(params.id);
+  sendJson(res, 200, { topics });
+});
+
+addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const body = (await parseBody(req)) as {
+    title?: string;
+    anchorMessageId?: string;
+    anchorSeq?: number;
+    seedMode?: "fork" | "fresh";
+  };
+  if (!body.anchorMessageId) { sendJson(res, 400, { error: "anchorMessageId is required" }); return; }
+  const all = messageStore.readAllMessages(params.id);
+  const anchor = all.find((m) => m.id === body.anchorMessageId)
+    || (body.anchorSeq !== undefined ? all.find((m) => m.seq === body.anchorSeq) : undefined);
+  if (!anchor) { sendJson(res, 404, { error: "Anchor message not found in room" }); return; }
+
+  const seedMode = body.seedMode === "fork" ? "fork" : "fresh";
+  const title = (body.title || "").trim() || String(anchor.content || "").replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled topic";
+  const guideText = topicStore.buildTopicGuideText({
+    title,
+    roomName: room.name,
+    roomId: room.id,
+    anchorExcerpt: anchor.content || "",
+    seedMode,
+  });
+  const topic = topicStore.createTopic({
+    roomId: room.id,
+    title,
+    anchorMessageId: anchor.id,
+    anchorSeq: anchor.seq,
+    seedMode,
+    guideText,
+  });
+
+  // Opening card on the room stream (batch 1: plain system message; batch 3 upgrades UI card).
+  postMessage(room.id, "system", `Topic opened: ${topic.title} (topic:${topic.id})`, [], {
+    type: undefined,
+  });
+
+  sendJson(res, 201, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
+});
+
+addRoute("GET", "/api/rooms/:id/topics/:topicId", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const topic = topicStore.getTopic(params.id, params.topicId);
+  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
+  sendJson(res, 200, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
+});
+
+addRoute("GET", "/api/rooms/:id/topics/:topicId/messages", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const topic = topicStore.getTopic(params.id, params.topicId);
+  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
+  const url = new URL(req.url || "", "http://localhost");
+  const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 500));
+  const all = topicStore.readAllTopicMessages(params.id, params.topicId);
+  sendJson(res, 200, { messages: all.slice(-limit) });
+});
+
+addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const topic = topicStore.getTopic(params.id, params.topicId);
+  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
+  if (topic.status !== "active") { sendJson(res, 400, { error: "Topic is closed" }); return; }
+
+  const body = (await parseBody(req)) as { content?: string; text?: string };
+  const content = String(body.content ?? body.text ?? "").trim();
+  if (!content) { sendJson(res, 400, { error: "content is required" }); return; }
+
+  const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
+  const roomMembers = roomStore.getRoomMembers(params.id);
+  const urgentMentions = parseUrgentMentions(content, roomMembers.map((m) => m.name));
+  const mentions = [...new Set([...parseMentions(content, roomMembers.map((m) => m.name)), ...urgentMentions])];
+  const mentionMemberIds = [...new Set([
+    ...parseMentionMemberIds(content, roomMembers),
+    ...parseUrgentMentionMemberIds(content, roomMembers),
+  ])];
+
+  // Post into topic scope — never the parent room stream.
+  const message = postMessage(scopeId, "user", content, mentions, {
+    mentionMemberIds,
+    ...(urgentMentions.length ? { urgentMentions } : {}),
+  });
+
+  // Activate mentioned members into the topic instance (fresh seed batch 1).
+  for (const mid of mentionMemberIds) {
+    try {
+      const { activateTopicMember } = await import("../engine/agent-manager.js");
+      await activateTopicMember(params.id, topic.id, mid);
+    } catch (err) {
+      logger.error("api", "topic activate failed", { topicId: topic.id, memberId: mid, error: String(err) });
+    }
+  }
+
+  sendJson(res, 200, message);
+});

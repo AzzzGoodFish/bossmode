@@ -3,6 +3,7 @@
 
 import * as messageStore from "../workspace/message-store.js";
 import { addDmMessage } from "../workspace/dm-message-store.js";
+import { addTopicMessage, resolveTopicRoomId } from "../workspace/topic-store.js";
 import { broadcastToRoom } from "./ws.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -32,12 +33,23 @@ export function postMessage(
   mentions: string[] = [],
   extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "autoDelivered" | "replyTo">>,
 ): RoomMessage {
-  // Scope-aware egress: a "dm:<memberId>" conversation address routes to the
-  // member-owned DM store (never to a phantom rooms/dm:<id>/messages.jsonl).
-  // Broadcast channel and listener notification stay keyed by the same address.
-  const message = roomId.startsWith("dm:")
-    ? addDmMessage(roomId.slice("dm:".length), { sender, content, mentions, ...extra })
-    : messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
+  // Scope-aware egress:
+  // - dm:<memberId> → member-owned DM store
+  // - topic:<topicId> → rooms/<roomId>/topics/<topicId>/messages.jsonl
+  // - plain room id → room messages.jsonl
+  // Broadcast channel and listener notification stay keyed by the same address
+  // (topic messages never land in the parent room stream).
+  let message: RoomMessage;
+  if (roomId.startsWith("dm:")) {
+    message = addDmMessage(roomId.slice("dm:".length), { sender, content, mentions, ...extra });
+  } else if (roomId.startsWith("topic:")) {
+    const topicId = roomId.slice("topic:".length);
+    const parentRoomId = resolveTopicRoomId(topicId);
+    if (!parentRoomId) throw new Error(`Unknown topic scope: ${roomId}`);
+    message = addTopicMessage(parentRoomId, topicId, { sender, content, mentions, ...extra });
+  } else {
+    message = messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
+  }
 
   // WebSocket broadcast
   broadcastToRoom(roomId, { type: "room:message", roomId, message });

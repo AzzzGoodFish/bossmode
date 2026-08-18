@@ -461,7 +461,13 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
     // unified member panel renders identically from either scope.
     const info = readMemoryLayerInfo(m.id, layer, scope as ScopeId | undefined);
     const scopeRef = scope ? parseScopeId(scope) : null;
-    const scopeKey = scopeRef ? (scopeRef.kind === "room" ? scopeRef.roomId : `dm:${scopeRef.memberId}`) : null;
+    const scopeKey = scopeRef
+      ? (scopeRef.kind === "room"
+        ? scopeRef.roomId
+        : scopeRef.kind === "dm"
+          ? `dm:${scopeRef.memberId}`
+          : `topic:${scopeRef.topicId}`)
+      : null;
     const scopeMessages = scopeKey ? mainlineStore.loadScopeMessages(scopeKey) : null;
     const content = layer === "mainline" && scopeKey && scopeMessages
       ? mainlineStore.resolveMainlineRefs(scopeKey, info.content, scopeMessages)

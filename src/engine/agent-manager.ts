@@ -200,7 +200,10 @@ const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
  * Contract §5.
  */
 function instanceKey(roomIdOrScope: string, memberId: string): string {
-  if (typeof roomIdOrScope === "string" && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:"))) {
+  if (
+    typeof roomIdOrScope === "string"
+    && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:") || roomIdOrScope.startsWith("topic:"))
+  ) {
     return scopeInstanceKey(roomIdOrScope, memberId);
   }
   return scopeInstanceKey(scopeIdOf({ kind: "room", roomId: roomIdOrScope }), memberId);
@@ -2248,6 +2251,211 @@ export async function activateDmMember(memberId: string): Promise<void> {
     });
   } finally {
     clearActivationSource(scopeId, member.name);
+  }
+}
+
+// -- Topic activation (plan-topic-threads-v1 batch 1, fresh seed) -------------
+
+function topicInstanceKey(topicId: string, memberId: string): string {
+  return scopeInstanceKey(scopeIdOf({ kind: "topic", topicId, roomId: "" }), memberId);
+}
+
+async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId: string): Promise<AgentInstance | null> {
+  const room = roomStore.getRoom(parentRoomId);
+  if (!room) {
+    logger.error("agent", "topic parent room not found", { parentRoomId, topicId });
+    return null;
+  }
+  const scopeId = scopeIdOf({ kind: "topic", topicId, roomId: parentRoomId });
+  const key = topicInstanceKey(topicId, memberId);
+  const existing = instances.get(key);
+  if (existing) return existing;
+
+  const pending = pendingCreations.get(key);
+  if (pending) return pending;
+
+  const creation = (async (): Promise<AgentInstance | null> => {
+    if (!registry) {
+      logger.error("agent", "runtime registry not initialized");
+      return null;
+    }
+    // Prefer room member config (model/thinking); fall back to global member record.
+    let member = resolveRoomMember(parentRoomId, memberId);
+    if (!member) {
+      const cfg = memberRecordToConfig(memberId);
+      if (!cfg) {
+        logger.error("agent", "topic member not found", { memberId, topicId });
+        return null;
+      }
+      member = cfg;
+    }
+    if (!isMemberConfigured(member)) {
+      logger.error("agent", "topic member unconfigured", { member: member.name, memberId, topicId });
+      return null;
+    }
+
+    const agentDef = loadAgentDefinition(member.agent) || {
+      name: member.agent,
+      description: member.agent,
+      systemPrompt: `You are ${member.name}.`,
+      tags: [],
+      skills: [],
+    };
+
+    const runtime = registry.get(member.runtime);
+    if (!runtime) {
+      logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
+      return null;
+    }
+
+    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    // Cache invariant: compile with parent room → byte-identical to room instance.
+    const compiled = compileMemberPromptForScope({
+      scopeId,
+      memberId,
+      memberName: member.name,
+      agentDef,
+      room,
+      docsRoot: docsRootPath,
+    });
+    setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+    clearStaleMounts(scopeId, memberId);
+
+    const skills = resolveSkills(member, agentDef);
+    const skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
+    const syntheticRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
+
+    try {
+      const handle = await runtime.createAgent({
+        cwd: room.cwd || process.cwd(),
+        roomId: syntheticRoomId,
+        member,
+        agentPrompt: compiled.agentPrompt,
+        envPrompt: compiled.envPrompt,
+        appendSystemPrompt: compiled.appendSystemPrompt,
+        skillPaths,
+        skillNames: skills,
+        roomMembers: room.members,
+        callbacks: {
+          onChat: async (message: string) => {
+            postMessage(syntheticRoomId, member!.name, message);
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:chat-topic");
+          },
+          onMention: async (target: string, message: string) => {
+            // Mentions inside a topic stay in the topic scope.
+            postMessage(syntheticRoomId, member!.name, message, [target]);
+            const active = instances.get(key);
+            if (active) clearPendingChatReply(active, "callback:mention-topic");
+          },
+        },
+      });
+
+      const instance: AgentInstance = {
+        handle,
+        scopeId,
+        roomId: syntheticRoomId,
+        memberId,
+        agentName: member.name,
+        sourceAgent: member.agent,
+        status: "idle",
+        dispatchState: "idle",
+        promptInFlight: false,
+        queuedInputs: [],
+        pendingChatReply: false,
+        hadErrorInTurn: false,
+        lastTurnError: null,
+        pendingErrorNotice: null,
+        lastMessageEndWasLength: false,
+        lengthContinuationPending: false,
+        lengthContinuationAttempted: false,
+        turnSegmentSeq: 0,
+        lastCompletedFinalText: "",
+        lastCompletedFinalSeq: 0,
+        compacting: false,
+        turnActive: false,
+        unsubscribe: () => {},
+        eventBuffer: [],
+        appliedModel: member.model || "",
+        appliedCredentialId: member.credentialId,
+      };
+
+      wireInstanceEvents(instance, key, syntheticRoomId, member.name, memberId);
+      instances.set(key, instance);
+      logger.info("agent", "topicAgentCreated", { member: member.name, memberId, scopeId, parentRoomId });
+      return instance;
+    } catch (err: any) {
+      logger.error("agent", "failed to create topic agent", {
+        member: member.name,
+        memberId,
+        topicId,
+        error: formatRuntimeErrorMessage(err),
+      });
+      postMessage(syntheticRoomId, "system", `Failed to create member "${member.name}" in topic: ${formatRuntimeErrorMessage(err)}`);
+      return null;
+    }
+  })();
+
+  pendingCreations.set(key, creation);
+  try {
+    return await creation;
+  } finally {
+    if (pendingCreations.get(key) === creation) pendingCreations.delete(key);
+  }
+}
+
+/**
+ * Activate a room member inside a topic (batch 1: fresh seed + guide message).
+ * Does not touch the parent room instance.
+ */
+export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string): Promise<void> {
+  const { getTopic, addTopicParticipant, buildTopicGuideText } = await import("../workspace/topic-store.js");
+  const topic = getTopic(parentRoomId, topicId);
+  if (!topic || topic.status !== "active") {
+    logger.warn("agent", "activateTopicMember: topic missing or closed", { parentRoomId, topicId });
+    return;
+  }
+  const roomMember = resolveRoomMember(parentRoomId, memberRef);
+  const memberId = roomMember?.id || memberRef;
+  const memberName = roomMember?.name || memberRef;
+
+  const instance = await getOrCreateTopic(parentRoomId, topicId, memberId);
+  if (!instance) return;
+
+  addTopicParticipant(parentRoomId, topicId, memberId);
+
+  const scopeId = instance.scopeId;
+  setActivationSource(scopeId, memberName, "room_mention");
+  try {
+    const guide =
+      topic.guideText
+      || buildTopicGuideText({
+        title: topic.title,
+        roomName: roomStore.getRoom(parentRoomId)?.name || parentRoomId,
+        roomId: parentRoomId,
+        anchorExcerpt: "",
+        seedMode: topic.seedMode,
+      });
+
+    // Fresh seed: guide is the sole context; room history via tools only.
+    const prompt =
+      `${guide}\n\n` +
+      `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`;
+
+    if (instance.dispatchState !== "idle" || instance.promptInFlight) {
+      queueInput(instance, prompt, "topic-activate");
+      return;
+    }
+    markPendingChatReply(instance, "topic-activate");
+    await runPrompt(instance, prompt, "activate", (err) => {
+      logger.error("agent", "topic prompt failed", {
+        memberId,
+        topicId,
+        error: formatRuntimeErrorMessage(err),
+      });
+    });
+  } finally {
+    clearActivationSource(scopeId, memberName);
   }
 }
 
