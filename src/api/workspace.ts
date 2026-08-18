@@ -9,6 +9,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
+import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import * as topicStore from "../workspace/topic-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
@@ -1190,4 +1191,61 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
   }
 
   sendJson(res, 200, message);
+});
+
+addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, params) => {
+  const room = roomStore.getRoom(params.id);
+  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const existing = topicStore.getTopic(params.id, params.topicId);
+  if (!existing) { sendJson(res, 404, { error: "Topic not found" }); return; }
+
+  const topic = topicStore.closeTopic(params.id, params.topicId);
+  if (!topic) { sendJson(res, 500, { error: "Failed to close topic" }); return; }
+
+  // Flip the opening card in place (same message id → WS replace).
+  const roomMsgs = messageStore.readAllMessages(params.id);
+  const opened = [...roomMsgs].reverse().find(
+    (m) => m.type === "topic_event" && m.topic_event_meta?.topicId === topic.id && m.topic_event_meta?.action === "opened",
+  );
+  if (opened) {
+    const flipped = messageStore.updateMessage(params.id, opened.id, {
+      content: `Topic closed: ${topic.title}`,
+      type: "topic_event",
+      topic_event_meta: {
+        action: "closed",
+        topicId: topic.id,
+        title: topic.title,
+        anchorSeq: topic.anchorSeq,
+        anchorMessageId: topic.anchorMessageId,
+        anchorExcerpt: topic.anchorExcerpt || opened.topic_event_meta?.anchorExcerpt,
+        actor: "user",
+        summary: topic.summary,
+      },
+    });
+    if (flipped) {
+      broadcastToRoom(params.id, { type: "room:message", roomId: params.id, message: flipped });
+    }
+  } else {
+    postMessage(params.id, "user", `Topic closed: ${topic.title}`, [], {
+      type: "topic_event",
+      topic_event_meta: {
+        action: "closed",
+        topicId: topic.id,
+        title: topic.title,
+        anchorSeq: topic.anchorSeq,
+        anchorMessageId: topic.anchorMessageId,
+        actor: "user",
+        summary: topic.summary,
+      },
+    });
+  }
+
+  try {
+    const { destroyTopicInstances } = await import("../engine/agent-manager.js");
+    destroyTopicInstances(topic.id);
+  } catch (err) {
+    logger.warn("api", "destroy topic instances failed", { topicId: topic.id, error: String(err) });
+  }
+
+  sendJson(res, 200, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
 });

@@ -161,6 +161,40 @@ export function createTopic(input: CreateTopicInput): TopicRecord {
   return topic;
 }
 
+/** Extractive close summary from the topic stream (no LLM — close must not block). */
+export function summarizeTopicMessages(messages: RoomMessage[], maxChars = 400): string {
+  const usable = messages.filter((m) => m.sender !== "system" && String(m.content || "").trim());
+  if (usable.length === 0) return "No discussion was recorded in this topic.";
+  const parts: string[] = [];
+  const take = usable.length <= 4 ? usable : [usable[0], usable[1], usable[usable.length - 2], usable[usable.length - 1]];
+  const seen = new Set<string>();
+  for (const m of take) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    const who = m.sender === "user" ? "you" : m.sender;
+    const line = String(m.content).replace(/\s+/g, " ").trim().slice(0, 140);
+    if (line) parts.push(`${who}: ${line}`);
+  }
+  const n = usable.length;
+  const head = n === 1 ? "1 message" : `${n} messages`;
+  const body = parts.join(" · ");
+  const out = `${head}. ${body}`;
+  return out.length > maxChars ? out.slice(0, maxChars - 1) + "…" : out;
+}
+
+export function closeTopic(roomId: string, topicId: string, summary?: string): TopicRecord | null {
+  const t = getTopic(roomId, topicId);
+  if (!t) return null;
+  if (t.status === "closed") return t;
+  const messages = readAllTopicMessages(roomId, topicId);
+  t.status = "closed";
+  t.closedAt = Date.now();
+  t.summary = (summary && summary.trim()) || summarizeTopicMessages(messages);
+  saveTopic(t);
+  logger.info("topic", "closed", { roomId, topicId, summaryChars: t.summary.length });
+  return t;
+}
+
 export function addTopicParticipant(roomId: string, topicId: string, memberId: string): void {
   const t = getTopic(roomId, topicId);
   if (!t) return;

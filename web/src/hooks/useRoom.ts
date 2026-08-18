@@ -159,7 +159,12 @@ export function useRoom(roomId: string | null) {
         // In history view, don't append new messages (user is reading old context)
         if (inHistoryView) return;
         setMessages((prev) => {
-          if (prev.some((m) => m.id === event.message.id)) return prev;
+          const i = prev.findIndex((m) => m.id === event.message.id);
+          if (i >= 0) {
+            const next = prev.slice();
+            next[i] = event.message;
+            return next;
+          }
           return [...prev, event.message];
         });
       }
