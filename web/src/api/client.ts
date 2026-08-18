@@ -925,6 +925,7 @@ export interface RoomMessageAttachment {
 
 export interface RoomMessage {
   id: string;
+  seq?: number;
   sender: string;
   senderMemberId?: string;
   content: string;
@@ -934,11 +935,64 @@ export interface RoomMessage {
   urgentMentions?: string[];
   urgentMentionMemberIds?: string[];
   ts: number;
-  type?: "task_event" | "knowledge_event";
+  type?: "task_event" | "knowledge_event" | "topic_event";
   task_event_meta?: TaskEventMeta;
   knowledge_event_meta?: KnowledgeEventMeta;
+  topic_event_meta?: TopicEventMeta;
   artifacts?: string[];
   attachments?: RoomMessageAttachment[];
+  /** Quote reply target (plan-reply-to-v1): seq for display/jump, messageId the stable anchor. */
+  replyTo?: { seq: number; messageId: string };
+}
+
+export interface TopicEventMeta {
+  action: "opened" | "closed";
+  topicId: string;
+  title: string;
+  anchorSeq?: number;
+  anchorMessageId?: string;
+  anchorExcerpt?: string;
+  actor: string;
+  /** Closed cards carry the auto summary (batch 4 writes it). */
+  summary?: string;
+}
+
+export type TopicStatus = "active" | "closed";
+export type TopicSeedMode = "fork" | "fresh";
+
+export interface TopicRecord {
+  id: string;
+  roomId: string;
+  title: string;
+  anchorMessageId: string;
+  anchorSeq?: number;
+  createdBy: string;
+  status: TopicStatus;
+  seedMode: TopicSeedMode;
+  createdAt: number;
+  closedAt?: number;
+  summary?: string;
+  participants: string[];
+}
+
+export async function listTopics(roomId: string): Promise<{ topics: TopicRecord[] }> {
+  return apiFetch(`/api/rooms/${roomId}/topics`);
+}
+
+export async function createTopic(roomId: string, input: { title?: string; anchorMessageId: string; anchorSeq?: number; seedMode?: TopicSeedMode }): Promise<{ topic: TopicRecord; scopeId: string }> {
+  return apiFetch(`/api/rooms/${roomId}/topics`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function getTopic(roomId: string, topicId: string): Promise<{ topic: TopicRecord; scopeId: string }> {
+  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}`);
+}
+
+export async function getTopicMessages(roomId: string, topicId: string, limit = 200): Promise<{ messages: RoomMessage[] }> {
+  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages?limit=${limit}`);
+}
+
+export async function sendTopicMessage(roomId: string, topicId: string, content: string, replyTo?: { seq: number }): Promise<RoomMessage> {
+  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages`, { method: "POST", body: JSON.stringify({ content, ...(replyTo ? { replyTo } : {}) }) });
 }
 
 export interface MessageSearchResult {
@@ -976,10 +1030,11 @@ export async function sendMessage(
   roomId: string,
   content: string,
   attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
+  replyTo?: { seq: number },
 ): Promise<RoomMessage> {
   return apiFetch(`/api/rooms/${roomId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content, attachments }),
+    body: JSON.stringify({ content, attachments, ...(replyTo ? { replyTo } : {}) }),
   });
 }
 
@@ -1518,10 +1573,11 @@ export async function sendDmMessage(
   memberId: string,
   text: string,
   attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
+  replyTo?: { seq: number },
 ): Promise<DmMessage> {
   const res = await apiFetch<{ message: DmMessage }>(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}) }),
+    body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}), ...(replyTo ? { replyTo } : {}) }),
   });
   return res.message;
 }

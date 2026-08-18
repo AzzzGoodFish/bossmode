@@ -486,8 +486,18 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     return;
   }
 
-  const body = (await parseBody(req)) as { content?: string; attachments?: Array<{ storedFilename?: string; filename?: string; originalFilename?: string; size?: number }>; artifacts?: string[] };
+  const body = (await parseBody(req)) as { content?: string; replyTo?: { seq?: number }; attachments?: Array<{ storedFilename?: string; filename?: string; originalFilename?: string; size?: number }>; artifacts?: string[] };
   const content = typeof body.content === "string" ? body.content : "";
+  // Quote reply (plan-reply-to-v1): user sends replyTo.seq; resolve to the stable
+  // messageId anchor. Unknown seq = explicit error, never a silent plain message.
+  let replyTo: { seq: number; messageId: string } | undefined;
+  if (body.replyTo !== undefined && body.replyTo !== null) {
+    const seq = Number(body.replyTo.seq);
+    if (!Number.isFinite(seq)) { sendJson(res, 400, { error: "replyTo.seq must be a number" }); return; }
+    const target = messageStore.readAllMessages(params.id).find((m) => m.seq === seq);
+    if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
+    replyTo = { seq, messageId: target.id };
+  }
   const artifacts = Array.isArray(body.artifacts) ? body.artifacts.map(String).map((value) => value.trim()).filter(Boolean) : [];
   const attachments: RoomMessageAttachment[] = [];
   if (Array.isArray(body.attachments)) {
@@ -549,6 +559,7 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
   // Post via message-bus (writes + broadcasts + notifies router listeners)
   const extra = {
     mentionMemberIds,
+    ...(replyTo ? { replyTo } : {}),
     ...(urgentMentions.length > 0 ? { urgentMentions, urgentMentionMemberIds } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(artifacts.length > 0 ? { artifacts } : {}),
@@ -1096,9 +1107,18 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
     anchorExcerpt: topicStore.normalizeAnchorExcerpt(anchor.content || ""),
   });
 
-  // Opening card on the room stream (batch 1: plain system message; batch 3 upgrades UI card).
-  postMessage(room.id, "system", `Topic opened: ${topic.title} (topic:${topic.id})`, [], {
-    type: undefined,
+  // Opening card on the room stream (batch 3: structured topic_event card; batch 4 flips on close).
+  postMessage(room.id, "user", `Topic opened: ${topic.title}`, [], {
+    type: "topic_event",
+    topic_event_meta: {
+      action: "opened",
+      topicId: topic.id,
+      title: topic.title,
+      anchorSeq: anchor.seq,
+      anchorMessageId: anchor.id,
+      anchorExcerpt: String(anchor.content || "").replace(/\s+/g, " ").trim().slice(0, 120),
+      actor: "user",
+    },
   });
 
   sendJson(res, 201, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
@@ -1130,9 +1150,18 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
   if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
   if (topic.status !== "active") { sendJson(res, 400, { error: "Topic is closed" }); return; }
 
-  const body = (await parseBody(req)) as { content?: string; text?: string };
+  const body = (await parseBody(req)) as { content?: string; text?: string; replyTo?: { seq?: number } };
   const content = String(body.content ?? body.text ?? "").trim();
   if (!content) { sendJson(res, 400, { error: "content is required" }); return; }
+
+  let replyTo: { seq: number; messageId: string } | undefined;
+  if (body.replyTo !== undefined && body.replyTo !== null) {
+    const seq = Number(body.replyTo.seq);
+    if (!Number.isFinite(seq)) { sendJson(res, 400, { error: "replyTo.seq must be a number" }); return; }
+    const target = topicStore.readAllTopicMessages(params.id, topic.id).find((m) => m.seq === seq);
+    if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
+    replyTo = { seq, messageId: target.id };
+  }
 
   const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
   const roomMembers = roomStore.getRoomMembers(params.id);
@@ -1146,6 +1175,7 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
   // Post into topic scope — never the parent room stream.
   const message = postMessage(scopeId, "user", content, mentions, {
     mentionMemberIds,
+    ...(replyTo ? { replyTo } : {}),
     ...(urgentMentions.length ? { urgentMentions } : {}),
   });
 

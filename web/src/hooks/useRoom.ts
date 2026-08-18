@@ -190,9 +190,9 @@ export function useRoom(roomId: string | null) {
   );
 
   const sendMessage = useCallback(
-    async (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => {
+    async (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>, replyTo?: { seq: number }) => {
       if (!roomId) return;
-      const msg = await apiSendMessage(roomId, content, attachments);
+      const msg = await apiSendMessage(roomId, content, attachments, replyTo);
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];

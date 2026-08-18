@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type DragEvent, type ClipboardEvent } from "react";
-import { Paperclip } from "lucide-react";
+import { Paperclip, CornerUpLeft, X } from "lucide-react";
 import { useDraft } from "../hooks/useDraft";
 import { useUpload } from "../hooks/useUpload";
 import { AttachmentUploader } from "./AttachmentUploader";
@@ -33,6 +33,9 @@ interface MessageInputProps {
   /** Upload scope override (default roomId). Pass "dm:<memberId>" for DM uploads. */
   uploadScope?: string;
   placeholder?: string;
+  /** Active quote reply (topic-threads-v1 spec ①): strip above the input, cancelable. */
+  quote?: { seq: number; sender: string; excerpt: string } | null;
+  onClearQuote?: () => void;
 }
 
 /** Format a clipboard image filename: clipboard-YYYYMMDD-HHmmss.png */
@@ -42,7 +45,7 @@ function clipboardFilename(): string {
   return `clipboard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
 }
 
-export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder }: MessageInputProps) {
+export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder, quote, onClearQuote }: MessageInputProps) {
   const [value, setValue, clearDraft] = useDraft(draftKey !== undefined ? draftKey : roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
@@ -205,6 +208,21 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Quote reply strip */}
+      {quote && (
+        <div className="flex items-center gap-2 mb-2 pl-2.5 pr-2 py-1.5 border-l-2 border-accent bg-accent-dim/60 rounded-r-lg">
+          <CornerUpLeft size={12} className="text-accent-ink shrink-0" />
+          <span className="text-xs text-ink-2 truncate">
+            Reply to <span className="font-semibold text-accent-ink">{quote.sender}</span>
+            <span className="font-mono text-[10px] text-ink-4 ml-1">#{quote.seq}</span>
+            <span className="text-ink-3">：{quote.excerpt}</span>
+          </span>
+          <button type="button" onClick={onClearQuote} title="Cancel reply" aria-label="Cancel reply" className="ml-auto shrink-0 text-ink-4 hover:text-ink-1 cursor-pointer">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       {/* Mention autocomplete */}
       {showMentions && filteredMembers.length > 0 && (
         <div

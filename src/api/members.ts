@@ -587,16 +587,26 @@ addRoute("POST", "/api/dm/:memberId/messages", async (req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const body = (await parseBody(req)) as { text?: string; content?: string; attachments?: unknown };
+    const body = (await parseBody(req)) as { text?: string; content?: string; replyTo?: { seq?: number }; attachments?: unknown };
     const text = (body.text ?? body.content ?? "").toString();
     if (!text.trim() && !body.attachments) {
       sendJson(res, 400, { error: "empty", message: "text is required" });
       return;
     }
+    // Quote reply in DM scope (plan-reply-to-v1): resolve seq → stable messageId anchor.
+    let replyTo: { seq: number; messageId: string } | undefined;
+    if (body.replyTo !== undefined && body.replyTo !== null) {
+      const seq = Number(body.replyTo.seq);
+      if (!Number.isFinite(seq)) { sendJson(res, 400, { error: "replyTo.seq must be a number" }); return; }
+      const target = readAllDmMessages(m.id).find((msg) => msg.seq === seq);
+      if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
+      replyTo = { seq, messageId: target.id };
+    }
     const message = addDmMessage(m.id, {
       sender: "user",
       content: text,
       mentions: [],
+      ...(replyTo ? { replyTo } : {}),
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments as any } : {}),
     });
     // 0.20: DM messages activate the member directly (no @).
