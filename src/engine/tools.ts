@@ -13,6 +13,7 @@ import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../works
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
+import { resolveTopicRoomId } from "../workspace/topic-store.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
@@ -32,13 +33,22 @@ const MAX_RESULT_CHARS = 25_000;
  * member-global store keyed by ScopeId (contract §6).
  */
 function toolScopeId(roomId: string): ScopeId {
-  return roomId.startsWith("dm:") ? roomId : `room:${roomId}`;
+  // topic:<id> is already a full ScopeId; dm:<id> same; bare room uuid → room:<uuid>
+  if (roomId.startsWith("dm:") || roomId.startsWith("topic:")) return roomId;
+  return `room:${roomId}`;
+
 }
 
 function resolveMemoryActor(roomId: string, agentName: string): { id: string; name: string } | null {
   if (roomId.startsWith("dm:")) {
     const member = getMember(roomId.slice("dm:".length));
     return member ? { id: member.id, name: member.name } : null;
+  }
+  if (roomId.startsWith("topic:")) {
+    // Resolve actor against the parent room membership.
+    const parent = resolveTopicRoomId(roomId.slice("topic:".length));
+    if (!parent) return null;
+    return roomStore.resolveRoomMemberRef(parent, agentName);
   }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
@@ -542,9 +552,21 @@ export async function handleToolCallback(
       const title = params?.title ? String(params.title).trim() : "";
       if (!title) return { ok: false, error: "title is required" };
       try {
-        const assignee = resolveTaskAssignee(roomId, params?.assignee);
-        const subscribers = resolveTaskSubscribers(roomId, params?.subscribers);
-        const task = taskStore.createTask(roomId, {
+        // Topic tasks belong to the parent room; auto-tag topic:<id> (plan §6).
+        let taskRoomId = roomId;
+        let autoTopicRef: string | undefined;
+        if (roomId.startsWith("topic:")) {
+          const parent = resolveTopicRoomId(roomId.slice("topic:".length));
+          if (!parent) return { ok: false, error: `Unknown topic scope: ${roomId}` };
+          taskRoomId = parent;
+          autoTopicRef = roomId; // "topic:<id>"
+        }
+        if (taskRoomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
+        const assignee = resolveTaskAssignee(taskRoomId, params?.assignee);
+        const subscribers = resolveTaskSubscribers(taskRoomId, params?.subscribers);
+        let references = Array.isArray(params?.references) ? params.references.map(String) : [];
+        if (autoTopicRef && !references.includes(autoTopicRef)) references = [...references, autoTopicRef];
+        const task = taskStore.createTask(taskRoomId, {
           title,
           createdBy: agentName,
           status: (params?.status as TaskStatus) || "todo",
@@ -552,11 +574,11 @@ export async function handleToolCallback(
           assignee: assignee?.name,
           assigneeMemberId: assignee?.memberId,
           description: params?.description ? String(params.description) : undefined,
-          references: Array.isArray(params?.references) ? params.references.map(String) : undefined,
+          references: references.length ? references : undefined,
           subscribers: subscribers?.names,
           subscriberMemberIds: subscribers?.memberIds,
         });
-        emitTaskEvent(roomId, "created", task, agentName);
+        emitTaskEvent(taskRoomId, "created", task, agentName);
         return { ok: true, taskId: task.id, title: task.title, status: task.status };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };

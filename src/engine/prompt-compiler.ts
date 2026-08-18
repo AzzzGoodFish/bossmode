@@ -211,7 +211,10 @@ export function compileMemberPromptForScope(args: {
       docsRoot: args.docsRoot,
     });
   } else {
-    if (!args.room) throw new Error("room required for room scope compile");
+    // room + topic: same Core/room-principles recipe (topic inherits parent room).
+    // Prompt cache invariant (plan-topic-threads-v1 §0/§3): topic compile output
+    // must be byte-identical to the parent room instance compile.
+    if (!args.room) throw new Error("room required for room/topic scope compile");
     corePrompt = buildRoomCorePrompt({
       room: args.room,
       memberName: args.memberName,
@@ -226,11 +229,16 @@ export function compileMemberPromptForScope(args: {
 
   // Persona (global) + scope principles/mainline from 0.20 member-memory-store.
   // Fall back to legacy room-keyed stores when new paths are empty (migration window).
+  // Topic inherits parent room memory assets (same scope key as room instance).
+  const assetScopeId: ScopeId =
+    ref.kind === "topic" && args.room
+      ? `room:${args.room.id}`
+      : args.scopeId;
   const persona = readMemoryLayer(args.memberId, "persona");
-  let scopePrinciples = readMemoryLayer(args.memberId, "principles", args.scopeId);
-  let scopeMainline = readMemoryLayer(args.memberId, "mainline", args.scopeId);
+  let scopePrinciples = readMemoryLayer(args.memberId, "principles", assetScopeId);
+  let scopeMainline = readMemoryLayer(args.memberId, "mainline", assetScopeId);
 
-  if (ref.kind === "room" && args.room) {
+  if ((ref.kind === "room" || ref.kind === "topic") && args.room) {
     if (!scopePrinciples.content.trim()) {
       const legacy = readPrinciplesWithBudget(args.room.id, "member", args.memberId);
       if (legacy.content.trim()) {
@@ -290,8 +298,10 @@ export function compileMemberPromptForScope(args: {
   // environment-communication asset + scope-kind (determines the tool set).
   // Memory assets (persona/principles/mainline) are excluded — they change
   // daily and must not trigger a contract-drift prompt.
+  // Topic inherits room tool surface — fingerprint as room so cache/drift match parent.
+  const fingerprintKind = ref.kind === "topic" ? "room" : ref.kind;
   const contractFingerprint = createHash("sha1")
-    .update(`${ref.kind}\n${corePrompt}\n${ecAsset.content}`)
+    .update(`${fingerprintKind}\n${corePrompt}\n${ecAsset.content}`)
     .digest("hex");
   logger.info("agent", "compilePrompt", {
     member: args.memberName,

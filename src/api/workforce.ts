@@ -398,7 +398,11 @@ addRoute("GET", "/api/members/:id/stats", async (req, res, params) => {
     if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
     // Scope artifact key: room scope → room uuid; dm scope → "dm:<memberId>"
     // (the instance registry key DM events/stats are recorded under today).
-    const artifactKey = ref.kind === "room" ? ref.roomId : `dm:${ref.memberId}`;
+    const artifactKey = ref.kind === "room"
+      ? ref.roomId
+      : ref.kind === "dm"
+        ? `dm:${ref.memberId}`
+        : `topic:${ref.topicId}`;
     sendJson(res, 200, readMemberStats(artifactKey, member.id));
     return;
   }
@@ -419,7 +423,11 @@ addRoute("GET", "/api/members/:id/events", async (req, res, params) => {
   if (!ref) { sendJson(res, 400, { error: "scope_not_found", message: "valid scope is required" }); return; }
   const member = resolveMemberRef(params.id);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
-  const artifactKey = ref.kind === "room" ? ref.roomId : `dm:${ref.memberId}`;
+  const artifactKey = ref.kind === "room"
+    ? ref.roomId
+    : ref.kind === "dm"
+      ? `dm:${ref.memberId}`
+      : `topic:${ref.topicId}`;
   const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 500));
   const beforeSeq = url.searchParams.get("beforeSeq") ? parseInt(url.searchParams.get("beforeSeq")!, 10) : undefined;
   const typesParam = url.searchParams.get("types");
