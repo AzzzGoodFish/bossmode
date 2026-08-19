@@ -70,6 +70,7 @@ const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together", "kimi-coding"]);
 const MIGRATION_CUSTOM_ENDPOINT_VISION_V1 = "custom-endpoint-vision-v1";
+const MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1 = "custom-endpoint-reasoning-default-v1";
 
 type ModelCredentialStore = { profiles: ModelCredentialProfile[]; migrations: string[] };
 type OAuthJobStatus = OAuthLoginJobStatus;
@@ -654,7 +655,8 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
   }
   const models = (input.models || [])
     .map(validateModel)
-    .map((m) => applyPiCatalogFallback(m, input.providerSlug.trim(), loadPiCatalogModelsSync()));
+    .map((m) => applyPiCatalogFallback(m, input.providerSlug.trim(), loadPiCatalogModelsSync()))
+    .map(defaultCustomEndpointReasoning);
   if (models.length === 0) throw new Error("at least one model is required");
   validateUniqueModels(models);
   return { ...input, profileKind, name: input.name.trim(), providerSlug: input.providerSlug.trim(), requestProfile, models };
@@ -1072,6 +1074,14 @@ function explicitBoolean(...values: unknown[]): boolean | undefined {
   return undefined;
 }
 
+/** Custom endpoints: missing reasoning defaults to true so a user-chosen thinking
+ *  level is actually sent. Endpoints that cannot think fail loudly instead of
+ *  silently ignoring the level. Built-in catalog flags are never rewritten here. */
+function defaultCustomEndpointReasoning(model: ModelDefinitionConfig): ModelDefinitionConfig {
+  if (typeof model.reasoning === "boolean") return model;
+  return { ...model, reasoning: true };
+}
+
 function clonePlainObject<T extends Record<string, unknown>>(value: unknown): T | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   try { return JSON.parse(JSON.stringify(value)) as T; } catch { return undefined; }
@@ -1100,7 +1110,7 @@ function coerceDiscoveredModel(raw: any): ModelDefinitionConfig | null {
     name: typeof raw?.name === "string" ? raw.name : undefined,
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
-    ...(reasoning !== undefined ? { reasoning } : {}),
+    reasoning: reasoning ?? true,
     ...(Array.isArray(raw?.input) && raw.input.length ? { input: raw.input } : {}),
     ...modelSdkMetadata(raw),
     metadataSource: hasEndpointMetadata ? "endpoint" : "unknown",
@@ -1665,6 +1675,41 @@ function isDefaultTextOnlyInput(input: ModelDefinitionConfig["input"]): boolean 
   return Array.isArray(input) && input.length === 1 && input[0] === "text";
 }
 
+function snapshotCredentialStoreOnce(storePathStr: string): void {
+  if (!existsSync(storePathStr)) return;
+  const snapRoot = join(getBossmodePiRuntimeRoot(), ".migration-snapshots");
+  mkdirSync(snapRoot, { recursive: true });
+  const dest = join(snapRoot, `${MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1}-${Date.now()}.json`);
+  try {
+    writeFileSync(dest, readFileSync(storePathStr, "utf-8"), "utf-8");
+  } catch (err) {
+    logger.warn("credentials", "reasoning-default snapshot failed", { error: String(err) });
+  }
+}
+
+function migrateCustomEndpointReasoningDefault(profile: ModelCredentialProfile): ModelCredentialProfile {
+  if ((profile.profileKind ?? "custom_endpoint") !== "custom_endpoint") return profile;
+  let changed = false;
+  const models = profile.models.map((model) => {
+    if (typeof model.reasoning === "boolean") return model;
+    changed = true;
+    return { ...model, reasoning: true };
+  });
+  return changed ? { ...profile, models, updatedAt: now() } : profile;
+}
+
+function rewriteAgentDirModelsJson(): void {
+  for (const dir of listMemberAgentDirs()) {
+    const path = join(dir, "models.json");
+    if (!existsSync(path)) continue;
+    try {
+      writePrivateJson(path, { providers: buildAllProvidersCatalog() });
+    } catch (err) {
+      logger.warn("credentials", "models.json rewrite after reasoning-default failed", { dir, error: String(err) });
+    }
+  }
+}
+
 function migrateCustomEndpointVisionInput(profile: ModelCredentialProfile, catalog: any[]): ModelCredentialProfile {
   if ((profile.profileKind ?? "custom_endpoint") !== "custom_endpoint") return profile;
   let changed = false;
@@ -1687,15 +1732,22 @@ function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }):
   const catalog = loadPiCatalogModelsSync();
   let changed = false;
   const runVisionMigration = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_VISION_V1);
+  const runReasoningDefault = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1);
+  if (runReasoningDefault && options.persist) snapshotCredentialStoreOnce(storePath());
   const profiles = store.profiles.map((profile) => {
     const refreshed = refreshBuiltinProviderProfile(profile);
-    const next = runVisionMigration ? migrateCustomEndpointVisionInput(refreshed, catalog) : refreshed;
+    let next = runVisionMigration ? migrateCustomEndpointVisionInput(refreshed, catalog) : refreshed;
+    if (runReasoningDefault) next = migrateCustomEndpointReasoningDefault(next);
     if (next !== profile) changed = true;
     return next;
   });
-  const migrations = runVisionMigration ? [...store.migrations, MIGRATION_CUSTOM_ENDPOINT_VISION_V1] : store.migrations;
-  if (runVisionMigration) changed = true;
-  if (changed && options.persist) writeStore(profiles, migrations);
+  let migrations = store.migrations;
+  if (runVisionMigration) { migrations = [...migrations, MIGRATION_CUSTOM_ENDPOINT_VISION_V1]; changed = true; }
+  if (runReasoningDefault) { migrations = [...migrations, MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1]; changed = true; }
+  if (changed && options.persist) {
+    writeStore(profiles, migrations);
+    if (runReasoningDefault) rewriteAgentDirModelsJson();
+  }
   return profiles;
 }
 

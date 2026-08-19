@@ -1342,7 +1342,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   };
   const addCustomModel = () => {
     const current = modelCustomizations(form);
-    updateModelCustomizations({ ...current, addedModels: [...(current.addedModels || []), { id: "", metadataSource: "unknown" }] });
+    updateModelCustomizations({ ...current, addedModels: [...(current.addedModels || []), { id: "", reasoning: true, metadataSource: "unknown" }] });
   };
   const updateCustomModel = (index: number, patch: Partial<ModelDefinitionConfig> & { thinkingLevelMap?: ModelDefinitionConfig["thinkingLevelMap"] }) => {
     const current = modelCustomizations(form);
@@ -1480,6 +1480,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                         <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => updateCustomModel(i, { input: e.target.checked ? ["text", "image"] : undefined })} />
                         Supports image input
                       </label>
+                      <label className="flex items-center gap-2 text-xs text-ink-2">
+                        <input type="checkbox" checked={m.reasoning !== false} onChange={(e) => updateCustomModel(i, { reasoning: e.target.checked })} />
+                        Supports thinking
+                      </label>
                       <ThinkingLevelMapEditor
                         value={m.thinkingLevelMap}
                         onChange={(thinkingLevelMap) => updateCustomModel(i, { thinkingLevelMap })}
@@ -1490,7 +1494,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
               </>
             ) : (
               <>
-                <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-ink-1">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", metadataSource: "unknown" }] })} className="text-xs text-accent-ink">Add model manually</button></div></div>
+                <div className="flex items-center justify-between"><h4 className="text-sm font-medium text-ink-1">Models</h4><div className="flex gap-3"><button type="button" onClick={fetchModels} disabled={fetchingModels} className="text-xs text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">{fetchingModels ? "Fetching..." : "Fetch models"}</button><button type="button" onClick={() => setForm({ ...form, models: [...form.models, { id: "", reasoning: true, metadataSource: "unknown" }] })} className="text-xs text-accent-ink">Add model manually</button></div></div>
                 {fetchError && <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-2">{fetchError} Manual add remains available.</div>}
                 {form.models.map((m, i) => <div key={i} className="border border-line-soft rounded-lg p-3 space-y-2">
                   <input className={inputCls} value={m.id} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, id: e.target.value }; setForm({ ...form, models }); }} placeholder="model id" />
@@ -1502,6 +1506,10 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
                   <label className="flex items-center gap-2 text-xs text-ink-2">
                     <input type="checkbox" checked={!!m.input?.includes("image")} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, input: e.target.checked ? ["text", "image"] : undefined }; setForm({ ...form, models }); }} />
                     Supports image input
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-ink-2">
+                    <input type="checkbox" checked={m.reasoning !== false} onChange={(e) => { const models = [...form.models]; models[i] = { ...m, reasoning: e.target.checked }; setForm({ ...form, models }); }} />
+                    Supports thinking
                   </label>
                   <ThinkingLevelMapEditor
                     value={m.thinkingLevelMap}
