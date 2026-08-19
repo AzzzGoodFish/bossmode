@@ -70,7 +70,9 @@ function resolveReadTarget(
   const scopeId = String(scopeParam).trim();
   try {
     const access = assertMemberScopeAccess(actor.id, scopeId);
-    return { ok: true, roomId: access.kind === "dm" ? `dm:${access.memberId}` : access.roomId };
+    if (access.kind === "dm") return { ok: true, roomId: `dm:${access.memberId}` };
+    if (access.kind === "topic") return { ok: true, roomId: `topic:${access.topicId}` };
+    return { ok: true, roomId: access.roomId };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -229,6 +231,34 @@ export function loadScopeMessages(scopeId: string): RoomMessage[] {
   return messageStore.readAllMessages(scopeId);
 }
 
+/** In-memory filter for scopes without a query index (DM + topic). */
+function filterMessagesInMemory(
+  all: RoomMessage[],
+  searchOpts: messageStore.SearchOptions,
+  fromSeq: number | undefined,
+  limit: number,
+): RoomMessage[] {
+  let msgs = all;
+  if (searchOpts.query) {
+    const q = searchOpts.query.toLowerCase();
+    msgs = msgs.filter((m) => (m.content || "").toLowerCase().includes(q));
+  }
+  if (searchOpts.from) msgs = msgs.filter((m) => m.sender === searchOpts.from);
+  if (searchOpts.after !== undefined) msgs = msgs.filter((m) => (m.ts ?? 0) >= (searchOpts.after as number));
+  if (searchOpts.before !== undefined) msgs = msgs.filter((m) => (m.ts ?? 0) <= (searchOpts.before as number));
+  if (searchOpts.type) msgs = msgs.filter((m) => (m as { type?: string }).type === searchOpts.type);
+  if (fromSeq !== undefined) {
+    return msgs.filter((m) => (m.seq ?? 0) > fromSeq).slice(0, limit);
+  }
+  if (searchOpts.aroundSeq !== undefined) {
+    const center = msgs.findIndex((m) => m.seq === searchOpts.aroundSeq);
+    if (center < 0) return [];
+    const half = Math.floor(limit / 2);
+    return msgs.slice(Math.max(0, center - half), center + half + 1);
+  }
+  return msgs.slice(-limit);
+}
+
 /** Parse chat need_response: string[] of member names. Invalid type → error string. */
 export function parseNeedResponseParam(
   raw: unknown,
@@ -377,29 +407,10 @@ export async function handleToolCallback(
         fromSeq !== undefined;
 
       let messages: RoomMessage[];
-      if (targetRoomId.startsWith("dm:")) {
-        // DM store has no query index — filter in memory with the same semantics.
-        let all = readAllDmMessages(targetRoomId.slice("dm:".length));
-        if (searchOpts.query) {
-          const q = searchOpts.query.toLowerCase();
-          all = all.filter((m) => (m.content || "").toLowerCase().includes(q));
-        }
-        if (searchOpts.from) all = all.filter((m) => m.sender === searchOpts.from);
-        if (searchOpts.after !== undefined) all = all.filter((m) => (m.ts ?? 0) >= (searchOpts.after as number));
-        if (searchOpts.before !== undefined) all = all.filter((m) => (m.ts ?? 0) <= (searchOpts.before as number));
-        if (searchOpts.type) all = all.filter((m) => (m as any).type === searchOpts.type);
-        if (searchOpts.aroundSeq !== undefined) {
-          const center = all.findIndex((m) => m.seq === searchOpts.aroundSeq);
-          if (center >= 0) {
-            const half = Math.floor(limit / 2);
-            all = all.slice(Math.max(0, center - half), center + half + 1);
-          } else {
-            all = [];
-          }
-        } else {
-          all = all.slice(-limit);
-        }
-        messages = all;
+      if (targetRoomId.startsWith("dm:") || targetRoomId.startsWith("topic:")) {
+        // DM / topic have no query index — filter in memory. Topic must not
+        // fall through to rooms/topic:xxx/ (that directory does not exist).
+        messages = filterMessagesInMemory(loadScopeMessages(targetRoomId), searchOpts, fromSeq, limit);
       } else if (fromSeq !== undefined) {
         // Backlog read (hybrid injection msg:#14818): messages strictly after
         // from_seq, ascending — the actionable primitive the unread hint points at.
@@ -418,7 +429,7 @@ export async function handleToolCallback(
       // member's own room advances the delivery cursor to the furthest message
       // seen — the unread hint disappears on the next activation. Cross-scope
       // reads and DM (which has no backlog semantics) never touch the cursor.
-      if (!targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
+      if (!targetRoomId.startsWith("dm:") && !targetRoomId.startsWith("topic:") && targetRoomId === roomId && messages.length > 0) {
         let maxSeq = -1;
         let maxMsg: RoomMessage | null = null;
         for (const m of messages) {

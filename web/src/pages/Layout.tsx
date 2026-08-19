@@ -337,13 +337,14 @@ export function Layout({ onLogout, username }: LayoutProps) {
               title: activePage.anchorTitle,
               excerpt: activePage.anchorExcerpt,
             }}
-            onCreateDraft={async (content) => {
+            onCreateDraft={async (content, attachments) => {
               const page = activePageRef.current;
               if (page?.type !== "topic-draft") return;
               const res = await createTopic(page.roomId, {
                 anchorMessageId: page.anchorMessageId,
                 content,
                 title: page.anchorTitle,
+                ...(attachments?.length ? { attachments } : {}),
               }).catch((e) => {
                 toast(e instanceof Error ? e.message : "Failed to create topic", "error");
                 throw e;

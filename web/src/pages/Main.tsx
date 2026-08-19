@@ -412,7 +412,7 @@ export function Main({
                   excerpt,
                 });
               }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
-              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
+              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content, ...(atts?.length ? { attachments: atts } : {}) }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
             </>
           ) : selectedRoomId ? (
             <TasksTab

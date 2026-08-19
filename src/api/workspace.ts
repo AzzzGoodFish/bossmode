@@ -30,6 +30,29 @@ import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment
 import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
+type AttachmentInput = { storedFilename?: string; filename?: string; originalFilename?: string; size?: number };
+
+/** Resolve user-posted attachments against the parent room store. Same shape as room messages. */
+function parseUserAttachments(roomId: string, raw: unknown): { ok: true; attachments: RoomMessageAttachment[] } | { ok: false; error: string } {
+  const attachments: RoomMessageAttachment[] = [];
+  if (!Array.isArray(raw)) return { ok: true, attachments };
+  for (const item of raw as AttachmentInput[]) {
+    const storedFilename = displayFilename(item?.storedFilename || item?.filename || "");
+    if (!storedFilename || !attachmentStore.attachmentExists(roomId, storedFilename)) {
+      return { ok: false, error: `Attachment not found: ${storedFilename || "(missing filename)"}` };
+    }
+    const originalFilename = displayFilename(item?.originalFilename || storedFilename);
+    attachments.push({
+      id: storedFilename,
+      storedFilename,
+      originalFilename,
+      size: typeof item?.size === "number" ? item.size : undefined,
+      previewType: inferAttachmentPreviewType(storedFilename || originalFilename),
+    });
+  }
+  return { ok: true, attachments };
+}
+
 /** FYI @ participants on the room stream when a topic closes. Never throws to the caller. */
 function notifyTopicClosed(roomId: string, topic: { title: string; participants: string[] }, card: RoomMessage | null): void {
   const names: string[] = [];
@@ -518,24 +541,9 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     replyTo = { seq, messageId: target.id };
   }
   const artifacts = Array.isArray(body.artifacts) ? body.artifacts.map(String).map((value) => value.trim()).filter(Boolean) : [];
-  const attachments: RoomMessageAttachment[] = [];
-  if (Array.isArray(body.attachments)) {
-    for (const raw of body.attachments) {
-      const storedFilename = displayFilename(raw?.storedFilename || raw?.filename || "");
-      if (!storedFilename || !attachmentStore.attachmentExists(params.id, storedFilename)) {
-        sendJson(res, 400, { error: `Attachment not found: ${storedFilename || "(missing filename)"}` });
-        return;
-      }
-      const originalFilename = displayFilename(raw?.originalFilename || storedFilename);
-      attachments.push({
-        id: storedFilename,
-        storedFilename,
-        originalFilename,
-        size: typeof raw?.size === "number" ? raw.size : undefined,
-        previewType: inferAttachmentPreviewType(storedFilename || originalFilename),
-      });
-    }
-  }
+  const parsed = parseUserAttachments(params.id, body.attachments);
+  if (!parsed.ok) { sendJson(res, 400, { error: parsed.error }); return; }
+  const attachments = parsed.attachments;
   if (!content.trim() && attachments.length === 0 && artifacts.length === 0) {
     sendJson(res, 400, { error: "content, attachments, or artifacts is required" });
     return;
@@ -1100,14 +1108,18 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
     anchorMessageId?: string;
     anchorSeq?: number;
     content?: string;
+    attachments?: AttachmentInput[];
   };
   const content = String(body.content ?? "").trim();
+  const parsed = parseUserAttachments(params.id, body.attachments);
+  if (!parsed.ok) { sendJson(res, 400, { error: parsed.error }); return; }
+  const attachments = parsed.attachments;
   const all = messageStore.readAllMessages(params.id);
   const anchor = body.anchorMessageId
     ? all.find((m) => m.id === body.anchorMessageId)
     : (body.anchorSeq !== undefined ? all.find((m) => m.seq === body.anchorSeq) : undefined);
   if (body.anchorMessageId && !anchor) { sendJson(res, 404, { error: "Anchor message not found in room" }); return; }
-  if (!anchor && !content) { sendJson(res, 400, { error: "anchorMessageId or content is required" }); return; }
+  if (!anchor && !content && attachments.length === 0) { sendJson(res, 400, { error: "anchorMessageId, content, or attachments is required" }); return; }
 
   const seedMode = getTopicSeedMode();
   const sourceText = content || String(anchor?.content || "");
@@ -1149,7 +1161,7 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
   }
 
   // Composer mode: first topic message + @ activations via the mention router (single path).
-  if (content) {
+  if (content || attachments.length > 0) {
     const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
     const roomMembers = roomStore.getRoomMembers(params.id);
     const urgentMentions = parseUrgentMentions(content, roomMembers.map((m) => m.name));
@@ -1163,6 +1175,7 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
       mentionMemberIds,
       ...(urgentMentions.length ? { urgentMentions } : {}),
       ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
   }
 
@@ -1195,9 +1208,12 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
   if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
   if (topic.status !== "active") { sendJson(res, 400, { error: "Topic is closed" }); return; }
 
-  const body = (await parseBody(req)) as { content?: string; text?: string; replyTo?: { seq?: number } };
+  const body = (await parseBody(req)) as { content?: string; text?: string; replyTo?: { seq?: number }; attachments?: AttachmentInput[] };
   const content = String(body.content ?? body.text ?? "").trim();
-  if (!content) { sendJson(res, 400, { error: "content is required" }); return; }
+  const parsed = parseUserAttachments(params.id, body.attachments);
+  if (!parsed.ok) { sendJson(res, 400, { error: parsed.error }); return; }
+  const attachments = parsed.attachments;
+  if (!content && attachments.length === 0) { sendJson(res, 400, { error: "content or attachments is required" }); return; }
 
   let replyTo: { seq: number; messageId: string } | undefined;
   if (body.replyTo !== undefined && body.replyTo !== null) {
@@ -1225,6 +1241,7 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, par
     ...(replyTo ? { replyTo } : {}),
     ...(urgentMentions.length ? { urgentMentions } : {}),
     ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   });
 
   sendJson(res, 200, message);
