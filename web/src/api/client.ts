@@ -1115,6 +1115,13 @@ export async function getAgentEventsPaginated(roomId: string, agentName: string,
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events${params}`);
 }
 
+/** Scope-addressed events (topic:<id> / dm:<id> / room:<id>). */
+export async function getConversationEvents(scopeId: string, member: string, limit: number, before?: number): Promise<PaginatedEvents> {
+  const qs = new URLSearchParams({ member, limit: String(limit) });
+  if (before !== undefined) qs.set("before", String(before));
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/events?${qs}`);
+}
+
 export interface ActivityEventsPage {
   events: unknown[];
   hasMore: boolean;

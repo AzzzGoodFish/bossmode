@@ -82,6 +82,7 @@ describe("Acceptance: topic activity scope", () => {
     expect(created.status).toBe(201);
     const { topic, scopeId } = JSON.parse(created.body);
 
+    // Same route the topic rail RECENT ACTIVITY mini-feed uses (getConversationEvents).
     const empty = await jsonRequest(ts.port, "GET", `/api/conversations/${encodeURIComponent(scopeId)}/events?member=pm&limit=50`, { token });
     expect(empty.status).toBe(200);
     expect(JSON.parse(empty.body).events || []).toEqual([]);

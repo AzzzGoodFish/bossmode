@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
   getMemberScopedStats, getMemberMemoryAsset, getMemberCorePromptScoped, getConversationTools,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord, type MemberActiveTool,
@@ -263,40 +263,44 @@ This clears the member's working session memory and starts fresh. Room messages 
     }
   }, [onMembersChanged, roomId, toast]);
 
+  const eventWatchId = activityScope || roomId;
+
   const loadRecentEvents = useCallback(async (name: string) => {
     try {
-      const result = await getAgentEventsPaginated(roomId, name, 40);
+      const result = activityScope
+        ? await getConversationEvents(activityScope, name, 40)
+        : await getAgentEventsPaginated(roomId, name, 40);
       const stationEvents = coalesceStationActivity(result.events as AgentEvent[]).slice(-8);
       setRecentEvents((prev) => ({ ...prev, [name]: stationEvents }));
     } catch (err) {
       console.error("Failed to load recent agent events:", err);
     }
-  }, [roomId]);
+  }, [roomId, activityScope]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!eventWatchId) return;
     for (const name of members) void loadRecentEvents(name);
-  }, [roomId, members.join("\u0000"), loadRecentEvents]);
+  }, [eventWatchId, members.join("\u0000"), loadRecentEvents]);
 
   useEffect(() => {
     const token = getToken();
-    if (!token || !roomId || members.length === 0) return;
+    if (!token || !eventWatchId || members.length === 0) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
     ws.onopen = () => {
-      for (const name of members) ws.send(JSON.stringify({ type: "subscribe:agent", roomId, agent: name }));
+      for (const name of members) ws.send(JSON.stringify({ type: "subscribe:agent", roomId: eventWatchId, agent: name }));
     };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type !== "agent:event" || data.roomId !== roomId || !members.includes(data.agent)) return;
+        if (data.type !== "agent:event" || data.roomId !== eventWatchId || !members.includes(data.agent)) return;
         const event = data.event as AgentEvent;
         if (!isStationDisplayEvent(event)) return;
         setRecentEvents((prev) => ({ ...prev, [data.agent]: coalesceStationActivity([...(prev[data.agent] || []), event]).slice(-8) }));
       } catch {}
     };
     return () => ws.close();
-  }, [roomId, members.join("\u0000")]);
+  }, [eventWatchId, members.join("\u0000")]);
 
   const toggleMemberMcpServer = useCallback(async (member: MemberInfo, server: string) => {
     const current = new Set(member.mcpServers || []);
