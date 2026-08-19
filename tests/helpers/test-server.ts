@@ -57,6 +57,8 @@ export function setupConfigMock(): void {
     removePidFile: () => {},
     configExists: () => true,
     getBossmodeDir: () => TEST_BOSSMODE_DIR,
+    getTopicSeedMode: () => "fork" as const,
+    writeConfig: () => {},
   }));
 }
 

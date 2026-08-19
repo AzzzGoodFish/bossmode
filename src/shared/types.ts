@@ -21,6 +21,8 @@ export interface BossmodeRuntimeConfig {
    * Reload member / new instance required. general agent template never uses this.
    */
   piBuiltinPrompt?: boolean;
+  /** Default topic session seed. fork = inherit room session prefix. Default fork. */
+  topicSeedMode?: "fork" | "fresh";
 }
 
 export interface BossmodeMcpConfig {

@@ -37,8 +37,17 @@ export function readConfig(): BossmodeConfig {
     ...(parsed.runtime || {}),
     sessionResume: (parsed.runtime?.sessionResume ?? legacySessionResume) !== false,
     piBuiltinPrompt: parsed.runtime?.piBuiltinPrompt === true,
+    topicSeedMode: parsed.runtime?.topicSeedMode === "fresh" ? "fresh" : "fork",
   };
   return parsed;
+}
+
+export function getTopicSeedMode(): "fork" | "fresh" {
+  try {
+    return readConfig().runtime?.topicSeedMode === "fresh" ? "fresh" : "fork";
+  } catch {
+    return "fork";
+  }
 }
 
 export function writeConfig(config: BossmodeConfig): void {
@@ -87,7 +96,7 @@ export function getDefaultConfig(): BossmodeConfig {
     auth: { username: "", passwordHash: "" },
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
-    runtime: { sessionResume: true, piBuiltinPrompt: false, codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
+    runtime: { sessionResume: true, piBuiltinPrompt: false, topicSeedMode: "fork", codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
     mcp: { enabled: false },
   };
 }
