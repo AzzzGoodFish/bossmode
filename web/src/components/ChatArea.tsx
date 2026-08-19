@@ -5,6 +5,7 @@ import { getTopicMessages } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
 import { MessageSearchBar } from "./MessageSearchBar";
 import type { MessageArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
+import { GROUP_INTERVAL_MS, isGroupedWithPrev } from "../utils/message-grouping";
 import { formatMessageDateSeparator, isSameLocalDate } from "../utils/message-date";
 import { getUsername } from "../api/client";
 
@@ -33,7 +34,6 @@ interface ChatAreaProps {
   onOpenTopic?: (topicId: string) => void;
 }
 
-const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 
 export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -486,13 +486,7 @@ export function shouldShowDateSeparator(prev: RoomMessage | null, current: RoomM
   return !isSameLocalDate(prev.ts, current.ts);
 }
 
-export function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): boolean {
-  if (!prev) return false;
-  if (prev.sender !== current.sender) return false;
-  if (current.ts - prev.ts > GROUP_INTERVAL_MS) return false;
-  if (!isSameLocalDate(prev.ts, current.ts)) return false;
-  return true;
-}
+export { isGroupedWithPrev };
 
 export function DateSeparator({ ts }: { ts: number }) {
   const formatted = formatMessageDateSeparator(ts);
