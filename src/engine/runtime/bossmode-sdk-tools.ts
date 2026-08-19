@@ -267,17 +267,27 @@ export function createBossmodeSdkTools(opts: {
     tools.push(defineTool({
       name: "member_status",
       label: "Member Status",
-      description: "Query live runtime status of room members. Returns each member's aggregated status — working / idle / inactive (inactive = no live runtime instance) — plus, for members with live instances, the scopes they are live in with per-scope status. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
+      description: "Query live runtime status of room members. Returns each member's aggregated status plus a room/topics breakdown — topics lists this member's live topic instances in the current room. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
       parameters: Type.Object({
         member: Type.Optional(Type.String({ description: "Member name; omit for all room members" })),
       }),
       execute: async (_id, params) => {
         const data = await call("member_status", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "Member status failed");
-        const members = (data.members ?? []) as Array<{ name: string; status: string; activeScopes: Array<{ scope: string; status: string }> }>;
+        const members = (data.members ?? []) as Array<{
+          name: string; status: string; room?: string;
+          topics?: Array<{ topicId: string; title: string; status: string }>;
+          activeScopes: Array<{ scope: string; status: string }>;
+        }>;
         const lines = members.map((m) => {
-          const scopes = m.activeScopes.map((s) => `${s.scope} (${s.status})`).join(", ");
-          return `- ${m.name}: ${m.status}${scopes ? ` — ${scopes}` : ""}`;
+          const topicBits = (m.topics ?? []).map((t) => `${t.title} (${t.status})`).join(", ");
+          const scopes = (m.activeScopes ?? []).map((s) => `${s.scope} (${s.status})`).join(", ");
+          const extra = [
+            m.room ? `room ${m.room}` : "",
+            topicBits ? `topics: ${topicBits}` : "",
+            scopes,
+          ].filter(Boolean).join(" — ");
+          return `- ${m.name}: ${m.status}${extra ? ` — ${extra}` : ""}`;
         });
         return textResult(lines.length ? lines.join("\n") : "No room members.");
       },

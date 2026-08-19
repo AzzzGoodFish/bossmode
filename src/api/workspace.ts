@@ -27,8 +27,26 @@ import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo } from "../workspace/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
-import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
+import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
+
+/** FYI @ participants on the room stream when a topic closes. Never throws to the caller. */
+function notifyTopicClosed(roomId: string, topic: { title: string; participants: string[] }, card: RoomMessage | null): void {
+  const names: string[] = [];
+  const ids: string[] = [];
+  for (const pid of topic.participants || []) {
+    const m = resolveRoomMember(roomId, pid);
+    if (!m || ids.includes(m.id)) continue;
+    names.push(m.name);
+    ids.push(m.id);
+  }
+  if (ids.length === 0) return;
+  postMessage(roomId, "user", `Topic "${topic.title}" is closed. The summary is on the topic card.`, names, {
+    mentionMemberIds: ids,
+    needResponse: [],
+    ...(card && typeof card.seq === "number" ? { replyTo: { seq: card.seq, messageId: card.id } } : {}),
+  });
+}
 
 // ── Rooms ──
 
@@ -1222,6 +1240,7 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, param
   if (!topic) { sendJson(res, 500, { error: "Failed to close topic" }); return; }
 
   // Flip the opening card in place (same message id → WS replace).
+  let closedCard: ReturnType<typeof messageStore.updateMessage> = null;
   const roomMsgs = messageStore.readAllMessages(params.id);
   const opened = [...roomMsgs].reverse().find(
     (m) => m.type === "topic_event" && m.topic_event_meta?.topicId === topic.id && m.topic_event_meta?.action === "opened",
@@ -1244,8 +1263,9 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, param
     if (flipped) {
       broadcastToRoom(params.id, { type: "room:message", roomId: params.id, message: flipped });
     }
+    closedCard = flipped;
   } else {
-    postMessage(params.id, "user", `Topic closed: ${topic.title}`, [], {
+    closedCard = postMessage(params.id, "user", `Topic closed: ${topic.title}`, [], {
       type: "topic_event",
       topic_event_meta: {
         action: "closed",
@@ -1257,6 +1277,12 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, param
         summary: topic.summary,
       },
     });
+  }
+
+  try {
+    notifyTopicClosed(params.id, topic, closedCard);
+  } catch (err) {
+    logger.warn("api", "topic close FYI failed", { topicId: topic.id, error: String(err) });
   }
 
   try {

@@ -90,8 +90,10 @@ export function initRouter(
     logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds, needResponse: message.needResponse });
 
     const needList = Array.isArray(message.needResponse) ? message.needResponse.filter((n) => typeof n === "string" && n.trim()) : undefined;
+    const explicitFyi = Array.isArray(message.needResponse) && message.needResponse.length === 0;
     const ctx: MentionActivationCtx = {
       ...(needList && needList.length ? { needResponse: needList } : {}),
+      ...(explicitFyi ? { needResponse: [] as string[] } : {}),
       senderName: message.sender,
     };
 
