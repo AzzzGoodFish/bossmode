@@ -26,6 +26,7 @@ import type { AgentStatusMap } from "../hooks/useRoom";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { StationPanel } from "../components/StationPanel";
+import { TopicRail, TopicRailToggle, useRoomTopics, useTopicRailOpen } from "../components/TopicRail";
 
 export interface TopicDraftAnchor {
   anchorMessageId: string;
@@ -136,6 +137,7 @@ export function TopicPage({
   draft,
   onCreateDraft,
   onBack,
+  onOpenTopic,
   onJumpToRoomMessage,
   onOpenMcpSettings,
   onOpenExtensionsSettings,
@@ -148,12 +150,16 @@ export function TopicPage({
   /** First-message send in draft mode: parent creates the topic and navigates. */
   onCreateDraft?: (content: string) => Promise<void>;
   onBack: () => void;
+  /** Direct topic⇄topic switch from the embedded rail (fish pick: direction A). */
+  onOpenTopic?: (topicId: string) => void;
   onJumpToRoomMessage?: (messageId: string) => void;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
 }) {
   const isDraft = !topicId;
   const { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage } = useTopicStream(roomId, topicId);
+  const [topicRailOpen, toggleTopicRail] = useTopicRailOpen(roomId);
+  const { topics: roomTopics, activeCount: topicActiveCount } = useRoomTopics(roomId);
   const [quote, setQuote] = useState<{ seq: number; messageId: string; sender: string; excerpt: string } | null>(null);
   const [ending, setEnding] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -238,6 +244,7 @@ export function TopicPage({
             : `topic · ${anchorSeq !== undefined ? `anchored #${anchorSeq}` : "composer-created"}`}
         </span>
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          <TopicRailToggle open={topicRailOpen} activeCount={topicActiveCount} onToggle={toggleTopicRail} />
           {!isDraft && !closed && (
             <button
               onClick={() => { setEnding(true); void endTopic().finally(() => setEnding(false)); }}
@@ -251,6 +258,15 @@ export function TopicPage({
       </div>
 
       <div className="flex-1 flex min-h-0">
+        {/* embedded topic rail — same instance state as the room view, one-click direct switch */}
+        {topicRailOpen && (
+          <TopicRail
+            topics={roomTopics}
+            currentTopicId={topicId}
+            onSelectRoom={onBack}
+            onSelectTopic={(id) => onOpenTopic?.(id)}
+          />
+        )}
         {/* stream column */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
