@@ -43,7 +43,7 @@ import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
-import { resolveTopicRoomId } from "../workspace/topic-store.js";
+import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage } from "../shared/types.js";
 
 // -- Registry injection --
@@ -1028,7 +1028,9 @@ export async function activateAgent(roomId: string, memberRef: string, ctx?: { n
   const memberId = member?.id || memberRef;
   const list = Array.isArray(ctx?.needResponse) ? ctx!.needResponse! : [];
   const listed = list.some((n) => n === memberName || n === memberId || n === memberRef);
-  const replyDebt = isUser || !ctx ? true : listed;
+  // Explicit empty need_response on a user message = FYI (topic-close notice).
+  const explicitFyi = isUser && !!ctx && Array.isArray(ctx.needResponse) && ctx.needResponse.length === 0;
+  const replyDebt = explicitFyi ? false : (isUser || !ctx ? true : listed);
   const banner = ctx && replyDebt
     ? isUser
       ? "[REPLY EXPECTED] Respond using the chat tool."
@@ -1042,6 +1044,10 @@ async function activateAgentInternal(
   memberRef: string,
   opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
 ): Promise<void> {
+  if (typeof roomId === "string" && roomId.startsWith("topic:")) {
+    logger.warn("agent", "activateAgentInternal refused topic scope — use activateTopicMember", { roomId, memberRef, trigger: opts.trigger });
+    return;
+  }
   const member = resolveRoomMember(roomId, memberRef);
   const memberName = member?.name || memberRef;
   const memberId = member?.id || memberRef;
@@ -1369,11 +1375,22 @@ export function getRoomAgentStale(roomId: string): Record<string, { mounts?: { s
 
 // -- Member status report (member_status tool) --
 
+export interface MemberStatusTopicSlice {
+  topicId: string;
+  title: string;
+  status: AgentStatus;
+  lastActivity?: number;
+}
+
 export interface MemberStatusEntry {
   name: string;
   memberId: string;
   /** Aggregated across live instances: working > idle > inactive (no live instance). */
   status: AgentStatus;
+  /** Room-instance status in this room (inactive if none). */
+  room: AgentStatus;
+  /** Live topic instances for this member whose parent is this room. */
+  topics: MemberStatusTopicSlice[];
   /** Live instances only: which scopes this member is active in, with per-scope status. */
   activeScopes: Array<{ scope: string; status: AgentStatus }>;
   /** Mount/contract stale markers for badges (auto-reload prompt). */
@@ -1394,28 +1411,44 @@ export function getRoomMemberStatusReport(roomId: string, memberRef?: string): M
   return members.map((m) => {
     const gid = (thisRoom ? roomStore.resolveGlobalMemberId(thisRoom, m) : null) || m.id;
     const activeScopes: Array<{ scope: string; status: AgentStatus }> = [];
+    const topics: MemberStatusTopicSlice[] = [];
+    let roomStatus: AgentStatus = "inactive";
     let status: AgentStatus = "inactive";
-    for (const inst of instances.values()) {
-      // Match by global id (DM scopes) or by room-local id/name (room scopes)
-      let match = false;
-      let scopeLabel: string;
-      if (inst.scopeId.startsWith("dm:")) {
-        match = inst.memberId === m.id || inst.memberId === gid || inst.scopeId === `dm:${gid}`;
-        scopeLabel = "dm";
-      } else {
-        const r = roomStore.getRoom(inst.roomId);
-        if (!r) continue;
-        const local = roomStore.getRoomMembers(r.id).find((rm) => rm.id === inst.memberId || rm.name === inst.agentName);
-        if (!local) continue;
-        match = roomStore.resolveGlobalMemberId(r, local) === gid || inst.memberId === m.id;
-        scopeLabel = r.id === roomId && thisRoom ? `room: ${thisRoom.name}` : `room: ${r.name}`;
-      }
-      if (!match) continue;
-      activeScopes.push({ scope: scopeLabel, status: inst.status });
-      if (inst.status === "working") status = "working";
+    const bump = (st: AgentStatus) => {
+      if (st === "working") status = "working";
       else if (status === "inactive") status = "idle";
+    };
+    for (const inst of instances.values()) {
+      if (inst.scopeId.startsWith("dm:")) {
+        const match = inst.memberId === m.id || inst.memberId === gid || inst.scopeId === `dm:${gid}`;
+        if (!match) continue;
+        activeScopes.push({ scope: "dm", status: inst.status });
+        bump(inst.status);
+        continue;
+      }
+      if (inst.scopeId.startsWith("topic:")) {
+        const topicId = inst.scopeId.slice("topic:".length);
+        const parent = resolveTopicRoomId(topicId);
+        if (parent !== roomId) continue;
+        const match = inst.memberId === m.id || inst.memberId === gid || inst.agentName === m.name;
+        if (!match) continue;
+        const rec = getTopic(parent, topicId);
+        topics.push({ topicId, title: rec?.title || topicId, status: inst.status });
+        activeScopes.push({ scope: `topic: ${rec?.title || topicId}`, status: inst.status });
+        bump(inst.status);
+        continue;
+      }
+      const r = roomStore.getRoom(inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId);
+      if (!r) continue;
+      const local = roomStore.getRoomMembers(r.id).find((rm) => rm.id === inst.memberId || rm.name === inst.agentName);
+      if (!local) continue;
+      const match = roomStore.resolveGlobalMemberId(r, local) === gid || inst.memberId === m.id;
+      if (!match) continue;
+      activeScopes.push({ scope: r.id === roomId && thisRoom ? `room: ${thisRoom.name}` : `room: ${r.name}`, status: inst.status });
+      if (r.id === roomId) roomStatus = inst.status === "working" ? "working" : (roomStatus === "working" ? "working" : inst.status);
+      bump(inst.status);
     }
-    return { name: m.name, memberId: m.id, status, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
+    return { name: m.name, memberId: m.id, status, room: roomStatus, topics, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
   });
 }
 
@@ -1728,6 +1761,12 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
  * never see system notices per the rc.5 filter).
  */
 export async function interruptAgent(roomId: string, memberRef: string, urgentByName: string): Promise<{ ok: boolean; action: string }> {
+  if (typeof roomId === "string" && roomId.startsWith("topic:")) {
+    const topicId = roomId.slice("topic:".length);
+    const parent = resolveTopicRoomId(topicId);
+    if (!parent) return { ok: false, action: "not_in_topic" };
+    return interruptTopicMember(parent, topicId, memberRef, urgentByName);
+  }
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const memberName = member?.name || memberRef;
@@ -2556,20 +2595,27 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
   }
 }
 
-/** Abort a live topic instance, then re-activate in-topic (urgent !). */
-async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string): Promise<void> {
+/** Abort a live topic instance only. No topic instance → error, never touch the room instance. */
+async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string): Promise<{ ok: boolean; action: string }> {
   const roomMember = resolveRoomMember(parentRoomId, memberRef);
   const memberId = roomMember?.id || memberRef;
   const memberName = roomMember?.name || memberRef;
   const key = topicInstanceKey(topicId, memberId);
   const instance = instances.get(key);
-  if (instance && instance.status === "working") {
+  if (!instance) {
+    postMessage(`topic:${topicId}`, "system", `Member "${memberName}" is not in this topic.`);
+    logger.info("agent", "urgentInterruptNotInTopic", { member: memberName, memberId, topicId, urgentBy: urgentByName });
+    return { ok: false, action: "not_in_topic" };
+  }
+  if (instance.status === "working") {
     try { settleWaitOnAbort(`topic:${topicId}`, memberId); } catch { /* ignore */ }
     try { instance.handle.abort(); } catch { /* ignore */ }
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
+    logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId: `topic:${topicId}`, urgentBy: urgentByName });
   }
   await activateTopicMember(parentRoomId, topicId, memberRef);
+  return { ok: true, action: instance.status === "working" ? "interrupted" : "activated" };
 }
 
 async function activateAllTopicMembers(parentRoomId: string, topicId: string): Promise<void> {
