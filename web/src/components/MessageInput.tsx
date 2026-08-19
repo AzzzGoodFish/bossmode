@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type DragEvent, type ClipboardEvent } from "react";
-import { Paperclip, CornerUpLeft, X } from "lucide-react";
+import { Paperclip, CornerUpLeft, X, MessageSquarePlus } from "lucide-react";
 import { useDraft } from "../hooks/useDraft";
 import { useUpload } from "../hooks/useUpload";
 import { AttachmentUploader } from "./AttachmentUploader";
@@ -35,6 +35,8 @@ interface MessageInputProps {
   placeholder?: string;
   /** Active quote reply (topic-threads-v1 spec ①): strip above the input, cancelable. */
   quote?: { seq: number; sender: string; excerpt: string } | null;
+  /** Topic-creation mode (topic-threads v2 spec ①): room composer only — toggle button left of the textarea; one-shot, the sent message opens the topic. */
+  topicMode?: { active: boolean; onToggle: () => void };
   onClearQuote?: () => void;
 }
 
@@ -45,7 +47,7 @@ function clipboardFilename(): string {
   return `clipboard-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
 }
 
-export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder, quote, onClearQuote }: MessageInputProps) {
+export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder, quote, onClearQuote, topicMode }: MessageInputProps) {
   const [value, setValue, clearDraft] = useDraft(draftKey !== undefined ? draftKey : roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
@@ -223,6 +225,20 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
         </div>
       )}
 
+      {/* Topic-creation mode hint */}
+      {topicMode?.active && (
+        <div className="flex items-center gap-2 mb-2 pl-2.5 pr-2 py-1.5 border-l-2 border-accent bg-accent-dim/60 rounded-r-lg">
+          <MessageSquarePlus size={12} className="text-accent-ink shrink-0" />
+          <span className="text-xs text-ink-2 truncate">
+            <span className="font-semibold text-accent-ink">New topic</span>
+            <span className="text-ink-3"> — this message opens the topic as its first message; @ members join instantly. One-shot.</span>
+          </span>
+          <button type="button" onClick={topicMode.onToggle} title="Cancel topic mode" aria-label="Cancel topic mode" className="ml-auto shrink-0 text-ink-4 hover:text-ink-1 cursor-pointer">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       {/* Mention autocomplete */}
       {showMentions && filteredMembers.length > 0 && (
         <div
@@ -278,6 +294,18 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       )}
 
       <div className="flex gap-2 items-end">
+        {topicMode && (
+          <button
+            onClick={topicMode.onToggle}
+            disabled={disabled}
+            className={`w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${topicMode.active ? "text-accent-ink bg-accent-dim" : "text-ink-4 hover:text-ink-2 hover:bg-surface-2"}`}
+            title={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
+            aria-label={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
+            aria-pressed={topicMode.active}
+          >
+            <MessageSquarePlus size={18} />
+          </button>
+        )}
         {!hideAttachments && (
           <>
             <button
@@ -302,9 +330,10 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           disabled={disabled || upload.isUploading}
           placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... (@ to mention, Ctrl+V to paste image)")}
           rows={1}
-          className="flex-1 bg-inset border border-line rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
-                     resize-none focus:outline-none focus:border-line-strong
-                     placeholder:text-ink-4 disabled:opacity-50 max-h-[200px] transition-colors"
+          className={`flex-1 bg-inset border rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
+                     resize-none focus:outline-none
+                     placeholder:text-ink-4 disabled:opacity-50 max-h-[200px] transition-colors
+                     ${topicMode?.active ? "border-accent ring-1 ring-accent/30 focus:border-accent" : "border-line focus:border-line-strong"}`}
         />
         <button
           onClick={handleSend}

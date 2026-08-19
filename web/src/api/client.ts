@@ -966,6 +966,7 @@ export interface TopicRecord {
   title: string;
   anchorMessageId: string;
   anchorSeq?: number;
+  anchorExcerpt?: string;
   createdBy: string;
   status: TopicStatus;
   seedMode: TopicSeedMode;
@@ -979,7 +980,7 @@ export async function listTopics(roomId: string): Promise<{ topics: TopicRecord[
   return apiFetch(`/api/rooms/${roomId}/topics`);
 }
 
-export async function createTopic(roomId: string, input: { title?: string; anchorMessageId: string; anchorSeq?: number; seedMode?: TopicSeedMode }): Promise<{ topic: TopicRecord; scopeId: string }> {
+export async function createTopic(roomId: string, input: { title?: string; anchorMessageId?: string; anchorSeq?: number; content?: string; seedMode?: TopicSeedMode }): Promise<{ topic: TopicRecord; scopeId: string }> {
   return apiFetch(`/api/rooms/${roomId}/topics`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -1608,6 +1609,18 @@ export interface ChatEntry {
   unreadCount: number;
   mentioned: boolean;
   status?: string;
+  /** Room rows: topic sub-list for the sidebar (topic-threads v2). */
+  topics?: TopicChatEntry[];
+}
+
+export interface TopicChatEntry {
+  topicId: string;
+  title: string;
+  status: "active" | "closed";
+  lastMessage?: { sender: string; text: string; ts: number } | null;
+  unreadCount: number;
+  mentioned: boolean;
+  anyWorking: boolean;
 }
 
 export async function getChats(): Promise<{ chats: ChatEntry[] }> {

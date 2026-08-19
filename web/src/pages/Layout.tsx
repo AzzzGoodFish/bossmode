@@ -17,6 +17,7 @@ import { MemberCreatePage } from "./MemberCreatePage";
 import { MemberSettingsPage } from "./MemberSettingsPage";
 import { TemplatesPage } from "./TemplatesPage";
 import { Main } from "./Main";
+import { TopicPage } from "./TopicPage";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsPage } from "./SkillsPage";
 import { KnowledgePage } from "./KnowledgePage";
@@ -59,6 +60,8 @@ export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: strin
 
 export function Layout({ onLogout, username }: LayoutProps) {
   const [activePage, setActivePage] = useState<ActivePage>({ type: "chats" });
+  /** Cross-page jump target: topic anchor block → room stream message (topic-threads v2). */
+  const [pendingJump, setPendingJump] = useState<{ roomId: string; messageId: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -297,6 +300,22 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onNavigateToKnowledge={(path) => setActivePage({ type: "knowledge", path })}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
+            onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
+            pendingJump={pendingJump}
+            onConsumeJump={() => setPendingJump(null)}
+          />
+        )}
+
+        {/* Topic workspace (topic-threads v2): room-form page, back returns to the room */}
+        {activePage?.type === "topic" && (
+          <TopicPage
+            roomId={activePage.roomId}
+            topicId={activePage.topicId}
+            onBack={() => handleNavigate({ type: "room", id: activePage.roomId })}
+            onJumpToRoomMessage={(messageId) => {
+              setPendingJump({ roomId: activePage.roomId, messageId });
+              handleNavigate({ type: "room", id: activePage.roomId });
+            }}
           />
         )}
 

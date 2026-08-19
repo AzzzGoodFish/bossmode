@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search,
+  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search, MessagesSquare,
   Folder, LayoutTemplate,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -20,6 +20,7 @@ export type ActivePage =
   | { type: "member-settings"; memberId: string }
   | { type: "templates"; name?: string; create?: boolean }
   | { type: "room"; id: string }
+  | { type: "topic"; roomId: string; topicId: string }
   | { type: "skill"; name: string | null }
   | { type: "knowledge"; path?: string }
   | { type: "settings"; section?: SettingsSection }
@@ -431,39 +432,63 @@ function ChatRow({ c, activePage, onNavigate }: { c: ChatEntry; activePage: Acti
   const active =
     (c.kind === "dm" && activePage?.type === "dm" && activePage.memberId === c.memberId) ||
     (c.kind === "room" && activePage?.type === "room" && activePage.id === c.roomId);
+  const topics = c.kind === "room" ? (c.topics ?? []) : [];
   return (
-    <button
-      onClick={() =>
-        c.kind === "dm" && c.memberId
-          ? onNavigate({ type: "dm", memberId: c.memberId })
-          : c.roomId
-            ? onNavigate({ type: "room", id: c.roomId })
-            : undefined
-      }
-      className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
-    >
-      {c.kind === "dm" ? (
-        <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
-      ) : (
-        <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
-          <Hash size={12} />
+    <>
+      <button
+        onClick={() =>
+          c.kind === "dm" && c.memberId
+            ? onNavigate({ type: "dm", memberId: c.memberId })
+            : c.roomId
+              ? onNavigate({ type: "room", id: c.roomId })
+              : undefined
+        }
+        className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left cursor-pointer transition-colors ${active ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+      >
+        {c.kind === "dm" ? (
+          <StaffBadge name={c.title} status={statusFromAgent(c.status ?? "idle")} size="sm" />
+        ) : (
+          <div className="w-6 h-6 rounded-md bg-accent-dim text-accent-ink flex items-center justify-center shrink-0">
+            <Hash size={12} />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
+          <div className="text-[10.5px] text-ink-4 truncate">
+            {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
+          </div>
+        </div>
+        {c.mentioned && (
+          <span className="shrink-0 w-[18px] h-[18px] rounded-full bg-blocked text-white text-[10px] font-bold flex items-center justify-center">@</span>
+        )}
+        {c.unreadCount > 0 && (
+          <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
+            {c.unreadCount > 99 ? "99+" : c.unreadCount}
+          </span>
+        )}
+      </button>
+      {/* Topic sub-list under the room row (topic-threads v2): working pulse + unread dot + closed dimmed. */}
+      {topics.length > 0 && (
+        <div className="mt-0.5 mb-1">
+          {[...topics].sort((a, b) => (a.status === b.status ? 0 : a.status === "active" ? -1 : 1)).map((t) => {
+            const tActive = activePage?.type === "topic" && activePage.roomId === c.roomId && activePage.topicId === t.topicId;
+            return (
+              <button
+                key={t.topicId}
+                onClick={() => c.roomId && onNavigate({ type: "topic", roomId: c.roomId, topicId: t.topicId })}
+                className={`w-full flex items-center gap-1.5 pl-[34px] pr-2 py-1 rounded-md text-left cursor-pointer transition-colors ${tActive ? "bg-accent-dim" : "hover:bg-surface-2"} ${t.status === "closed" ? "opacity-55" : ""}`}
+              >
+                <MessagesSquare size={11} className="text-ink-4 shrink-0" />
+                <span className={`text-[11.5px] truncate flex-1 ${t.status === "closed" ? "line-through decoration-ink-4 text-ink-4" : t.unreadCount > 0 ? "font-semibold text-ink-1" : "text-ink-3"}`}>{t.title}</span>
+                {t.status === "active" && t.anyWorking && <span className="w-1.5 h-1.5 rounded-full bg-onair animate-pulse shrink-0" title="A member is working in this topic" />}
+                {t.mentioned && <span className="shrink-0 w-[15px] h-[15px] rounded-full bg-blocked text-white text-[9px] font-bold flex items-center justify-center">@</span>}
+                {t.unreadCount > 0 && <span className="shrink-0 w-[7px] h-[7px] rounded-full bg-accent" title={`${t.unreadCount} unread`} />}
+              </button>
+            );
+          })}
         </div>
       )}
-      <div className="min-w-0 flex-1">
-        <div className={`text-[12.5px] truncate ${c.unreadCount > 0 ? "font-bold text-ink-1" : "font-medium text-ink-2"}`}>{c.title}</div>
-        <div className="text-[10.5px] text-ink-4 truncate">
-          {c.lastMessage ? c.lastMessage.text.replace(/\s+/g, " ").slice(0, 42) : "No messages yet"}
-        </div>
-      </div>
-      {c.mentioned && (
-        <span className="shrink-0 w-[18px] h-[18px] rounded-full bg-blocked text-white text-[10px] font-bold flex items-center justify-center">@</span>
-      )}
-      {c.unreadCount > 0 && (
-        <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-accent-contrast text-[10px] font-bold flex items-center justify-center tabular-nums">
-          {c.unreadCount > 99 ? "99+" : c.unreadCount}
-        </span>
-      )}
-    </button>
+    </>
   );
 }
 
