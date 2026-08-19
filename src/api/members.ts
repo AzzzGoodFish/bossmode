@@ -29,6 +29,7 @@ import {
   getLatestDmSeq,
 } from "../workspace/dm-message-store.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import * as topicStore from "../workspace/topic-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
@@ -93,7 +94,7 @@ export function countUserUnreadAndMention(
   // System notices and typed task/knowledge events never badge (Feishu semantics,
   // fish 2026-08-04): they are not conversation the user needs to chase.
   const isUserVisibleChat = (m: RoomMessage): boolean =>
-    m.sender !== "user" && m.sender !== "system" && m.type !== "task_event" && m.type !== "knowledge_event";
+    m.sender !== "user" && m.sender !== "system" && m.type !== "task_event" && m.type !== "knowledge_event" && m.type !== "topic_event";
   const unreadCount = slice.filter(isUserVisibleChat).length;
   // v1 mention approx: text contains @<loginName>
   const needle = userLoginName ? `@${userLoginName}` : "";
@@ -126,6 +127,16 @@ addRoute("GET", "/api/chats", async (_req, res) => {
       unreadCount: number;
       mentioned: boolean;
       status: string;
+      /** Room rows carry their topics for the sidebar sub-list (topic-threads v2). */
+      topics?: Array<{
+        topicId: string;
+        title: string;
+        status: "active" | "closed";
+        lastMessage: { sender: string; text: string; ts: number } | null;
+        unreadCount: number;
+        mentioned: boolean;
+        anyWorking: boolean;
+      }>;
     }> = [];
 
     let getScopeLiveStatus: ((scopeId: string) => string) | null = null;
@@ -171,6 +182,29 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         login,
       );
       const live = getScopeLiveStatus?.(scopeId) || "idle";
+      // Topic sub-list (topic-threads v2): per-topic unread/mention from the topic's
+      // own cursor + working flag from any live topic instance.
+      const topics = topicStore.listTopics(room.id).map((t) => {
+        const tScope = scopeIdOf({ kind: "topic", topicId: t.id, roomId: room.id });
+        const tMsgs = topicStore.readAllTopicMessages(room.id, t.id);
+        const tLast = tMsgs[tMsgs.length - 1];
+        const tCursor = getUserReadCursor(tScope);
+        const { unreadCount: tUnread, mentioned: tMentioned } = countUserUnreadAndMention(
+          tMsgs,
+          tCursor?.messageId ?? null,
+          tCursor?.seq ?? null,
+          login,
+        );
+        return {
+          topicId: t.id,
+          title: t.title,
+          status: t.status,
+          lastMessage: summarizeMessage(tLast),
+          unreadCount: tUnread,
+          mentioned: tMentioned,
+          anyWorking: (getScopeLiveStatus?.(tScope) || "idle") === "working",
+        };
+      });
       chats.push({
         scopeId,
         kind: "room",
@@ -179,6 +213,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         unreadCount,
         mentioned,
         status: live === "inactive" ? "idle" : live,
+        topics,
       });
     }
 
@@ -206,6 +241,14 @@ addRoute("POST", "/api/conversations/:scope/read", async (req, res, params) => {
       const ref = parseScopeId(scopeId)!;
       if (ref.kind === "dm") {
         const msgs = readAllDmMessages(ref.memberId);
+        const last = msgs[msgs.length - 1];
+        messageId = last?.id ?? null;
+        seq = typeof last?.seq === "number" ? last.seq : null;
+      } else if (ref.kind === "topic") {
+        // Topic-threads v2: the sidebar sub-list badge clears via this same route.
+        // roomId is not embedded in the scope id — resolve via the topic record.
+        const topicRoomId = topicStore.resolveTopicRoomId(ref.topicId);
+        const msgs = topicRoomId ? topicStore.readAllTopicMessages(topicRoomId, ref.topicId) : [];
         const last = msgs[msgs.length - 1];
         messageId = last?.id ?? null;
         seq = typeof last?.seq === "number" ? last.seq : null;
