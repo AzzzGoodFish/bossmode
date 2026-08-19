@@ -62,6 +62,7 @@ function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     sessionResume: settings.sessionResume !== false,
     piBuiltinPrompt: settings.piBuiltinPrompt === true,
+    topicSeedMode: settings.topicSeedMode === "fresh" ? "fresh" : "fork",
     codexTransport: settings.codexTransport || "auto",
     websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
     httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
@@ -89,6 +90,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
     piBuiltinPrompt: false,
+    topicSeedMode: "fork",
     codexTransport: "auto",
     websocketConnectTimeoutMs: 15000,
   });
@@ -201,6 +203,10 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
 
   const handlePiBuiltinPromptToggle = async () => {
     await handleRuntimeChange({ piBuiltinPrompt: !runtimeSettings.piBuiltinPrompt });
+  };
+
+  const handleTopicSeedModeToggle = async () => {
+    await handleRuntimeChange({ topicSeedMode: runtimeSettings.topicSeedMode === "fresh" ? "fork" : "fresh" });
   };
 
   const handleRuntimeNetworkSave = async () => {
@@ -316,6 +322,33 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               <span
                 className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
                   runtimeSettings.piBuiltinPrompt ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-ink-1">Start topic members fresh</div>
+              <div className="text-xs text-ink-3 mt-0.5">
+                Off: new topics fork the room session at the anchor. On: members start with the topic guide only. Applies to topics created after you change this.
+              </div>
+            </div>
+            <button
+              onClick={handleTopicSeedModeToggle}
+              disabled={runtimeSaving}
+              role="switch"
+              aria-checked={runtimeSettings.topicSeedMode === "fresh"}
+              aria-label="Start topic members fresh"
+              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
+                runtimeSettings.topicSeedMode === "fresh" ? "bg-accent" : "bg-surface-3"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  runtimeSettings.topicSeedMode === "fresh" ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </button>

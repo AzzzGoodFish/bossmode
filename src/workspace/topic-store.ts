@@ -195,6 +195,13 @@ export function listTopics(roomId: string, opts?: { status?: TopicStatus }): Top
   return out;
 }
 
+/** First meaningful line, @mentions stripped — used when create API omits title. */
+export function titleFromMessage(content: string, max = 80): string {
+  const stripped = String(content || "").replace(/^(?:[@!]\S+\s*)+/, "");
+  const line = stripped.split("\n").find((l) => l.trim())?.replace(/\s+/g, " ").trim() || "";
+  return line.slice(0, max);
+}
+
 export interface CreateTopicInput {
   roomId: string;
   title: string;
@@ -216,7 +223,7 @@ export function createTopic(input: CreateTopicInput): TopicRecord {
     createdBy: "user",
     status: "active",
     createdAt: Date.now(),
-    seedMode: input.seedMode === "fork" ? "fork" : "fresh",
+    seedMode: input.seedMode === "fresh" ? "fresh" : "fork",
     participants: [],
     ...(input.guideText ? { guideText: input.guideText } : {}),
     ...(input.anchorExcerpt ? { anchorExcerpt: normalizeAnchorExcerpt(input.anchorExcerpt) } : {}),

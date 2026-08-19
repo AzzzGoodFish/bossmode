@@ -77,11 +77,11 @@ describe("runtime settings routes", () => {
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, {
       sessionResume: true,
       piBuiltinPrompt: false,
+      topicSeedMode: "fork",
       codexTransport: "websocket-cached",
       websocketConnectTimeoutMs: 60000,
     });
   });
-});
 
   it("persists piBuiltinPrompt toggle", async () => {
     const config = {
@@ -104,3 +104,25 @@ describe("runtime settings routes", () => {
       sessionResume: true,
     }));
   });
+
+  it("persists topicSeedMode toggle", async () => {
+    const config = {
+      auth: { username: "u", passwordHash: "h" },
+      apiKeys: {},
+      defaults: { host: "127.0.0.1", port: 8080 },
+      runtime: { sessionResume: true },
+    };
+    readConfigMock.mockReturnValue(config);
+    parseBodyMock.mockResolvedValue({ topicSeedMode: "fresh" });
+
+    const handler = routes.get("PUT /api/settings/runtime");
+    await handler({} as any, {} as any, {});
+
+    expect(writeConfigMock).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: expect.objectContaining({ topicSeedMode: "fresh" }),
+    }));
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
+      topicSeedMode: "fresh",
+    }));
+  });
+});

@@ -132,4 +132,25 @@ describe("Acceptance: topic batch-3 routes + user replyTo", () => {
     const missing = await jsonRequest(ts.port, "POST", `/api/dm/${pm.id}/messages`, { token, body: { text: "x", replyTo: { seq: 999 } } });
     expect(missing.status).toBe(404);
   });
+
+  it("⑤ composer create: no title, content is first topic message, seedMode fork", async () => {
+    const room = await makeRoom("composer-room");
+    const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, {
+      token,
+      body: { content: "@pm please own this thread" },
+    });
+    expect(res.status).toBe(201);
+    const { topic } = JSON.parse(res.body);
+    expect(topic.title).toBe("please own this thread");
+    expect(topic.seedMode).toBe("fork");
+    expect(topic.anchorMessageId).toBeTruthy();
+
+    const tmsgs = JSON.parse((await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/topics/${topic.id}/messages?limit=20`, { token })).body);
+    expect(tmsgs.messages.some((m: any) => m.content === "@pm please own this thread")).toBe(true);
+    expect(tmsgs.messages.find((m: any) => m.content === "@pm please own this thread").mentions).toContain("pm");
+
+    const roomMsgs = await roomMessages(room.id);
+    expect(roomMsgs.some((m: any) => m.content === "@pm please own this thread")).toBe(false);
+    expect(roomMsgs.some((m: any) => m.type === "topic_event")).toBe(true);
+  });
 });

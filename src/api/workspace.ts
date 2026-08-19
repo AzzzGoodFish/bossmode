@@ -17,7 +17,7 @@ import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgent
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
-import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
+import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, resolveCredentialProfileForModel, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
@@ -1081,46 +1081,72 @@ addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
     title?: string;
     anchorMessageId?: string;
     anchorSeq?: number;
-    seedMode?: "fork" | "fresh";
+    content?: string;
   };
-  if (!body.anchorMessageId) { sendJson(res, 400, { error: "anchorMessageId is required" }); return; }
+  const content = String(body.content ?? "").trim();
   const all = messageStore.readAllMessages(params.id);
-  const anchor = all.find((m) => m.id === body.anchorMessageId)
-    || (body.anchorSeq !== undefined ? all.find((m) => m.seq === body.anchorSeq) : undefined);
-  if (!anchor) { sendJson(res, 404, { error: "Anchor message not found in room" }); return; }
+  const anchor = body.anchorMessageId
+    ? all.find((m) => m.id === body.anchorMessageId)
+    : (body.anchorSeq !== undefined ? all.find((m) => m.seq === body.anchorSeq) : undefined);
+  if (body.anchorMessageId && !anchor) { sendJson(res, 404, { error: "Anchor message not found in room" }); return; }
+  if (!anchor && !content) { sendJson(res, 400, { error: "anchorMessageId or content is required" }); return; }
 
-  const seedMode = body.seedMode === "fork" ? "fork" : "fresh";
-  const title = (body.title || "").trim() || String(anchor.content || "").replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled topic";
+  const seedMode = getTopicSeedMode();
+  const sourceText = content || String(anchor?.content || "");
+  const title = (body.title || "").trim() || topicStore.titleFromMessage(sourceText) || "Untitled topic";
   const guideText = topicStore.buildTopicGuideText({
     title,
     roomName: room.name,
     roomId: room.id,
-    anchorExcerpt: anchor.content || "",
+    anchorExcerpt: sourceText,
     seedMode,
   });
   const topic = topicStore.createTopic({
     roomId: room.id,
     title,
-    anchorMessageId: anchor.id,
-    anchorSeq: anchor.seq,
+    anchorMessageId: anchor?.id || "",
+    anchorSeq: anchor?.seq,
     seedMode,
     guideText,
-    anchorExcerpt: topicStore.normalizeAnchorExcerpt(anchor.content || ""),
+    anchorExcerpt: topicStore.normalizeAnchorExcerpt(sourceText),
   });
 
   // Opening card on the room stream (batch 3: structured topic_event card; batch 4 flips on close).
-  postMessage(room.id, "user", `Topic opened: ${topic.title}`, [], {
+  const card = postMessage(room.id, "user", `Topic opened: ${topic.title}`, [], {
     type: "topic_event",
     topic_event_meta: {
       action: "opened",
       topicId: topic.id,
       title: topic.title,
-      anchorSeq: anchor.seq,
-      anchorMessageId: anchor.id,
-      anchorExcerpt: String(anchor.content || "").replace(/\s+/g, " ").trim().slice(0, 120),
+      anchorSeq: anchor?.seq ?? topic.anchorSeq,
+      anchorMessageId: anchor?.id || topic.anchorMessageId,
+      anchorExcerpt: topicStore.normalizeAnchorExcerpt(sourceText).slice(0, 120),
       actor: "user",
     },
   });
+  if (!anchor) {
+    topic.anchorMessageId = card.id;
+    topic.anchorSeq = card.seq;
+    topicStore.saveTopic(topic);
+  }
+
+  // Composer mode: first topic message + @ activations via the mention router (single path).
+  if (content) {
+    const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
+    const roomMembers = roomStore.getRoomMembers(params.id);
+    const urgentMentions = parseUrgentMentions(content, roomMembers.map((m) => m.name));
+    const mentions = [...new Set([...parseMentions(content, roomMembers.map((m) => m.name)), ...urgentMentions])];
+    const mentionMemberIds = [...new Set([
+      ...parseMentionMemberIds(content, roomMembers),
+      ...parseUrgentMentionMemberIds(content, roomMembers),
+    ])];
+    const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
+    postMessage(scopeId, "user", content, mentions, {
+      mentionMemberIds,
+      ...(urgentMentions.length ? { urgentMentions } : {}),
+      ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
+    });
+  }
 
   sendJson(res, 201, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
 });
