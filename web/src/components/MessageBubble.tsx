@@ -121,7 +121,7 @@ export function MessageBubble({
             </button>
           )}
           {onCreateTopic && (
-            <button type="button" onClick={onCreateTopic} title="New topic" aria-label="New topic" className="w-7 h-[26px] flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
+            <button type="button" onClick={onCreateTopic} title="Start a topic from this message — creates on first send" aria-label="New topic" className="w-7 h-[26px] flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
               <MessagesSquare size={13} />
             </button>
           )}
