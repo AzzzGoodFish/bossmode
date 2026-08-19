@@ -6,9 +6,9 @@
  * - Draft topic (Feishu semantics): opened from a message's topic button —
  *   nothing persists until the first message sends; the anchor is the subject.
  *
- * Right rail is the room's NATIVE member view (StationPanel): member info,
- * tool terminal-state bars, model/thinking switching — same component as the
- * room, operating on the parent room's member records.
+ * Right rail is the room's NATIVE member view (StationPanel), narrowed to the
+ * topic's participants only (fish 2026-08-19 ②): members @-mentioned/activated
+ * in this topic — not the full room roster. Hidden until someone is brought in.
  *
  * Data: WS subscriptions on both topic:<id> (messages + in-topic status) and
  * the parent room scope (member status/context parity with the room view).
@@ -182,23 +182,32 @@ export function TopicPage({
 
   const members = useMemo(() => memberInfos.map((m) => m.name), [memberInfos]);
 
-  // Native rail parity: seed context usage per member (room scope), like useRoom.
+  // Right rail shows ONLY the topic's participants (members @-mentioned/activated
+  // in this topic) — not the full room roster (fish 2026-08-19 ②).
+  // The composer mention list keeps the full roster (anyone can be brought in).
+  const railMembers = useMemo(() => {
+    if (isDraft || !topic) return [];
+    const nameOf = (id: string) => memberInfos.find((m) => m.id === id)?.name ?? id;
+    return topic.participants.map(nameOf);
+  }, [isDraft, topic, memberInfos]);
+
+  // Native rail parity: seed context usage per SHOWN member (room scope), like useRoom.
   useEffect(() => {
-    if (members.length === 0) return;
+    if (railMembers.length === 0) return;
     let cancelled = false;
-    Promise.allSettled(members.map((name) => getAgentContextUsage(roomId, name))).then((results) => {
+    Promise.allSettled(railMembers.map((name) => getAgentContextUsage(roomId, name))).then((results) => {
       if (cancelled) return;
-      // Rebuild by call order — results align with the members array.
+      // Rebuild by call order — results align with the railMembers array.
       const byName: Record<string, ContextUsageData> = {};
       results.forEach((r, i) => {
         if (r.status !== "fulfilled") return;
         const data = r.value as any;
-        if (data && !data.unavailable && data.supported !== false) byName[members[i]] = data;
+        if (data && !data.unavailable && data.supported !== false) byName[railMembers[i]] = data;
       });
       if (Object.keys(byName).length > 0) setContextUsage((prev) => ({ ...prev, ...byName }));
     });
     return () => { cancelled = true; };
-  }, [members, roomId, setContextUsage]);
+  }, [railMembers, roomId, setContextUsage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView();
@@ -265,6 +274,7 @@ export function TopicPage({
             currentTopicId={topicId}
             onSelectRoom={onBack}
             onSelectTopic={(id) => onOpenTopic?.(id)}
+            onClose={toggleTopicRail}
           />
         )}
         {/* stream column */}
@@ -347,17 +357,19 @@ export function TopicPage({
           )}
         </div>
 
-        {/* right rail — the room's NATIVE member view (fish v3 ③) */}
-        <div className="w-[280px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
-          <StationPanel
-            members={members}
-            agentStatus={agentStatus}
-            contextUsage={contextUsage}
-            roomId={roomId}
-            onOpenMcpSettings={onOpenMcpSettings}
-            onOpenExtensionsSettings={onOpenExtensionsSettings}
-          />
-        </div>
+        {/* right rail — native member view, participants only (fish ②); hidden until someone is @'d in */}
+        {railMembers.length > 0 && (
+          <div className="w-[280px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
+            <StationPanel
+              members={railMembers}
+              agentStatus={agentStatus}
+              contextUsage={contextUsage}
+              roomId={roomId}
+              onOpenMcpSettings={onOpenMcpSettings}
+              onOpenExtensionsSettings={onOpenExtensionsSettings}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

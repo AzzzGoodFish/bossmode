@@ -395,6 +395,7 @@ export function Main({
             currentTopicId={null}
             onSelectRoom={() => {}}
             onSelectTopic={(topicId) => onOpenTopicPage?.(selectedRoomId, topicId)}
+            onClose={toggleTopicRail}
           />
         )}
         <div className="flex-1 flex flex-col min-w-0">
