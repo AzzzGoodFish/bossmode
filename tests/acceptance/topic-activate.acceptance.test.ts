@@ -106,4 +106,41 @@ describe("Acceptance: topic @ activates topic instance (P0)", () => {
     const leaked = roomMsgs.filter((m: { content: string }) => /CF:CHAT/.test(m.content));
     expect(leaked).toHaveLength(0);
   });
+
+  it("topic activate prompt includes trigger body and reply quote", async () => {
+    const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
+      token,
+      body: {
+        name: "p1-topic-envelope",
+        cwd: "/tmp",
+        members: [{ agent: "pm", name: "pm" }, { agent: "developer", name: "developer" }],
+        promptLeaderMemberName: "pm",
+      },
+    });
+    expect(roomRes.status).toBe(200);
+    const room = JSON.parse(roomRes.body);
+    await configureMockMembersForRoom(room.id, ["pm", "developer"]);
+
+    const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
+      token, body: { content: "anchor" },
+    })).body);
+    const { topic } = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, {
+      token, body: { title: "env", anchorMessageId: anchor.id, seedMode: "fresh" },
+    })).body);
+
+    const first = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/messages`, {
+      token, body: { content: "original body here" },
+    })).body);
+    mockPromptFn.mockClear();
+    const quoted = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/messages`, {
+      token, body: { content: "@pm look at this quote", replyTo: { seq: first.seq } },
+    });
+    expect(quoted.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 150));
+
+    const prompt = String(mockPromptFn.mock.calls.at(-1)?.[0] ?? "");
+    expect(prompt).toContain("look at this quote");
+    expect(prompt).toMatch(/In reply to msg:#/i);
+    expect(prompt).toContain("original body here");
+  });
 });

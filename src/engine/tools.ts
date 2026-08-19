@@ -13,7 +13,7 @@ import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../works
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { resolveTopicRoomId, resolveOwningRoomId, readAllTopicMessages } from "../workspace/topic-store.js";
+import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages } from "../workspace/topic-store.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
@@ -112,9 +112,10 @@ export function deliverMemberMessage(roomId: string, memberName: string, text: s
     return;
   }
 
-  const room = roomStore.getRoom(roomId);
-  const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-  const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, memberName) : undefined;
+  const rosterId = resolveChatScopeRoomId(roomId) || roomId;
+  const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
+  const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+  const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, memberName) : undefined;
   const info = room ? mentionInfoFromText(text, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
 
   // Room message via message-bus (writes + broadcasts + notifies listeners)
@@ -282,7 +283,8 @@ export async function handleToolCallback(
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const outcomes = await processAgentAttachments(roomId, params.attachments.map(String));
+        const attachRoomId = resolveChatScopeRoomId(roomId) || roomId;
+        const outcomes = await processAgentAttachments(attachRoomId, params.attachments.map(String));
         const errors: string[] = [];
         for (const o of outcomes) {
           if (o.ok) {
@@ -321,9 +323,10 @@ export async function handleToolCallback(
         return { ok: true, ...(hasNeed ? { note: "no @target — need_response ignored" } : {}) };
       }
 
-      const room = roomStore.getRoom(roomId);
-      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(roomId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
+      const rosterId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
+      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, agentName) : undefined;
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
       const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
 
@@ -605,13 +608,14 @@ export async function handleToolCallback(
       }
       // Room principles — room-level shared asset, still room-keyed; leader-only writes.
       if (roomId.startsWith("dm:")) return { ok: false, error: "Room principles are not available in a DM scope" };
-      const room = roomStore.getRoom(roomId);
+      const principlesRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = roomStore.getRoom(principlesRoomId);
       if (!room) return { ok: false, error: "Room not found" };
       if (!room.promptLeaderMemberId) return { ok: false, error: "No room leader is configured; room principles writes are disabled" };
       if (room.promptLeaderMemberId !== actor.id) return { ok: false, error: "Only the configured room leader can write the room principles" };
       try {
         const common = {
-          roomId,
+          roomId: principlesRoomId,
           scope: "room" as principlesStore.PrinciplesScope,
           memberId: undefined,
           actor: memoryActor,
@@ -620,7 +624,7 @@ export async function handleToolCallback(
         const principles = tool === "write_memory"
           ? principlesStore.writePrinciples({ ...common, content: String(params?.content ?? "") })
           : principlesStore.editPrinciples({ ...common, oldText: String(params?.oldText ?? ""), newText: String(params?.newText ?? "") });
-        const budget = principlesStore.readPrinciplesWithBudget(roomId, "room").budget;
+        const budget = principlesStore.readPrinciplesWithBudget(principlesRoomId, "room").budget;
         return {
           ok: true,
           asset,
@@ -675,7 +679,8 @@ export async function handleToolCallback(
     case "update_task": {
       const taskId = params?.taskId ? String(params.taskId) : "";
       if (!taskId) return { ok: false, error: "taskId is required" };
-      const before = taskStore.getTask(roomId, taskId);
+      const taskRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const before = taskStore.getTask(taskRoomId, taskId);
       if (!before) return { ok: false, error: `Task not found: ${taskId}` };
       try {
         const patch: Parameters<typeof taskStore.updateTask>[2] = {};
@@ -683,21 +688,21 @@ export async function handleToolCallback(
         if (params?.status !== undefined) patch.status = params.status as TaskStatus;
         if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
         if (params?.assignee !== undefined) {
-          const assignee = resolveTaskAssignee(roomId, params.assignee);
+          const assignee = resolveTaskAssignee(taskRoomId, params.assignee);
           patch.assignee = assignee?.name;
           patch.assigneeMemberId = assignee?.memberId;
         }
         if (params?.description !== undefined) patch.description = String(params.description);
         if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
         if (params?.subscribers !== undefined) {
-          const subscribers = resolveTaskSubscribers(roomId, params.subscribers) || { names: [], memberIds: [] };
+          const subscribers = resolveTaskSubscribers(taskRoomId, params.subscribers) || { names: [], memberIds: [] };
           patch.subscribers = subscribers.names;
           patch.subscriberMemberIds = subscribers.memberIds;
         }
-        const updated = taskStore.updateTask(roomId, taskId, patch);
+        const updated = taskStore.updateTask(taskRoomId, taskId, patch);
         if (!updated) return { ok: false, error: "Update failed" };
         const action = before.status !== updated.status ? "status_changed" : "updated";
-        emitTaskEvent(roomId, action, updated, agentName);
+        emitTaskEvent(taskRoomId, action, updated, agentName);
         return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };
@@ -716,7 +721,7 @@ export async function handleToolCallback(
       if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
       if (!tTarget.ok) return { ok: false, error: tTarget.error };
       if (tTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
-      const tasksRoomId = tTarget.roomId;
+      const tasksRoomId = resolveChatScopeRoomId(tTarget.roomId) || tTarget.roomId;
       let tasks = taskStore.listTasks(tasksRoomId);
       if (params?.status) tasks = tasks.filter((t) => t.status === params.status);
       if (params?.assignee) tasks = tasks.filter((t) => taskAssigneeMatches(tasksRoomId, t, String(params.assignee)));
@@ -737,7 +742,8 @@ export async function handleToolCallback(
       if (gTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
       const taskId = params?.taskId ? String(params.taskId) : "";
       if (!taskId) return { ok: false, error: "taskId is required" };
-      const task = taskStore.getTask(gTarget.roomId, taskId);
+      const getTaskRoomId = resolveChatScopeRoomId(gTarget.roomId) || gTarget.roomId;
+      const task = taskStore.getTask(getTaskRoomId, taskId);
       if (!task) return { ok: false, error: `Task not found: ${taskId}` };
       return truncateToolResult(renderTaskAsMarkdown(task));
     }
@@ -746,9 +752,10 @@ export async function handleToolCallback(
       const comment = params?.comment ? String(params.comment) : "";
       if (!taskId) return { ok: false, error: "taskId is required" };
       if (!comment.trim()) return { ok: false, error: "comment is required" };
-      const result = taskStore.addTaskComment(roomId, taskId, { author: agentName, content: comment });
+      const commentRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const result = taskStore.addTaskComment(commentRoomId, taskId, { author: agentName, content: comment });
       if (!result) return { ok: false, error: `Task not found: ${taskId}` };
-      emitTaskEvent(roomId, "commented", result.task, agentName, { commentId: result.comment.id });
+      emitTaskEvent(commentRoomId, "commented", result.task, agentName, { commentId: result.comment.id });
       return { ok: true, taskId: result.task.id, commentId: result.comment.id };
     }
     case "query_integration": {
@@ -761,7 +768,7 @@ export async function handleToolCallback(
       try {
         const client = new LinearClient(apiKey);
         const [viewer, teams] = await Promise.all([client.viewer(), client.listTeams()]);
-        const config = getRoomLinearIntegration(roomId);
+        const config = getRoomLinearIntegration(resolveChatScopeRoomId(roomId) || roomId);
         const teamQuery = params?.team ? String(params.team) : undefined;
         const projectTeam = teamQuery ? findTeam(teams, teamQuery) : (config ? teams.find((t) => t.id === config.teamId) : undefined);
         const projects = projectTeam ? await client.listProjects(projectTeam.id) : [];
@@ -796,7 +803,7 @@ export async function handleToolCallback(
       const projectInput = params?.project ? String(params.project) : "";
       const project = projectInput ? findProject(projects, projectInput) : undefined;
       if (projectInput && !project) return { ok: false, error: `Linear project not found in ${team.name}: ${projectInput}`, projects };
-      const config = saveRoomLinearIntegration(roomId, {
+      const config = saveRoomLinearIntegration(resolveChatScopeRoomId(roomId) || roomId, {
         teamId: team.id,
         teamName: team.name,
         teamKey: team.key,
@@ -808,23 +815,26 @@ export async function handleToolCallback(
     }
     case "member_status": {
       // Room-scope read-only live status (same source as the member panel lamp).
-      const room = roomStore.getRoom(roomId);
+      const statusRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = roomStore.getRoom(statusRoomId);
       if (!room) return { ok: false, error: "Room not found" };
       const { getRoomMemberStatusReport } = await import("./agent-manager.js");
       const memberRef = params?.member !== undefined ? String(params.member).trim() : "";
-      const report = getRoomMemberStatusReport(roomId, memberRef || undefined);
+      const report = getRoomMemberStatusReport(statusRoomId, memberRef || undefined);
       if (!report) return { ok: false, error: `Member not found: ${memberRef}` };
       return { ok: true, members: report };
     }
     case "wait": {
       // 0.20: wait available to all room members (no longer leader-only).
-      const room = roomStore.getRoom(roomId);
-      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
+      // Roster from parent room; wait watches the current scope (topic instance if any).
+      const waitRosterId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = roomStore.getRoom(waitRosterId);
+      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(waitRosterId, agentName) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
 
       const targetRef = String(params?.member || "").trim();
       if (!targetRef) return { ok: false, error: "member is required" };
-      const target = (roomStore as any).resolveRoomMemberRef(roomId, targetRef);
+      const target = (roomStore as any).resolveRoomMemberRef(waitRosterId, targetRef);
       if (!target) return { ok: false, error: `Member not found: ${targetRef}` };
       if (target.id === actor.id) return { ok: false, error: "Cannot wait on yourself" };
 
@@ -952,7 +962,8 @@ export async function handleToolCallback(
       const actorGlobal = findMemberByName(agentName) || listMembers().find((m) => m.name === agentName);
       if (!actorGlobal) return { ok: false, error: `Member not found: ${agentName}` };
 
-      const targetRoomId = String(params?.roomId || roomId || "").trim();
+      const rawTarget = String(params?.roomId || roomId || "").trim();
+      const targetRoomId = resolveChatScopeRoomId(rawTarget) || rawTarget;
       if (!targetRoomId) return { ok: false, error: "roomId is required" };
       const room = roomStore.getRoom(targetRoomId);
       if (!room) return { ok: false, error: "Room not found" };

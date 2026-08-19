@@ -2469,7 +2469,15 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
  * Does not touch the parent room instance.
  */
 export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string): Promise<void> {
-  const { getTopic, addTopicParticipant, buildTopicGuideText } = await import("../workspace/topic-store.js");
+  const {
+    getTopic,
+    addTopicParticipant,
+    buildTopicGuideText,
+    getTopicCursors,
+    setTopicCursor,
+    getTopicMessagesSince,
+    getLatestTopicMessageId,
+  } = await import("../workspace/topic-store.js");
   const topic = getTopic(parentRoomId, topicId);
   if (!topic || topic.status !== "active") {
     logger.warn("agent", "activateTopicMember: topic missing or closed", { parentRoomId, topicId });
@@ -2485,22 +2493,40 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
   addTopicParticipant(parentRoomId, topicId, memberId);
 
   const scopeId = instance.scopeId;
+  const roomName = roomStore.getRoom(parentRoomId)?.name || parentRoomId;
+  const cursors = getTopicCursors(parentRoomId, topicId);
+  const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
+  const allNew = getTopicMessagesSince(parentRoomId, topicId, lastCursor);
+  const visible = filterAgentVisibleMessages(allNew, memberName);
+
+  let formattedTrigger = "";
+  if (visible.length > 0) {
+    const triggerIdx = lastMentionTriggerIndex(visible, memberName);
+    const trigger = visible[triggerIdx >= 0 ? triggerIdx : visible.length - 1];
+    formattedTrigger = formatMessagesForAgent(scopeId, [trigger], memberName, roomName);
+    setTopicCursor(parentRoomId, topicId, memberId, trigger.id);
+  } else {
+    const latest = getLatestTopicMessageId(parentRoomId, topicId);
+    if (latest) setTopicCursor(parentRoomId, topicId, memberId, latest);
+  }
+
   setActivationSource(scopeId, memberName, "room_mention");
   try {
     const guide =
       topic.guideText
       || buildTopicGuideText({
         title: topic.title,
-        roomName: roomStore.getRoom(parentRoomId)?.name || parentRoomId,
+        roomName,
         roomId: parentRoomId,
         anchorExcerpt: "",
         seedMode: topic.seedMode,
       });
 
-    // Fresh seed: guide is the sole context; room history via tools only.
-    const prompt =
-      `${guide}\n\n` +
-      `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`;
+    const prompt = [
+      guide,
+      formattedTrigger,
+      `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`,
+    ].filter(Boolean).join("\n\n");
 
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "topic-activate");
