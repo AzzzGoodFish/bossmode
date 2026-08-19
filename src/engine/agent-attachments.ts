@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { checkPath, type PathPolicy } from "../shared/path-security.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../workspace/attachment-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import { resolveChatScopeRoomId } from "../workspace/topic-store.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 
@@ -26,7 +27,8 @@ export type AttachmentOutcome = AttachmentSuccess | AttachmentError;
 
 /** Build path policy for a room — defines allowed attachment source directories. */
 function buildPolicy(roomId: string): PathPolicy {
-  const room = roomStore.getRoom(roomId);
+  const parentId = resolveChatScopeRoomId(roomId) || roomId;
+  const room = roomStore.getRoom(parentId);
   if (!room) throw new Error(`Room not found: ${roomId}`);
   const allowedPrefixes: string[] = [];
   try { allowedPrefixes.push(realpathSync(room.cwd)); } catch { /* skip if unresolvable */ }
@@ -56,7 +58,7 @@ export async function processAgentAttachments(
       continue;
     }
     try {
-      const stored = await copyToAttachment(check.absolutePath, roomId);
+      const stored = await copyToAttachment(check.absolutePath, resolveChatScopeRoomId(roomId) || roomId);
       results.push({ ok: true, ...stored });
     } catch (err: any) {
       results.push({ ok: false, path: p, error: err.message || String(err) });

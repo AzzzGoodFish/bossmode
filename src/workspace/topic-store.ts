@@ -5,7 +5,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { roomDir, getRoomsDir } from "./room-store.js";
+import { roomDir, getRoomsDir, getRoom } from "./room-store.js";
+import type { Room } from "../shared/types.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseJsonlLines } from "../shared/jsonl.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -58,6 +59,47 @@ export function resolveOwningRoomId(roomIdOrScope: string): string {
     return roomIdOrScope.slice("room:".length);
   }
   return roomIdOrScope;
+}
+
+/** Parent room uuid for room-owned assets (roster, attachments, tasks, principles). DM → null. */
+export function resolveChatScopeRoomId(scopeOrRoomId: string): string | null {
+  if (typeof scopeOrRoomId === "string" && scopeOrRoomId.startsWith("dm:")) return null;
+  const id = resolveOwningRoomId(scopeOrRoomId);
+  if (!id || id.startsWith("topic:") || id.startsWith("dm:")) return null;
+  return id;
+}
+
+export function resolveChatScopeRoom(scopeOrRoomId: string): Room | null {
+  const id = resolveChatScopeRoomId(scopeOrRoomId);
+  return id ? getRoom(id) : null;
+}
+
+function topicCursorsPath(roomId: string, topicId: string): string {
+  return join(ensureTopicDir(roomId, topicId), "cursors.json");
+}
+
+export function getTopicCursors(roomId: string, topicId: string): Record<string, string | null> {
+  const path = topicCursorsPath(roomId, topicId);
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Record<string, string | null>;
+  } catch {
+    return {};
+  }
+}
+
+export function setTopicCursor(roomId: string, topicId: string, memberRef: string, cursor: string | null): void {
+  const cursors = getTopicCursors(roomId, topicId);
+  cursors[memberRef] = cursor;
+  writeFileSync(topicCursorsPath(roomId, topicId), JSON.stringify(cursors, null, 2), "utf-8");
+}
+
+export function getTopicMessagesSince(roomId: string, topicId: string, cursorId: string | null): RoomMessage[] {
+  const all = readAllTopicMessages(roomId, topicId);
+  if (!cursorId) return all;
+  const idx = all.findIndex((m) => m.id === cursorId);
+  if (idx === -1) return all;
+  return all.slice(idx + 1);
 }
 
 /** Event history dir: topic events live under the parent room, never rooms/topic:<id>/. */
