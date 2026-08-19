@@ -1,31 +1,53 @@
 /**
- * Topic workspace (topic-threads v2, fish-approved prototype topic-threads-v2).
+ * Topic workspace (topic-threads v3, fish 2026-08-19 feedback on rc.5):
  *
- * A topic IS a workspace, not a panel attachment: same anatomy as the room page —
- * top bar (back + title + anchored #seq + End topic…), stream with the anchor
- * context block pinned on top, composer, right rail with in-topic participants.
- * Panel⇄Surface tiers from v1 are retired.
+ * - Real topic: room-form page (top bar back/title/anchored #seq/End topic…,
+ *   anchor context block → jump to room message, composer, native member rail).
+ * - Draft topic (Feishu semantics): opened from a message's topic button —
+ *   nothing persists until the first message sends; the anchor is the subject.
  *
- * Data: own WS subscription on topic:<id> (messages + agent:status share the
- * scope); messages never touch the parent room stream. Read cursor reported
- * like the room does (watching = reading, Feishu semantics).
+ * Right rail is the room's NATIVE member view (StationPanel): member info,
+ * tool terminal-state bars, model/thinking switching — same component as the
+ * room, operating on the parent room's member records.
+ *
+ * Data: WS subscriptions on both topic:<id> (messages + in-topic status) and
+ * the parent room scope (member status/context parity with the room view).
+ * Read cursor reported like the room does (watching = reading).
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, MessagesSquare } from "lucide-react";
-import { closeTopic, getRoom, getRoomMembers, getTopic, getTopicMessages, sendTopicMessage, postConversationRead, getUsername, type MemberInfo, type RoomMessage, type TopicRecord } from "../api/client";
+import {
+  closeTopic, getRoom, getRoomMembers, getTopic, getTopicMessages, sendTopicMessage,
+  postConversationRead, getAgentContextUsage, getUsername,
+  type ContextUsageData, type MemberInfo, type RoomMessage, type TopicRecord,
+} from "../api/client";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
+import type { AgentStatusMap } from "../hooks/useRoom";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { StationPanel } from "../components/StationPanel";
 
-function useTopicStream(roomId: string, topicId: string) {
+export interface TopicDraftAnchor {
+  anchorMessageId: string;
+  anchorSeq?: number;
+  title: string;
+  excerpt: string;
+}
+
+function useTopicStream(roomId: string, topicId: string | null) {
   const [topic, setTopic] = useState<TopicRecord | null>(null);
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [notFound, setNotFound] = useState(false);
-  /** Topic-scoped member status (agent:status broadcasts on topic:<id>, same scope as messages). */
-  const [statusByName, setStatusByName] = useState<Record<string, string>>({});
-  const scopeId = `topic:${topicId}`;
+  /** Topic-scoped member status (agent:status broadcasts on topic:<id>). */
+  const [topicStatusByName, setTopicStatusByName] = useState<AgentStatusMap>({});
+  /** Room-scoped member status — the native rail's parity source. */
+  const [roomStatusByName, setRoomStatusByName] = useState<AgentStatusMap>({});
+  const [contextUsage, setContextUsage] = useState<Record<string, ContextUsageData>>({});
+  const scopeId = topicId ? `topic:${topicId}` : null;
+  const roomScope = `room:${roomId}`;
 
   useEffect(() => {
+    if (!topicId) return;
     let cancelled = false;
     setNotFound(false);
     Promise.all([getTopic(roomId, topicId), getTopicMessages(roomId, topicId, 500)])
@@ -36,39 +58,55 @@ function useTopicStream(roomId: string, topicId: string) {
       })
       .catch(() => { if (!cancelled) setNotFound(true); });
     // Viewing = reading (room semantics): report the cursor on open.
-    postConversationRead(scopeId).catch(() => {});
+    postConversationRead(`topic:${topicId}`).catch(() => {});
     return () => { cancelled = true; };
-  }, [roomId, topicId, scopeId]);
+  }, [roomId, topicId]);
 
   const handleWsEvent = useCallback(
     (event: WsEvent) => {
-      if (event.type === "room:message" && event.roomId === scopeId) {
+      if (scopeId && event.type === "room:message" && event.roomId === scopeId) {
         const msg = event.message as RoomMessage;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         // A fresh message can mean a new participant joined — refetch the record lazily.
-        getTopic(roomId, topicId).then((t) => setTopic(t.topic)).catch(() => {});
+        getTopic(roomId, topicId!).then((t) => setTopic(t.topic)).catch(() => {});
       }
-      if (event.type === "agent:status" && event.roomId === scopeId) {
-        setStatusByName((prev) => ({ ...prev, [event.agent]: event.status }));
+      if (event.type === "agent:status") {
+        const status = event.status as AgentStatusMap[string];
+        if (scopeId && event.roomId === scopeId) {
+          setTopicStatusByName((prev) => ({ ...prev, [event.agent]: status }));
+        }
+        if (event.roomId === roomScope) {
+          setRoomStatusByName((prev) => ({ ...prev, [event.agent]: status }));
+        }
+      }
+      if (event.type === "agent:context_usage" && (event.roomId === roomScope || (scopeId && event.roomId === scopeId))) {
+        const name = (event as any).agent as string;
+        const usage = (event as any).usage as ContextUsageData | undefined;
+        if (name && usage) setContextUsage((prev) => ({ ...prev, [name]: usage }));
       }
     },
-    [scopeId, roomId, topicId],
+    [scopeId, roomScope, roomId, topicId],
   );
   const { subscribeRoom, unsubscribeRoom } = useWebSocket({ onEvent: handleWsEvent });
   useEffect(() => {
-    subscribeRoom(scopeId);
-    return () => unsubscribeRoom(scopeId);
-  }, [scopeId, subscribeRoom, unsubscribeRoom]);
+    subscribeRoom(roomScope);
+    if (scopeId) subscribeRoom(scopeId);
+    return () => {
+      unsubscribeRoom(roomScope);
+      if (scopeId) unsubscribeRoom(scopeId);
+    };
+  }, [scopeId, roomScope, subscribeRoom, unsubscribeRoom]);
 
   // Follow the read cursor while viewing (debounced, like useRoom).
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (!scopeId || messages.length === 0) return;
     const t = setTimeout(() => { postConversationRead(scopeId).catch(() => {}); }, 800);
     return () => clearTimeout(t);
   }, [scopeId, messages]);
 
   const send = useCallback(
     async (content: string, replyTo?: { seq: number }) => {
+      if (!topicId) return;
       const msg = await sendTopicMessage(roomId, topicId, content, replyTo);
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     },
@@ -76,11 +114,12 @@ function useTopicStream(roomId: string, topicId: string) {
   );
 
   const endTopic = useCallback(async () => {
+    if (!topicId) return;
     const res = await closeTopic(roomId, topicId);
     if (res?.topic) setTopic(res.topic);
   }, [roomId, topicId]);
 
-  return { topic, messages, notFound, send, endTopic, statusByName };
+  return { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage };
 }
 
 function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
@@ -94,19 +133,32 @@ function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: nu
 export function TopicPage({
   roomId,
   topicId,
+  draft,
+  onCreateDraft,
   onBack,
   onJumpToRoomMessage,
+  onOpenMcpSettings,
+  onOpenExtensionsSettings,
 }: {
   roomId: string;
-  topicId: string;
+  /** Real topic id; null in draft mode. */
+  topicId: string | null;
+  /** Draft anchor (v3): when set, the page is an unsent draft workspace. */
+  draft?: TopicDraftAnchor;
+  /** First-message send in draft mode: parent creates the topic and navigates. */
+  onCreateDraft?: (content: string) => Promise<void>;
   onBack: () => void;
   onJumpToRoomMessage?: (messageId: string) => void;
+  onOpenMcpSettings?: () => void;
+  onOpenExtensionsSettings?: () => void;
 }) {
-  const { topic, messages, notFound, send, endTopic, statusByName } = useTopicStream(roomId, topicId);
+  const isDraft = !topicId;
+  const { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage } = useTopicStream(roomId, topicId);
   const [quote, setQuote] = useState<{ seq: number; messageId: string; sender: string; excerpt: string } | null>(null);
   const [ending, setEnding] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("room");
-  const [memberInfos, setMemberInfos] = useState<Array<Pick<MemberInfo, "id" | "name">>>([]);
+  const [memberInfos, setMemberInfos] = useState<MemberInfo[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const closed = topic?.status === "closed";
 
@@ -122,29 +174,71 @@ export function TopicPage({
     return () => { cancelled = true; };
   }, [roomId]);
 
-  const members = memberInfos.map((m) => m.name);
+  const members = useMemo(() => memberInfos.map((m) => m.name), [memberInfos]);
+
+  // Native rail parity: seed context usage per member (room scope), like useRoom.
+  useEffect(() => {
+    if (members.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(members.map((name) => getAgentContextUsage(roomId, name))).then((results) => {
+      if (cancelled) return;
+      // Rebuild by call order — results align with the members array.
+      const byName: Record<string, ContextUsageData> = {};
+      results.forEach((r, i) => {
+        if (r.status !== "fulfilled") return;
+        const data = r.value as any;
+        if (data && !data.unavailable && data.supported !== false) byName[members[i]] = data;
+      });
+      if (Object.keys(byName).length > 0) setContextUsage((prev) => ({ ...prev, ...byName }));
+    });
+    return () => { cancelled = true; };
+  }, [members, roomId, setContextUsage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView();
   }, [topicId, messages.length]);
 
-  const nameOf = (id: string) => memberInfos.find((m) => m.id === id)?.name ?? id;
+  // Topic-scoped status wins (in-topic work), room scope fills the rest.
+  const agentStatus = useMemo(() => ({ ...roomStatusByName, ...topicStatusByName }), [roomStatusByName, topicStatusByName]);
+
+  const anchorSeq = isDraft ? draft?.anchorSeq : topic?.anchorSeq;
+  const anchorExcerpt = isDraft ? draft?.excerpt : topic?.anchorExcerpt;
+  const anchorMessageId = isDraft ? draft?.anchorMessageId : topic?.anchorMessageId;
+  const title = isDraft ? (draft?.title ?? "New topic") : (topic?.title ?? "Topic");
+
+  const handleSend = async (content: string) => {
+    if (isDraft) {
+      if (!onCreateDraft) return;
+      setCreating(true);
+      try {
+        await onCreateDraft(content);
+      } finally {
+        setCreating(false);
+      }
+      return;
+    }
+    const q = quote;
+    setQuote(null);
+    return send(content, q ? { seq: q.seq } : undefined);
+  };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-surface-1" data-testid="topic-page">
+    <div className="flex-1 flex flex-col min-h-0 bg-surface-1" data-testid="topic-page" data-draft={isDraft ? "true" : "false"}>
       {/* Top bar — room-page language */}
       <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
-        <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 -ml-2 text-ink-3 hover:text-ink-1 hover:bg-surface-2 transition-colors cursor-pointer" title={`Back to ${roomName}`}>
+        <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 -ml-2 text-ink-3 hover:text-ink-1 hover:bg-surface-2 transition-colors cursor-pointer" title={isDraft ? "Discard draft and go back" : `Back to ${roomName}`}>
           <ArrowLeft size={14} />
           <span className="text-xs">{roomName}</span>
         </button>
         <MessagesSquare size={14} className="text-accent-ink shrink-0" />
-        <h2 className="text-sm font-semibold tracking-tight text-ink-1 truncate">{topic?.title ?? "Topic"}</h2>
+        <h2 className="text-sm font-semibold tracking-tight text-ink-1 truncate">{title}</h2>
         <span className="font-mono text-[11px] text-ink-4 truncate hidden sm:block">
-          topic · {topic?.anchorSeq !== undefined ? `anchored #${topic.anchorSeq}` : "composer-created"}
+          {isDraft
+            ? "draft · created on first send"
+            : `topic · ${anchorSeq !== undefined ? `anchored #${anchorSeq}` : "composer-created"}`}
         </span>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          {!closed && (
+          {!isDraft && !closed && (
             <button
               onClick={() => { setEnding(true); void endTopic().finally(() => setEnding(false)); }}
               disabled={ending}
@@ -160,29 +254,35 @@ export function TopicPage({
         {/* stream column */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
-            {notFound ? (
+            {!isDraft && notFound ? (
               <div className="h-full flex items-center justify-center text-xs text-ink-4">Topic not found.</div>
             ) : (
               <>
                 {/* Anchor context block — pinned on top, click jumps back to the room message */}
-                {topic && topic.anchorExcerpt && (
+                {anchorExcerpt && (
                   <button
                     type="button"
-                    onClick={() => topic.anchorMessageId && onJumpToRoomMessage?.(topic.anchorMessageId)}
+                    onClick={() => anchorMessageId && onJumpToRoomMessage?.(anchorMessageId)}
                     className={`w-full text-left border-l-2 border-accent bg-accent-dim/40 rounded-r-lg px-3 py-2 mb-3 ${onJumpToRoomMessage ? "cursor-pointer hover:bg-accent-dim/70" : "cursor-default"}`}
                     title={onJumpToRoomMessage ? "Jump to anchor in room" : undefined}
                   >
                     <span className="block text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-accent-ink mb-1">Topic anchor</span>
                     <span className="text-xs text-ink-3">
-                      {topic.anchorSeq !== undefined && <span className="font-mono text-[10px] text-ink-4 mr-1.5">#{topic.anchorSeq}</span>}
-                      {topic.anchorExcerpt}
+                      {anchorSeq !== undefined && <span className="font-mono text-[10px] text-ink-4 mr-1.5">#{anchorSeq}</span>}
+                      {anchorExcerpt}
                     </span>
                   </button>
                 )}
-                {messages.length === 0 && (
-                  <div className="text-xs text-ink-4 px-1 py-2">Beginning of topic. @ a member to bring them in.</div>
+                {isDraft ? (
+                  <div className="text-xs text-ink-4 px-1 py-2 leading-relaxed">
+                    This topic doesn't exist yet — your first message creates it, with the anchor above as its subject. @ members to bring them in.
+                  </div>
+                ) : (
+                  messages.length === 0 && (
+                    <div className="text-xs text-ink-4 px-1 py-2">Beginning of topic. @ a member to bring them in.</div>
+                  )
                 )}
-                {messages.map((m) => {
+                {!isDraft && messages.map((m) => {
                   const d = new Date(m.ts);
                   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                   return (
@@ -213,50 +313,34 @@ export function TopicPage({
               </>
             )}
           </div>
-          {closed ? (
+          {!isDraft && closed ? (
             <div className="shrink-0 border-t border-line-soft px-4 py-2.5 text-[11.5px] text-think">
               Topic closed — read-only. The summary card is in the room stream.
             </div>
           ) : (
             <MessageInput
-              onSend={(content) => { const q = quote; setQuote(null); return send(content, q ? { seq: q.seq } : undefined); }}
+              onSend={(content) => handleSend(content)}
               members={members}
               roomId={roomId}
-              draftKey={`topic:${topicId}`}
-              placeholder="Message topic… (@ to mention)"
+              draftKey={isDraft ? `topic-draft:${draft?.anchorMessageId}` : `topic:${topicId}`}
+              placeholder={isDraft ? "Send the first message to create this topic… (@ to mention)" : "Message topic… (@ to mention)"}
               quote={quote}
               onClearQuote={() => setQuote(null)}
+              disabled={creating}
             />
           )}
         </div>
 
-        {/* right rail — in-topic participants (station-wall row language) */}
-        <div className="w-[240px] border-l border-line shrink-0 px-3 py-3 hidden md:block">
-          <h4 className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4 mb-2">In this topic</h4>
-          {topic && topic.participants.length > 0 ? (
-            <div className="space-y-0.5">
-              {topic.participants.map((pid) => {
-                const name = nameOf(pid);
-                const working = statusByName[name] === "working";
-                return (
-                  <div key={pid} className="flex items-center gap-2 px-1 py-1.5 text-[12.5px] text-ink-2">
-                    <span className="w-[22px] h-[22px] rounded-full bg-surface-3 border border-line flex items-center justify-center text-[10px] font-semibold shrink-0">
-                      {name.charAt(0).toUpperCase()}
-                    </span>
-                    <span className="truncate">{name}</span>
-                    {working
-                      ? <span className="ml-auto w-1.5 h-1.5 rounded-full bg-onair animate-pulse shrink-0" title="working" />
-                      : <span className="ml-auto w-1.5 h-1.5 rounded-full bg-ink-4 shrink-0" title="idle" />}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-[11px] text-ink-4 leading-relaxed">No members yet — @ one in the stream.</div>
-          )}
-          <p className="mt-3 text-[10.5px] text-ink-4 leading-relaxed">
-            @ any room member to bring them in. Members enter with an English guide (title / anchor / progress summary / how to query the main stream).
-          </p>
+        {/* right rail — the room's NATIVE member view (fish v3 ③) */}
+        <div className="w-[280px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
+          <StationPanel
+            members={members}
+            agentStatus={agentStatus}
+            contextUsage={contextUsage}
+            roomId={roomId}
+            onOpenMcpSettings={onOpenMcpSettings}
+            onOpenExtensionsSettings={onOpenExtensionsSettings}
+          />
         </div>
       </div>
     </div>

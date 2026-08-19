@@ -18,6 +18,8 @@ import { MemberSettingsPage } from "./MemberSettingsPage";
 import { TemplatesPage } from "./TemplatesPage";
 import { Main } from "./Main";
 import { TopicPage } from "./TopicPage";
+import { createTopic } from "../api/client";
+import { useDialog } from "../components/dialogs";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsPage } from "./SkillsPage";
 import { KnowledgePage } from "./KnowledgePage";
@@ -59,6 +61,7 @@ export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: strin
 }
 
 export function Layout({ onLogout, username }: LayoutProps) {
+  const { toast } = useDialog();
   const [activePage, setActivePage] = useState<ActivePage>({ type: "chats" });
   /** Cross-page jump target: topic anchor block → room stream message (topic-threads v2). */
   const [pendingJump, setPendingJump] = useState<{ roomId: string; messageId: string } | null>(null);
@@ -301,6 +304,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
             onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
+            onOpenTopicDraft={(roomId, anchor) => handleNavigate({ type: "topic-draft", roomId, anchorMessageId: anchor.anchorMessageId, anchorSeq: anchor.anchorSeq, anchorTitle: anchor.title, anchorExcerpt: anchor.excerpt })}
             pendingJump={pendingJump}
             onConsumeJump={() => setPendingJump(null)}
           />
@@ -316,6 +320,42 @@ export function Layout({ onLogout, username }: LayoutProps) {
               setPendingJump({ roomId: activePage.roomId, messageId });
               handleNavigate({ type: "room", id: activePage.roomId });
             }}
+            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
+            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
+          />
+        )}
+
+        {/* Topic draft (v3): unsent workspace — the first message creates the topic */}
+        {activePage?.type === "topic-draft" && (
+          <TopicPage
+            roomId={activePage.roomId}
+            topicId={null}
+            draft={{
+              anchorMessageId: activePage.anchorMessageId,
+              anchorSeq: activePage.anchorSeq,
+              title: activePage.anchorTitle,
+              excerpt: activePage.anchorExcerpt,
+            }}
+            onCreateDraft={async (content) => {
+              const page = activePageRef.current;
+              if (page?.type !== "topic-draft") return;
+              const res = await createTopic(page.roomId, {
+                anchorMessageId: page.anchorMessageId,
+                content,
+                title: page.anchorTitle,
+              }).catch((e) => {
+                toast(e instanceof Error ? e.message : "Failed to create topic", "error");
+                throw e;
+              });
+              handleNavigate({ type: "topic", roomId: page.roomId, topicId: res.topic.id });
+            }}
+            onBack={() => handleNavigate({ type: "room", id: activePage.roomId })}
+            onJumpToRoomMessage={(messageId) => {
+              setPendingJump({ roomId: activePage.roomId, messageId });
+              handleNavigate({ type: "room", id: activePage.roomId });
+            }}
+            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
+            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
 

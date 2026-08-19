@@ -27,6 +27,7 @@ import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSu
 import { TaskPreviewSurface, TaskPreviewPanel } from "../components/TaskPreviewSurface";
 import { StationPanel } from "../components/StationPanel";
 import { MessageInput } from "../components/MessageInput";
+import { TopicStrip } from "../components/TopicStrip";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
@@ -55,6 +56,8 @@ interface MainProps {
   onOpenExtensionsSettings?: () => void;
   /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
   onOpenTopicPage?: (roomId: string, topicId: string) => void;
+  /** Open an unsent topic draft on a message (topic-threads v3 — creates on first send, Feishu semantics). */
+  onOpenTopicDraft?: (roomId: string, anchor: { anchorMessageId: string; anchorSeq?: number; title: string; excerpt: string }) => void;
   /** Cross-page jump (topic anchor block → this room's message): consumed once the room is loaded. */
   pendingJump?: { roomId: string; messageId: string } | null;
   onConsumeJump?: () => void;
@@ -89,6 +92,7 @@ export function Main({
   onOpenMcpSettings,
   onOpenExtensionsSettings,
   onOpenTopicPage,
+  onOpenTopicDraft,
   pendingJump,
   onConsumeJump,
 }: MainProps) {
@@ -383,7 +387,19 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => { if (!selectedRoomId) return; void createTopic(selectedRoomId, { anchorMessageId: msg.id }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => toast(e instanceof Error ? e.message : "Failed to create topic", "error")); }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
+              {/* Topic strip (v3 ②): room topics as a scrollable chip row at the chat area top */}
+              {selectedRoomId && <TopicStrip roomId={selectedRoomId} onOpenTopic={(topicId) => onOpenTopicPage?.(selectedRoomId, topicId)} />}
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
+                if (!selectedRoomId) return;
+                const firstLine = (msg.content || "").split("\n").find((l) => l.trim())?.trim() ?? "";
+                const excerpt = (msg.content || "").replace(/\s+/g, " ").slice(0, 120);
+                onOpenTopicDraft?.(selectedRoomId, {
+                  anchorMessageId: msg.id,
+                  anchorSeq: typeof msg.seq === "number" ? msg.seq : undefined,
+                  title: firstLine.slice(0, 80) || "New topic",
+                  excerpt,
+                });
+              }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
               <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
             </>
           ) : selectedRoomId ? (
