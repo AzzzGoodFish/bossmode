@@ -354,6 +354,7 @@ export function TopicPage({
             agentStatus={agentStatus}
             contextUsage={contextUsage}
             roomId={roomId}
+            activityScope={isDraft || !topicId ? undefined : `topic:${topicId}`}
             onOpenMcpSettings={onOpenMcpSettings}
             onOpenExtensionsSettings={onOpenExtensionsSettings}
           />
