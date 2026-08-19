@@ -18,13 +18,15 @@ type FilterMode = "all" | "tools" | "replies";
  * - Only the event stream scrolls. Infinite scroll-up + scroll anchoring apply to
  *   that stream container alone.
  */
-export function ActivityTab({ roomId, agentName, dmScope }: {
+export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
   roomId: string;
   agentName: string;
   /** 0.20 flagship ②: when set, activity reads/watches the dm scope — events
    * come from the members-shaped route and the WS subscription targets the
    * synthetic dm:<memberId> room the DM instance emits on. */
   dmScope?: { scopeId: string; memberId: string };
+  /** Topic page: read/watch topic:<id> events (member config stays on roomId). */
+  activityScope?: { scopeId: string; memberId: string };
 }) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,8 +56,9 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const result = dmScope
-        ? await getMemberScopedActivityEvents(dmScope.memberId, dmScope.scopeId, PAGE_SIZE)
+      const scoped = activityScope || dmScope;
+      const result = scoped
+        ? await getMemberScopedActivityEvents(scoped.memberId, scoped.scopeId, PAGE_SIZE)
         : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE);
       setEvents(result.events as AgentEvent[]);
       setHasMore(result.hasMore);
@@ -63,7 +66,7 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
     } finally {
       setLoading(false);
     }
-  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
+  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId, activityScope?.memberId]);
 
   useEffect(() => { scrolledToLatestRef.current = false; void loadInitial(); }, [loadInitial]);
 
@@ -80,7 +83,7 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    const watchRoomId = dmScope ? `dm:${dmScope.memberId}` : roomId;
+    const watchRoomId = activityScope?.scopeId || (dmScope ? `dm:${dmScope.memberId}` : roomId);
     ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: agentName }));
     ws.onmessage = (e) => {
       try {
@@ -91,7 +94,7 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
       } catch {}
     };
     return () => ws.close();
-  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
+  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId]);
 
   const loadOlder = useCallback(async () => {
     if (!hasMore || beforeSeq === undefined || loadingOlderRef.current) return;
@@ -101,8 +104,9 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
     const prevScrollHeight = el?.scrollHeight ?? 0;
     const prevScrollTop = el?.scrollTop ?? 0;
     try {
-      const result = dmScope
-        ? await getMemberScopedActivityEvents(dmScope.memberId, dmScope.scopeId, PAGE_SIZE, beforeSeq)
+      const scoped = activityScope || dmScope;
+      const result = scoped
+        ? await getMemberScopedActivityEvents(scoped.memberId, scoped.scopeId, PAGE_SIZE, beforeSeq)
         : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE, beforeSeq);
       setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
       setHasMore(result.hasMore);
@@ -117,7 +121,7 @@ export function ActivityTab({ roomId, agentName, dmScope }: {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore, beforeSeq, roomId, agentName, dmScope?.scopeId, dmScope?.memberId]);
+  }, [hasMore, beforeSeq, roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId, activityScope?.memberId]);
 
   // Infinite scroll: scrolling near the top of the event-stream container
   // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).

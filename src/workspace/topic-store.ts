@@ -22,12 +22,14 @@ export interface TopicRecord {
   title: string;
   anchorMessageId: string;
   anchorSeq?: number;
-  createdBy: "user";
+  createdBy: string;
   status: TopicStatus;
   createdAt: number;
   closedAt?: number;
   seedMode: TopicSeedMode;
   summary?: string;
+  /** Optional leader brief injected into the topic guide (user-message layer). */
+  brief?: string;
   /** Members activated inside this topic. */
   participants: string[];
   /** Pre-generated guide blurb (English) shared by all members entering the topic. */
@@ -210,6 +212,8 @@ export interface CreateTopicInput {
   seedMode?: TopicSeedMode;
   guideText?: string;
   anchorExcerpt?: string;
+  createdBy?: string;
+  brief?: string;
 }
 
 export function createTopic(input: CreateTopicInput): TopicRecord {
@@ -220,13 +224,14 @@ export function createTopic(input: CreateTopicInput): TopicRecord {
     title: String(input.title || "").trim() || "Untitled topic",
     anchorMessageId: input.anchorMessageId,
     anchorSeq: input.anchorSeq,
-    createdBy: "user",
+    createdBy: (input.createdBy || "user").trim() || "user",
     status: "active",
     createdAt: Date.now(),
     seedMode: input.seedMode === "fresh" ? "fresh" : "fork",
     participants: [],
     ...(input.guideText ? { guideText: input.guideText } : {}),
     ...(input.anchorExcerpt ? { anchorExcerpt: normalizeAnchorExcerpt(input.anchorExcerpt) } : {}),
+    ...(input.brief?.trim() ? { brief: input.brief.trim() } : {}),
   };
   saveTopic(topic);
   logger.info("topic", "created", { roomId: topic.roomId, topicId: topic.id, seedMode: topic.seedMode });
@@ -333,6 +338,8 @@ export function buildTopicGuideText(args: {
   anchorExcerpt: string;
   seedMode: TopicSeedMode;
   prefixSummary?: string;
+  brief?: string;
+  briefBy?: string;
 }): string {
   const excerpt = String(args.anchorExcerpt || "").replace(/\s+/g, " ").trim().slice(0, 280);
   const progress =
@@ -341,11 +348,13 @@ export function buildTopicGuideText(args: {
       : args.seedMode === "fresh"
         ? "(fresh session — background is this guide only; room history is available via query tools)"
         : "(forked room prefix — see session history; room stream via query tools)";
+  const brief = (args.brief || "").trim();
   return [
     `[Topic guide] Title: ${args.title} | Anchor: ${excerpt || "(empty)"}`,
     `Room progress before this topic: ${progress}`,
     `Scope of work: discuss and deliver within this topic thread.`,
     `This topic belongs to room "${args.roomName}" (scope: room:${args.roomId}) — query the main stream via query_room_messages(scope="room:${args.roomId}").`,
+    ...(brief ? [`Topic brief (set by ${args.briefBy || "leader"}): ${brief}`] : []),
     `Concurrency: this topic runs in parallel with the main room and other topics. Other instances of you may be working elsewhere right now. Shared state is contested — the main checkout, the main branch, release packaging, global installs. Before mainline mutations (merging main, cutting packages, global changes), check whether another instance of you is mid-action; if so, coordinate in the room or defer. Topic-local work (your own branch, your own worktree, this topic's stream) needs no such care.`,
   ].join("\n");
 }

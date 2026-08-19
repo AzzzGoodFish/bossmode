@@ -245,6 +245,21 @@ export function createBossmodeSdkTools(opts: {
   if (scopeKind === "room") {
     // Room: wait for all members. Tasks already in base list above.
     tools.push(defineTool({
+      name: "create_topic",
+      label: "Create topic",
+      description: "Create a focused topic in this room. Only the room leader can use this. message is the first post (title is its first line; @-mentions activate those members). brief is an optional instruction injected into the topic guide (behavior boundary, e.g. research only — do not touch main).",
+      parameters: Type.Object({
+        message: Type.String({ description: "First topic message — becomes the topic title (first line) and is posted into the topic. @ a member to bring them in." }),
+        brief: Type.Optional(Type.String({ description: "Optional topic instruction injected into the guide before the concurrency reminder." })),
+      }),
+      execute: async (_id, params) => {
+        const data = await call("create_topic", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "create_topic failed");
+        return textResult(`Topic created: ${data.title} (${data.scopeId})`);
+      },
+    }));
+
+    tools.push(defineTool({
       name: "wait",
       label: "Wait",
       description: WAIT_DESCRIPTION,

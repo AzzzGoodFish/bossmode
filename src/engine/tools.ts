@@ -13,11 +13,12 @@ import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../works
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages } from "../workspace/topic-store.js";
-import type { ScopeId } from "../shared/conversation-ref.js";
+import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages, createTopic, saveTopic, buildTopicGuideText, titleFromMessage, normalizeAnchorExcerpt } from "../workspace/topic-store.js";
+import { scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import { getTopicSeedMode } from "../shared/config.js";
 import { emitTaskEvent } from "../api/tasks.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
-import { parseMentions, parseUrgentMentions } from "../communication/router.js";
+import { parseMentions, parseUrgentMentions, parseMentionMemberIds, parseUrgentMentionMemberIds } from "../communication/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -639,6 +640,67 @@ export async function handleToolCallback(
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };
       }
+    }
+    case "create_topic": {
+      const message = String(params?.message ?? "").trim();
+      if (!message) return { ok: false, error: "message is required" };
+      if (roomId.startsWith("dm:")) return { ok: false, error: "create_topic is not available in a DM scope" };
+      const parentRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = roomStore.getRoom(parentRoomId);
+      if (!room) return { ok: false, error: "Room not found" };
+      const actor = resolveMemoryActor(roomId, agentName);
+      if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const leaderId = room.promptLeaderGlobalMemberId || room.promptLeaderMemberId;
+      if (!leaderId || (leaderId !== actor.id && leaderId !== roomStore.resolveGlobalMemberId(room, actor))) {
+        return { ok: false, error: "Only the room leader can create a topic" };
+      }
+      const brief = String(params?.brief ?? "").trim();
+      const seedMode = getTopicSeedMode();
+      const title = titleFromMessage(message) || "Untitled topic";
+      const guideText = buildTopicGuideText({
+        title,
+        roomName: room.name,
+        roomId: parentRoomId,
+        anchorExcerpt: message,
+        seedMode,
+        ...(brief ? { brief, briefBy: actor.name } : {}),
+      });
+      const topic = createTopic({
+        roomId: parentRoomId,
+        title,
+        anchorMessageId: "",
+        seedMode,
+        guideText,
+        anchorExcerpt: normalizeAnchorExcerpt(message),
+        createdBy: actor.name,
+        ...(brief ? { brief } : {}),
+      });
+      const card = postMessage(parentRoomId, actor.name, `Topic opened: ${topic.title}`, [], {
+        type: "topic_event",
+        topic_event_meta: {
+          action: "opened",
+          topicId: topic.id,
+          title: topic.title,
+          actor: actor.name,
+          anchorExcerpt: normalizeAnchorExcerpt(message).slice(0, 120),
+        },
+      });
+      topic.anchorMessageId = card.id;
+      topic.anchorSeq = card.seq;
+      saveTopic(topic);
+      const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: parentRoomId });
+      const roomMembers = roomStore.getRoomMembers(parentRoomId);
+      const urgentMentions = parseUrgentMentions(message, roomMembers.map((m) => m.name));
+      const mentions = [...new Set([...parseMentions(message, roomMembers.map((m) => m.name)), ...urgentMentions])];
+      const mentionMemberIds = [...new Set([
+        ...parseMentionMemberIds(message, roomMembers),
+        ...parseUrgentMentionMemberIds(message, roomMembers),
+      ])];
+      postMessage(scopeId, actor.name, message, mentions, {
+        mentionMemberIds,
+        ...(urgentMentions.length ? { urgentMentions } : {}),
+      });
+      return { ok: true, topicId: topic.id, scopeId, title: topic.title };
     }
     case "create_task": {
       const title = params?.title ? String(params.title).trim() : "";

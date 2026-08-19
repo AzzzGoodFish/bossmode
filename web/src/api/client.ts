@@ -974,6 +974,7 @@ export interface TopicRecord {
   closedAt?: number;
   summary?: string;
   participants: string[];
+  brief?: string;
 }
 
 export async function listTopics(roomId: string): Promise<{ topics: TopicRecord[] }> {

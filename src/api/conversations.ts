@@ -8,6 +8,7 @@
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as roomStore from "../workspace/room-store.js";
+import { resolveTopicRoomId } from "../workspace/topic-store.js";
 import { findMemberByName, getMember } from "../workspace/member-registry.js";
 import { toolSurfaceForScope } from "../engine/scope-tool-surface.js";
 import {
@@ -36,7 +37,7 @@ function decodeScope(raw: string): ScopeId | null {
 function resolveTarget(
   scopeParam: string,
   query: URLSearchParams,
-): { scopeId: ScopeId; kind: "dm" | "room"; roomId: string; memberId: string; memberName: string; isLeader: boolean } | { error: string; status: number } {
+): { scopeId: ScopeId; kind: "dm" | "room" | "topic"; roomId: string; memberId: string; memberName: string; isLeader: boolean } | { error: string; status: number } {
   const scopeId = decodeScope(scopeParam);
   if (!scopeId) return { error: "scope_not_found", status: 400 };
   const ref = parseScopeId(scopeId)!;
@@ -51,6 +52,26 @@ function resolveTarget(
       memberId: global.id,
       memberName: global.name,
       isLeader: false,
+    };
+  }
+
+  if (ref.kind === "topic") {
+    const parent = resolveTopicRoomId(ref.topicId);
+    if (!parent) return { error: "not_found", status: 404 };
+    const room = roomStore.getRoom(parent);
+    if (!room) return { error: "not_found", status: 404 };
+    const memberRef = query.get("memberId") || query.get("member") || "";
+    if (!memberRef) return { error: "member_required", status: 400 };
+    const local = roomStore.resolveRoomMemberRef(parent, memberRef);
+    if (!local) return { error: "not_found", status: 404 };
+    const isLeader = !!room.promptLeaderMemberId && (room.promptLeaderMemberId === local.id || room.promptLeaderGlobalMemberId === local.id);
+    return {
+      scopeId,
+      kind: "topic",
+      roomId: scopeId, // topic:<id> — runtime instance + event dir key
+      memberId: local.id,
+      memberName: local.name,
+      isLeader,
     };
   }
 
@@ -173,8 +194,9 @@ addRoute("GET", "/api/conversations/:scope/events", async (req, res, params) => 
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 1), 200);
   const before = url.searchParams.get("before");
   const beforeN = before ? parseInt(before, 10) : undefined;
-  // Events keyed by roomId + member name/id historically
-  const page = loadEventsPaginated(target.roomId, target.memberName, limit, Number.isFinite(beforeN as number) ? beforeN : undefined);
+  // Topic/DM: roomId is the scope key; events file is keyed by member id.
+  const eventRef = target.kind === "room" ? target.memberName : target.memberId;
+  const page = loadEventsPaginated(target.roomId, eventRef, limit, Number.isFinite(beforeN as number) ? beforeN : undefined);
   sendJson(res, 200, { ...page, scopeId: target.scopeId, memberId: target.memberId });
 });
 

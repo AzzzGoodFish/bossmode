@@ -23,6 +23,8 @@ interface StationPanelProps {
   staleMembers?: Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }>;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
+  /** Topic page: activity reads/watches this scope; member config still uses roomId. */
+  activityScope?: string;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
   onMembersChanged?: () => void;
@@ -103,7 +105,7 @@ export function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, staleMembers, contextUsage, roomId, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, staleMembers, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -514,6 +516,7 @@ This clears the member's working session memory and starts fresh. Room messages 
         {selectedMember && memberInfos[selectedMember] && (
           <MemberConfigPanel
             roomId={roomId}
+            activityScope={activityScope}
             member={memberInfos[selectedMember]}
             status={agentStatus[selectedMember] || "inactive"}
             stale={staleMembers?.[selectedMember]}
@@ -974,6 +977,7 @@ function CoreCard({ corePrompt }: { corePrompt: { content: string; charCount: nu
 export function MemberConfigPanel({
   roomId,
   dmScope,
+  activityScope,
   member,
   onJumpToMessage,
   status,
@@ -1006,6 +1010,8 @@ export function MemberConfigPanel({
    * the members-shaped scope-addressed APIs, tags read "this DM", and the
    * room-principles layer (which does not exist for a DM) is hidden. */
   dmScope?: { scopeId: string; memberId: string };
+  /** Topic page: Activity tab reads/watches this scope; config still uses roomId. */
+  activityScope?: string;
   member: MemberInfo;
   status: string;
   contextUsage?: ContextUsageData;
@@ -1206,7 +1212,12 @@ export function MemberConfigPanel({
 
       {tab === "activity" ? (
         <div className="flex-1 min-h-0 flex flex-col">
-          <ActivityTab roomId={roomId} agentName={member.name} dmScope={dmScope} />
+          <ActivityTab
+            roomId={roomId}
+            agentName={member.name}
+            dmScope={dmScope}
+            activityScope={activityScope && member.id ? { scopeId: activityScope, memberId: member.id } : undefined}
+          />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
