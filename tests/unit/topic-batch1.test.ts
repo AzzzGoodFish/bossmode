@@ -128,6 +128,16 @@ describe("topic-store + message isolation", () => {
     expect(g).toMatch(/Topic guide/);
     expect(g).toMatch(/room:r1/);
     expect(g).toMatch(/query_room_messages/);
+    expect(g).toMatch(/Concurrency: this topic runs in parallel/);
+    expect(g).toMatch(/mainline mutations/);
+    const fork = buildTopicGuideText({
+      title: "T",
+      roomName: "dev",
+      roomId: "r1",
+      anchorExcerpt: "hello",
+      seedMode: "fork",
+    });
+    expect(fork).toMatch(/Concurrency: this topic runs in parallel/);
   });
 });
 

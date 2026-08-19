@@ -346,5 +346,6 @@ export function buildTopicGuideText(args: {
     `Room progress before this topic: ${progress}`,
     `Scope of work: discuss and deliver within this topic thread.`,
     `This topic belongs to room "${args.roomName}" (scope: room:${args.roomId}) — query the main stream via query_room_messages(scope="room:${args.roomId}").`,
+    `Concurrency: this topic runs in parallel with the main room and other topics. Other instances of you may be working elsewhere right now. Shared state is contested — the main checkout, the main branch, release packaging, global installs. Before mainline mutations (merging main, cutting packages, global changes), check whether another instance of you is mid-action; if so, coordinate in the room or defer. Topic-local work (your own branch, your own worktree, this topic's stream) needs no such care.`,
   ].join("\n");
 }
