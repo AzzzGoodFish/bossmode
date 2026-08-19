@@ -981,7 +981,7 @@ export async function listTopics(roomId: string): Promise<{ topics: TopicRecord[
   return apiFetch(`/api/rooms/${roomId}/topics`);
 }
 
-export async function createTopic(roomId: string, input: { title?: string; anchorMessageId?: string; anchorSeq?: number; content?: string; seedMode?: TopicSeedMode }): Promise<{ topic: TopicRecord; scopeId: string }> {
+export async function createTopic(roomId: string, input: { title?: string; anchorMessageId?: string; anchorSeq?: number; content?: string; seedMode?: TopicSeedMode; attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }> }): Promise<{ topic: TopicRecord; scopeId: string }> {
   return apiFetch(`/api/rooms/${roomId}/topics`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -993,8 +993,17 @@ export async function getTopicMessages(roomId: string, topicId: string, limit = 
   return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages?limit=${limit}`);
 }
 
-export async function sendTopicMessage(roomId: string, topicId: string, content: string, replyTo?: { seq: number }): Promise<RoomMessage> {
-  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages`, { method: "POST", body: JSON.stringify({ content, ...(replyTo ? { replyTo } : {}) }) });
+export async function sendTopicMessage(
+  roomId: string,
+  topicId: string,
+  content: string,
+  replyTo?: { seq: number },
+  attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
+): Promise<RoomMessage> {
+  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}), ...(replyTo ? { replyTo } : {}) }),
+  });
 }
 
 export async function closeTopic(roomId: string, topicId: string): Promise<{ topic: TopicRecord; scopeId: string }> {

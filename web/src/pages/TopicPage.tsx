@@ -106,9 +106,9 @@ function useTopicStream(roomId: string, topicId: string | null) {
   }, [scopeId, messages]);
 
   const send = useCallback(
-    async (content: string, replyTo?: { seq: number }) => {
+    async (content: string, replyTo?: { seq: number }, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => {
       if (!topicId) return;
-      const msg = await sendTopicMessage(roomId, topicId, content, replyTo);
+      const msg = await sendTopicMessage(roomId, topicId, content, replyTo, attachments);
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     },
     [roomId, topicId],
@@ -148,7 +148,7 @@ export function TopicPage({
   /** Draft anchor (v3): when set, the page is an unsent draft workspace. */
   draft?: TopicDraftAnchor;
   /** First-message send in draft mode: parent creates the topic and navigates. */
-  onCreateDraft?: (content: string) => Promise<void>;
+  onCreateDraft?: (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => Promise<void>;
   onBack: () => void;
   /** Direct topic⇄topic switch from the embedded rail (fish pick: direction A). */
   onOpenTopic?: (topicId: string) => void;
@@ -221,12 +221,12 @@ export function TopicPage({
   const anchorMessageId = isDraft ? draft?.anchorMessageId : topic?.anchorMessageId;
   const title = isDraft ? (draft?.title ?? "New topic") : (topic?.title ?? "Topic");
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (content: string, attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>) => {
     if (isDraft) {
       if (!onCreateDraft) return;
       setCreating(true);
       try {
-        await onCreateDraft(content);
+        await onCreateDraft(content, attachments);
       } finally {
         setCreating(false);
       }
@@ -234,7 +234,7 @@ export function TopicPage({
     }
     const q = quote;
     setQuote(null);
-    return send(content, q ? { seq: q.seq } : undefined);
+    return send(content, q ? { seq: q.seq } : undefined, attachments);
   };
 
   return (
@@ -325,6 +325,7 @@ export function TopicPage({
                       loginName={getUsername()}
                       roomId={roomId}
                       messageId={m.id}
+                      attachments={m.attachments}
                       quote={resolveTopicQuote(messages, m)}
                       onReply={!closed && m.sender !== "system" ? () => setQuote({
                         seq: m.seq ?? 0,
@@ -345,7 +346,7 @@ export function TopicPage({
             </div>
           ) : (
             <MessageInput
-              onSend={(content) => handleSend(content)}
+              onSend={(content, attachments) => handleSend(content, attachments)}
               members={members}
               roomId={roomId}
               draftKey={isDraft ? `topic-draft:${draft?.anchorMessageId}` : `topic:${topicId}`}
