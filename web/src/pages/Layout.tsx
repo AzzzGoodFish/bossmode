@@ -316,6 +316,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             roomId={activePage.roomId}
             topicId={activePage.topicId}
             onBack={() => handleNavigate({ type: "room", id: activePage.roomId })}
+            onOpenTopic={(topicId) => handleNavigate({ type: "topic", roomId: activePage.roomId, topicId })}
             onJumpToRoomMessage={(messageId) => {
               setPendingJump({ roomId: activePage.roomId, messageId });
               handleNavigate({ type: "room", id: activePage.roomId });
