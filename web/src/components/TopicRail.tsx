@@ -87,6 +87,7 @@ export function TopicRail({
   currentTopicId,
   onSelectRoom,
   onSelectTopic,
+  onClose,
 }: {
   /** From the shared useRoomTopics hook (owned by the page so the topbar badge shares one poll). */
   topics: TopicChatEntry[];
@@ -94,6 +95,8 @@ export function TopicRail({
   currentTopicId: string | null;
   onSelectRoom: () => void;
   onSelectTopic: (topicId: string) => void;
+  /** Drag-to-close (fish 2026-08-19): no min-width floor — dragging the grip all the way left closes the rail; reopen via the topbar Topics button. */
+  onClose: () => void;
 }) {
   const [closedOpen, setClosedOpen] = useState(false);
   const railRef = useRef<HTMLDivElement>(null);
@@ -102,25 +105,35 @@ export function TopicRail({
     return Math.min(320, Math.max(170, isNaN(w) ? 220 : w));
   });
   const dragging = useRef(false);
+  /** Last width during an active drag — mouseup must not rely on a React re-render having landed. */
+  const dragWidth = useRef(0);
 
+  // Drag: visual floor 60px (affordance), release below 170px → close the rail;
+  // otherwise snap into 170–320 and persist. No hard min-width — fish ①.
   const onGripDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
     e.preventDefault();
     const move = (ev: MouseEvent) => {
       if (!dragging.current || !railRef.current) return;
       const left = railRef.current.getBoundingClientRect().left;
-      setWidth(Math.min(320, Math.max(170, ev.clientX - left)));
+      const w = Math.min(320, Math.max(60, ev.clientX - left));
+      dragWidth.current = w;
+      setWidth(w);
     };
     const up = () => {
       if (!dragging.current) return;
       dragging.current = false;
-      if (railRef.current) localStorage.setItem(RAIL_W_KEY, String(Math.round(railRef.current.offsetWidth)));
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      const w = dragWidth.current;
+      if (w < 170) { onClose(); return; }
+      const clamped = Math.min(320, Math.max(170, w));
+      setWidth(clamped);
+      localStorage.setItem(RAIL_W_KEY, String(Math.round(clamped)));
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
-  }, []);
+  }, [onClose]);
 
   const active = topics.filter((t) => t.status === "active");
   const closed = topics.filter((t) => t.status === "closed");
@@ -161,8 +174,8 @@ export function TopicRail({
           </>
         )}
       </div>
-      {/* width drag grip */}
-      <div onMouseDown={onGripDown} className="absolute top-0 -right-[3px] w-[6px] h-full cursor-col-resize z-10 hover:bg-accent-dim" title="Drag to resize" />
+      {/* width drag grip — drag all the way left to close the rail (fish ①) */}
+      <div onMouseDown={onGripDown} className="absolute top-0 -right-[3px] w-[6px] h-full cursor-col-resize z-10 hover:bg-accent-dim" title="Drag to resize · drag all the way left to close" />
     </div>
   );
 }
