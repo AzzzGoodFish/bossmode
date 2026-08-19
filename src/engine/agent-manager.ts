@@ -227,6 +227,17 @@ export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inac
     if (st === "inactive") return "inactive";
     return "idle";
   }
+  if (ref.kind === "topic") {
+    // Topic instances live under topic:<id>:<memberId>, not the parent room.
+    const want = `topic:${ref.topicId}`;
+    let sawInstance = false;
+    for (const inst of instances.values()) {
+      if (inst.scopeId !== want) continue;
+      sawInstance = true;
+      if (inst.status === "working") return "working";
+    }
+    return sawInstance ? "idle" : "inactive";
+  }
   // Room: any member working → working; else idle if any live instance else inactive
   let sawInstance = false;
   for (const m of roomStore.getRoomMembers(ref.roomId)) {

@@ -8,9 +8,9 @@
  * - closed topics report status "closed"
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, configureMockMembersForRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
-import { resetMocks } from "../helpers/mock-runtime.js";
+import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
 vi.mock("../../src/workforce/member-store.js", () => ({
   getMemberByName: vi.fn().mockImplementation((name: string) => ({
@@ -102,5 +102,35 @@ describe("Acceptance: chats topics sub-list (sidebar v2)", () => {
     chatsRes = await jsonRequest(ts.port, "GET", "/api/chats", { token });
     roomEntry = (JSON.parse(chatsRes.body) as any).chats.find((c: any) => c.kind === "room" && c.scopeId === `room:${roomId}`);
     expect(roomEntry.topics[0].status).toBe("closed");
+  });
+
+  it("anyWorking is true while a topic instance is working", async () => {
+    const roomId = await makeRoom("sidebar-working");
+    await configureMockMembersForRoom(roomId, ["pm"]);
+
+    const msgRes = await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/messages`, { token, body: { content: "anchor working" } });
+    const anchorId = (JSON.parse(msgRes.body) as any).id as string;
+    const createRes = await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/topics`, { token, body: { anchorMessageId: anchorId } });
+    const topic = (JSON.parse(createRes.body) as any).topic;
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    setMockPromptFn(() => gate);
+
+    const mention = await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/topics/${topic.id}/messages`, {
+      token, body: { content: "@pm please work" },
+    });
+    expect(mention.status).toBe(200);
+
+    let anyWorking = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      const chatsRes = await jsonRequest(ts.port, "GET", "/api/chats", { token });
+      const roomEntry = (JSON.parse(chatsRes.body) as any).chats.find((c: any) => c.kind === "room" && c.scopeId === `room:${roomId}`);
+      const row = roomEntry?.topics?.find((t: any) => t.topicId === topic.id);
+      if (row?.anyWorking) { anyWorking = true; break; }
+    }
+    release();
+    expect(anyWorking).toBe(true);
   });
 });
