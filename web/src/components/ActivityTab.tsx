@@ -187,6 +187,31 @@ function FilterButton({ label, count, active, onClick }: { label: string; count:
   return <button onClick={onClick} className={`px-3 py-1 text-[11.5px] font-semibold rounded-md cursor-pointer ${active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"}`}>{label} <span className="font-mono text-[9.5px] text-ink-4">{count}</span></button>;
 }
 
+/**
+ * W2-1 (beautifului Thinking, fish-picked 2026-08-20): collapsible thinking trace.
+ * Collapsed = one line "Thought for N seconds" (elapsed = gap to the next event
+ * ts — an honest estimate, not a model-reported duration); click to expand the
+ * full text. Default collapsed so consecutive blocks stop eating the stream.
+ */
+function ThinkingTrace({ text, elapsedSec, time }: { text: string; elapsedSec?: number; time: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-[10px] border border-line-soft bg-surface-1">
+      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-1.5 px-3 py-[8px] text-left cursor-pointer">
+        <Brain size={10} className="text-think shrink-0" aria-hidden />
+        <span className="text-[12px] font-semibold text-ink-2">
+          {elapsedSec !== undefined && elapsedSec > 0 ? `Thought for ${elapsedSec} second${elapsedSec === 1 ? "" : "s"}` : "Thinking"}
+        </span>
+        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
+        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
+      </button>
+      {expanded && (
+        <div className="border-t border-line-soft px-3 py-2.5 text-[12.5px] text-ink-3 italic whitespace-pre-wrap max-h-32 overflow-y-auto">{text}</div>
+      )}
+    </div>
+  );
+}
+
 function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
   const turns: Array<{ events: AgentEvent[] }> = [];
   let current: AgentEvent[] = [];
@@ -217,10 +242,108 @@ function TurnBlock({ index, events, query }: { index: number; events: AgentEvent
   }, [events]);
   // Orphan tool_end events (no matching tool_start) pass through the filter
   // and render as standalone cards via EventRow.
-  return <section className="space-y-[7px]"><div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>{events.filter(e => e.type !== "tool_end" || !e.toolCallId || !events.some(s => s.type === "tool_start" && s.toolCallId === e.toolCallId)).map((event, i) => <EventRow key={`${event.ts || i}:${event.type}:${i}`} event={event} toolEnd={event.type === "tool_start" && event.toolCallId ? toolEndMap[event.toolCallId] : undefined} query={query} />)}</section>;
+  const visible = events.filter(e => e.type !== "tool_end" || !e.toolCallId || !events.some(s => s.type === "tool_start" && s.toolCallId === e.toolCallId));
+
+  // W2-1 (beautifului Thinking): thinking duration = gap to the next event ts (estimate, honest).
+  const thinkingElapsed = new Map<AgentEvent, number>();
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i];
+    if (e.type === "message_end" && e.thinking && typeof e.ts === "number") {
+      const next = visible.slice(i + 1).find((n) => typeof n.ts === "number");
+      if (next) thinkingElapsed.set(e, Math.max(0, Math.round(((next.ts as number) - e.ts) / 1000)));
+    }
+  }
+
+  // W2-2 (beautifului Tool Chips): consecutive tool_start rows form a collapsible group.
+  type RenderItem = { kind: "row"; event: AgentEvent } | { kind: "group"; events: AgentEvent[] };
+  const items: RenderItem[] = [];
+  let toolRun: AgentEvent[] = [];
+  const flushTools = () => {
+    if (toolRun.length >= 2) items.push({ kind: "group", events: toolRun });
+    else toolRun.forEach((e) => items.push({ kind: "row", event: e }));
+    toolRun = [];
+  };
+  for (const e of visible) {
+    if (e.type === "tool_start") { toolRun.push(e); continue; }
+    flushTools();
+    items.push({ kind: "row", event: e });
+  }
+  flushTools();
+
+  return (
+    <section className="space-y-[7px]">
+      <div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
+      {items.map((item, i) =>
+        item.kind === "group" ? (
+          <ToolGroupBlock key={`g${i}`} events={item.events} toolEndMap={toolEndMap} query={query} />
+        ) : (
+          <EventRow key={`${item.event.ts || i}:${item.event.type}:${i}`} event={item.event} toolEnd={item.event.type === "tool_start" && item.event.toolCallId ? toolEndMap[item.event.toolCallId] : undefined} elapsedSec={thinkingElapsed.get(item.event)} query={query} />
+        ),
+      )}
+    </section>
+  );
 }
 
-function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: AgentEvent; query: string }) {
+/**
+ * W2-2: one turn's consecutive tool calls collapse into a single group row
+ * ("N tool calls · M edits · status"). Body keeps the existing full ToolCards
+ * untouched; a file-level diff-chip summary aggregates edit/write stats.
+ * Default: collapsed when every call finished, expanded while any is running.
+ */
+function ToolGroupBlock({ events, toolEndMap, query }: { events: AgentEvent[]; toolEndMap: Record<string, AgentEvent>; query: string }) {
+  const ends = events.map((e) => (e.toolCallId ? toolEndMap[e.toolCallId] : undefined));
+  const running = ends.filter((e) => !e).length;
+  const failed = ends.filter((e) => e?.isError).length;
+  const [expanded, setExpanded] = useState(running > 0);
+  useEffect(() => { if (running > 0) setExpanded(true); }, [running > 0]);
+
+  const edits = events.filter((e) => {
+    const n = String(e.toolName || "").toLowerCase();
+    return n.includes("edit") || n.includes("write");
+  }).length;
+  // Aggregate diff stats per target file (chips: path +added −removed).
+  const fileDiffs = new Map<string, { added: number; removed: number }>();
+  for (const e of events) {
+    const d = diffStatForTool(e);
+    if (!d) continue;
+    const target = toolTarget(e.args) || "file";
+    const cur = fileDiffs.get(target) ?? { added: 0, removed: 0 };
+    cur.added += d.added;
+    cur.removed += d.removed;
+    fileDiffs.set(target, cur);
+  }
+  const time = formatEventTime(typeof events[events.length - 1]?.ts === "number" ? events[events.length - 1].ts : undefined);
+  const status = running > 0 ? <span className="text-think">● {running} running</span> : failed > 0 ? <span className="text-blocked">✗ {failed} failed</span> : <span className="text-onair">✓ all done</span>;
+
+  return (
+    <div className="rounded-[10px] border border-line-soft bg-surface-1">
+      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-2 px-3 py-[8px] text-left cursor-pointer">
+        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        <span className="text-[12px] font-semibold text-ink-2">{events.length} tool calls{edits > 0 ? ` · ${edits} edit${edits > 1 ? "s" : ""}` : ""}</span>
+        <span className="ml-auto flex items-center gap-2 text-[10px] font-bold">{status}</span>
+        <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-line-soft px-2.5 py-2 space-y-[6px]">
+          {fileDiffs.size > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-1 pb-0.5">
+              {[...fileDiffs.entries()].map(([file, d]) => (
+                <span key={file} className="font-mono text-[10px] bg-surface-2 border border-line-soft rounded-md px-1.5 py-0.5 text-ink-3">
+                  {file.split("/").pop()} <span className="text-onair">+{d.added}</span> <span className="text-blocked">−{d.removed}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {events.map((e, i) => (
+            <ToolCard key={`${e.ts || i}:${i}`} event={e} toolEnd={e.toolCallId ? toolEndMap[e.toolCallId] : undefined} diff={diffStatForTool(e)} time={formatEventTime(typeof e.ts === "number" ? e.ts : undefined)} query={query} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventRow({ event, toolEnd, elapsedSec, query }: { event: AgentEvent; toolEnd?: AgentEvent; elapsedSec?: number; query: string }) {
   const summary = summarizeAgentEvent(event);
   const diff = diffStatForTool(event);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
@@ -238,18 +361,11 @@ function EventRow({ event, toolEnd, query }: { event: AgentEvent; toolEnd?: Agen
   if (event.type === "message_end" && (event.thinking || event.text)) {
     // Both cards render when a message carries thinking and text (thinking-enabled
     // members must not have their reply silently swallowed).
-    // Identity (designer activity-card-identity-v1): Brain+dim italic thinking,
-    // MessageSquareText reply — restrained, no new card shells.
+    // W2-1 (beautifului Thinking): thinking collapses into a one-line trace
+    // ("Thought for N seconds"), expanded on demand — consecutive blocks no
+    // longer eat the stream. Identity per activity-card-identity-v1 kept.
     return <>
-      {event.thinking ? (
-        <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px] text-xs text-ink-3">
-          <div className="flex items-center gap-1.5">
-            <Brain size={10} className="text-think shrink-0" aria-hidden />
-            <span className="font-extrabold text-think tracking-[0.08em] uppercase text-[9.5px]">THINKING</span>
-          </div>
-          <div className="mt-[6px] text-[12.5px] text-ink-3 italic whitespace-pre-wrap max-h-32 overflow-y-auto">{String(event.thinking)}</div>
-        </div>
-      ) : null}
+      {event.thinking ? <ThinkingTrace text={String(event.thinking)} elapsedSec={elapsedSec} time={time} /> : null}
       {event.text ? (
         <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
           <div className="flex items-center gap-2 mb-1">
