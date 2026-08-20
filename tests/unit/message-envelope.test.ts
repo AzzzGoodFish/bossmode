@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../src/shared/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
+  return {
+    ...actual,
+    readConfig: () => ({ auth: { username: "fish", passwordHash: "" }, apiKeys: {}, defaults: {} }),
+  };
+});
+
 import {
   resolveSenderRole,
   wrapRoomContextMessage,

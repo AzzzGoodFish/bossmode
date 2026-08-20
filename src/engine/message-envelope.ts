@@ -1,5 +1,5 @@
 import type { RoomMessage } from "../shared/types.js";
-import { USER_DISPLAY_NAME } from "../shared/user-identity.js";
+import { getUserDisplayName } from "../shared/user-identity.js";
 
 export type SenderRole = "user" | "member";
 
@@ -13,7 +13,7 @@ export function resolveSenderRole(sender: string): SenderRole {
 
 /** Map internal sender id to the human-visible display name for envelopes. */
 function senderDisplayName(sender: string): string {
-  return sender === "user" ? USER_DISPLAY_NAME : sender;
+  return sender === "user" ? getUserDisplayName() : sender;
 }
 
 function formatTimestamp(ts: number): string {
