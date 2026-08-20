@@ -21,6 +21,7 @@ import { resolveOwningRoomId } from "../../workspace/topic-store.js";
 import { listInstalledExtensions, resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
+import { ensureKimiAllowEmptySignature, sanitizeThinkingSignaturesInMessages } from "./thinking-signature.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
@@ -571,8 +572,22 @@ class PiSdkAgentHandle implements AgentHandle {
     return () => this.listeners.delete(fn);
   }
 
+  /** Drop thinking signatures Kimi would reject (standard base64 with +/). */
+  private sanitizeOutboundThinkingSignatures(): void {
+    try {
+      const messages = (this.session as any)?.state?.messages;
+      const cleared = sanitizeThinkingSignaturesInMessages(messages);
+      if (cleared > 0) {
+        logger.info("runtime:pi-sdk", "cleared invalid thinking signatures", { count: cleared });
+      }
+    } catch (err) {
+      logger.warn("runtime:pi-sdk", "thinking signature sanitize failed", { error: String(err) });
+    }
+  }
+
   async prompt(message: string): Promise<void> {
     if (message === "/compact") return this.compact();
+    this.sanitizeOutboundThinkingSignatures();
     this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
     try {
       let next: string | null = message;
@@ -603,6 +618,7 @@ class PiSdkAgentHandle implements AgentHandle {
       this.compact().catch((err) => logger.error("runtime:pi-sdk", "compact failed in steer", { error: err.message }));
       return;
     }
+    this.sanitizeOutboundThinkingSignatures();
     this.session.steer(message).catch((err) => {
       this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
     });
@@ -653,6 +669,7 @@ class PiSdkAgentHandle implements AgentHandle {
       logger.warn("runtime:pi-sdk", "setModel target not found", { modelRef });
       throw new Error(`Model not found: ${modelRef}`);
     }
+    ensureKimiAllowEmptySignature(model as { provider?: string; compat?: Record<string, unknown> });
     await this.session.setModel(model);
     this.runtimeParams.model = resolveModelLabel(modelRef);
   }
@@ -867,6 +884,9 @@ export class PiSdkRuntime implements AgentRuntime {
     const transportSettings = applyRuntimeTransportSettings(settingsManager);
     const model = modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Model not found: ${resolvedModel}`);
+    // k3-256k (and any kimi-coding model missing the flag) must keep empty-signature
+    // thinking blocks as thinking, not degrade to text — pairs with signature sanitize.
+    ensureKimiAllowEmptySignature(model as { provider?: string; compat?: Record<string, unknown> });
     const authCheck = await modelRegistry.getApiKeyAndHeaders(model);
     if (!authCheck.ok) throw new Error(`Credential projection failed for ${resolvedModel}: ${authCheck.error}`);
     if (!authCheck.apiKey && piConfig.profile?.authType !== "ambient") throw new Error(`Credential projection failed for ${resolvedModel}: no API key available for provider ${provider}`);
