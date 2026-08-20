@@ -1,8 +1,43 @@
+import { useState } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import PrismLight from "react-syntax-highlighter/dist/esm/prism-light";
 const SyntaxHighlighter = PrismLight;
+
+/**
+ * W1-2 (assistant-ui markdown-text, fish-picked 2026-08-20): fenced code blocks
+ * get a header bar — language label + one-click copy with Copied feedback.
+ * Members paste code constantly; copy-by-selection was the daily friction.
+ */
+function CodeBlockFrame({ language, raw, children }: { language: string; raw: string; children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    if (!navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(raw).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    }).catch(() => {});
+  };
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-line-soft">
+      <div className="flex items-center gap-2 border-b border-line-soft bg-surface-2 px-2.5 py-1">
+        <span className="font-mono text-[10px] lowercase text-ink-3">{language}</span>
+        <button
+          type="button"
+          onClick={copy}
+          className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] cursor-pointer ${copied ? "text-onair" : "text-ink-3 hover:text-ink-1 hover:bg-surface-3"}`}
+          title={copied ? "Copied" : "Copy code"}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
@@ -49,30 +84,34 @@ const components: Components = {
     }
 
     const language = match?.[1] || "text";
+    const raw = String(children).replace(/\n$/, "");
 
     // Prism markdown grammar has token-rendering bugs (table syntax gets split
     // into per-token line breaks). Render markdown code blocks as plain text.
     if (language === "markdown" || language === "md") {
       return (
-        <pre className="overflow-x-auto bg-inset border border-line-soft rounded-md p-3 my-2 text-xs text-ink-2 font-mono">
-          <code className="whitespace-pre">{String(children).replace(/\n$/, "")}</code>
-        </pre>
+        <CodeBlockFrame language={language} raw={raw}>
+          <pre className="overflow-x-auto bg-inset p-3 text-xs text-ink-2 font-mono">
+            <code className="whitespace-pre">{raw}</code>
+          </pre>
+        </CodeBlockFrame>
       );
     }
 
     return (
-      <SyntaxHighlighter
-        style={oneDark}
-        language={language}
-        PreTag="div"
-        customStyle={{
-          margin: "0.5rem 0",
-          borderRadius: "0.375rem",
-          fontSize: "0.8rem",
-        }}
-      >
-        {String(children).replace(/\n$/, "")}
-      </SyntaxHighlighter>
+      <CodeBlockFrame language={language} raw={raw}>
+        <SyntaxHighlighter
+          style={oneDark}
+          language={language}
+          PreTag="div"
+          customStyle={{
+            margin: 0,
+            fontSize: "0.8rem",
+          }}
+        >
+          {raw}
+        </SyntaxHighlighter>
+      </CodeBlockFrame>
     );
   },
   // Compact styling for other elements
