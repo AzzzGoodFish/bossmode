@@ -205,7 +205,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   return (
     <div
       data-tour="composer"
-      className={`relative border-t border-line-soft p-3 pb-[max(12px,env(safe-area-inset-bottom))] ${dragOver ? "bg-accent-dim border-accent" : ""}`}
+      className={`relative border-t p-3 pb-[max(12px,env(safe-area-inset-bottom))] transition-colors ${dragOver ? "bg-accent-dim border-accent" : topicMode?.active ? "border-accent/40" : "border-line-soft"}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -333,7 +333,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           className={`flex-1 bg-inset border rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
                      resize-none focus:outline-none
                      placeholder:text-ink-4 disabled:opacity-50 max-h-[200px] transition-colors
-                     ${topicMode?.active ? "border-accent ring-1 ring-accent/30 focus:border-accent" : "border-line focus:border-line-strong"}`}
+                     ${topicMode?.active ? "border-accent ring-1 ring-accent/30 focus:border-accent" : "border-line focus:border-accent focus:ring-1 focus:ring-accent/25"}`}
         />
         <button
           onClick={handleSend}
@@ -344,6 +344,8 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           {upload.isUploading ? "..." : "Send"}
         </button>
       </div>
+      {/* W1-4 (assistant-ui Composer, fish-picked 2026-08-20): persistent shortcut hint */}
+      <div className="mt-1.5 pr-1 text-right text-[10px] text-ink-4 select-none">⏎ send · ⇧⏎ newline · @ mention</div>
     </div>
   );
 }

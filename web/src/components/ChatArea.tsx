@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, BookOpen, FileText, Plus, Pencil, ArrowRight, Trash2, Eye, MessagesSquare } from "lucide-react";
+import { Loader2, BookOpen, FileText, Plus, Pencil, ArrowRight, Trash2, Eye, MessagesSquare, ArrowDown } from "lucide-react";
 import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
 import { getTopicMessages } from "../api/client";
 import { MessageBubble } from "./MessageBubble";
@@ -37,6 +37,9 @@ interface ChatAreaProps {
 
 export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
+  const [atBottom, setAtBottom] = useState(true);
+  const [awayCount, setAwayCount] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(messages.length);
@@ -67,6 +70,8 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
       // New message appended — scroll to bottom
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
+    // W1-3: count arrivals while the user is scrolled up (scroll-pill badge).
+    if (added > 0 && !isNearBottom.current) setAwayCount((c) => c + added);
     prevMsgCount.current = messages.length;
   }, [messages.length]);
 
@@ -120,7 +125,10 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
     const el = containerRef.current;
     if (!el) return;
 
-    isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    isNearBottom.current = near;
+    setAtBottom(near);
+    if (near) setAwayCount(0);
 
     // Load older when at top — debounced 300ms buffer
     if (el.scrollTop === 0 && hasMore && !loadingOlder && onLoadOlder) {
@@ -263,6 +271,19 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
         )}
         <div ref={bottomRef} />
       </div>
+      {/* W1-3: scrolled-up pill — back to bottom, badge counts arrivals while away */}
+      {!atBottom && messages.length > 0 && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); setAwayCount(0); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-surface-3 border border-line-strong text-ink-1 rounded-full shadow-lg hover:bg-surface-2 transition-colors cursor-pointer"
+            title="Back to the latest messages"
+          >
+            <ArrowDown size={12} />
+            {awayCount > 0 ? <><span className="min-w-[16px] h-4 px-1 rounded-full bg-accent text-accent-contrast text-[9.5px] font-bold flex items-center justify-center tabular-nums">{awayCount}</span> new</> : "Back to latest"}
+          </button>
+        </div>
+      )}
       {inHistoryView && onReturnToLatest && (
         <div className="absolute bottom-4 right-4 z-10">
           <button

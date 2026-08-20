@@ -1646,16 +1646,38 @@ function ActionLine({ name, status, events, expanded, onToggle }: { name: string
 function MiniEvent({ event, events = [] }: { event: AgentEvent; events?: AgentEvent[] }) {
   const summary = stationSummary(event, events);
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
+  // W2-3 (beautifului Task Rows, fish-picked 2026-08-20): unified status language —
+  // status icon + action title + meta + Completed/Running/Failed pill. Live
+  // seconds while running (ticker only mounted for running rows).
+  const kind = summary.kind;
+  const icon = kind === "running" ? <span className="text-think animate-spin inline-block">◐</span>
+    : kind === "error" ? <span className="text-blocked">✗</span>
+    : <span className="text-onair">✓</span>;
+  const pill = kind === "running" ? <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-think bg-think/10">Running</span>
+    : kind === "error" ? <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-blocked bg-blocked/10">Failed</span>
+    : <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-onair bg-onair/10">Completed</span>;
   return (
-    <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(summary.kind)}`}>
+    <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(kind)}`}>
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(summary.kind)}`} />
-        <span className={`text-[9px] font-bold tracking-[0.1em] uppercase shrink-0 ${actionTone(summary.kind)}`}>{summary.label}</span>
-        <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{summary.detail}</span>
-        {time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
+        <span className="text-[10px] w-3.5 text-center shrink-0">{icon}</span>
+        <span className="text-[11.5px] font-semibold text-ink-2 truncate">{summary.label}</span>
+        <span className="font-mono text-[10px] text-ink-4 truncate flex-1">{summary.detail}</span>
+        {kind === "running" && typeof event.ts === "number" ? <LiveSeconds since={event.ts} /> : time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
+        {pill}
       </div>
     </div>
   );
+}
+
+/** 1s-ticking "Ns" badge for running task rows (mounted only while running). */
+function LiveSeconds({ since }: { since: number }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => force((v) => v + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
+  return <span className="font-mono text-[9.5px] text-think shrink-0 tabular-nums">{s}s</span>;
 }
 
 export function ModelPop({

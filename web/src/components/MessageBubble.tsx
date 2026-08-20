@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileText, FileCode, Image as ImageIcon, Eye, Download, X, CornerUpLeft, MessagesSquare } from "lucide-react";
+import { FileText, FileCode, Image as ImageIcon, Eye, Download, X, CornerUpLeft, MessagesSquare, Copy, Check } from "lucide-react";
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
@@ -91,6 +91,13 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 export function MessageBubble({
   sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply, onCreateTopic,
 }: MessageBubbleProps) {
+  const [copied, setCopied] = useState(false);
+  // W1-1 (assistant-ui ActionBar, fish-picked 2026-08-20): copy message text —
+  // self-contained in the hover family, no call-site plumbing.
+  const handleCopy = () => {
+    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 1200); };
+    if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(content).then(done).catch(() => {}); }
+  };
   const isUser = sender === "user";
   const isSystem = sender === "system";
 
@@ -113,8 +120,13 @@ export function MessageBubble({
 
   return (
     <div className={`group relative flex gap-3 ${grouped ? "mt-0.5" : "mt-3"} -mx-2 px-2 py-0.5 rounded hover:bg-surface-2/40 transition-colors`}>
-      {(onReply || onCreateTopic) && (
+      {(onReply || onCreateTopic || content) && (
         <div className="absolute -top-3 right-2 z-10 hidden group-hover:flex items-center bg-surface-1 border border-line rounded-lg shadow-pop p-0.5">
+          {content && (
+            <button type="button" onClick={handleCopy} title={copied ? "Copied" : "Copy"} aria-label="Copy message" className={`w-7 h-[26px] flex items-center justify-center rounded cursor-pointer ${copied ? "text-onair" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}>
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </button>
+          )}
           {onReply && (
             <button type="button" onClick={onReply} title="Reply" aria-label="Reply" className="w-7 h-[26px] flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
               <CornerUpLeft size={13} />
