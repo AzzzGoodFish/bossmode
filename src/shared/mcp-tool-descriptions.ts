@@ -45,7 +45,7 @@ Only one wait at a time. If the target is already idle, returns immediately. Pre
 export const PARAM_DESCRIPTIONS = {
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
-  from: "Filter by sender name (exact match, e.g. 'fish' or 'developer')",
+  from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
   after: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')",
   before: "Only messages before this time: same format as 'after'",
   type: "Filter by message type (e.g. 'task_event', 'knowledge_event')",
