@@ -1662,14 +1662,16 @@ function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHist
     || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
   const memberId = member?.id || instance?.memberId || memberRef;
   const agentName = member?.name || instance?.agentName || memberRef;
-  if (instance) instance.eventBuffer.push(event);
-  try { appendEventToDisk(roomId, memberId, event); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
+  // Stamp once so disk + WS share identity (same rule as event-handler, rc.4).
+  const stamped = typeof (event as { ts?: number }).ts === "number" ? event : { ...event, ts: Date.now() };
+  if (instance) instance.eventBuffer.push(stamped);
+  try { appendEventToDisk(roomId, memberId, stamped); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
   broadcastToAgentSubscribers(roomId, agentName, {
     type: "agent:event",
     roomId,
     agent: agentName,
     memberId,
-    event,
+    event: stamped,
   });
 }
 
