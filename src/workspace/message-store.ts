@@ -2,12 +2,13 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir } from "./room-store.js";
-import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import { parseJsonlLines } from "../shared/jsonl.js";
+import { invalidateJsonlCache, readJsonlCached } from "./jsonl-file-cache.js";
 
 function parseRoomMessages(content: string, roomId: string): RoomMessage[] {
+  if (!content.trim()) return [];
   return parseJsonlLines<RoomMessage>(content, {
     category: "message-store",
     context: { roomId },
@@ -56,19 +57,15 @@ export function addMessage(roomId: string, msg: Omit<RoomMessage, "id" | "ts">):
 
   const path = messagesPath(roomId);
   appendFileSync(path, JSON.stringify(message) + "\n", "utf-8");
+  invalidateJsonlCache(path);
   writeNextSeq(roomId, seq + 1);
   return message;
 }
 
 // 2c: getMessages
 export function getMessages(roomId: string, opts?: { limit?: number; before?: string; around?: string; fromSeq?: number }): RoomMessage[] {
-  const path = messagesPath(roomId);
-  if (!existsSync(path)) return [];
-
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return [];
-
-  let messages: RoomMessage[] = parseRoomMessages(content, roomId);
+  let messages: RoomMessage[] = readAllMessages(roomId);
+  if (messages.length === 0) return [];
 
   // Around: return a window centered on the target message
   if (opts?.around) {
@@ -108,13 +105,8 @@ export function getMessages(roomId: string, opts?: { limit?: number; before?: st
 
 // 2c: getMessagesSince with merge
 export function getMessagesSince(roomId: string, cursorId: string | null): RoomMessage[] {
-  const path = messagesPath(roomId);
-  if (!existsSync(path)) return [];
-
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return [];
-
-  const messages: RoomMessage[] = parseRoomMessages(content, roomId);
+  const messages = readAllMessages(roomId);
+  if (messages.length === 0) return [];
 
   if (!cursorId) return messages;
 
@@ -125,27 +117,11 @@ export function getMessagesSince(roomId: string, cursorId: string | null): RoomM
 }
 
 export function getLatestMessageId(roomId: string): string | null {
-  const path = messagesPath(roomId);
-  if (!existsSync(path)) return null;
-
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return null;
-
-  // Walk backward so a truncated trailing line does not hide the real latest id.
-  const lines = content.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    try {
-      const msg = JSON.parse(line) as RoomMessage;
-      if (msg?.id) return msg.id;
-    } catch (err) {
-      logger.warn("message-store", "skipped corrupt jsonl line (latest-id scan)", {
-        roomId,
-        lineNo: i + 1,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  const messages = readAllMessages(roomId);
+  if (messages.length === 0) return null;
+  // Prefer last with id (parse already dropped corrupt lines).
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.id) return messages[i].id;
   }
   return null;
 }
@@ -169,15 +145,13 @@ export function updateMessage(
 export function overwriteMessages(roomId: string, messages: RoomMessage[]): void {
   const path = messagesPath(roomId);
   writeFileSync(path, messages.map((m) => JSON.stringify(limitRuntimeFailureRoomMessage(m))).join("\n") + "\n", "utf-8");
+  invalidateJsonlCache(path);
 }
 
-// Read all raw messages (no merge)
+// Read all raw messages (no merge) — single cache entry for the room file.
 export function readAllMessages(roomId: string): RoomMessage[] {
   const path = messagesPath(roomId);
-  if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return [];
-  return parseRoomMessages(content, roomId);
+  return readJsonlCached(path, (content) => parseRoomMessages(content, roomId), []);
 }
 
 // -- Message search --

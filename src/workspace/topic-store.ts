@@ -3,6 +3,7 @@
  * Path: rooms/<roomId>/topics/<topicId>/topic.json + messages.jsonl + .topic-seq
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
+import { invalidateJsonlCache, readJsonlCached } from "./jsonl-file-cache.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir, getRoomsDir, getRoom } from "./room-store.js";
@@ -297,13 +298,18 @@ function readNextSeq(roomId: string, topicId: string): number {
 
 export function readAllTopicMessages(roomId: string, topicId: string): RoomMessage[] {
   const path = join(topicDir(roomId, topicId), "messages.jsonl");
-  if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8");
-  return parseJsonlLines<RoomMessage>(content, {
-    category: "topic-message-store",
-    context: { roomId, topicId },
-    map: (value) => limitRuntimeFailureRoomMessage(value as RoomMessage),
-  });
+  return readJsonlCached(
+    path,
+    (content) => {
+      if (!content.trim()) return [];
+      return parseJsonlLines<RoomMessage>(content, {
+        category: "topic-message-store",
+        context: { roomId, topicId },
+        map: (value) => limitRuntimeFailureRoomMessage(value as RoomMessage),
+      });
+    },
+    [],
+  );
 }
 
 export function addTopicMessage(
@@ -319,7 +325,9 @@ export function addTopicMessage(
     seq,
     ts: Date.now(),
   };
-  appendFileSync(messagesPath(roomId, topicId), JSON.stringify(message) + "\n", "utf-8");
+  const path = messagesPath(roomId, topicId);
+  appendFileSync(path, JSON.stringify(message) + "\n", "utf-8");
+  invalidateJsonlCache(path);
   writeFileSync(seqPath(roomId, topicId), String(seq + 1), "utf-8");
   return message;
 }
