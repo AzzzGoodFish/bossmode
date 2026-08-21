@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronRight, MessageSquareText, Search, User } from "lucide-react";
 import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
-import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isActivityStreamEvent, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
 const PAGE_SIZE = 120;
@@ -38,16 +38,7 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledToLatestRef = useRef(false);
 
-  /** All-stream visibility. Streaming deltas (message_update/tool_update) and
-   * message_start markers are noise; a bare message_end from a pure tool-call
-   * round (no text, no thinking) carries no information either — excluded per
-   * fish 2026-08-09. message_end WITH text/thinking still renders as the
-   * REPLY/THINKING cards. */
-  const isAllStreamEvent = (event: AgentEvent): boolean => {
-    if (event.type === "message_update" || event.type === "tool_update" || event.type === "message_start") return false;
-    if (event.type === "message_end" && !event.text && !event.thinking) return false;
-    return true;
-  };
+  const isAllStreamEvent = isActivityStreamEvent;
   // Synchronous re-entry guard — React state alone can miss a second scroll
   // event that fires before the next render (QA noted this under synthetic
   // scrollTop assignment; real wheel gestures were fine, but a ref is cheap insurance).
@@ -212,7 +203,7 @@ function ThinkingTrace({ text, elapsedSec, time }: { text: string; elapsedSec?: 
   );
 }
 
-function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
+export function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
   const turns: Array<{ events: AgentEvent[] }> = [];
   let current: AgentEvent[] = [];
   for (const event of events) {
@@ -232,6 +223,18 @@ function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }> {
 
 function TurnBlock({ index, events, query }: { index: number; events: AgentEvent[]; query: string }) {
   const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
+  return (
+    <section className="space-y-[7px]">
+      <div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
+      <TurnEventList events={events} query={query} />
+    </section>
+  );
+}
+
+/** One turn's event body — thinking traces, tool groups/cards, reply/prompt
+ * cards. Shared by the member Activity tab (Turn · #N header) and the room
+ * workstations feed (member header), so both render the identical card language. */
+export function TurnEventList({ events, query }: { events: AgentEvent[]; query: string }) {
   // Build a toolCallId → tool_end map so tool_start rows can show their result.
   const toolEndMap = useMemo(() => {
     const m: Record<string, AgentEvent> = {};
@@ -271,8 +274,7 @@ function TurnBlock({ index, events, query }: { index: number; events: AgentEvent
   flushTools();
 
   return (
-    <section className="space-y-[7px]">
-      <div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
+    <>
       {items.map((item, i) =>
         item.kind === "group" ? (
           <ToolGroupBlock key={`g${i}`} events={item.events} toolEndMap={toolEndMap} query={query} />
@@ -280,7 +282,7 @@ function TurnBlock({ index, events, query }: { index: number; events: AgentEvent
           <EventRow key={`${item.event.ts || i}:${item.event.type}:${i}`} event={item.event} toolEnd={item.event.type === "tool_start" && item.event.toolCallId ? toolEndMap[item.event.toolCallId] : undefined} elapsedSec={thinkingElapsed.get(item.event)} query={query} />
         ),
       )}
-    </section>
+    </>
   );
 }
 
@@ -571,9 +573,12 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
 
   return (
     <div className={`rounded-[10px] border ${cardBorder} bg-surface-1 px-3 py-[9px]`}>
-      <button onClick={() => toolEnd && setExpanded(v => !v)} className={`w-full text-left ${toolEnd ? "cursor-pointer" : "cursor-default"}`}>
+      {/* Expandable in every state (fish 2026-08-21: a running tool must show
+       * its args — don't gate inspection on completion). Running cards show
+       * args + a live "running" placeholder in the result area. */}
+      <button onClick={() => setExpanded(v => !v)} className="w-full text-left cursor-pointer">
         <div className="flex items-center gap-2">
-          {toolEnd && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
+          <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
           <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-3">TOOL·{tool.label}</span>
           <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
@@ -587,6 +592,12 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
       {expanded && (
         <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
           {event.args !== undefined && <ArgsPanel args={event.args} />}
+          {isRunning && (
+            <div className="flex items-center gap-2 rounded-[7px] border border-line-soft bg-surface-1 px-[9px] py-[7px]">
+              <span className="text-think animate-pulse text-[10px] font-bold">●</span>
+              <span className="text-[11px] text-ink-3">Running — the result appears here when the call finishes.</span>
+            </div>
+          )}
           {resultText && (
             <div className={`${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30 p-1.5" : ""}`}>
               <div className="flex items-center gap-2 mb-1">
