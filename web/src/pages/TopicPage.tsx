@@ -26,6 +26,7 @@ import type { AgentStatusMap } from "../hooks/useRoom";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { StationPanel } from "../components/StationPanel";
+import { ResizableRail } from "../components/ResizableRail";
 import { TopicRail, TopicRailToggle, useRoomTopics, useTopicRailOpen } from "../components/TopicRail";
 
 export interface TopicDraftAnchor {
@@ -360,7 +361,7 @@ export function TopicPage({
 
         {/* right rail — native member view, participants only (fish ②); activity scoped to topic */}
         {railMembers.length > 0 && (
-          <div className="w-[340px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
+          <ResizableRail className="hidden md:block">
             <StationPanel
               members={railMembers}
               agentStatus={agentStatus}
@@ -370,7 +371,7 @@ export function TopicPage({
               onOpenMcpSettings={onOpenMcpSettings}
               onOpenExtensionsSettings={onOpenExtensionsSettings}
             />
-          </div>
+          </ResizableRail>
         )}
       </div>
     </div>

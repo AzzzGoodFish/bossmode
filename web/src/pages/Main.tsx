@@ -26,6 +26,7 @@ import { ArtifactPreviewPanel, type MessageArtifactPreviewState, type ChatAttach
 import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSurface";
 import { TaskPreviewSurface, TaskPreviewPanel } from "../components/TaskPreviewSurface";
 import { StationPanel } from "../components/StationPanel";
+import { ResizableRail } from "../components/ResizableRail";
 import { MessageInput } from "../components/MessageInput";
 import { TopicRail, TopicRailToggle, useRoomTopics, useTopicRailOpen } from "../components/TopicRail";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
@@ -457,8 +458,8 @@ export function Main({
           </>
         )}
 
-        {/* 工位墙（桌面） */}
-        <div className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[340px] border-l border-line shrink-0`}>
+        {/* 工位墙（桌面，可拖拽调宽 fish 2026-08-21） */}
+        <ResizableRail className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"}`}>
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}
@@ -471,7 +472,7 @@ export function Main({
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
           />
-        </div>
+        </ResizableRail>
 
         {/* 工位墙（移动端抽屉） */}
         {isMobile && (

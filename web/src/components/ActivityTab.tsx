@@ -147,13 +147,13 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
     <div className="flex flex-col h-full min-h-0">
       {/* Sticky sub-header: filter + search stay pinned; never scroll with events. */}
       <div className="shrink-0 px-5 pt-4 pb-2.5 border-b border-line-soft bg-surface-1">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5.5">
           <div className="flex bg-inset border border-line-soft rounded-lg p-0.5">
             <FilterButton label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
             <FilterButton label="Tools" count={counts.tools} active={filter === "tools"} onClick={() => setFilter("tools")} />
             <FilterButton label="Replies" count={counts.replies} active={filter === "replies"} onClick={() => setFilter("replies")} />
           </div>
-          <div className="flex items-center gap-2 bg-inset border border-line-soft rounded-lg px-2.5 py-1.5 flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 bg-inset border border-line-soft rounded-lg px-2.5 py-1.5 flex-1 min-w-0">
             <Search size={13} className="text-ink-4 shrink-0" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity…" className="bg-transparent outline-none text-[11.5px] text-ink-1 placeholder:text-ink-4 flex-1 min-w-0" />
           </div>
@@ -194,7 +194,7 @@ function MemberHead({ member }: { member?: string }) {
   return (
     <>
       <MemberDisc name={member} />
-      <span className="text-[11px] font-bold text-ink-1 truncate max-w-[90px] shrink-0" title={member}>{member}</span>
+      <span className="text-[11px] font-bold text-ink-1 truncate max-w-[80px] shrink-0" title={member}>{member}</span>
     </>
   );
 }
@@ -213,7 +213,11 @@ export function ThinkingTrace({ text, elapsedSec, time, member }: { text: string
         <MemberHead member={member} />
         <Brain size={10} className="text-think shrink-0" aria-hidden />
         <span className="text-[12px] font-semibold text-ink-2">
-          {elapsedSec !== undefined && elapsedSec > 0 ? `Thought for ${elapsedSec} second${elapsedSec === 1 ? "" : "s"}` : "Thinking"}
+          {/* "Thinking" is live-only vocabulary (fish 2026-08-21): a settled
+           * trace with no honest duration says "Thought", never "Thinking" —
+           * otherwise it reads as a live card forever (elapsed 0 when the next
+           * event lands in the same instant, e.g. think+text in one message). */}
+          {elapsedSec !== undefined && elapsedSec > 0 ? `Thought for ${elapsedSec} second${elapsedSec === 1 ? "" : "s"}` : "Thought"}
         </span>
         <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
         <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
@@ -247,7 +251,7 @@ function TurnBlock({ index, events, query }: { index: number; events: AgentEvent
   const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
   return (
     <section className="space-y-[7px]">
-      <div className="flex items-center gap-2"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
+      <div className="flex items-center gap-1.5"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
       <TurnEventList events={events} query={query} />
     </section>
   );
@@ -314,7 +318,7 @@ export function TurnEventList({ events, query }: { events: AgentEvent[]; query: 
  * untouched; a file-level diff-chip summary aggregates edit/write stats.
  * Default: collapsed when every call finished, expanded while any is running.
  */
-export function ToolGroupBlock({ events, toolEndMap, query, member }: { events: AgentEvent[]; toolEndMap: Record<string, AgentEvent>; query: string; member?: string }) {
+export function ToolGroupBlock({ events, toolEndMap, query, member, compact }: { events: AgentEvent[]; toolEndMap: Record<string, AgentEvent>; query: string; member?: string; compact?: boolean }) {
   const ends = events.map((e) => (e.toolCallId ? toolEndMap[e.toolCallId] : undefined));
   const running = ends.filter((e) => !e).length;
   const failed = ends.filter((e) => e?.isError).length;
@@ -337,16 +341,16 @@ export function ToolGroupBlock({ events, toolEndMap, query, member }: { events: 
     fileDiffs.set(target, cur);
   }
   const time = formatEventTime(typeof events[events.length - 1]?.ts === "number" ? events[events.length - 1].ts : undefined);
-  const status = running > 0 ? <span className="text-think">● {running} running</span> : failed > 0 ? <span className="text-blocked">✗ {failed} failed</span> : <span className="text-onair">✓ all done</span>;
+  const status = running > 0 ? <span className="text-think whitespace-nowrap flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-think animate-pulse" />{running} running</span> : failed > 0 ? <span className="text-blocked whitespace-nowrap">✗ {failed} failed</span> : <span className="text-onair whitespace-nowrap">✓ all done</span>;
 
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1">
-      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-2 px-3 py-[8px] text-left cursor-pointer">
+      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-1.5 px-3 py-[8px] text-left cursor-pointer">
         <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
         <MemberHead member={member} />
-        <span className="text-[12px] font-semibold text-ink-2">{events.length} tool calls{edits > 0 ? ` · ${edits} edit${edits > 1 ? "s" : ""}` : ""}</span>
-        <span className="ml-auto flex items-center gap-2 text-[10px] font-bold">{status}</span>
-        <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
+        <span className="text-[12px] font-semibold text-ink-2 truncate min-w-0">{events.length} tool calls{edits > 0 ? ` · ${edits} edit${edits > 1 ? "s" : ""}` : ""}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-[10px] font-bold shrink-0 whitespace-nowrap">{status}</span>
+        <span className="font-mono text-[10px] text-ink-4 shrink-0 whitespace-nowrap">{time}</span>
       </button>
       {expanded && (
         <div className="border-t border-line-soft px-2.5 py-2 space-y-[6px]">
@@ -360,7 +364,7 @@ export function ToolGroupBlock({ events, toolEndMap, query, member }: { events: 
             </div>
           )}
           {events.map((e, i) => (
-            <ToolCard key={`${e.ts || i}:${i}`} event={e} toolEnd={e.toolCallId ? toolEndMap[e.toolCallId] : undefined} diff={diffStatForTool(e)} time={formatEventTime(typeof e.ts === "number" ? e.ts : undefined)} query={query} />
+            <ToolCard key={`${e.ts || i}:${i}`} event={e} toolEnd={e.toolCallId ? toolEndMap[e.toolCallId] : undefined} diff={diffStatForTool(e)} time={formatEventTime(typeof e.ts === "number" ? e.ts : undefined)} query={query} compact={compact} />
           ))}
         </div>
       )}
@@ -399,26 +403,26 @@ function EventRow({ event, toolEnd, elapsedSec, query }: { event: AgentEvent; to
 /** REPLY card — extracted from EventRow so the workstations river renders the
  * identical card language with a member tag (fish 2026-08-21 ①). `clamp` caps
  * long replies at ~4 lines with a Show-more toggle (river passes it). */
+/** REPLY card. Tab face (default): header + markdown body. River face
+ * (`clamp`, fish 2026-08-21 ③): uniform one-line anatomy — header carries a
+ * truncated plain-text preview; face click expands the full markdown. */
 export function ReplyCard({ text, time, query = "", member, clamp }: { text: string; time: string; query?: string; member?: string; clamp?: boolean }) {
-  const [showAll, setShowAll] = useState(false);
-  const needsClamp = clamp && (text.length > 280 || text.split("\n").length > 4);
+  const [open, setOpen] = useState(false);
+  const needsClamp = !!clamp && (text.length > 60 || text.includes("\n"));
+  const preview = text.replace(/\s+/g, " ").trim();
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
-      <div className="flex items-center gap-2 mb-1">
-        <MemberHead member={member} />
-        <MessageSquareText size={10} className="text-onair shrink-0" aria-hidden />
-        <span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px]">REPLY</span>
-        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
-      </div>
-      <div className={`mt-[6px] text-[12.5px] text-ink-2 ${needsClamp && !showAll ? "max-h-[96px] overflow-hidden relative" : ""}`}>
-        <Markdown content={text} />
-        {needsClamp && !showAll && <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-surface-1 to-transparent pointer-events-none" />}
-      </div>
-      {needsClamp && (
-        <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[11px] font-semibold text-accent-ink hover:underline cursor-pointer">
-          {showAll ? "Collapse ↑" : "Show more ↓"}
-        </button>
-      )}
+      <button type="button" onClick={() => needsClamp && setOpen((v) => !v)} className={`w-full text-left ${needsClamp ? "cursor-pointer" : "cursor-default"}`}>
+        <div className="flex items-center gap-1.5">
+          {needsClamp && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />}
+          <MemberHead member={member} />
+          <MessageSquareText size={10} className="text-onair shrink-0" aria-hidden />
+          <span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px] shrink-0">REPLY</span>
+          {needsClamp && !open && <span className="text-[11.5px] text-ink-3 truncate flex-1 min-w-0">{preview}</span>}
+          <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0 whitespace-nowrap">{time}</span>
+        </div>
+      </button>
+      {(!needsClamp || open) && <div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={text} /></div>}
     </div>
   );
 }
@@ -426,16 +430,21 @@ export function ReplyCard({ text, time, query = "", member, clamp }: { text: str
 /** Compaction card — extracted from EventRow for river reuse (member tag). */
 export function CompactionCard({ event, time, query = "", member }: { event: AgentEvent; time: string; query?: string; member?: string }) {
   const summary = summarizeAgentEvent(event);
+  const [open, setOpen] = useState(false);
   const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
+  const expandable = event.type === "compaction_end";
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
-      <div className="flex items-center gap-2">
-        <MemberHead member={member} />
-        <span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase ${tone}`}>{summary.label}</span>
-        <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(summary.detail, query)}</span>
-        <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
-      </div>
-      {event.type === "compaction_end" && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}
+      <button type="button" onClick={() => expandable && setOpen((v) => !v)} className={`w-full text-left ${expandable ? "cursor-pointer" : "cursor-default"}`}>
+        <div className="flex items-center gap-1.5">
+          {expandable && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />}
+          <MemberHead member={member} />
+          <span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase whitespace-nowrap ${tone}`}>{summary.label}</span>
+          <span className="font-mono text-[11px] text-ink-3 truncate flex-1 min-w-0">{highlight(summary.detail, query)}</span>
+          <span className="font-mono text-[10px] text-ink-4 shrink-0 whitespace-nowrap">{time}</span>
+        </div>
+      </button>
+      {expandable && open && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}
     </div>
   );
 }
@@ -450,6 +459,7 @@ export function UserPromptCard({
   query,
   label = "USER PROMPT",
   member,
+  compact,
 }: {
   event: AgentEvent;
   time: string;
@@ -457,18 +467,41 @@ export function UserPromptCard({
   /** USER PROMPT (turn start) or STEER (mid-turn inject) — same teal family card. */
   label?: string;
   member?: string;
+  /** River face (fish 2026-08-21 ③): one-line anatomy — header carries a
+   * truncated plain-text preview; face click expands the full prompt. */
+  compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const text = String(event.text || "");
   const lines = text.split("\n");
   const clamped = lines.length > PROMPT_CLAMP_LINES && !expanded;
   const body = clamped ? lines.slice(0, PROMPT_CLAMP_LINES).join("\n") : text;
+  const preview = text.replace(/\s+/g, " ").trim();
+  const needsClamp = !!compact && (text.length > 60 || text.includes("\n"));
   const from = typeof (event as { from?: unknown }).from === "string"
     ? String((event as { from?: string }).from).trim()
     : "";
+  if (compact) {
+    return (
+      <div className="rounded-[10px] border border-accent/30 bg-accent-dim/20 px-3 py-[9px]">
+        <button type="button" onClick={() => needsClamp && setExpanded((v) => !v)} className={`w-full text-left ${needsClamp ? "cursor-pointer" : "cursor-default"}`}>
+          <div className="flex items-center gap-1.5">
+            {needsClamp && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
+            <MemberHead member={member} />
+            <User size={10} className="text-accent-ink shrink-0" aria-hidden />
+            <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px] shrink-0">{label}</span>
+            {from ? <span className="text-[10px] text-ink-4 shrink-0">· {from}</span> : null}
+            {needsClamp && !expanded && <span className="text-[11.5px] text-ink-2 truncate flex-1 min-w-0">{preview}</span>}
+            <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0 whitespace-nowrap">{time}</span>
+          </div>
+        </button>
+        {(!needsClamp || expanded) && <div className="mt-[6px] text-[12.5px] text-ink-2 whitespace-pre-wrap break-words">{highlight(text, query)}</div>}
+      </div>
+    );
+  }
   return (
     <div className="rounded-[10px] border border-accent/30 bg-accent-dim/20 px-3 py-[9px]">
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-1.5 mb-1">
         <MemberHead member={member} />
         <User size={10} className="text-accent-ink shrink-0" aria-hidden />
         <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px]">{label}</span>
@@ -505,7 +538,7 @@ function ArgsPanel({ args }: { args: unknown }) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-1.5 mb-1">
         <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">
           Arguments{lineCount > 1 ? <span className="font-mono font-normal normal-case tracking-normal text-ink-4"> · {lineCount} lines · {charLabel}</span> : null}
         </div>
@@ -613,7 +646,7 @@ function isMarkdownResult(toolName: string | undefined, text: string): boolean {
   return /^(#|\*\*|\d+\.|- |```|\|)/m.test(text.slice(0, 200));
 }
 
-export function ToolCard({ event, toolEnd, diff, time, query, member }: { event: AgentEvent; toolEnd?: AgentEvent; diff: ReturnType<typeof diffStatForTool>; time: string; query: string; member?: string }) {
+export function ToolCard({ event, toolEnd, diff, time, query, member, compact }: { event: AgentEvent; toolEnd?: AgentEvent; diff: ReturnType<typeof diffStatForTool>; time: string; query: string; member?: string; compact?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<"raw" | "preview">("raw");
   const tool = toolDisplay(event.toolName, event.args);
@@ -627,10 +660,17 @@ export function ToolCard({ event, toolEnd, diff, time, query, member }: { event:
   const canPreview = !isError && isMarkdownResult(event.toolName, resultText);
   const summaryText = resultText.slice(0, 120).replace(/\n/g, " ").trim();
 
-  const statusIcon = isError ? "✗" : isRunning ? "●" : toolEnd ? "✓" : "";
-  const statusColor = isError ? "text-blocked" : isRunning ? "text-think animate-pulse" : "text-onair";
   // Failed cards must jump out of the river (fish 2026-08-21 ③): red left edge + Failed tag.
   const cardBorder = isError ? "border-blocked/40 border-l-2 border-l-blocked" : isRunning ? "border-think/40" : "border-line-soft";
+  // Live dot is a real CSS circle (fish: ● glyph rides the baseline and reads
+  // off-center against the small caps tags).
+  const statusMark = isRunning
+    ? <span className="w-1.5 h-1.5 rounded-full bg-think animate-pulse shrink-0" title="running" />
+    : isError
+      ? <span className="text-blocked text-[10px] font-bold leading-none shrink-0" title="error">✗</span>
+      : toolEnd
+        ? <span className="text-onair text-[10px] font-bold leading-none shrink-0" title="done">✓</span>
+        : null;
 
   return (
     <div className={`rounded-[10px] border ${cardBorder} bg-surface-1 px-3 py-[9px]`}>
@@ -638,33 +678,36 @@ export function ToolCard({ event, toolEnd, diff, time, query, member }: { event:
        * its args — don't gate inspection on completion). Running cards show
        * args + a live "running" placeholder in the result area. */}
       <button onClick={() => setExpanded(v => !v)} className="w-full text-left cursor-pointer">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
           <MemberHead member={member} />
-          <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-3">TOOL·{tool.label}</span>
-          {isError && <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-blocked bg-blocked/10 shrink-0">Failed</span>}
-          <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
-          {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
-          {statusIcon && <span className={`text-[10px] font-bold shrink-0 ${statusColor}`} title={isError ? "error" : isRunning ? "running" : "done"}>{statusIcon} {toolEnd && !isError && `${(resultSize / 1024).toFixed(1)}k`}{isError && `${(resultSize / 1024).toFixed(1)}k`}</span>}
-          <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
+          <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-3 truncate min-w-0 shrink max-w-[96px]">TOOL·{tool.label}</span>
+          {isError && <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-blocked bg-blocked/10 shrink-0 whitespace-nowrap">Failed</span>}
+          <span className="font-mono text-[11px] text-ink-3 truncate flex-1 min-w-0">{highlight(tool.detail || toolTarget(event.args), query)}</span>
+          {/* diff chips ride the tab face only — the compact river header has no budget for them */}
+          {!compact && diff && <span className="font-mono text-[10px] text-ink-4 shrink-0 whitespace-nowrap">+{diff.added} −{diff.removed}</span>}
+          {statusMark}
+          <span className="font-mono text-[10px] text-ink-4 shrink-0 whitespace-nowrap">{time}</span>
         </div>
-        {/* Collapsed: whole card face toggles — header row + one-line summary both live inside the button (fish: 点击区域太小). args/result stay in the expanded body. */}
-        {!expanded && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
+        {/* Collapsed: whole card face toggles. The one-line result preview stays
+         * in the member Activity tab; the river passes compact for a uniform
+         * one-line anatomy (fish 2026-08-21 ③). */}
+        {!expanded && !compact && summaryText && <div className={`mt-1.5 text-[11px] leading-snug truncate ${isError ? "text-blocked" : "text-ink-3"}`}>↳ {summaryText}{resultSize > 120 ? "…" : ""}</div>}
       </button>
       {/* Expanded: unified dropdown area — inset container + surface wells (Session & tools card language) */}
       {expanded && (
         <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
           {event.args !== undefined && <ArgsPanel args={event.args} />}
           {isRunning && (
-            <div className="flex items-center gap-2 rounded-[7px] border border-line-soft bg-surface-1 px-[9px] py-[7px]">
+            <div className="flex items-center gap-1.5 rounded-[7px] border border-line-soft bg-surface-1 px-[9px] py-[7px]">
               <span className="text-think animate-pulse text-[10px] font-bold">●</span>
               <span className="text-[11px] text-ink-3">Running — the result appears here when the call finishes.</span>
             </div>
           )}
           {resultText && (
             <div className={`${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30 p-1.5" : ""}`}>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">{isError ? "Error" : "Result"}</div>
+              <div className="flex items-center gap-1.5 mb-1">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-ink-4">{isError ? "Error" : "Result"}{resultSize > 0 ? ` · ${(resultSize / 1024).toFixed(1)}k` : ""}</div>
                 {canPreview && <div className="flex gap-0.5 rounded-md border border-line-soft bg-surface-1 p-0.5 ml-auto"><button onClick={(e) => { e.stopPropagation(); setMode("raw"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Raw</button><button onClick={(e) => { e.stopPropagation(); setMode("preview"); }} className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold ${mode === "preview" ? "bg-surface-3 text-ink-1" : "text-ink-4"}`}>Preview</button></div>}
               </div>
               {mode === "preview" && canPreview
