@@ -328,7 +328,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={disabled || upload.isUploading}
-          placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... (@ to mention, Ctrl+V to paste image)")}
+          placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... ⏎ send · ⇧⏎ newline · @ mention · Ctrl+V paste")}
           rows={1}
           className={`flex-1 bg-inset border rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
                      resize-none focus:outline-none
@@ -344,8 +344,9 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           {upload.isUploading ? "..." : "Send"}
         </button>
       </div>
-      {/* W1-4 (assistant-ui Composer, fish-picked 2026-08-20): persistent shortcut hint */}
-      <div className="mt-1.5 pr-1 text-right text-[10px] text-ink-4 select-none">⏎ send · ⇧⏎ newline · @ mention</div>
+      {/* Shortcut hints live in the placeholder (visible exactly when the box is
+       * empty); the persistent line below was removed — it reserved permanent
+       * whitespace under the composer (fish 2026-08-21). */}
     </div>
   );
 }
