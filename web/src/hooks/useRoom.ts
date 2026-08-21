@@ -116,6 +116,21 @@ export function useRoom(roomId: string | null) {
     fetchContextUsageCache().catch(console.error);
   }, [fetchContextUsageCache]);
 
+  // Context-usage refresh cadence (fish 2026-08-21: the number returns to the
+  // roster strips): it only moves at turn boundaries, so refetch when the
+  // room flips working→quiet, plus a 60s floor while anyone is working.
+  const anyWorking = Object.values(agentStatus).some((s) => s === "working");
+  const wasWorkingRef = useRef(false);
+  useEffect(() => {
+    if (wasWorkingRef.current && !anyWorking) fetchContextUsageCache().catch(console.error);
+    wasWorkingRef.current = anyWorking;
+  }, [anyWorking, fetchContextUsageCache]);
+  useEffect(() => {
+    if (!anyWorking) return;
+    const t = window.setInterval(() => { fetchContextUsageCache().catch(console.error); }, 60_000);
+    return () => window.clearInterval(t);
+  }, [anyWorking, fetchContextUsageCache]);
+
   // Load older messages (prepend)
   const loadOlder = useCallback(async (): Promise<void> => {
     if (!roomId || loadingOlder || !hasMore || messages.length === 0) return;
