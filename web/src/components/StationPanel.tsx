@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Square, ChevronRight, Pencil, X } from "lucide-react";
+import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
@@ -116,6 +116,8 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
   const [feedEvents, setFeedEvents] = useState<Record<string, AgentEvent[]>>({});
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedFilter, setFeedFilter] = useState<string | null>(null);
+  const [filterPopOpen, setFilterPopOpen] = useState(false);
+  const [filterAnchor, setFilterAnchor] = useState<DOMRect | null>(null);
   const feedScrollRef = useRef<HTMLDivElement>(null);
   const feedPinnedRef = useRef(true);
   // Card-river live streams (fish 2026-08-21 ②): message_update deltas are on
@@ -532,8 +534,8 @@ This clears the member's working session memory and starts fresh. Room messages 
           const info = memberInfos[name];
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
-          const selected = feedFilter === name;
           const activity = currentActivityLine(feedEvents[name] || [], status, liveStreams[name]);
+          const usage = contextUsage?.[name];
           const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
           const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
@@ -548,26 +550,30 @@ This clears the member's working session memory and starts fresh. Room messages 
               : (models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`);
 
           return (
-            <div key={name} className={`relative border-b border-line-soft last:border-b-0 transition-colors ${selected ? "bg-accent-dim/40" : ""}`}>
+            <div key={name} className="relative border-b border-line-soft last:border-b-0 transition-colors">
               <div
                 role="button"
                 tabIndex={0}
-                aria-pressed={selected}
-                onClick={() => setFeedFilter(selected ? null : name)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFeedFilter(selected ? null : name); } }}
-                title={selected ? `${name} filtered — click to show all members` : `Filter the activity feed to ${name}`}
+                onClick={() => setSelectedMember(name)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedMember(name); } }}
+                title={`${name} detail — memory, session & tools`}
                 className="flex items-center gap-2 px-3 py-[6px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
               >
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
-                  className="cursor-pointer rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`Configure ${name} · ${statusLabel(status)}`}
-                >
-                  <StaffBadge name={name} status={statusFromAgent(status)} size="xs" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
-                </button>
+                {/* fish 2026-08-21: the avatar ring carries CONTEXT USAGE
+                 * (fill = %, tone heats at 70/90); numbers live in a hover
+                 * bubble ("10% · 100k / 1000k"). Live status → 5-o'clock dot —
+                 * two rings on one badge read as mud. */}
+                <RosterAvatar
+                  name={name}
+                  status={status}
+                  stale={!!staleMembers?.[name]}
+                  staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""}
+                  usage={usage}
+                  onOpen={() => setSelectedMember(name)}
+                />
                 <div className="flex-1 min-w-0">
-                  {/* line 1: name + model/think/⋯ */}
+                  {/* line 1: name + model/think/⋯ — usage numbers live in the
+                   * avatar's hover bubble (fish 2026-08-21: inline % crowded the row). */}
                   <div className="flex items-center gap-0.5 min-w-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
@@ -699,11 +705,34 @@ This clears the member's working session memory and starts fresh. Room messages 
        * rail itself is the progress console (no separate Activity chrome). */}
       <div className="h-8 px-3 flex items-center gap-1.5 shrink-0">
         <Activity size={10} className="text-ink-4 shrink-0" aria-hidden />
-        <span className="text-[10px] font-semibold tracking-[0.06em] text-ink-4 uppercase truncate">Activity · {feedFilter && members.includes(feedFilter) ? feedFilter : "all members"}</span>
+        <span className="text-[10px] font-semibold tracking-[0.06em] text-ink-4 uppercase shrink-0">Activity ·</span>
+        {/* The filter lives on the content it filters (fish 2026-08-21): the
+         * roster-strip click coupling had zero affordance — you found it by
+         * misclicking. Strip click now opens the member detail instead. */}
+        <button
+          onClick={(e) => {
+            if (filterPopOpen) { setFilterPopOpen(false); setFilterAnchor(null); }
+            else { setFilterAnchor(e.currentTarget.getBoundingClientRect()); setFilterPopOpen(true); }
+          }}
+          title="Filter the activity feed by member"
+          className={`flex items-center gap-[3px] text-[10px] font-semibold tracking-[0.06em] uppercase truncate rounded px-1 py-0.5 -my-0.5 cursor-pointer transition-colors ${feedFilter && members.includes(feedFilter) ? "text-accent-ink hover:bg-accent-dim" : "text-ink-4 hover:text-ink-1 hover:bg-surface-2"}`}
+        >
+          {feedFilter && members.includes(feedFilter) ? feedFilter : "all members"}
+          <ChevronDown size={9} aria-hidden />
+        </button>
         {feedFilter && members.includes(feedFilter) && (
           <button onClick={() => setFeedFilter(null)} className="text-[10px] font-semibold text-accent-ink hover:underline cursor-pointer shrink-0">× clear</button>
         )}
       </div>
+      {filterPopOpen && (
+        <FilterPop
+          members={members}
+          current={feedFilter}
+          anchorRect={filterAnchor}
+          onSelect={(m) => { setFeedFilter(m); setFilterPopOpen(false); setFilterAnchor(null); }}
+          onClose={() => { setFilterPopOpen(false); setFilterAnchor(null); }}
+        />
+      )}
       <div className="relative flex-1 min-h-0">
         <div
           ref={feedScrollRef}
@@ -1866,6 +1895,164 @@ function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> 
       <span className="truncate">{summary.label} {summary.detail}</span>
       <span className="font-mono text-ink-4 ml-auto shrink-0">{time}</span>
     </div>
+  );
+}
+
+
+/** Roster avatar = badge button + hover usage bubble (fish 2026-08-21:
+ * "10% · 100k / 1000k" on hover, not inline). Bubble replaces the native
+ * title when usage data exists (no double tooltips). */
+function RosterAvatar({ name, status, stale, staleTitle, usage, onOpen }: {
+  name: string;
+  status: string;
+  stale: boolean;
+  staleTitle: string;
+  usage?: ContextUsageData;
+  onOpen: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [bubble, setBubble] = useState<DOMRect | null>(null);
+  const enterTimer = useRef<number | null>(null);
+  const usagePct = usage && usage.supported && !usage.unavailable && typeof usage.percentage === "number" ? Math.max(0, Math.round(usage.percentage)) : null;
+  const usageTone: "ok" | "warn" | "over" | null = usagePct === null ? null : usagePct >= 90 ? "over" : usagePct >= 70 ? "warn" : "ok";
+  const open = () => {
+    if (usagePct === null || !btnRef.current) return;
+    enterTimer.current = window.setTimeout(() => setBubble(btnRef.current!.getBoundingClientRect()), 150);
+  };
+  const close = () => {
+    if (enterTimer.current !== null) { window.clearTimeout(enterTimer.current); enterTimer.current = null; }
+    setBubble(null);
+  };
+  useEffect(() => () => { if (enterTimer.current !== null) window.clearTimeout(enterTimer.current); }, []);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
+        className="cursor-pointer rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        title={usagePct === null ? `Configure ${name} · ${statusLabel(status)}` : undefined}
+        aria-label={`Configure ${name} · ${statusLabel(status)}${usagePct !== null ? ` · context ${usagePct}%` : ""}`}
+      >
+        <RosterBadge name={name} status={status} stale={stale} staleTitle={staleTitle} usagePct={usagePct} usageTone={usageTone} />
+      </button>
+      {bubble && usagePct !== null && usage && createPortal(
+        <div
+          className="fixed z-50 flex items-center gap-1 bg-surface-3 border border-line-strong rounded-lg px-2 py-1.5 font-mono text-[10.5px] leading-none whitespace-nowrap pointer-events-none"
+          style={{ left: Math.min(bubble.left, window.innerWidth - 168), top: bubble.bottom + 6, boxShadow: "var(--shadow-pop)" }}
+        >
+          <span className={`font-semibold ${usageTone === "over" ? "text-blocked" : usageTone === "warn" ? "text-think" : "text-accent-ink"}`}>{usagePct}%</span>
+          <span className="text-ink-3">
+            · {typeof usage.totalTokens === "number" ? formatTokens(usage.totalTokens) : "?"} / {typeof usage.rawMaxTokens === "number" ? formatTokens(usage.rawMaxTokens) : "?"}
+          </span>
+          {usage.compacted && <span className="text-ink-4">· compacted</span>}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** Roster avatar cell (fish 2026-08-21): the ring carries CONTEXT USAGE
+ * (fill = percentage, tone heats amber ≥70 / red ≥90); the member's live
+ * status becomes a 5-o'clock presence dot — two stacked rings read as mud.
+ * No usage data (provider silent) → plain disc, no fake track. */
+function RosterBadge({ name, status, stale, staleTitle, usagePct, usageTone }: {
+  name: string;
+  status: string;
+  stale?: boolean;
+  staleTitle?: string;
+  usagePct: number | null;
+  usageTone: "ok" | "warn" | "over" | null;
+}) {
+  const R = 11.5;
+  const C = 2 * Math.PI * R;
+  const stroke = usageTone === "over" ? "var(--blocked)" : usageTone === "warn" ? "var(--thinking)" : "var(--accent)";
+  const dim = status !== "working" && status !== "idle";
+  return (
+    <span className="relative block w-[26px] h-[26px] shrink-0">
+      {usagePct !== null && (
+        <svg width="26" height="26" viewBox="0 0 26 26" className="absolute inset-0 -rotate-90" aria-hidden>
+          <circle cx="13" cy="13" r={R} fill="none" stroke="var(--line)" strokeWidth="1.5" opacity="0.5" />
+          <circle cx="13" cy="13" r={R} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(100, usagePct)) / 100)} />
+        </svg>
+      )}
+      <span className={`absolute inset-[3px] rounded-full flex items-center justify-center font-semibold select-none text-[9px] ${dim ? "bg-surface-2 text-ink-4 opacity-70" : "bg-surface-3 text-ink-2"}`}>
+        {name.charAt(0).toUpperCase()}
+      </span>
+      {status === "working" && <span className="absolute bottom-[1px] right-[1px] w-1.5 h-1.5 rounded-full bg-onair animate-pulse ring-1 ring-surface-1" />}
+      {stale && <span className="stale-dot on" title={staleTitle || "Reload needed"} />}
+    </span>
+  );
+}
+
+/** Activity-feed member filter pop (fish 2026-08-21): opened from the
+ * "all members ▾" control in the feed header. Same pop family as ModelPop. */
+function FilterPop({ members, current, anchorRect, onSelect, onClose }: {
+  members: string[];
+  current: string | null;
+  anchorRect: DOMRect | null;
+  onSelect: (member: string | null) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const width = 172;
+  const gap = 6;
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const onResize = () => onClose();
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [onClose]);
+
+  const row = (label: string, value: string | null) => (
+    <button
+      key={label}
+      onClick={() => onSelect(value)}
+      className={`w-full flex items-center gap-2 text-left text-[11.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${current === value ? "bg-accent-dim text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
+    >
+      {value ? <MemberDisc name={value} /> : <Activity size={10} className="text-ink-4 shrink-0" aria-hidden />}
+      <span className="truncate flex-1">{label}</span>
+      {current === value && <span className="text-[10px] shrink-0">✓</span>}
+    </button>
+  );
+
+  const content = (
+    <>
+      <div className="px-2 pt-1.5 pb-1 text-[9px] font-semibold tracking-[0.05em] text-ink-4">FILTER ACTIVITY</div>
+      <div className="flex flex-col gap-px px-1 pb-1">
+        {row("All members", null)}
+        {members.map((m) => row(m, m))}
+      </div>
+    </>
+  );
+
+  if (!anchorRect) {
+    return <div ref={ref} onClick={(e) => e.stopPropagation()} className="absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5" style={{ width, boxShadow: "var(--shadow-pop)" }}>{content}</div>;
+  }
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.left));
+  const opensUp = window.innerHeight - anchorRect.bottom < 220 && anchorRect.top > 220;
+  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
+  return createPortal(
+    <div ref={ref} onClick={(e) => e.stopPropagation()} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5" style={{ left, width, ...vertical, boxShadow: "var(--shadow-pop)" }}>
+      {content}
+    </div>,
+    document.body,
   );
 }
 

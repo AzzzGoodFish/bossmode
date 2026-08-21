@@ -294,32 +294,36 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       )}
 
       <div className="flex gap-2 items-end">
-        {topicMode && (
-          <button
-            onClick={topicMode.onToggle}
-            disabled={disabled}
-            className={`w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${topicMode.active ? "text-accent-ink bg-accent-dim" : "text-ink-4 hover:text-ink-2 hover:bg-surface-2"}`}
-            title={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
-            aria-label={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
-            aria-pressed={topicMode.active}
-          >
-            <MessageSquarePlus size={18} />
-          </button>
-        )}
-        {!hideAttachments && (
-          <>
+        {/* Leading actions ride as one tight cluster (fish 2026-08-21: the
+         * container's 8px gap split the topic/attach pair too far apart). */}
+        <div className="flex items-end gap-0.5 shrink-0">
+          {topicMode && (
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || upload.isUploading}
-              className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
-              title="Attach files"
-              aria-label="Attach files"
+              onClick={topicMode.onToggle}
+              disabled={disabled}
+              className={`w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${topicMode.active ? "text-accent-ink bg-accent-dim" : "text-ink-4 hover:text-ink-2 hover:bg-surface-2"}`}
+              title={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
+              aria-label={topicMode.active ? "Cancel topic mode" : "Start a topic with this message"}
+              aria-pressed={topicMode.active}
             >
-              <Paperclip size={18} />
+              <MessageSquarePlus size={18} />
             </button>
-            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
-          </>
-        )}
+          )}
+          {!hideAttachments && (
+            <>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || upload.isUploading}
+                className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg text-ink-4 hover:text-ink-2 hover:bg-surface-2 disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+                title="Attach files"
+                aria-label="Attach files"
+              >
+                <Paperclip size={18} />
+              </button>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
+            </>
+          )}
+        </div>
 
         <textarea
           ref={inputRef}
