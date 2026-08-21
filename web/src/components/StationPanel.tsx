@@ -536,8 +536,6 @@ This clears the member's working session memory and starts fresh. Room messages 
           const hasUnread = unreadAgents?.has(name);
           const activity = currentActivityLine(feedEvents[name] || [], status, liveStreams[name]);
           const usage = contextUsage?.[name];
-          const usagePct = usage && usage.supported && !usage.unavailable && typeof usage.percentage === "number" ? Math.max(0, Math.round(usage.percentage)) : null;
-          const usageTone: "ok" | "warn" | "over" | null = usagePct === null ? null : usagePct >= 90 ? "over" : usagePct >= 70 ? "warn" : "ok";
           const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
           const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
@@ -561,29 +559,22 @@ This clears the member's working session memory and starts fresh. Room messages 
                 title={`${name} detail — memory, session & tools`}
                 className="flex items-center gap-2 px-3 py-[6px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
               >
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
-                  className="cursor-pointer rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`Configure ${name} · ${statusLabel(status)}`}
-                >
-                  {/* fish 2026-08-21: the avatar ring now carries CONTEXT USAGE
-                   * (fill = %, tone heats at 70/90). Live status moves to the
-                   * 5-o'clock dot — two rings on one badge read as mud. */}
-                  <RosterBadge name={name} status={status} stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} usagePct={usagePct} usageTone={usageTone} />
-                </button>
+                {/* fish 2026-08-21: the avatar ring carries CONTEXT USAGE
+                 * (fill = %, tone heats at 70/90); numbers live in a hover
+                 * bubble ("10% · 100k / 1000k"). Live status → 5-o'clock dot —
+                 * two rings on one badge read as mud. */}
+                <RosterAvatar
+                  name={name}
+                  status={status}
+                  stale={!!staleMembers?.[name]}
+                  staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""}
+                  usage={usage}
+                  onOpen={() => setSelectedMember(name)}
+                />
                 <div className="flex-1 min-w-0">
-                  {/* line 1: [usage%] name + model/think/⋯ — the percentage hugs
-                   * the avatar (fish 2026-08-21): ring+number form the load unit. */}
+                  {/* line 1: name + model/think/⋯ — usage numbers live in the
+                   * avatar's hover bubble (fish 2026-08-21: inline % crowded the row). */}
                   <div className="flex items-center gap-0.5 min-w-0">
-                    {usagePct !== null && (
-                      <span
-                        className={`font-mono text-[10px] leading-none tabular-nums shrink-0 mr-[3px] ${usageTone === "over" ? "text-blocked" : usageTone === "warn" ? "text-think" : "text-ink-4"}`}
-                        title={`Context ${usagePct}%${usage?.totalTokens ? ` · ${formatTokens(usage.totalTokens)} tok` : ""}${usage?.compacted ? " · compacted" : ""}`}
-                      >
-                        {usagePct}%
-                      </span>
-                    )}
                     <button
                       onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
                       className="text-[12.5px] leading-none font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[40%]"
@@ -1907,6 +1898,64 @@ function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> 
   );
 }
 
+
+/** Roster avatar = badge button + hover usage bubble (fish 2026-08-21:
+ * "10% · 100k / 1000k" on hover, not inline). Bubble replaces the native
+ * title when usage data exists (no double tooltips). */
+function RosterAvatar({ name, status, stale, staleTitle, usage, onOpen }: {
+  name: string;
+  status: string;
+  stale: boolean;
+  staleTitle: string;
+  usage?: ContextUsageData;
+  onOpen: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [bubble, setBubble] = useState<DOMRect | null>(null);
+  const enterTimer = useRef<number | null>(null);
+  const usagePct = usage && usage.supported && !usage.unavailable && typeof usage.percentage === "number" ? Math.max(0, Math.round(usage.percentage)) : null;
+  const usageTone: "ok" | "warn" | "over" | null = usagePct === null ? null : usagePct >= 90 ? "over" : usagePct >= 70 ? "warn" : "ok";
+  const open = () => {
+    if (usagePct === null || !btnRef.current) return;
+    enterTimer.current = window.setTimeout(() => setBubble(btnRef.current!.getBoundingClientRect()), 150);
+  };
+  const close = () => {
+    if (enterTimer.current !== null) { window.clearTimeout(enterTimer.current); enterTimer.current = null; }
+    setBubble(null);
+  };
+  useEffect(() => () => { if (enterTimer.current !== null) window.clearTimeout(enterTimer.current); }, []);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
+        className="cursor-pointer rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        title={usagePct === null ? `Configure ${name} · ${statusLabel(status)}` : undefined}
+        aria-label={`Configure ${name} · ${statusLabel(status)}${usagePct !== null ? ` · context ${usagePct}%` : ""}`}
+      >
+        <RosterBadge name={name} status={status} stale={stale} staleTitle={staleTitle} usagePct={usagePct} usageTone={usageTone} />
+      </button>
+      {bubble && usagePct !== null && usage && createPortal(
+        <div
+          className="fixed z-50 flex items-center gap-1 bg-surface-3 border border-line-strong rounded-lg px-2 py-1.5 font-mono text-[10.5px] leading-none whitespace-nowrap pointer-events-none"
+          style={{ left: Math.min(bubble.left, window.innerWidth - 168), top: bubble.bottom + 6, boxShadow: "var(--shadow-pop)" }}
+        >
+          <span className={`font-semibold ${usageTone === "over" ? "text-blocked" : usageTone === "warn" ? "text-think" : "text-accent-ink"}`}>{usagePct}%</span>
+          <span className="text-ink-3">
+            · {typeof usage.totalTokens === "number" ? formatTokens(usage.totalTokens) : "?"} / {typeof usage.rawMaxTokens === "number" ? formatTokens(usage.rawMaxTokens) : "?"}
+          </span>
+          {usage.compacted && <span className="text-ink-4">· compacted</span>}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 /** Roster avatar cell (fish 2026-08-21): the ring carries CONTEXT USAGE
  * (fill = percentage, tone heats amber ≥70 / red ≥90); the member's live
