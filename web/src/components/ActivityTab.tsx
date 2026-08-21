@@ -493,8 +493,11 @@ export function UserPromptCard({
             <MemberHead member={member} />
             <User size={10} className="text-accent-ink shrink-0 ml-[7px] mr-[4px]" aria-hidden />
             <span className="font-extrabold leading-none text-accent-ink tracking-[0.08em] uppercase text-[9.5px] shrink-0">{label}</span>
-            {from ? <span className="text-[10px] leading-none text-ink-4 shrink-0 ml-[4px] mr-[7px]">· {from}</span> : null}
-            {!expanded && <span className="text-[11.5px] leading-none text-ink-2 truncate flex-1 min-w-0">{preview}</span>}
+            {from ? <span className="text-[10px] leading-none text-ink-4 shrink-0 ml-[4px]">· {from}</span> : null}
+            {/* The 7px tag→preview gap rides the preview (fish 2026-08-21: the
+             * tag's own margin only existed on the usually-absent "from" span,
+             * so plain prompts rendered STEER[text] glued together). */}
+            {!expanded && <span className="text-[11.5px] leading-none text-ink-2 truncate flex-1 min-w-0 ml-[7px]">{preview}</span>}
             <span className="font-mono text-[10px] leading-none text-ink-4 ml-auto pl-[6px] shrink-0 whitespace-nowrap">{time}</span>
           </div>
         </button>
