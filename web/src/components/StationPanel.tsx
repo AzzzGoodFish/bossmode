@@ -124,6 +124,9 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
   // — on reload only settled cards render (REST has finals only).
   const [liveStreams, setLiveStreams] = useState<Record<string, LiveStream>>({});
   const streamBufRef = useRef<Record<string, LiveStream>>({});
+  // Exact thinking durations measured at seal time (text delta #1) — the
+  // river's settled THOUGHT card prefers these over any estimate.
+  const sealedThinkRef = useRef<Record<string, { sec: number; at: number }>>({});
   const streamFlushRef = useRef<number | null>(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
   // Roster height (fish 2026-08-21: roster/feed divider is draggable): null =
@@ -293,7 +296,7 @@ This clears the member's working session memory and starts fresh. Room messages 
       const result = activityScope
         ? await getConversationEvents(activityScope, name, FEED_PAGE_SIZE)
         : await getAgentEventsPaginated(roomId, name, FEED_PAGE_SIZE);
-      setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter(isActivityStreamEvent).slice(-FEED_PAGE_SIZE) }));
+      setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter((e) => isActivityStreamEvent(e) || e.type === "message_start").slice(-FEED_PAGE_SIZE) }));
     } catch (err) {
       console.error("Failed to load agent activity:", err);
     }
@@ -323,6 +326,10 @@ This clears the member's working session memory and starts fresh. Room messages 
         if (event.type === "message_start") {
           streamBufRef.current[agent] = { thinking: "", text: "", t0: typeof event.ts === "number" ? event.ts : Date.now() };
           scheduleStreamFlush();
+          // Also kept in the event buffer (never rendered) — settled thinking
+          // cards derive their honest duration from message_end − message_start.
+          const display = typeof event.ts === "number" ? event : { ...event, ts: Date.now() };
+          setFeedEvents((prev) => ({ ...prev, [agent]: [...(prev[agent] || []), display].slice(-FEED_BUFFER_CAP) }));
           return;
         }
         if (event.type === "message_update") {
@@ -332,7 +339,10 @@ This clears the member's working session memory and starts fresh. Room messages 
             // First text delta seals thinking (fish 2026-08-21: thinking and
             // replying must never be live at once — the model emits thinking
             // blocks before text within a message).
-            if (cur.thinking && cur.thinkingDoneAt === undefined) cur.thinkingDoneAt = typeof event.ts === "number" ? event.ts : Date.now();
+            if (cur.thinking && cur.thinkingDoneAt === undefined) {
+              cur.thinkingDoneAt = typeof event.ts === "number" ? event.ts : Date.now();
+              sealedThinkRef.current[agent] = { sec: Math.max(1, Math.round((cur.thinkingDoneAt - cur.t0) / 1000)), at: cur.thinkingDoneAt };
+            }
             cur.text += event.text;
           }
           streamBufRef.current[agent] = cur;
@@ -393,13 +403,34 @@ This clears the member's working session memory and starts fresh. Room messages 
       const paired = (e: AgentEvent) => !!e.toolCallId && events.some((s) => s.type === "tool_start" && s.toolCallId === e.toolCallId);
       for (let i = 0; i < events.length; i++) {
         const e = events[i];
-        if (e.type === "agent_start" || e.type === "agent_end") continue;
+        if (e.type === "agent_start" || e.type === "agent_end" || e.type === "message_start") continue;
         if (e.type === "tool_end" && paired(e)) continue; // rendered inside its tool_start card
-        // thinking duration = gap to the next timestamped event (same honest estimate as the Activity tab)
+        // Thinking-duration ladder (fish 2026-08-21: THOUGHT FOR Ns must show a
+        // real number whenever one honestly exists — the gap estimate collapses
+        // to 0 when thinking and text settle in a single message):
+        // ① live seal measurement ② message_start→end ③ gap to the next event.
         let thinkSec: number | undefined;
         if (e.type === "message_end" && e.thinking && typeof e.ts === "number") {
-          const next = events.slice(i + 1).find((n) => typeof n.ts === "number");
-          if (next) thinkSec = Math.max(0, Math.round(((next.ts as number) - e.ts) / 1000));
+          const sealed = sealedThinkRef.current[name];
+          if (sealed && e.ts >= sealed.at - 2000 && e.ts - sealed.at < 120_000) thinkSec = sealed.sec;
+          if (thinkSec === undefined) {
+            for (let j = i - 1; j >= 0; j--) {
+              const p = events[j];
+              if (p.type === "message_start" && typeof p.ts === "number") {
+                const d = Math.round((e.ts - (p.ts as number)) / 1000);
+                if (d > 0) thinkSec = d;
+                break;
+              }
+              if (p.type === "message_end" || p.type === "agent_end") break; // never cross a message boundary
+            }
+          }
+          if (thinkSec === undefined) {
+            const next = events.slice(i + 1).find((n) => typeof n.ts === "number");
+            if (next) {
+              const g = Math.round(((next.ts as number) - e.ts) / 1000);
+              if (g > 0) thinkSec = g;
+            }
+          }
         }
         items.push({ kind: "event", member: name, event: e, toolEnd: e.type === "tool_end" ? e : e.toolCallId ? endMap[e.toolCallId] : undefined, thinkSec, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${i}` });
       }
@@ -1771,31 +1802,37 @@ function StreamCard({ member, kind, text, t0 }: { member: string; kind: "think" 
   // stays near the bottom of it (same pin rule as the feed).
   const bodyRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  // Uniform chevron slot — a live card collapses to its header like any other.
+  const [open, setOpen] = useState(true);
   useEffect(() => {
     const el = bodyRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [text]);
   return (
     <div className={`rounded-[10px] border bg-surface-1 ${isThink ? "border-think/40" : "border-onair/30"}`}>
-      <div className="flex items-center gap-1.5 px-3 py-[8px]">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-1.5 px-3 py-[8px] text-left cursor-pointer"
+>
+        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         <MemberDisc name={member} />
         <span className="text-[11px] font-bold text-ink-1 truncate max-w-[90px]">{member}</span>
         <span className={`text-[9.5px] leading-none font-extrabold tracking-[0.08em] uppercase ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
         <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isThink ? "bg-think" : "bg-onair"}`} />
         <LiveSeconds since={t0} />
         <span className="font-mono text-[10px] leading-none text-ink-4 ml-auto shrink-0">{formatEventTime(t0)}</span>
-      </div>
-      <div
-        ref={bodyRef}
-        onScroll={() => {
-          const el = bodyRef.current;
-          if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-        }}
-        className={`border-t border-line-soft px-3 py-2.5 text-[12.5px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto ${isThink ? "text-ink-3 italic" : "text-ink-2"}`}
-      >
-        {text}
-        <span className={`inline-block w-[7px] h-[11px] align-[-1px] animate-pulse ${isThink ? "bg-think" : "bg-onair"}`} />
-      </div>
+      </button>
+      {open && (
+        <div
+          ref={bodyRef}
+          onScroll={() => {
+            const el = bodyRef.current;
+            if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          }}
+          className={`border-t border-line-soft px-3 py-2.5 text-[12.5px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto ${isThink ? "text-ink-3 italic" : "text-ink-2"}`}
+        >
+          {text}
+          <span className={`inline-block w-[7px] h-[11px] align-[-1px] animate-pulse ${isThink ? "bg-think" : "bg-onair"}`} />
+        </div>
+      )}
     </div>
   );
 }

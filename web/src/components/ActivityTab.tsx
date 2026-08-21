@@ -210,17 +210,16 @@ export function ThinkingTrace({ text, elapsedSec, time, member }: { text: string
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1">
       <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-1.5 px-3 py-[8px] text-left cursor-pointer">
+        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
         <MemberHead member={member} />
         <Brain size={10} className="text-think shrink-0" aria-hidden />
-        <span className="text-[12px] font-semibold text-ink-2">
-          {/* "Thinking" is live-only vocabulary (fish 2026-08-21): a settled
-           * trace with no honest duration says "Thought", never "Thinking" —
-           * otherwise it reads as a live card forever (elapsed 0 when the next
-           * event lands in the same instant, e.g. think+text in one message). */}
-          {elapsedSec !== undefined && elapsedSec > 0 ? `Thought for ${elapsedSec} second${elapsedSec === 1 ? "" : "s"}` : "Thought"}
+        {/* Uniform tag typography with REPLY/TOOL·X (fish 2026-08-21: mixed
+         * title sizes made the river ragged). "THINKING" is live-only
+         * vocabulary — a settled trace with no honest duration says "THOUGHT". */}
+        <span className="font-extrabold text-think tracking-[0.08em] uppercase text-[9.5px] whitespace-nowrap">
+          {elapsedSec !== undefined && elapsedSec > 0 ? `Thought for ${elapsedSec}s` : "Thought"}
         </span>
-        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{time}</span>
-        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0 whitespace-nowrap">{time}</span>
       </button>
       {expanded && (
         <div className="border-t border-line-soft px-3 py-2.5 text-[12.5px] text-ink-3 italic whitespace-pre-wrap max-h-32 overflow-y-auto">{text}</div>
@@ -407,22 +406,23 @@ function EventRow({ event, toolEnd, elapsedSec, query }: { event: AgentEvent; to
  * (`clamp`, fish 2026-08-21 ③): uniform one-line anatomy — header carries a
  * truncated plain-text preview; face click expands the full markdown. */
 export function ReplyCard({ text, time, query = "", member, clamp }: { text: string; time: string; query?: string; member?: string; clamp?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const needsClamp = !!clamp && (text.length > 60 || text.includes("\n"));
+  // Uniform chevron slot (fish 2026-08-21: mixed chevron presence broke the
+  // member-name column) — every river card toggles; short replies start open.
+  const [open, setOpen] = useState(() => !clamp || !(text.length > 60 || text.includes("\n")));
   const preview = text.replace(/\s+/g, " ").trim();
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
-      <button type="button" onClick={() => needsClamp && setOpen((v) => !v)} className={`w-full text-left ${needsClamp ? "cursor-pointer" : "cursor-default"}`}>
+      <button type="button" onClick={() => clamp && setOpen((v) => !v)} className={`w-full text-left ${clamp ? "cursor-pointer" : "cursor-default"}`}>
         <div className="flex items-center gap-1.5">
-          {needsClamp && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />}
+          {clamp && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />}
           <MemberHead member={member} />
           <MessageSquareText size={10} className="text-onair shrink-0" aria-hidden />
           <span className="font-extrabold text-onair tracking-[0.08em] uppercase text-[9.5px] shrink-0">REPLY</span>
-          {needsClamp && !open && <span className="text-[11.5px] text-ink-3 truncate flex-1 min-w-0">{preview}</span>}
+          {clamp && !open && <span className="text-[11.5px] text-ink-3 truncate flex-1 min-w-0">{preview}</span>}
           <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0 whitespace-nowrap">{time}</span>
         </div>
       </button>
-      {(!needsClamp || open) && <div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={text} /></div>}
+      {(!clamp || open) && <div className="mt-[6px] text-[12.5px] text-ink-2"><Markdown content={text} /></div>}
     </div>
   );
 }
@@ -432,19 +432,18 @@ export function CompactionCard({ event, time, query = "", member }: { event: Age
   const summary = summarizeAgentEvent(event);
   const [open, setOpen] = useState(false);
   const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
-  const expandable = event.type === "compaction_end";
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[9px]">
-      <button type="button" onClick={() => expandable && setOpen((v) => !v)} className={`w-full text-left ${expandable ? "cursor-pointer" : "cursor-default"}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full text-left cursor-pointer">
         <div className="flex items-center gap-1.5">
-          {expandable && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />}
+          <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
           <MemberHead member={member} />
           <span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase whitespace-nowrap ${tone}`}>{summary.label}</span>
           <span className="font-mono text-[11px] text-ink-3 truncate flex-1 min-w-0">{highlight(summary.detail, query)}</span>
           <span className="font-mono text-[10px] text-ink-4 shrink-0 whitespace-nowrap">{time}</span>
         </div>
       </button>
-      {expandable && open && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}
+      {open && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}
     </div>
   );
 }
@@ -471,31 +470,31 @@ export function UserPromptCard({
    * truncated plain-text preview; face click expands the full prompt. */
   compact?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const text = String(event.text || "");
+  // Uniform chevron slot: every river card toggles; short prompts start open.
+  const [expanded, setExpanded] = useState(() => !compact || !(text.length > 60 || text.includes("\n")));
   const lines = text.split("\n");
   const clamped = lines.length > PROMPT_CLAMP_LINES && !expanded;
   const body = clamped ? lines.slice(0, PROMPT_CLAMP_LINES).join("\n") : text;
   const preview = text.replace(/\s+/g, " ").trim();
-  const needsClamp = !!compact && (text.length > 60 || text.includes("\n"));
   const from = typeof (event as { from?: unknown }).from === "string"
     ? String((event as { from?: string }).from).trim()
     : "";
   if (compact) {
     return (
       <div className="rounded-[10px] border border-accent/30 bg-accent-dim/20 px-3 py-[9px]">
-        <button type="button" onClick={() => needsClamp && setExpanded((v) => !v)} className={`w-full text-left ${needsClamp ? "cursor-pointer" : "cursor-default"}`}>
+        <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full text-left cursor-pointer">
           <div className="flex items-center gap-1.5">
-            {needsClamp && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
+            <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
             <MemberHead member={member} />
             <User size={10} className="text-accent-ink shrink-0" aria-hidden />
             <span className="font-extrabold text-accent-ink tracking-[0.08em] uppercase text-[9.5px] shrink-0">{label}</span>
             {from ? <span className="text-[10px] text-ink-4 shrink-0">· {from}</span> : null}
-            {needsClamp && !expanded && <span className="text-[11.5px] text-ink-2 truncate flex-1 min-w-0">{preview}</span>}
+            {!expanded && <span className="text-[11.5px] text-ink-2 truncate flex-1 min-w-0">{preview}</span>}
             <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0 whitespace-nowrap">{time}</span>
           </div>
         </button>
-        {(!needsClamp || expanded) && <div className="mt-[6px] text-[12.5px] text-ink-2 whitespace-pre-wrap break-words">{highlight(text, query)}</div>}
+        {expanded && <div className="mt-[6px] text-[12.5px] text-ink-2 whitespace-pre-wrap break-words">{highlight(text, query)}</div>}
       </div>
     );
   }
