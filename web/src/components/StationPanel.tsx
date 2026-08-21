@@ -10,12 +10,12 @@ import {
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
 import { Markdown } from "./Markdown";
-import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
-import { ActivityTab, ThinkingTrace, ToolCard, ToolGroupBlock, ReplyCard, UserPromptCard, CompactionCard, MemberDisc } from "./ActivityTab";
+import { ActivityTab, ThinkingTrace, ToolCard, ReplyCard, UserPromptCard, CompactionCard, MemberDisc } from "./ActivityTab";
 
 interface StationPanelProps {
   members: string[];
@@ -126,6 +126,15 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
   const streamBufRef = useRef<Record<string, LiveStream>>({});
   const streamFlushRef = useRef<number | null>(null);
   const [showNewBtn, setShowNewBtn] = useState(false);
+  // Roster height (fish 2026-08-21: roster/feed divider is draggable): null =
+  // auto (content capped at 42%), px after first drag; persisted.
+  const [rosterH, setRosterH] = useState<number | null>(() => {
+    const v = Number(localStorage.getItem(ROSTER_H_KEY));
+    return Number.isFinite(v) && v >= 64 && v <= 480 ? v : null;
+  });
+  const [rosterDragging, setRosterDragging] = useState(false);
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const rosterDragRef = useRef({ y: 0, h: 160 });
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(false);
@@ -319,7 +328,13 @@ This clears the member's working session memory and starts fresh. Room messages 
         if (event.type === "message_update") {
           const cur = streamBufRef.current[agent] || { thinking: "", text: "", t0: Date.now() };
           if (typeof event.thinking === "string") cur.thinking += event.thinking;
-          if (typeof event.text === "string") cur.text += event.text;
+          if (typeof event.text === "string") {
+            // First text delta seals thinking (fish 2026-08-21: thinking and
+            // replying must never be live at once — the model emits thinking
+            // blocks before text within a message).
+            if (cur.thinking && cur.thinkingDoneAt === undefined) cur.thinkingDoneAt = typeof event.ts === "number" ? event.ts : Date.now();
+            cur.text += event.text;
+          }
           streamBufRef.current[agent] = cur;
           scheduleStreamFlush();
           return;
@@ -351,6 +366,13 @@ This clears the member's working session memory and starts fresh. Room messages 
   }, []);
   useEffect(() => () => { if (streamFlushRef.current !== null) window.clearTimeout(streamFlushRef.current); }, []);
 
+  useEffect(() => { if (rosterH !== null) localStorage.setItem(ROSTER_H_KEY, String(rosterH)); }, [rosterH]);
+  useEffect(() => {
+    if (!rosterDragging) return;
+    document.body.style.userSelect = "none";
+    return () => { document.body.style.userSelect = ""; };
+  }, [rosterDragging]);
+
   const closePops = useCallback(() => {
     setOpenChip(null);
     setChipAnchor(null);
@@ -358,10 +380,9 @@ This clears the member's working session memory and starts fresh. Room messages 
     setThinkingAnchor(null);
   }, []);
 
-  /** Card river (fish 2026-08-21): flat cards, each self-tagged with its member.
-   * No turn headers. agent_start/agent_end stay out (turn chrome); consecutive
-   * same-member tool calls still collapse into a group (boundary-safe: a turn
-   * edge flushes the run). */
+  /** Card river (fish 2026-08-21): flat one-line cards, each self-tagged with
+   * its member. No turn headers, no agent start/end rows, no tool grouping
+   * (fish ruling: every tool call is its own single-line card). */
   const riverItems = useMemo<RiverItem[]>(() => {
     const names = feedFilter && members.includes(feedFilter) ? [feedFilter] : members;
     const items: RiverItem[] = [];
@@ -370,43 +391,33 @@ This clears the member's working session memory and starts fresh. Room messages 
       const endMap: Record<string, AgentEvent> = {};
       for (const e of events) if (e.type === "tool_end" && e.toolCallId) endMap[e.toolCallId] = e;
       const paired = (e: AgentEvent) => !!e.toolCallId && events.some((s) => s.type === "tool_start" && s.toolCallId === e.toolCallId);
-      let run: AgentEvent[] = [];
-      const flush = () => {
-        if (run.length >= 2) {
-          items.push({ kind: "group", member: name, events: run, toolEndMap: endMap, firstTs: riverTs(run[0]), key: `${name}:g:${run[0].ts ?? "x"}:${items.length}` });
-        } else {
-          for (const e of run) items.push({ kind: "event", member: name, event: e, toolEnd: e.toolCallId ? endMap[e.toolCallId] : undefined, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${items.length}` });
-        }
-        run = [];
-      };
       for (let i = 0; i < events.length; i++) {
         const e = events[i];
-        if (e.type === "agent_start" || e.type === "agent_end") { flush(); continue; }
+        if (e.type === "agent_start" || e.type === "agent_end") continue;
         if (e.type === "tool_end" && paired(e)) continue; // rendered inside its tool_start card
-        if (e.type === "tool_start") { run.push(e); continue; }
-        flush();
         // thinking duration = gap to the next timestamped event (same honest estimate as the Activity tab)
         let thinkSec: number | undefined;
         if (e.type === "message_end" && e.thinking && typeof e.ts === "number") {
           const next = events.slice(i + 1).find((n) => typeof n.ts === "number");
           if (next) thinkSec = Math.max(0, Math.round(((next.ts as number) - e.ts) / 1000));
         }
-        items.push({ kind: "event", member: name, event: e, toolEnd: e.type === "tool_end" ? e : undefined, thinkSec, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${i}` });
+        items.push({ kind: "event", member: name, event: e, toolEnd: e.type === "tool_end" ? e : e.toolCallId ? endMap[e.toolCallId] : undefined, thinkSec, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${i}` });
       }
-      flush();
     }
     items.sort((a, b) => a.firstTs - b.firstTs);
     return items.slice(-RIVER_MAX_ITEMS);
   }, [feedEvents, members, feedFilter]);
 
   /** Live stream cards ride at the river's tail (the forming edge). */
+  /** Live stream cards ride at the river's tail (the forming edge). Thinking
+   * seals into a quiet "Thought for Ns" the moment reply text starts. */
   const streamCards = useMemo(() => {
     const names = feedFilter && members.includes(feedFilter) ? [feedFilter] : members;
     return names.flatMap((name) => {
       const s = liveStreams[name];
       if (!s || (!s.thinking && !s.text)) return [];
       const cards: Array<{ name: string; s: LiveStream; kind: "think" | "reply" }> = [];
-      if (s.thinking) cards.push({ name, s, kind: "think" });
+      if (s.thinking && s.thinkingDoneAt === undefined) cards.push({ name, s, kind: "think" });
       if (s.text) cards.push({ name, s, kind: "reply" });
       return cards;
     });
@@ -476,10 +487,15 @@ This clears the member's working session memory and starts fresh. Room messages 
         </span>
       </div>
 
-      {/* Roster — compact member strips (A+ fusion, fish 2026-08-20). Row
-       * click = filter the feed to that member (click again / ×clear = all);
-       * avatar & name open member detail as before; chips tune model/thinking. */}
-      <div className="shrink-0 max-h-[42%] overflow-y-auto border-b border-line" onScroll={closePops}>
+      {/* Roster — compact two-line strips (fish 2026-08-21): line 1 = name +
+       * model/think/⋯ config, line 2 = state summary (Thinking…/Replying…/bash/
+       * idle, no arg details). Row click = feed filter; avatar & name = detail. */}
+      <div
+        ref={rosterRef}
+        className={`shrink-0 overflow-y-auto ${rosterH === null ? "max-h-[42%]" : ""}`}
+        style={rosterH !== null ? { height: rosterH } : undefined}
+        onScroll={closePops}
+      >
         {members.map((name) => {
           const status = agentStatus[name] || "inactive";
           const info = memberInfos[name];
@@ -501,7 +517,7 @@ This clears the member's working session memory and starts fresh. Room messages 
               : (models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`);
 
           return (
-            <div key={name} className={`border-b border-line-soft last:border-b-0 transition-colors ${selected ? "bg-accent-dim/40" : ""}`}>
+            <div key={name} className={`relative border-b border-line-soft last:border-b-0 transition-colors ${selected ? "bg-accent-dim/40" : ""}`}>
               <div
                 role="button"
                 tabIndex={0}
@@ -509,7 +525,7 @@ This clears the member's working session memory and starts fresh. Room messages 
                 onClick={() => setFeedFilter(selected ? null : name)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFeedFilter(selected ? null : name); } }}
                 title={selected ? `${name} filtered — click to show all members` : `Filter the activity feed to ${name}`}
-                className="flex items-center gap-2 px-3 py-[7px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
+                className="flex items-center gap-2 px-3 py-[6px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
               >
                 <button
                   onMouseDown={(e) => e.preventDefault()}
@@ -519,17 +535,62 @@ This clears the member's working session memory and starts fresh. Room messages 
                 >
                   <StaffBadge name={name} status={statusFromAgent(status)} size="xs" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
-                  className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[38%]"
-                  title={`Configure ${name} · Agent: ${agentLabel}`}
-                >
-                  <span className="truncate">{name}</span>
-                  {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                </button>
-                <span className={`flex-1 min-w-0 truncate font-mono text-[10.5px] ${activityTone(activity.kind)}`}>
-                  {activity.text}{activity.liveSince !== undefined && <> · <LiveSeconds since={activity.liveSince} /></>}
-                </span>
+                <div className="flex-1 min-w-0">
+                  {/* line 1: name + model/think/⋯ */}
+                  <div className="flex items-center gap-0.5 min-w-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
+                      className="text-[12.5px] leading-none font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[40%]"
+                      title={`Configure ${name} · Agent: ${agentLabel}`}
+                    >
+                      <span className="truncate">{name}</span>
+                      {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                    </button>
+                    {info && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenThinkingChip(null);
+                            setThinkingAnchor(null);
+                            if (openChip === name) { setOpenChip(null); setChipAnchor(null); }
+                            else { setOpenChip(name); setChipAnchor(e.currentTarget.getBoundingClientRect()); }
+                          }}
+                          title={modelChipTitle}
+                          className={`font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors truncate min-w-0 max-w-[104px] hover:bg-accent-dim ${
+                            !isConfigured || !modelAvailable ? "text-think" : "text-ink-4 hover:text-accent-ink"
+                          }`}
+                        >
+                          {modelChipLabel} ▾
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChip(null);
+                            setChipAnchor(null);
+                            if (openThinkingChip === name) { setOpenThinkingChip(null); setThinkingAnchor(null); }
+                            else { setOpenThinkingChip(name); setThinkingAnchor(e.currentTarget.getBoundingClientRect()); }
+                          }}
+                          title={`think · ${info.thinkingLevel || "off"} · This room only`}
+                          className="font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-accent-ink hover:bg-accent-dim"
+                        >
+                          think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span> ▾
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
+                          title={`${name} detail — memory, session & tools`}
+                          className="font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-ink-1 hover:bg-surface-2"
+                        >
+                          ⋯
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {/* line 2: state summary */}
+                  <div className={`mt-[3px] font-mono text-[10.5px] leading-none truncate ${activityTone(activity.kind)}`}>
+                    {activity.text}{activity.liveSince !== undefined && <> · <LiveSeconds since={activity.liveSince} /></>}
+                  </div>
+                </div>
                 {isBusy && (
                   <button
                     onClick={(e) => { e.stopPropagation(); abortAgent(roomId, name).catch(console.error); }}
@@ -540,89 +601,65 @@ This clears the member's working session memory and starts fresh. Room messages 
                   </button>
                 )}
               </div>
-              {/* Config chips — model / thinking (same pops as before) + ⋯ detail. */}
-              <div className="relative flex items-center gap-1 px-3 pb-2 pl-[40px]">
-                {info && (
-                  <>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenThinkingChip(null);
-                        setThinkingAnchor(null);
-                        if (openChip === name) {
-                          setOpenChip(null);
-                          setChipAnchor(null);
-                        } else {
-                          setOpenChip(name);
-                          setChipAnchor(e.currentTarget.getBoundingClientRect());
-                        }
-                      }}
-                      title={modelChipTitle}
-                      className={`font-mono text-[10px] rounded-md border border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors max-w-[132px] truncate text-left hover:border-line-strong ${
-                        !isConfigured || !modelAvailable ? "text-think" : "text-ink-3 hover:text-ink-1"
-                      }`}
-                    >
-                      {modelChipLabel} ▾
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenChip(null);
-                        setChipAnchor(null);
-                        if (openThinkingChip === name) {
-                          setOpenThinkingChip(null);
-                          setThinkingAnchor(null);
-                        } else {
-                          setOpenThinkingChip(name);
-                          setThinkingAnchor(e.currentTarget.getBoundingClientRect());
-                        }
-                      }}
-                      title={`think · ${info.thinkingLevel || "off"} · This room only`}
-                      className="font-mono text-[10px] rounded-md border border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0 text-ink-3 hover:text-ink-1 hover:border-line-strong"
-                    >
-                      think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span> ▾
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
-                      title={`${name} detail — memory, session & tools`}
-                      className="font-mono text-[10px] rounded-md border border-dashed border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-ink-1 hover:border-line-strong"
-                    >
-                      ⋯
-                    </button>
-                  </>
-                )}
-                {openChip === name && info && (
-                  <ModelPop
-                    anchorRect={chipAnchor}
-                    models={models}
-                    current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
-                    onClose={() => { setOpenChip(null); setChipAnchor(null); }}
-                    onSelect={(model, credentialId) => {
-                      setOpenChip(null);
-                      setChipAnchor(null);
-                      handleSwitchModel(info, model, credentialId);
-                    }}
-                  />
-                )}
-                {openThinkingChip === name && info && (
-                  <ThinkingPop
-                    anchorRect={thinkingAnchor}
-                    currentThinking={info.thinkingLevel || "off"}
-                    models={models}
-                    modelRef={info.model ?? null}
-                    credentialId={info.credentialId ?? null}
-                    onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
-                    onSelect={(thinkingLevel) => {
-                      setOpenThinkingChip(null);
-                      setThinkingAnchor(null);
-                      void handleSwitchThinking(info, thinkingLevel);
-                    }}
-                  />
-                )}
-              </div>
+              {openChip === name && info && (
+                <ModelPop
+                  anchorRect={chipAnchor}
+                  models={models}
+                  current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
+                  onClose={() => { setOpenChip(null); setChipAnchor(null); }}
+                  onSelect={(model, credentialId) => {
+                    setOpenChip(null);
+                    setChipAnchor(null);
+                    handleSwitchModel(info, model, credentialId);
+                  }}
+                />
+              )}
+              {openThinkingChip === name && info && (
+                <ThinkingPop
+                  anchorRect={thinkingAnchor}
+                  currentThinking={info.thinkingLevel || "off"}
+                  models={models}
+                  modelRef={info.model ?? null}
+                  credentialId={info.credentialId ?? null}
+                  onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
+                  onSelect={(thinkingLevel) => {
+                    setOpenThinkingChip(null);
+                    setThinkingAnchor(null);
+                    void handleSwitchThinking(info, thinkingLevel);
+                  }}
+                />
+              )}
             </div>
           );
         })}
+      </div>
+
+      {/* Roster/feed divider — draggable (fish 2026-08-21). The small centered
+       * pill is the persistent affordance that marks this divider as draggable
+       * (static borders carry no mark). */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize member list"
+        title="Drag to resize · double-click to reset"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+          rosterDragRef.current = { y: e.clientY, h: rosterRef.current?.getBoundingClientRect().height ?? 160 };
+          setRosterDragging(true);
+        }}
+        onPointerMove={(e) => {
+          if (!rosterDragging) return;
+          const parent = rosterRef.current?.parentElement;
+          const max = parent ? Math.round(parent.getBoundingClientRect().height * 0.6) : 480;
+          const next = Math.max(64, Math.min(max, Math.round(rosterDragRef.current.h + (e.clientY - rosterDragRef.current.y))));
+          setRosterH(next);
+        }}
+        onPointerUp={() => setRosterDragging(false)}
+        onDoubleClick={() => setRosterH(null)}
+        className={`relative h-[7px] -mt-[3px] shrink-0 cursor-row-resize z-10 flex items-center justify-center border-b border-line group ${rosterDragging ? "bg-accent/20" : ""}`}
+      >
+        <span className={`w-6 h-[3px] rounded-full transition-colors ${rosterDragging ? "bg-accent" : "bg-ink-4/40 group-hover:bg-accent/60"}`} />
       </div>
 
       {/* Merged activity feed — every member's turns interleaved by time; the
@@ -652,13 +689,15 @@ This clears the member's working session memory and starts fresh. Room messages 
             <div className="text-center text-[11px] text-ink-4 py-8">{feedFilter ? `No recent activity for ${feedFilter}.` : "No member activity yet."}</div>
           )}
           <div className="space-y-[6px]">
-            {riverItems.map((item) =>
-              item.kind === "group" ? (
-                <ToolGroupBlock key={item.key} events={item.events} toolEndMap={item.toolEndMap} query="" member={item.member} />
-              ) : (
-                <RiverEventCard key={item.key} item={item} />
-              ),
-            )}
+            {riverItems.map((item) => <RiverEventCard key={item.key} item={item} />)}
+            {/* Sealed thinking (fish: thinking settles when reply starts) rides
+             * above the live reply card, already in its final quiet form. */}
+            {(feedFilter && members.includes(feedFilter) ? [feedFilter] : members).flatMap((name) => {
+              const s = liveStreams[name];
+              if (!s || !s.thinking || s.thinkingDoneAt === undefined || !s.text) return [];
+              const sec = Math.max(1, Math.round((s.thinkingDoneAt - s.t0) / 1000));
+              return [<ThinkingTrace key={`sealed:${name}`} text={s.thinking} elapsedSec={sec} time={formatEventTime(s.thinkingDoneAt)} member={name} />];
+            })}
             {streamCards.map((sc) => (
               <StreamCard key={`stream:${sc.name}:${sc.kind}`} member={sc.name} kind={sc.kind} text={sc.kind === "think" ? sc.s.thinking : sc.s.text} t0={sc.s.t0} />
             ))}
@@ -1671,20 +1710,19 @@ function LiveSeconds({ since }: { since: number }) {
 const FEED_PAGE_SIZE = 80;
 const FEED_BUFFER_CAP = 160;
 const RIVER_MAX_ITEMS = 40;
+const ROSTER_H_KEY = "bossmode.roster.height";
 
-interface LiveStream { thinking: string; text: string; t0: number }
+interface LiveStream { thinking: string; text: string; t0: number; thinkingDoneAt?: number }
 
-type RiverItem =
-  | { kind: "group"; member: string; events: AgentEvent[]; toolEndMap: Record<string, AgentEvent>; firstTs: number; key: string }
-  | { kind: "event"; member: string; event: AgentEvent; toolEnd?: AgentEvent; thinkSec?: number; firstTs: number; key: string };
+type RiverItem = { kind: "event"; member: string; event: AgentEvent; toolEnd?: AgentEvent; thinkSec?: number; firstTs: number; key: string };
 
 function riverTs(e: AgentEvent): number {
   return typeof e.ts === "number" ? e.ts : 0;
 }
 
-/** One-line "what is this member doing right now" for the roster strip. A live
- * stream (thinking/reply deltas in flight) outranks the settled event scan;
- * idle members show "idle" regardless of history. */
+/** One-line "what is this member doing right now" for the roster strip
+ * (fish 2026-08-21: summary only — Thinking…/Replying…/tool name, never args).
+ * A live stream outranks the settled event scan; idle members show "idle". */
 function currentActivityLine(events: AgentEvent[], status: string, stream?: LiveStream): { kind: string; text: string; liveSince?: number } {
   if (stream && (stream.thinking || stream.text)) {
     return stream.text
@@ -1697,14 +1735,13 @@ function currentActivityLine(events: AgentEvent[], status: string, stream?: Live
     if (e.type === "agent_end") break;
     if (e.type === "tool_start") {
       const end = e.toolCallId ? events.slice(i + 1).find((x) => x.type === "tool_end" && x.toolCallId === e.toolCallId) : undefined;
-      const tool = toolDisplay(e.toolName, e.args);
-      const target = tool.detail || toolTarget(e.args) || "";
-      if (!end) return { kind: "running", text: `${tool.label}${target ? ` · ${target}` : ""}`, liveSince: typeof e.ts === "number" ? e.ts : undefined };
-      if (end.isError) return { kind: "error", text: `${tool.label} failed` };
-      return { kind: "done", text: `${tool.label}${target ? ` · ${target}` : ""}` };
+      const toolName = String(e.toolName || "tool");
+      if (!end) return { kind: "running", text: toolName, liveSince: typeof e.ts === "number" ? e.ts : undefined };
+      if (end.isError) return { kind: "error", text: `${toolName} failed` };
+      return { kind: "done", text: toolName };
     }
-    if (e.type === "compaction_start") return { kind: "running", text: "Compacting context", liveSince: typeof e.ts === "number" ? e.ts : undefined };
-    if (e.type === "message_end" && e.text) return { kind: "reply", text: `Replied · ${truncateText(e.text, 48)}` };
+    if (e.type === "compaction_start") return { kind: "running", text: "Compacting", liveSince: typeof e.ts === "number" ? e.ts : undefined };
+    if (e.type === "message_end" && e.text) return { kind: "reply", text: "Replied" };
     if (e.type === "message_end" && e.thinking) {
       const next = events.slice(i + 1).find((x) => typeof x.ts === "number");
       const elapsed = next && typeof e.ts === "number" ? Math.max(0, Math.round(((next.ts as number) - (e.ts as number)) / 1000)) : 0;
@@ -1730,17 +1767,32 @@ function activityTone(kind: string): string {
  * place; the block cursor pulses until message_end swaps in the settled cards. */
 function StreamCard({ member, kind, text, t0 }: { member: string; kind: "think" | "reply"; text: string; t0: number }) {
   const isThink = kind === "think";
+  // Fish 2026-08-21 ④: a streaming body follows its own tail while the user
+  // stays near the bottom of it (same pin rule as the feed).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [text]);
   return (
     <div className={`rounded-[10px] border bg-surface-1 ${isThink ? "border-think/40" : "border-onair/30"}`}>
       <div className="flex items-center gap-1.5 px-3 py-[8px]">
         <MemberDisc name={member} />
         <span className="text-[11px] font-bold text-ink-1 truncate max-w-[90px]">{member}</span>
-        <span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
-        <span className={`text-[10px] font-bold animate-pulse ${isThink ? "text-think" : "text-onair"}`}>●</span>
+        <span className={`text-[9.5px] leading-none font-extrabold tracking-[0.08em] uppercase ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
+        <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isThink ? "bg-think" : "bg-onair"}`} />
         <LiveSeconds since={t0} />
-        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{formatEventTime(t0)}</span>
+        <span className="font-mono text-[10px] leading-none text-ink-4 ml-auto shrink-0">{formatEventTime(t0)}</span>
       </div>
-      <div className={`border-t border-line-soft px-3 py-2.5 text-[12.5px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto ${isThink ? "text-ink-3 italic" : "text-ink-2"}`}>
+      <div
+        ref={bodyRef}
+        onScroll={() => {
+          const el = bodyRef.current;
+          if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+        className={`border-t border-line-soft px-3 py-2.5 text-[12.5px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto ${isThink ? "text-ink-3 italic" : "text-ink-2"}`}
+      >
         {text}
         <span className={`inline-block w-[7px] h-[11px] align-[-1px] animate-pulse ${isThink ? "bg-think" : "bg-onair"}`} />
       </div>
@@ -1753,10 +1805,10 @@ function StreamCard({ member, kind, text, t0 }: { member: string; kind: "think" 
 function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> }) {
   const { event, member, toolEnd } = item;
   const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query="" label="USER PROMPT" member={member} />;
-  if (event.type === "user_steer") return <UserPromptCard event={event} time={time} query="" label="STEER" member={member} />;
+  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query="" label="USER PROMPT" member={member} compact />;
+  if (event.type === "user_steer") return <UserPromptCard event={event} time={time} query="" label="STEER" member={member} compact />;
   if (event.type === "tool_start" || event.type === "tool_end") {
-    return <ToolCard event={event} toolEnd={toolEnd} diff={diffStatForTool(event)} time={time} query="" member={member} />;
+    return <ToolCard event={event} toolEnd={toolEnd} diff={diffStatForTool(event)} time={time} query="" member={member} compact />;
   }
   if (event.type === "compaction_start" || event.type === "compaction_end") return <CompactionCard event={event} time={time} member={member} />;
   if (event.type === "message_end" && (event.thinking || event.text)) {
