@@ -360,7 +360,7 @@ export function TopicPage({
 
         {/* right rail — native member view, participants only (fish ②); activity scoped to topic */}
         {railMembers.length > 0 && (
-          <div className="w-[280px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
+          <div className="w-[340px] border-l border-line shrink-0 hidden md:block overflow-y-auto">
             <StationPanel
               members={railMembers}
               agentStatus={agentStatus}

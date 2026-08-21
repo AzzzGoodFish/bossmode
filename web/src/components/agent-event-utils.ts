@@ -29,6 +29,17 @@ export function isStationActionEvent(event: AgentEvent): boolean {
   return isDurableAgentEvent(event);
 }
 
+/** Activity-stream visibility (member Activity tab + workstations feed):
+ * streaming deltas (message_update/tool_update) and message_start markers are
+ * noise; a bare message_end from a pure tool-call round (no text, no thinking)
+ * carries no information either — excluded per fish 2026-08-09. message_end
+ * WITH text/thinking still renders as the REPLY/THINKING cards. */
+export function isActivityStreamEvent(event: AgentEvent): boolean {
+  if (event.type === "message_update" || event.type === "tool_update" || event.type === "message_start") return false;
+  if (event.type === "message_end" && !event.text && !event.thinking) return false;
+  return true;
+}
+
 export function formatEventTime(ts?: number): string {
   if (!ts) return "";
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

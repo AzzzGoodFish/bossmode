@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
-import { Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
+import { Activity, Square, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
   getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
@@ -10,12 +10,12 @@ import {
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
 import { Markdown } from "./Markdown";
-import { compactionEndDetail, compactionReasonLabel, formatEventTime, isStationActionEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
+import { formatEventTime, isActivityStreamEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
-import { ActivityTab } from "./ActivityTab";
+import { ActivityTab, groupTurns, TurnEventList } from "./ActivityTab";
 
 interface StationPanelProps {
   members: string[];
@@ -113,8 +113,11 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
   const [chipAnchor, setChipAnchor] = useState<DOMRect | null>(null);
   const [openThinkingChip, setOpenThinkingChip] = useState<string | null>(null);
   const [thinkingAnchor, setThinkingAnchor] = useState<DOMRect | null>(null);
-  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const [recentEvents, setRecentEvents] = useState<Record<string, AgentEvent[]>>({});
+  const [feedEvents, setFeedEvents] = useState<Record<string, AgentEvent[]>>({});
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedFilter, setFeedFilter] = useState<string | null>(null);
+  const feedScrollRef = useRef<HTMLDivElement>(null);
+  const feedPinnedRef = useRef(true);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(false);
@@ -265,22 +268,25 @@ This clears the member's working session memory and starts fresh. Room messages 
 
   const eventWatchId = activityScope || roomId;
 
-  const loadRecentEvents = useCallback(async (name: string) => {
+  // A+ fusion feed (fish 2026-08-20): each member's raw activity stream, kept
+  // per member and merged into turn blocks at render. Same visibility filter
+  // as the member Activity tab (isActivityStreamEvent).
+  const loadFeedEvents = useCallback(async (name: string) => {
     try {
       const result = activityScope
-        ? await getConversationEvents(activityScope, name, 40)
-        : await getAgentEventsPaginated(roomId, name, 40);
-      const stationEvents = coalesceStationActivity(result.events as AgentEvent[]).slice(-8);
-      setRecentEvents((prev) => ({ ...prev, [name]: stationEvents }));
+        ? await getConversationEvents(activityScope, name, FEED_PAGE_SIZE)
+        : await getAgentEventsPaginated(roomId, name, FEED_PAGE_SIZE);
+      setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter(isActivityStreamEvent).slice(-FEED_PAGE_SIZE) }));
     } catch (err) {
-      console.error("Failed to load recent agent events:", err);
+      console.error("Failed to load agent activity:", err);
     }
   }, [roomId, activityScope]);
 
   useEffect(() => {
     if (!eventWatchId) return;
-    for (const name of members) void loadRecentEvents(name);
-  }, [eventWatchId, members.join("\u0000"), loadRecentEvents]);
+    setFeedLoading(true);
+    void Promise.all(members.map((name) => loadFeedEvents(name))).finally(() => setFeedLoading(false));
+  }, [eventWatchId, members.join("\u0000"), loadFeedEvents]);
 
   useEffect(() => {
     const token = getToken();
@@ -295,12 +301,40 @@ This clears the member's working session memory and starts fresh. Room messages 
         const data = JSON.parse(e.data);
         if (data.type !== "agent:event" || data.roomId !== eventWatchId || !members.includes(data.agent)) return;
         const event = data.event as AgentEvent;
-        if (!isStationDisplayEvent(event)) return;
-        setRecentEvents((prev) => ({ ...prev, [data.agent]: coalesceStationActivity([...(prev[data.agent] || []), event]).slice(-8) }));
+        if (!isActivityStreamEvent(event)) return;
+        setFeedEvents((prev) => ({ ...prev, [data.agent]: [...(prev[data.agent] || []), event].slice(-FEED_BUFFER_CAP) }));
       } catch {}
     };
     return () => ws.close();
   }, [eventWatchId, members.join("\u0000")]);
+
+  const closePops = useCallback(() => {
+    setOpenChip(null);
+    setChipAnchor(null);
+    setOpenThinkingChip(null);
+    setThinkingAnchor(null);
+  }, []);
+
+  /** All members' turns interleaved by start time, newest last; capped tail. */
+  const feedTurns = useMemo(() => {
+    const names = feedFilter && members.includes(feedFilter) ? [feedFilter] : members;
+    const turns: Array<{ member: string; events: AgentEvent[]; firstTs: number; running: boolean }> = [];
+    for (const name of names) {
+      for (const turn of groupTurns(feedEvents[name] || [])) {
+        const firstTs = turn.events.find((e) => typeof e.ts === "number")?.ts ?? 0;
+        const hasEnd = turn.events.some((e) => e.type === "agent_end");
+        turns.push({ member: name, events: turn.events, firstTs, running: !hasEnd && agentStatus[name] === "working" });
+      }
+    }
+    turns.sort((a, b) => a.firstTs - b.firstTs);
+    return turns.slice(-FEED_MAX_TURNS);
+  }, [feedEvents, members, feedFilter, agentStatus]);
+
+  // Follow the live tail unless the user scrolled up to read earlier activity.
+  useEffect(() => {
+    const el = feedScrollRef.current;
+    if (el && feedPinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [feedTurns]);
 
   const toggleMemberMcpServer = useCallback(async (member: MemberInfo, server: string) => {
     const current = new Set(member.mcpServers || []);
@@ -347,22 +381,24 @@ This clears the member's working session memory and starts fresh. Room messages 
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0" onScroll={() => { setOpenChip(null); setChipAnchor(null); setOpenThinkingChip(null); setThinkingAnchor(null); }}>
+      {/* Roster — compact member strips (A+ fusion, fish 2026-08-20). Row
+       * click = filter the feed to that member (click again / ×clear = all);
+       * avatar & name open member detail as before; chips tune model/thinking. */}
+      <div className="shrink-0 max-h-[42%] overflow-y-auto border-b border-line" onScroll={closePops}>
         {members.map((name) => {
           const status = agentStatus[name] || "inactive";
           const info = memberInfos[name];
-          const usage = contextUsage[name];
-          const hasUsage = usage?.supported && usage.percentage !== undefined;
-          const pct = hasUsage ? Math.round(usage.percentage!) : 0;
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
+          const selected = feedFilter === name;
+          const activity = currentActivityLine(feedEvents[name] || [], status);
           const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
           const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
           const isConfigured = !!info?.model && !!info?.credentialId;
           const modelWarning = isConfigured ? memberModelAvailabilityLabel(info?.model, info?.credentialId, models) : null;
           const modelAvailable = isConfigured && modelWarning === null;
-          const modelChipLabel = !isConfigured ? (models.length === 0 ? "No model connected" : "Select model") : modelAvailable ? modelLabel : modelWarning!;
+          const modelChipLabel = !isConfigured ? (models.length === 0 ? "No model" : "Select model") : modelAvailable ? modelLabel : modelWarning!;
           const modelChipTitle = !isConfigured
             ? "Choose a model and credential for this member"
             : modelAvailable
@@ -370,151 +406,157 @@ This clears the member's working session memory and starts fresh. Room messages 
               : (models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`);
 
           return (
-            <div key={name} className="relative border-b border-line-soft px-3.5 py-3">
-              <div className="flex items-center gap-2.5">
+            <div key={name} className={`border-b border-line-soft last:border-b-0 transition-colors ${selected ? "bg-accent-dim/40" : ""}`}>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-pressed={selected}
+                onClick={() => setFeedFilter(selected ? null : name)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFeedFilter(selected ? null : name); } }}
+                title={selected ? `${name} filtered — click to show all members` : `Filter the activity feed to ${name}`}
+                className="flex items-center gap-2 px-3 py-[7px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
+              >
                 <button
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setSelectedMember(name)}
-                  className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
+                  className="cursor-pointer rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   title={`Configure ${name} · ${statusLabel(status)}`}
                 >
-                  <StaffBadge name={name} avatar={info ? undefined : undefined} status={statusFromAgent(status)} size="md" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
+                  <StaffBadge name={name} status={statusFromAgent(status)} size="xs" stale={!!staleMembers?.[name]} staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
                 </button>
-                <div className="flex-1 min-w-0">
-                  <button
-                    onClick={() => setSelectedMember(name)}
-                    className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors max-w-full"
-                    title={`Configure ${name}`}
-                  >
-                    <span className="truncate">{name}</span>
-                    {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                  </button>
-                  {/* member name is primary; Agent identity is a weak hint, then room-local runtime chips */}
-                  <div className="relative flex items-center gap-1 min-w-0 max-w-full">
-                    <span className="text-[10px] text-ink-4 truncate shrink-0 max-w-[92px]" title={`Agent: ${agentLabel}`}>{agentLabel}</span>
-                    {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
-                    {info && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenThinkingChip(null);
-                          setThinkingAnchor(null);
-                          if (openChip === name) {
-                            setOpenChip(null);
-                            setChipAnchor(null);
-                          } else {
-                            setOpenChip(name);
-                            setChipAnchor(e.currentTarget.getBoundingClientRect());
-                          }
-                        }}
-                        title={modelChipTitle}
-                        className={`font-mono text-[10px] rounded px-1 py-px flex-1 cursor-pointer transition-colors min-w-0 truncate text-left hover:bg-accent-dim ${
-                          !isConfigured || !modelAvailable ? "text-think" : "text-ink-4 hover:text-accent-ink"
-                        }`}
-                      >
-                        {modelChipLabel}
-                      </button>
-                    )}
-                    {info && <span className="font-mono text-[10px] text-ink-4 shrink-0">·</span>}
-                    {info && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenChip(null);
-                          setChipAnchor(null);
-                          if (openThinkingChip === name) {
-                            setOpenThinkingChip(null);
-                            setThinkingAnchor(null);
-                          } else {
-                            setOpenThinkingChip(name);
-                            setThinkingAnchor(e.currentTarget.getBoundingClientRect());
-                          }
-                        }}
-                        title={`think · ${info.thinkingLevel || "off"} · This room only`}
-                        className={`font-mono text-[10px] hover:text-accent-ink hover:bg-accent-dim rounded px-1 py-px cursor-pointer transition-colors shrink-0 ${info.thinkingLevel ? "text-ink-3" : "text-ink-4"}`}
-                      >
-                        think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span>
-                      </button>
-                    )}
-                    {openChip === name && info && (
-                      <ModelPop
-                        anchorRect={chipAnchor}
-                        models={models}
-                        current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
-                        onClose={() => { setOpenChip(null); setChipAnchor(null); }}
-                        onSelect={(model, credentialId) => {
-                          setOpenChip(null);
-                          setChipAnchor(null);
-                          handleSwitchModel(info, model, credentialId);
-                        }}
-                      />
-                    )}
-                    {openThinkingChip === name && info && (
-                      <ThinkingPop
-                        anchorRect={thinkingAnchor}
-                        currentThinking={info.thinkingLevel || "off"}
-                        models={models}
-                        modelRef={info.model ?? null}
-                        credentialId={info.credentialId ?? null}
-                        onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
-                        onSelect={(thinkingLevel) => {
-                          setOpenThinkingChip(null);
-                          setThinkingAnchor(null);
-                          void handleSwitchThinking(info, thinkingLevel);
-                        }}
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
-              {isBusy && (
                 <button
-                  onClick={() => abortAgent(roomId, name).catch(console.error)}
-                  className="absolute right-3.5 top-3.5 w-5 h-5 flex items-center justify-center rounded text-ink-4 hover:text-blocked hover:bg-surface-2 transition-colors cursor-pointer"
-                  title={`Abort ${name}`}
+                  onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
+                  className="text-[12.5px] font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[38%]"
+                  title={`Configure ${name} · Agent: ${agentLabel}`}
                 >
-                  <Square size={9} fill="currentColor" />
+                  <span className="truncate">{name}</span>
+                  {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                 </button>
-              )}
-
-              <ActionLine
-                name={name}
-                status={status}
-                events={recentEvents[name] || []}
-                expanded={expandedAgent === name}
-                onToggle={() => setExpandedAgent(expandedAgent === name ? null : name)}
-              />
-              {expandedAgent === name && (
-                <div className="mt-2.5 border-l-2 border-accent bg-surface-1 rounded-r-lg p-2 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-[9px] font-semibold tracking-[0.08em] text-ink-4">RECENT ACTIVITY</span>
-                  </div>
-                  {(recentEvents[name] || []).slice(-5).reverse().map((event, idx) => <MiniEvent key={`${event.ts || idx}:${event.type}:${idx}`} event={event} events={recentEvents[name] || []} />)}
-                  {(recentEvents[name] || []).length === 0 && <div className="text-[11px] text-ink-4 py-1">No recent activity</div>}
-                </div>
-              )}
-
-              {/* Context usage gauge */}
-              <div className="flex items-center gap-2 mt-2.5">
-                <div className="flex-1 h-[3px] rounded-full bg-surface-3 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ease-out ${
-                      pct >= 95 ? "bg-blocked" : pct >= 85 ? "bg-think" : "bg-ink-3"
-                    } ${isBusy ? "animate-pulse motion-reduce:animate-none" : ""}`}
-                    style={{ width: `${Math.max(pct, hasUsage ? 2 : 0)}%` }}
-                    role="progressbar"
-                    aria-valuenow={pct}
-                    aria-valuemax={100}
-                    aria-label={`${name} context usage ${pct}%`}
-                  />
-                </div>
-                <span className="font-mono text-[10px] text-ink-4 whitespace-nowrap shrink-0">
-                  {hasUsage ? `${pct}% · ${formatTokens(usage.totalTokens!)}` : "—"}
+                <span className={`flex-1 min-w-0 truncate font-mono text-[10.5px] ${activityTone(activity.kind)}`}>
+                  {activity.text}{activity.liveSince !== undefined && <> · <LiveSeconds since={activity.liveSince} /></>}
                 </span>
+                {isBusy && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); abortAgent(roomId, name).catch(console.error); }}
+                    className="w-4 h-4 flex items-center justify-center rounded text-ink-4 hover:text-blocked hover:bg-surface-3 transition-colors cursor-pointer shrink-0"
+                    title={`Abort ${name}`}
+                  >
+                    <Square size={9} fill="currentColor" />
+                  </button>
+                )}
+              </div>
+              {/* Config chips — model / thinking (same pops as before) + ⋯ detail. */}
+              <div className="relative flex items-center gap-1 px-3 pb-2 pl-[40px]">
+                {info && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenThinkingChip(null);
+                        setThinkingAnchor(null);
+                        if (openChip === name) {
+                          setOpenChip(null);
+                          setChipAnchor(null);
+                        } else {
+                          setOpenChip(name);
+                          setChipAnchor(e.currentTarget.getBoundingClientRect());
+                        }
+                      }}
+                      title={modelChipTitle}
+                      className={`font-mono text-[10px] rounded-md border border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors max-w-[132px] truncate text-left hover:border-line-strong ${
+                        !isConfigured || !modelAvailable ? "text-think" : "text-ink-3 hover:text-ink-1"
+                      }`}
+                    >
+                      {modelChipLabel} ▾
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenChip(null);
+                        setChipAnchor(null);
+                        if (openThinkingChip === name) {
+                          setOpenThinkingChip(null);
+                          setThinkingAnchor(null);
+                        } else {
+                          setOpenThinkingChip(name);
+                          setThinkingAnchor(e.currentTarget.getBoundingClientRect());
+                        }
+                      }}
+                      title={`think · ${info.thinkingLevel || "off"} · This room only`}
+                      className="font-mono text-[10px] rounded-md border border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0 text-ink-3 hover:text-ink-1 hover:border-line-strong"
+                    >
+                      think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span> ▾
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
+                      title={`${name} detail — memory, session & tools`}
+                      className="font-mono text-[10px] rounded-md border border-dashed border-line-soft bg-surface-1 px-1.5 py-0.5 cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-ink-1 hover:border-line-strong"
+                    >
+                      ⋯
+                    </button>
+                  </>
+                )}
+                {openChip === name && info && (
+                  <ModelPop
+                    anchorRect={chipAnchor}
+                    models={models}
+                    current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
+                    onClose={() => { setOpenChip(null); setChipAnchor(null); }}
+                    onSelect={(model, credentialId) => {
+                      setOpenChip(null);
+                      setChipAnchor(null);
+                      handleSwitchModel(info, model, credentialId);
+                    }}
+                  />
+                )}
+                {openThinkingChip === name && info && (
+                  <ThinkingPop
+                    anchorRect={thinkingAnchor}
+                    currentThinking={info.thinkingLevel || "off"}
+                    models={models}
+                    modelRef={info.model ?? null}
+                    credentialId={info.credentialId ?? null}
+                    onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
+                    onSelect={(thinkingLevel) => {
+                      setOpenThinkingChip(null);
+                      setThinkingAnchor(null);
+                      void handleSwitchThinking(info, thinkingLevel);
+                    }}
+                  />
+                )}
               </div>
             </div>
           );
         })}
+      </div>
+
+      {/* Merged activity feed — every member's turns interleaved by time; the
+       * rail itself is the progress console (no separate Activity chrome). */}
+      <div className="h-8 px-3 flex items-center gap-1.5 shrink-0">
+        <Activity size={10} className="text-ink-4 shrink-0" aria-hidden />
+        <span className="text-[10px] font-semibold tracking-[0.06em] text-ink-4 uppercase truncate">Activity · {feedFilter && members.includes(feedFilter) ? feedFilter : "all members"}</span>
+        {feedFilter && members.includes(feedFilter) && (
+          <button onClick={() => setFeedFilter(null)} className="text-[10px] font-semibold text-accent-ink hover:underline cursor-pointer shrink-0">× clear</button>
+        )}
+      </div>
+      <div
+        ref={feedScrollRef}
+        onScroll={() => {
+          const el = feedScrollRef.current;
+          if (el) feedPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+          closePops();
+        }}
+        className="flex-1 overflow-y-auto min-h-0 px-2.5 py-2.5"
+      >
+        {feedLoading && <div className="text-center text-[11px] text-ink-4 py-8">Loading activity…</div>}
+        {!feedLoading && feedTurns.length === 0 && (
+          <div className="text-center text-[11px] text-ink-4 py-8">{feedFilter ? `No recent activity for ${feedFilter}.` : "No member activity yet."}</div>
+        )}
+        <div className="space-y-3">
+          {feedTurns.map((turn, i) => (
+            <FeedTurnBlock key={`${turn.member}:${turn.firstTs}:${i}`} member={turn.member} events={turn.events} running={turn.running} status={agentStatus[turn.member]} />
+          ))}
+        </div>
       </div>
       <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl" dock="right">
         {selectedMember && memberInfos[selectedMember] && (
@@ -1495,181 +1537,7 @@ export function MemberConfigPanel({
 }
 
 
-function isStationDisplayEvent(event: AgentEvent): boolean {
-  if (event.type === "message_end" || event.type === "message_update" || event.type === "message_start" || event.type === "tool_update") return false;
-  return isStationActionEvent(event) || event.type === "tool_end";
-}
-
-function toolLifecycleKey(event: AgentEvent): string | null {
-  if (event.type !== "tool_start" && event.type !== "tool_end" && event.type !== "compaction_start" && event.type !== "compaction_end") return null;
-  if (event.type === "compaction_start" || event.type === "compaction_end") return `compaction:${event.reason || "context"}`;
-  return event.toolCallId ? `id:${event.toolCallId}` : `name:${event.toolName || "tool"}`;
-}
-
-function coalesceStationActivity(events: AgentEvent[]): AgentEvent[] {
-  const rows: AgentEvent[] = [];
-  const toolRowIndex = new Map<string, number>();
-  for (const event of events) {
-    if (!isStationDisplayEvent(event)) continue;
-    const key = toolLifecycleKey(event);
-    if (!key) {
-      rows.push(event);
-      continue;
-    }
-    const existingIndex = toolRowIndex.get(key);
-    if (existingIndex === undefined) {
-      rows.push(event);
-      toolRowIndex.set(key, rows.length - 1);
-      continue;
-    }
-    const previous = rows[existingIndex];
-    rows[existingIndex] = {
-      ...previous,
-      ...event,
-      args: event.args ?? previous.args,
-      ts: event.ts ?? previous.ts,
-      lifecycleStartedAt: previous.lifecycleStartedAt ?? previous.ts,
-    };
-  }
-  return rows;
-}
-
-function safeEventDetail(value: unknown): string {
-  if (typeof value === "string") return truncateText(value, 64);
-  if (!value || typeof value !== "object") return truncateText(value ?? "", 64);
-  const obj = value as Record<string, unknown>;
-  return truncateText(obj.error ?? obj.message ?? obj.summary ?? obj.text ?? "", 64);
-}
-
-function findMatchingToolStart(events: AgentEvent[], endEvent: AgentEvent): AgentEvent | undefined {
-  const reversed = [...events].reverse();
-  return reversed.find((event) => {
-    if (event.type !== "tool_start") return false;
-    if (endEvent.toolCallId) return event.toolCallId === endEvent.toolCallId;
-    if (endEvent.toolName && event.toolName === endEvent.toolName) return true;
-    return false;
-  });
-}
-
-function toolEndDetail(event: AgentEvent, events: AgentEvent[] = []): string {
-  const matchingStart = findMatchingToolStart(events, event);
-  return toolTarget(matchingStart?.args) || toolTarget(event.args) || (event.isError ? safeEventDetail(event.result ?? event.text) : safeEventDetail(event.result ?? event.text)) || String(event.toolName || "tool");
-}
-
-function stationSummary(event?: AgentEvent, events: AgentEvent[] = []): { kind: string; label: string; detail: string; ts?: number; pulse?: boolean } {
-  if (!event) return { kind: "idle", label: "IDLE", detail: "No recent activity" };
-  const ts = typeof event.ts === "number" ? event.ts : undefined;
-  if (event.type === "tool_start") {
-    const tool = toolDisplay(event.toolName, event.args);
-    return { kind: "running", label: tool.label, detail: tool.detail || "running", ts, pulse: true };
-  }
-  if (event.type === "tool_end") {
-    const tool = toolDisplay(event.toolName, event.args);
-    return {
-      kind: event.isError ? "error" : "done",
-      label: tool.label,
-      detail: toolEndDetail(event, events),
-      ts,
-    };
-  }
-  if (event.type === "compaction_start") {
-    return { kind: "running", label: "COMPACTING · context", detail: compactionReasonLabel(event.reason), ts, pulse: true };
-  }
-  if (event.type === "compaction_end") {
-    return {
-      kind: event.errorMessage ? "error" : event.aborted ? "system" : "done",
-      label: event.errorMessage ? "COMPACT FAILED" : event.aborted ? "COMPACT CANCELLED" : "COMPACTED · context",
-      detail: compactionEndDetail(event),
-      ts,
-    };
-  }
-  const summary = summarizeAgentEvent(event);
-  return summary;
-}
-
-function latestStationSummary(events: AgentEvent[]) {
-  return stationSummary([...events].reverse().find(isStationDisplayEvent), events);
-}
-
-function actionTone(kind: string): string {
-  if (kind === "running") return "text-accent-ink";
-  if (kind === "done") return "text-onair";
-  if (kind === "error") return "text-blocked";
-  if (kind === "working") return "text-onair";
-  if (kind === "tool") return "text-accent-ink";
-  if (kind === "thinking") return "text-think";
-  if (kind === "reply") return "text-ink-2";
-  return "text-ink-4";
-}
-
-function actionShell(kind: string): string {
-  if (kind === "running") return "border-accent/30 ring-1 ring-accent/10";
-  if (kind === "done") return "border-onair/20";
-  if (kind === "error") return "border-blocked/35 bg-blocked-dim/40";
-  if (kind === "working") return "border-onair/15";
-  return "border-line-soft";
-}
-
-function actionDot(kind: string): string {
-  if (kind === "running") return "bg-accent shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_16%,transparent)] animate-pulse";
-  if (kind === "done") return "bg-onair opacity-80";
-  if (kind === "error") return "bg-blocked";
-  if (kind === "working") return "bg-onair shadow-[0_0_0_3px_color-mix(in_srgb,var(--on-air)_16%,transparent)] animate-pulse";
-  if (kind === "thinking") return "bg-think";
-  if (kind === "reply") return "bg-ink-3";
-  return "bg-ink-4";
-}
-
-function ActionLine({ name, status, events, expanded, onToggle }: { name: string; status: string; events: AgentEvent[]; expanded: boolean; onToggle: () => void }) {
-  const summary = latestStationSummary(events);
-  const isWorkingWithoutEvent = status === "working" && summary.kind === "idle";
-  const isWorkingTurnStart = status === "working" && summary.kind === "system" && summary.label === "TURN" && summary.detail === "Agent started";
-  const label = isWorkingWithoutEvent ? "WORKING" : status === "working" && summary.label === "REPLY" ? "DRAFT" : summary.label;
-  const time = summary.ts ? formatEventTime(summary.ts) : "";
-  const detail = isWorkingWithoutEvent ? "Waiting for activity" : status === "working" && label === "DRAFT" ? summary.detail : summary.kind === "reply" && time ? `${summary.detail} · ${time}` : summary.detail;
-  const visualKind = isWorkingWithoutEvent || isWorkingTurnStart ? "working" : summary.kind;
-  const tone = actionTone(visualKind);
-  return (
-    <button
-      onClick={onToggle}
-      className={`w-full mt-2.5 flex items-center gap-2 rounded-md border bg-inset px-2 py-1.5 text-left hover:border-line transition-colors cursor-pointer ${actionShell(visualKind)}`}
-      title={`${name}: ${label} ${detail}`}
-    >
-      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${actionDot(visualKind)}`} />
-      <span className={`text-[9px] font-bold tracking-[0.12em] uppercase shrink-0 ${tone}`}>{label}</span>
-      <span className="font-mono text-[10.5px] text-ink-3 truncate flex-1">{detail}</span>
-      <ChevronDown size={11} className={`text-ink-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
-    </button>
-  );
-}
-
-function MiniEvent({ event, events = [] }: { event: AgentEvent; events?: AgentEvent[] }) {
-  const summary = stationSummary(event, events);
-  const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
-  // W2-3 (beautifului Task Rows, fish-picked 2026-08-20): unified status language —
-  // status icon + action title + meta + Completed/Running/Failed pill. Live
-  // seconds while running (ticker only mounted for running rows).
-  const kind = summary.kind;
-  const icon = kind === "running" ? <span className="text-think animate-spin inline-block">◐</span>
-    : kind === "error" ? <span className="text-blocked">✗</span>
-    : <span className="text-onair">✓</span>;
-  const pill = kind === "running" ? <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-think bg-think/10">Running</span>
-    : kind === "error" ? <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-blocked bg-blocked/10">Failed</span>
-    : <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-onair bg-onair/10">Completed</span>;
-  return (
-    <div className={`rounded-md bg-inset border px-2 py-1.5 ${actionShell(kind)}`}>
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[10px] w-3.5 text-center shrink-0">{icon}</span>
-        <span className="text-[11.5px] font-semibold text-ink-2 truncate">{summary.label}</span>
-        <span className="font-mono text-[10px] text-ink-4 truncate flex-1">{summary.detail}</span>
-        {kind === "running" && typeof event.ts === "number" ? <LiveSeconds since={event.ts} /> : time && <span className="font-mono text-[9.5px] text-ink-4 shrink-0">{time}</span>}
-        {pill}
-      </div>
-    </div>
-  );
-}
-
-/** 1s-ticking "Ns" badge for running task rows (mounted only while running). */
+/** 1s-ticking "Ns" badge for running rows (mounted only while running). */
 function LiveSeconds({ since }: { since: number }) {
   const [, force] = useState(0);
   useEffect(() => {
@@ -1679,6 +1547,75 @@ function LiveSeconds({ since }: { since: number }) {
   const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
   return <span className="font-mono text-[9.5px] text-think shrink-0 tabular-nums">{s}s</span>;
 }
+
+// ── A+ fusion feed (fish-approved prototype agent-visibility-v1 → A+ tab) ────
+
+const FEED_PAGE_SIZE = 80;
+const FEED_BUFFER_CAP = 160;
+const FEED_MAX_TURNS = 30;
+
+/** One-line "what is this member doing right now" for the roster strip.
+ * Derived from the member's feed buffer within the current turn (scan stops at
+ * the previous agent_end); idle members show "idle" regardless of history. */
+function currentActivityLine(events: AgentEvent[], status: string): { kind: string; text: string; liveSince?: number } {
+  if (status !== "working" && status !== "thinking") return { kind: "idle", text: "idle" };
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "agent_end") break;
+    if (e.type === "tool_start") {
+      const end = e.toolCallId ? events.slice(i + 1).find((x) => x.type === "tool_end" && x.toolCallId === e.toolCallId) : undefined;
+      const tool = toolDisplay(e.toolName, e.args);
+      const target = tool.detail || toolTarget(e.args) || "";
+      if (!end) return { kind: "running", text: `${tool.label}${target ? ` · ${target}` : ""}`, liveSince: typeof e.ts === "number" ? e.ts : undefined };
+      if (end.isError) return { kind: "error", text: `${tool.label} failed` };
+      return { kind: "done", text: `${tool.label}${target ? ` · ${target}` : ""}` };
+    }
+    if (e.type === "compaction_start") return { kind: "running", text: "Compacting context", liveSince: typeof e.ts === "number" ? e.ts : undefined };
+    if (e.type === "message_end" && e.text) return { kind: "reply", text: `Replied · ${truncateText(e.text, 48)}` };
+    if (e.type === "message_end" && e.thinking) {
+      const next = events.slice(i + 1).find((x) => typeof x.ts === "number");
+      const elapsed = next && typeof e.ts === "number" ? Math.max(0, Math.round(((next.ts as number) - (e.ts as number)) / 1000)) : 0;
+      return { kind: "thinking", text: elapsed > 0 ? `Thought for ${elapsed}s` : "Thought" };
+    }
+  }
+  return { kind: "working", text: "Working…" };
+}
+
+function activityTone(kind: string): string {
+  switch (kind) {
+    case "running": return "text-accent-ink";
+    case "thinking": return "text-think";
+    case "error": return "text-blocked";
+    case "working": return "text-onair";
+    case "done":
+    case "reply": return "text-ink-3";
+    default: return "text-ink-4";
+  }
+}
+
+/** One member's turn in the merged feed: member header (avatar + name +
+ * Running/Completed pill + start time) over the shared turn card language
+ * (TurnEventList — identical to the member Activity tab). */
+const FeedTurnBlock = memo(function FeedTurnBlock({ member, events, running, status }: { member: string; events: AgentEvent[]; running: boolean; status?: string }) {
+  const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
+  return (
+    <section>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <StaffBadge name={member} status={statusFromAgent(status)} size="xs" />
+        <span className="text-[11px] font-bold text-ink-1 truncate">{member}</span>
+        {running ? (
+          <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-think bg-think/10 shrink-0">Running</span>
+        ) : (
+          <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-onair bg-onair/10 shrink-0">Completed</span>
+        )}
+        <span className="font-mono text-[9.5px] text-ink-4 ml-auto shrink-0">{formatEventTime(firstTs)}</span>
+      </div>
+      <div className="space-y-[6px]">
+        <TurnEventList events={events} query="" />
+      </div>
+    </section>
+  );
+});
 
 export function ModelPop({
   models,

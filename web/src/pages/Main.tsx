@@ -458,7 +458,7 @@ export function Main({
         )}
 
         {/* 工位墙（桌面） */}
-        <div className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[280px] border-l border-line shrink-0`}>
+        <div className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"} w-[340px] border-l border-line shrink-0`}>
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}
