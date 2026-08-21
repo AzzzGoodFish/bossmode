@@ -68,6 +68,56 @@ describe("event-handler status authority", () => {
     expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "rm_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
   });
 
+  it("stamps numeric ts on WS agent:event and disk with the same identity", () => {
+    const roomId = `ws-ts-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const memberId = "rm_dev";
+    const buffer: AgentHistoryEvent[] = [];
+    vi.mocked(broadcastToAgentSubscribers).mockClear();
+
+    try {
+      handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "agent_start" }, buffer, memberId);
+
+      const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { type?: string; ts?: number } };
+      const wsTs = wsPayload?.event?.ts;
+      expect(typeof wsTs).toBe("number");
+      expect(Number.isFinite(wsTs)).toBe(true);
+      expect(wsTs).toBeGreaterThan(0);
+
+      const disk = loadEventsFromDisk(roomId, memberId);
+      const start = disk.find((e) => e.type === "agent_start") as { ts?: number } | undefined;
+      expect(start?.ts).toBe(wsTs);
+      expect((buffer[0] as { ts?: number }).ts).toBe(wsTs);
+    } finally {
+      rmSync(join("/tmp/bossmode-test", "rooms", roomId), { recursive: true, force: true });
+    }
+  });
+
+  it("does not overwrite an event that already carries ts", () => {
+    const roomId = `ws-ts-keep-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const memberId = "rm_dev";
+    const buffer: AgentHistoryEvent[] = [];
+    const fixedTs = 1_700_000_000_123;
+    vi.mocked(broadcastToAgentSubscribers).mockClear();
+
+    try {
+      handleAgentEvent(
+        roomId,
+        "developer",
+        `${roomId}:${memberId}`,
+        { type: "tool_start", toolCallId: "t1", toolName: "bash", args: {}, ts: fixedTs } as any,
+        buffer,
+        memberId,
+      );
+
+      const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { ts?: number } };
+      expect(wsPayload?.event?.ts).toBe(fixedTs);
+      const disk = loadEventsFromDisk(roomId, memberId);
+      expect((disk.find((e) => e.type === "tool_start") as { ts?: number } | undefined)?.ts).toBe(fixedTs);
+    } finally {
+      rmSync(join("/tmp/bossmode-test", "rooms", roomId), { recursive: true, force: true });
+    }
+  });
+
   it("caps runtime errors before buffering, persistence, WS publication, and legacy reads", () => {
     const roomId = `error-cap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const memberId = "rm_dev";
