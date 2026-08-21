@@ -688,9 +688,11 @@ This clears the member's working session memory and starts fresh. Room messages 
         }}
         onPointerUp={() => setRosterDragging(false)}
         onDoubleClick={() => setRosterH(null)}
-        className={`relative h-[7px] -mt-[3px] shrink-0 cursor-row-resize z-10 flex items-center justify-center border-b border-line group ${rosterDragging ? "bg-accent/20" : ""}`}
+        className={`relative h-[7px] -mt-[3px] shrink-0 cursor-row-resize z-10 border-b border-line group ${rosterDragging ? "bg-accent/20" : ""}`}
       >
-        <span className={`w-6 h-[3px] rounded-full transition-colors ${rosterDragging ? "bg-accent" : "bg-ink-4/40 group-hover:bg-accent/60"}`} />
+        {/* Pill hugs the line's top face (roster side) — same rule as the rail
+         * divider: the handle belongs to the pane it resizes (fish 2026-08-21). */}
+        <span className={`absolute bottom-[1px] left-1/2 -translate-x-1/2 w-6 h-[3px] rounded-full transition-colors ${rosterDragging ? "bg-accent" : "bg-ink-4/40 group-hover:bg-accent/60"}`} />
       </div>
 
       {/* Merged activity feed — every member's turns interleaved by time; the
@@ -1733,7 +1735,7 @@ function LiveSeconds({ since }: { since: number }) {
     return () => window.clearInterval(t);
   }, []);
   const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
-  return <span className="font-mono text-[9.5px] text-think shrink-0 tabular-nums">{s}s</span>;
+  return <span className="font-mono text-[9.5px] leading-none text-think shrink-0 tabular-nums">{s}s</span>;
 }
 
 // ── Card river feed (fish 2026-08-21 four points; prototype agent-visibility-v1 → v2 tab) ──
@@ -1810,15 +1812,16 @@ function StreamCard({ member, kind, text, t0 }: { member: string; kind: "think" 
   }, [text]);
   return (
     <div className={`rounded-[10px] border bg-surface-1 ${isThink ? "border-think/40" : "border-onair/30"}`}>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-1.5 px-3 py-[8px] text-left cursor-pointer"
->
-        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
-        <MemberDisc name={member} />
-        <span className="text-[11px] font-bold text-ink-1 truncate max-w-[90px]">{member}</span>
-        <span className={`text-[9.5px] leading-none font-extrabold tracking-[0.08em] uppercase ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
-        <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isThink ? "bg-think" : "bg-onair"}`} />
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center px-3 py-[8px] text-left cursor-pointer">
+        <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform mr-[4px] ${open ? "rotate-90" : ""}`} />
+        <span className="flex items-center gap-[5px] shrink-0 min-w-0">
+          <MemberDisc name={member} />
+          <span className="text-[11px] font-bold leading-none text-ink-1 truncate max-w-[90px]">{member}</span>
+        </span>
+        <span className={`text-[9.5px] leading-none font-extrabold tracking-[0.08em] uppercase ml-[7px] mr-[4px] ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
+        <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 mr-[4px] ${isThink ? "bg-think" : "bg-onair"}`} />
         <LiveSeconds since={t0} />
-        <span className="font-mono text-[10px] leading-none text-ink-4 ml-auto shrink-0">{formatEventTime(t0)}</span>
+        <span className="font-mono text-[10px] leading-none text-ink-4 ml-auto pl-[6px] shrink-0">{formatEventTime(t0)}</span>
       </button>
       {open && (
         <div
