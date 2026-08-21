@@ -230,10 +230,10 @@ export function handleAgentEvent(
 
   // One stamp for disk + WS so live feed sort and REST reload share identity.
   // Keep an existing ts (tool/user_prompt may already carry one).
-  const stamped: AgentStreamEvent =
+  const stamped: AgentStreamEvent & { ts?: number } =
     typeof (processedEvent as { ts?: number }).ts === "number" && Number.isFinite((processedEvent as { ts?: number }).ts)
-      ? processedEvent
-      : ({ ...processedEvent, ts: Date.now() } as AgentStreamEvent);
+      ? (processedEvent as AgentStreamEvent & { ts?: number })
+      : { ...processedEvent, ts: Date.now() };
 
   // Persist non-streaming events to disk
   if (stamped.type !== "message_update" && stamped.type !== "tool_update") {
@@ -244,7 +244,7 @@ export function handleAgentEvent(
   // Persistent per-member stats (turns/tool calls/active time/tokens) —
   // incremental, O(1) per event, so Overview reads never rescan the full log.
   const statsRef = memberId || agentName;
-  const statsTs = typeof (stamped as { ts?: number }).ts === "number" ? (stamped as { ts: number }).ts : Date.now();
+  const statsTs = typeof stamped.ts === "number" ? stamped.ts : Date.now();
   if (stamped.type === "agent_start") {
     recordTurnStart(instanceKey, statsTs);
   } else if (stamped.type === "agent_end") {
