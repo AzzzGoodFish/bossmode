@@ -45,11 +45,12 @@ export function ResizableRail({ children, className = "" }: { children: ReactNod
         }}
         onPointerUp={() => setDragging(false)}
         onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
-        className={`absolute top-0 bottom-0 -left-[3px] w-[7px] cursor-col-resize z-20 transition-colors flex items-center justify-center ${dragging ? "bg-accent/50" : "hover:bg-accent/30"}`}
+        className={`absolute top-0 bottom-0 -left-[3px] w-[7px] cursor-col-resize z-20 transition-colors ${dragging ? "bg-accent/50" : "hover:bg-accent/30"}`}
       >
         {/* Persistent grip mark — the small visual difference that says "this
-         * divider is draggable" (static borders carry none, fish 2026-08-21). */}
-        <span className={`w-[3px] h-6 rounded-full transition-colors ${dragging ? "bg-accent" : "bg-ink-4/40"}`} />
+         * divider is draggable". It hugs the line's LEFT face (chat side):
+         * the handle belongs to the pane you pull (fish 2026-08-21 v3). */}
+        <span className={`absolute right-[5px] top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-full transition-colors ${dragging ? "bg-accent" : "bg-ink-4/40"}`} />
       </div>
       {children}
     </div>
