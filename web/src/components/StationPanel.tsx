@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronRight, Pencil, X } from "lucide-react";
 import {
@@ -10,12 +10,12 @@ import {
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
 import { Markdown } from "./Markdown";
-import { formatEventTime, isActivityStreamEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, toolDisplay, toolTarget, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
-import { ActivityTab, groupTurns, TurnEventList } from "./ActivityTab";
+import { ActivityTab, ThinkingTrace, ToolCard, ToolGroupBlock, ReplyCard, UserPromptCard, CompactionCard, MemberDisc } from "./ActivityTab";
 
 interface StationPanelProps {
   members: string[];
@@ -118,6 +118,14 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
   const [feedFilter, setFeedFilter] = useState<string | null>(null);
   const feedScrollRef = useRef<HTMLDivElement>(null);
   const feedPinnedRef = useRef(true);
+  // Card-river live streams (fish 2026-08-21 ②): message_update deltas are on
+  // the WS already (never persisted); accumulate per member, flush to state at
+  // 60ms so delta bursts don't churn the rail. Stream cards are a live preview
+  // — on reload only settled cards render (REST has finals only).
+  const [liveStreams, setLiveStreams] = useState<Record<string, LiveStream>>({});
+  const streamBufRef = useRef<Record<string, LiveStream>>({});
+  const streamFlushRef = useRef<number | null>(null);
+  const [showNewBtn, setShowNewBtn] = useState(false);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState(false);
@@ -301,12 +309,47 @@ This clears the member's working session memory and starts fresh. Room messages 
         const data = JSON.parse(e.data);
         if (data.type !== "agent:event" || data.roomId !== eventWatchId || !members.includes(data.agent)) return;
         const event = data.event as AgentEvent;
+        const agent = data.agent as string;
+        // Streaming deltas feed the live-preview cards, not the event buffer.
+        if (event.type === "message_start") {
+          streamBufRef.current[agent] = { thinking: "", text: "", t0: typeof event.ts === "number" ? event.ts : Date.now() };
+          scheduleStreamFlush();
+          return;
+        }
+        if (event.type === "message_update") {
+          const cur = streamBufRef.current[agent] || { thinking: "", text: "", t0: Date.now() };
+          if (typeof event.thinking === "string") cur.thinking += event.thinking;
+          if (typeof event.text === "string") cur.text += event.text;
+          streamBufRef.current[agent] = cur;
+          scheduleStreamFlush();
+          return;
+        }
+        if (event.type === "message_end") {
+          delete streamBufRef.current[agent];
+          scheduleStreamFlush();
+          // falls through: a message_end carrying text/thinking also enters the buffer
+        }
         if (!isActivityStreamEvent(event)) return;
-        setFeedEvents((prev) => ({ ...prev, [data.agent]: [...(prev[data.agent] || []), event].slice(-FEED_BUFFER_CAP) }));
+        // Display-only tolerance: live events missing a server ts (e.g. the
+        // user_prompt path, which broadcasts the pre-stamp original) get the
+        // client arrival time so the river keeps arrival order; the disk ts
+        // remains authoritative and replaces it on reload.
+        const display = typeof event.ts === "number" ? event : { ...event, ts: Date.now() };
+        setFeedEvents((prev) => ({ ...prev, [agent]: [...(prev[agent] || []), display].slice(-FEED_BUFFER_CAP) }));
       } catch {}
     };
     return () => ws.close();
   }, [eventWatchId, members.join("\u0000")]);
+
+  /** 60ms-batched mirror of streamBufRef → React state. */
+  const scheduleStreamFlush = useCallback(() => {
+    if (streamFlushRef.current !== null) return;
+    streamFlushRef.current = window.setTimeout(() => {
+      streamFlushRef.current = null;
+      setLiveStreams({ ...streamBufRef.current });
+    }, 60);
+  }, []);
+  useEffect(() => () => { if (streamFlushRef.current !== null) window.clearTimeout(streamFlushRef.current); }, []);
 
   const closePops = useCallback(() => {
     setOpenChip(null);
@@ -315,26 +358,78 @@ This clears the member's working session memory and starts fresh. Room messages 
     setThinkingAnchor(null);
   }, []);
 
-  /** All members' turns interleaved by start time, newest last; capped tail. */
-  const feedTurns = useMemo(() => {
+  /** Card river (fish 2026-08-21): flat cards, each self-tagged with its member.
+   * No turn headers. agent_start/agent_end stay out (turn chrome); consecutive
+   * same-member tool calls still collapse into a group (boundary-safe: a turn
+   * edge flushes the run). */
+  const riverItems = useMemo<RiverItem[]>(() => {
     const names = feedFilter && members.includes(feedFilter) ? [feedFilter] : members;
-    const turns: Array<{ member: string; events: AgentEvent[]; firstTs: number; running: boolean }> = [];
+    const items: RiverItem[] = [];
     for (const name of names) {
-      for (const turn of groupTurns(feedEvents[name] || [])) {
-        const firstTs = turn.events.find((e) => typeof e.ts === "number")?.ts ?? 0;
-        const hasEnd = turn.events.some((e) => e.type === "agent_end");
-        turns.push({ member: name, events: turn.events, firstTs, running: !hasEnd && agentStatus[name] === "working" });
+      const events = feedEvents[name] || [];
+      const endMap: Record<string, AgentEvent> = {};
+      for (const e of events) if (e.type === "tool_end" && e.toolCallId) endMap[e.toolCallId] = e;
+      const paired = (e: AgentEvent) => !!e.toolCallId && events.some((s) => s.type === "tool_start" && s.toolCallId === e.toolCallId);
+      let run: AgentEvent[] = [];
+      const flush = () => {
+        if (run.length >= 2) {
+          items.push({ kind: "group", member: name, events: run, toolEndMap: endMap, firstTs: riverTs(run[0]), key: `${name}:g:${run[0].ts ?? "x"}:${items.length}` });
+        } else {
+          for (const e of run) items.push({ kind: "event", member: name, event: e, toolEnd: e.toolCallId ? endMap[e.toolCallId] : undefined, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${items.length}` });
+        }
+        run = [];
+      };
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (e.type === "agent_start" || e.type === "agent_end") { flush(); continue; }
+        if (e.type === "tool_end" && paired(e)) continue; // rendered inside its tool_start card
+        if (e.type === "tool_start") { run.push(e); continue; }
+        flush();
+        // thinking duration = gap to the next timestamped event (same honest estimate as the Activity tab)
+        let thinkSec: number | undefined;
+        if (e.type === "message_end" && e.thinking && typeof e.ts === "number") {
+          const next = events.slice(i + 1).find((n) => typeof n.ts === "number");
+          if (next) thinkSec = Math.max(0, Math.round(((next.ts as number) - e.ts) / 1000));
+        }
+        items.push({ kind: "event", member: name, event: e, toolEnd: e.type === "tool_end" ? e : undefined, thinkSec, firstTs: riverTs(e), key: `${name}:e:${e.ts ?? "x"}:${i}` });
       }
+      flush();
     }
-    turns.sort((a, b) => a.firstTs - b.firstTs);
-    return turns.slice(-FEED_MAX_TURNS);
-  }, [feedEvents, members, feedFilter, agentStatus]);
+    items.sort((a, b) => a.firstTs - b.firstTs);
+    return items.slice(-RIVER_MAX_ITEMS);
+  }, [feedEvents, members, feedFilter]);
 
-  // Follow the live tail unless the user scrolled up to read earlier activity.
+  /** Live stream cards ride at the river's tail (the forming edge). */
+  const streamCards = useMemo(() => {
+    const names = feedFilter && members.includes(feedFilter) ? [feedFilter] : members;
+    return names.flatMap((name) => {
+      const s = liveStreams[name];
+      if (!s || (!s.thinking && !s.text)) return [];
+      const cards: Array<{ name: string; s: LiveStream; kind: "think" | "reply" }> = [];
+      if (s.thinking) cards.push({ name, s, kind: "think" });
+      if (s.text) cards.push({ name, s, kind: "reply" });
+      return cards;
+    });
+  }, [liveStreams, members, feedFilter]);
+
+  // Follow the live tail unless the user scrolled up; then float "↓ New activity".
   useEffect(() => {
     const el = feedScrollRef.current;
-    if (el && feedPinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [feedTurns]);
+    if (!el) return;
+    if (feedPinnedRef.current) {
+      el.scrollTop = el.scrollHeight;
+      setShowNewBtn(false);
+    } else {
+      setShowNewBtn(true);
+    }
+  }, [riverItems, streamCards]);
+
+  const jumpToLatest = useCallback(() => {
+    feedPinnedRef.current = true;
+    const el = feedScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setShowNewBtn(false);
+  }, []);
 
   const toggleMemberMcpServer = useCallback(async (member: MemberInfo, server: string) => {
     const current = new Set(member.mcpServers || []);
@@ -391,7 +486,7 @@ This clears the member's working session memory and starts fresh. Room messages 
           const isBusy = status === "working";
           const hasUnread = unreadAgents?.has(name);
           const selected = feedFilter === name;
-          const activity = currentActivityLine(feedEvents[name] || [], status);
+          const activity = currentActivityLine(feedEvents[name] || [], status, liveStreams[name]);
           const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
           const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
@@ -539,24 +634,47 @@ This clears the member's working session memory and starts fresh. Room messages 
           <button onClick={() => setFeedFilter(null)} className="text-[10px] font-semibold text-accent-ink hover:underline cursor-pointer shrink-0">× clear</button>
         )}
       </div>
-      <div
-        ref={feedScrollRef}
-        onScroll={() => {
-          const el = feedScrollRef.current;
-          if (el) feedPinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-          closePops();
-        }}
-        className="flex-1 overflow-y-auto min-h-0 px-2.5 py-2.5"
-      >
-        {feedLoading && <div className="text-center text-[11px] text-ink-4 py-8">Loading activity…</div>}
-        {!feedLoading && feedTurns.length === 0 && (
-          <div className="text-center text-[11px] text-ink-4 py-8">{feedFilter ? `No recent activity for ${feedFilter}.` : "No member activity yet."}</div>
-        )}
-        <div className="space-y-3">
-          {feedTurns.map((turn, i) => (
-            <FeedTurnBlock key={`${turn.member}:${turn.firstTs}:${i}`} member={turn.member} events={turn.events} running={turn.running} status={agentStatus[turn.member]} />
-          ))}
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={feedScrollRef}
+          onScroll={() => {
+            const el = feedScrollRef.current;
+            if (!el) return;
+            const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+            feedPinnedRef.current = pinned;
+            if (pinned) setShowNewBtn(false);
+            closePops();
+          }}
+          className="h-full overflow-y-auto px-2.5 py-2.5"
+        >
+          {feedLoading && <div className="text-center text-[11px] text-ink-4 py-8">Loading activity…</div>}
+          {!feedLoading && riverItems.length === 0 && streamCards.length === 0 && (
+            <div className="text-center text-[11px] text-ink-4 py-8">{feedFilter ? `No recent activity for ${feedFilter}.` : "No member activity yet."}</div>
+          )}
+          <div className="space-y-[6px]">
+            {riverItems.map((item) =>
+              item.kind === "group" ? (
+                <ToolGroupBlock key={item.key} events={item.events} toolEndMap={item.toolEndMap} query="" member={item.member} />
+              ) : (
+                <RiverEventCard key={item.key} item={item} />
+              ),
+            )}
+            {streamCards.map((sc) => (
+              <StreamCard key={`stream:${sc.name}:${sc.kind}`} member={sc.name} kind={sc.kind} text={sc.kind === "think" ? sc.s.thinking : sc.s.text} t0={sc.s.t0} />
+            ))}
+          </div>
         </div>
+        {showNewBtn && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+            <button
+              onClick={jumpToLatest}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-surface-3 border border-line-strong text-ink-1 rounded-full shadow-lg hover:bg-surface-2 transition-colors cursor-pointer"
+              title="Back to the latest activity"
+            >
+              ↓ New activity
+            </button>
+          </div>
+        )}
       </div>
       <Sheet open={!!selectedMember} onClose={() => setSelectedMember(null)} size="xl" dock="right">
         {selectedMember && memberInfos[selectedMember] && (
@@ -1548,16 +1666,31 @@ function LiveSeconds({ since }: { since: number }) {
   return <span className="font-mono text-[9.5px] text-think shrink-0 tabular-nums">{s}s</span>;
 }
 
-// ── A+ fusion feed (fish-approved prototype agent-visibility-v1 → A+ tab) ────
+// ── Card river feed (fish 2026-08-21 四点; prototype agent-visibility-v1 → v2 tab) ──
 
 const FEED_PAGE_SIZE = 80;
 const FEED_BUFFER_CAP = 160;
-const FEED_MAX_TURNS = 30;
+const RIVER_MAX_ITEMS = 40;
 
-/** One-line "what is this member doing right now" for the roster strip.
- * Derived from the member's feed buffer within the current turn (scan stops at
- * the previous agent_end); idle members show "idle" regardless of history. */
-function currentActivityLine(events: AgentEvent[], status: string): { kind: string; text: string; liveSince?: number } {
+interface LiveStream { thinking: string; text: string; t0: number }
+
+type RiverItem =
+  | { kind: "group"; member: string; events: AgentEvent[]; toolEndMap: Record<string, AgentEvent>; firstTs: number; key: string }
+  | { kind: "event"; member: string; event: AgentEvent; toolEnd?: AgentEvent; thinkSec?: number; firstTs: number; key: string };
+
+function riverTs(e: AgentEvent): number {
+  return typeof e.ts === "number" ? e.ts : 0;
+}
+
+/** One-line "what is this member doing right now" for the roster strip. A live
+ * stream (thinking/reply deltas in flight) outranks the settled event scan;
+ * idle members show "idle" regardless of history. */
+function currentActivityLine(events: AgentEvent[], status: string, stream?: LiveStream): { kind: string; text: string; liveSince?: number } {
+  if (stream && (stream.thinking || stream.text)) {
+    return stream.text
+      ? { kind: "running", text: "Replying…", liveSince: stream.t0 }
+      : { kind: "thinking", text: "Thinking…", liveSince: stream.t0 };
+  }
   if (status !== "working" && status !== "thinking") return { kind: "idle", text: "idle" };
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
@@ -1593,29 +1726,56 @@ function activityTone(kind: string): string {
   }
 }
 
-/** One member's turn in the merged feed: member header (avatar + name +
- * Running/Completed pill + start time) over the shared turn card language
- * (TurnEventList — identical to the member Activity tab). */
-const FeedTurnBlock = memo(function FeedTurnBlock({ member, events, running, status }: { member: string; events: AgentEvent[]; running: boolean; status?: string }) {
-  const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
+/** Live streaming card (fish 2026-08-21 ②): thinking/reply deltas grow in
+ * place; the block cursor pulses until message_end swaps in the settled cards. */
+function StreamCard({ member, kind, text, t0 }: { member: string; kind: "think" | "reply"; text: string; t0: number }) {
+  const isThink = kind === "think";
   return (
-    <section>
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <StaffBadge name={member} status={statusFromAgent(status)} size="xs" />
-        <span className="text-[11px] font-bold text-ink-1 truncate">{member}</span>
-        {running ? (
-          <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-think bg-think/10 shrink-0">Running</span>
-        ) : (
-          <span className="text-[9px] font-bold rounded-full px-1.5 py-px text-onair bg-onair/10 shrink-0">Completed</span>
-        )}
-        <span className="font-mono text-[9.5px] text-ink-4 ml-auto shrink-0">{formatEventTime(firstTs)}</span>
+    <div className={`rounded-[10px] border bg-surface-1 ${isThink ? "border-think/40" : "border-onair/30"}`}>
+      <div className="flex items-center gap-1.5 px-3 py-[8px]">
+        <MemberDisc name={member} />
+        <span className="text-[11px] font-bold text-ink-1 truncate max-w-[90px]">{member}</span>
+        <span className={`text-[9.5px] font-extrabold tracking-[0.08em] uppercase ${isThink ? "text-think" : "text-onair"}`}>{isThink ? "Thinking" : "Replying"}</span>
+        <span className={`text-[10px] font-bold animate-pulse ${isThink ? "text-think" : "text-onair"}`}>●</span>
+        <LiveSeconds since={t0} />
+        <span className="font-mono text-[10px] text-ink-4 ml-auto shrink-0">{formatEventTime(t0)}</span>
       </div>
-      <div className="space-y-[6px]">
-        <TurnEventList events={events} query="" />
+      <div className={`border-t border-line-soft px-3 py-2.5 text-[12.5px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto ${isThink ? "text-ink-3 italic" : "text-ink-2"}`}>
+        {text}
+        <span className={`inline-block w-[7px] h-[11px] align-[-1px] animate-pulse ${isThink ? "bg-think" : "bg-onair"}`} />
       </div>
-    </section>
+    </div>
   );
-});
+}
+
+/** One river card — the shared card language from the member Activity tab with
+ * the member tag (fish ①). agent_start/end never reach the river (turn chrome). */
+function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> }) {
+  const { event, member, toolEnd } = item;
+  const time = formatEventTime(typeof event.ts === "number" ? event.ts : undefined);
+  if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query="" label="USER PROMPT" member={member} />;
+  if (event.type === "user_steer") return <UserPromptCard event={event} time={time} query="" label="STEER" member={member} />;
+  if (event.type === "tool_start" || event.type === "tool_end") {
+    return <ToolCard event={event} toolEnd={toolEnd} diff={diffStatForTool(event)} time={time} query="" member={member} />;
+  }
+  if (event.type === "compaction_start" || event.type === "compaction_end") return <CompactionCard event={event} time={time} member={member} />;
+  if (event.type === "message_end" && (event.thinking || event.text)) {
+    return (
+      <>
+        {event.thinking ? <ThinkingTrace text={String(event.thinking)} elapsedSec={item.thinkSec} time={time} member={member} /> : null}
+        {event.text ? <ReplyCard text={String(event.text)} time={time} member={member} clamp /> : null}
+      </>
+    );
+  }
+  const summary = summarizeAgentEvent(event);
+  return (
+    <div className="text-[11px] text-ink-4 px-1 py-0.5 flex items-center gap-1.5">
+      <MemberDisc name={member} />
+      <span className="truncate">{summary.label} {summary.detail}</span>
+      <span className="font-mono text-ink-4 ml-auto shrink-0">{time}</span>
+    </div>
+  );
+}
 
 export function ModelPop({
   models,
