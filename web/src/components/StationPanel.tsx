@@ -1666,7 +1666,7 @@ function LiveSeconds({ since }: { since: number }) {
   return <span className="font-mono text-[9.5px] text-think shrink-0 tabular-nums">{s}s</span>;
 }
 
-// ── Card river feed (fish 2026-08-21 四点; prototype agent-visibility-v1 → v2 tab) ──
+// ── Card river feed (fish 2026-08-21 four points; prototype agent-visibility-v1 → v2 tab) ──
 
 const FEED_PAGE_SIZE = 80;
 const FEED_BUFFER_CAP = 160;
