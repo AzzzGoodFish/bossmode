@@ -35,7 +35,11 @@ function agentEventsPath(roomId: string, agentName: string): string {
 export function appendEventToDisk(roomId: string, agentRef: string, event: AgentHistoryEvent): void {
   const dir = agentEventsDir(roomId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const withTs = { ...limitRuntimeErrorEvent(event), ts: Date.now() };
+  // Preserve an existing ts (handler stamps once so WS + disk share identity).
+  const limited = limitRuntimeErrorEvent(event);
+  const withTs = typeof (limited as { ts?: number }).ts === "number" && Number.isFinite((limited as { ts?: number }).ts)
+    ? limited
+    : { ...limited, ts: Date.now() };
   const path = agentEventsPath(roomId, agentRef);
   // Byte offset where this line will start = current file size. seq = 1-based
   // line number (matches backfill's assignment). Maintained in-memory, seeded
@@ -224,68 +228,73 @@ export function handleAgentEvent(
     processedEvent = enriched as AgentStreamEvent;
   }
 
+  // One stamp for disk + WS so live feed sort and REST reload share identity.
+  // Keep an existing ts (tool/user_prompt may already carry one).
+  const stamped: AgentStreamEvent =
+    typeof (processedEvent as { ts?: number }).ts === "number" && Number.isFinite((processedEvent as { ts?: number }).ts)
+      ? processedEvent
+      : ({ ...processedEvent, ts: Date.now() } as AgentStreamEvent);
+
   // Persist non-streaming events to disk
-  if (processedEvent.type !== "message_update" && processedEvent.type !== "tool_update") {
-    eventBuffer.push(processedEvent);
-    try { appendEventToDisk(roomId, memberId || agentName, processedEvent); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
+  if (stamped.type !== "message_update" && stamped.type !== "tool_update") {
+    eventBuffer.push(stamped);
+    try { appendEventToDisk(roomId, memberId || agentName, stamped); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
   }
 
   // Persistent per-member stats (turns/tool calls/active time/tokens) —
   // incremental, O(1) per event, so Overview reads never rescan the full log.
-  // agent_start/agent_end don't carry a ts on the wire (only appendEventToDisk
-  // stamps one, into a copy); capture the persist-time timestamp here directly.
   const statsRef = memberId || agentName;
-  const statsTs = Date.now();
-  if (processedEvent.type === "agent_start") {
+  const statsTs = typeof (stamped as { ts?: number }).ts === "number" ? (stamped as { ts: number }).ts : Date.now();
+  if (stamped.type === "agent_start") {
     recordTurnStart(instanceKey, statsTs);
-  } else if (processedEvent.type === "agent_end") {
+  } else if (stamped.type === "agent_end") {
     try { recordTurnEnd(roomId, statsRef, instanceKey, statsTs); } catch (err) { logger.error("member-stats", "recordTurnEnd failed", { roomId, agent: agentName, error: String(err) }); }
-  } else if (processedEvent.type === "tool_start") {
+  } else if (stamped.type === "tool_start") {
     try { recordToolCall(roomId, statsRef); } catch (err) { logger.error("member-stats", "recordToolCall failed", { roomId, agent: agentName, error: String(err) }); }
-  } else if (processedEvent.type === "message_end" && processedEvent.usage) {
-    try { recordTokenUsage(roomId, statsRef, processedEvent.usage); } catch (err) { logger.error("member-stats", "recordTokenUsage failed", { roomId, agent: agentName, error: String(err) }); }
+  } else if (stamped.type === "message_end" && stamped.usage) {
+    try { recordTokenUsage(roomId, statsRef, stamped.usage); } catch (err) { logger.error("member-stats", "recordTokenUsage failed", { roomId, agent: agentName, error: String(err) }); }
     // Dual-write the daily rollup (SQLite projection). Best-effort: never blocks
-    // the turn. Uses the persist-time date/model stamped above.
+    // the turn. Uses the stamped date/model above.
     try {
       recordDailyUsage(
         roomId,
         statsRef,
         statsTs,
-        processedEvent.usage,
-        (processedEvent as { model?: string }).model,
+        stamped.usage,
+        (stamped as { model?: string }).model,
       );
     } catch (err) {
       logger.error("db", "recordDailyUsage threw", { roomId, agent: agentName, error: String(err) });
     }
   }
 
-  // WebSocket push — forward all events for live streaming
+  // WebSocket push — forward all events for live streaming (same stamped object as disk)
   broadcastToAgentSubscribers(roomId, agentName, {
     type: "agent:event",
     roomId,
     agent: agentName,
     memberId,
-    event: processedEvent,
+    event: stamped,
   });
 
   // Public status is sourced only from runtime lifecycle events.
-  if (processedEvent.type === "agent_start") {
+  if (stamped.type === "agent_start") {
     logger.info("agent", "statusChange", { agent: agentName, status: "working" });
     return "working";
   }
 
-  if (processedEvent.type === "message_end") {
+  if (stamped.type === "message_end") {
     refreshContextUsage(roomId, memberId || agentName);
   }
 
-  if (processedEvent.type === "compaction_end") {
+  if (stamped.type === "compaction_end") {
     refreshContextUsage(roomId, memberId || agentName, { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
   }
 
-  if (processedEvent.type === "agent_end") {
+  if (stamped.type === "agent_end") {
     // pi session-level retry: agent_end.willRetry means another attempt is imminent.
     // Do not flip public status to idle or refresh context mid-retry (fish 2026-08-09).
-    if (processedEvent.willRetry) {
+    if (stamped.willRetry) {
       logger.info("agent", "statusChange", { agent: agentName, status: "working", reason: "agent_end_willRetry" });
       return undefined;
     }
