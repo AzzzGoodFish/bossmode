@@ -571,9 +571,12 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
 
   return (
     <div className={`rounded-[10px] border ${cardBorder} bg-surface-1 px-3 py-[9px]`}>
-      <button onClick={() => toolEnd && setExpanded(v => !v)} className={`w-full text-left ${toolEnd ? "cursor-pointer" : "cursor-default"}`}>
+      {/* Expandable in every state (fish 2026-08-21: a running tool must show
+       * its args — don't gate inspection on completion). Running cards show
+       * args + a live "running" placeholder in the result area. */}
+      <button onClick={() => setExpanded(v => !v)} className="w-full text-left cursor-pointer">
         <div className="flex items-center gap-2">
-          {toolEnd && <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />}
+          <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
           <span className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-3">TOOL·{tool.label}</span>
           <span className="font-mono text-[11px] text-ink-3 truncate flex-1">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {diff && <span className="font-mono text-[10px] text-ink-4 shrink-0">+{diff.added} −{diff.removed}</span>}
@@ -587,6 +590,12 @@ function ToolCard({ event, toolEnd, diff, time, query }: { event: AgentEvent; to
       {expanded && (
         <div className="mt-2 rounded-[7px] border border-line-soft bg-inset/50 p-2.5 space-y-2">
           {event.args !== undefined && <ArgsPanel args={event.args} />}
+          {isRunning && (
+            <div className="flex items-center gap-2 rounded-[7px] border border-line-soft bg-surface-1 px-[9px] py-[7px]">
+              <span className="text-think animate-pulse text-[10px] font-bold">●</span>
+              <span className="text-[11px] text-ink-3">Running — the result appears here when the call finishes.</span>
+            </div>
+          )}
           {resultText && (
             <div className={`${isError ? "rounded-[7px] border border-blocked/30 bg-blocked-dim/30 p-1.5" : ""}`}>
               <div className="flex items-center gap-2 mb-1">
