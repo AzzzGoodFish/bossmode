@@ -166,3 +166,54 @@ export function formatMemberPromptSegment(profile: MemberProfile, fallbackName: 
 export function isBlankPersona(profile: MemberProfile): boolean {
   return !profile.body.trim();
 }
+
+function serializeProfile(
+  fields: { name: string; title?: string; description?: string },
+  body: string,
+): string {
+  const lines = ["---", `name: ${yamlEscape(fields.name)}`];
+  if (fields.title?.trim()) lines.push(`title: ${yamlEscape(fields.title.trim())}`);
+  if (fields.description?.trim()) lines.push(`description: ${yamlEscape(fields.description.trim())}`);
+  lines.push("---", "");
+  const trimmedBody = body.replace(/^\uFEFF/, "").replace(/^\n+/, "").replace(/\s+$/, "");
+  if (trimmedBody) {
+    return `${lines.join("\n")}\n${trimmedBody}\n`;
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Patch member.md frontmatter fields while preserving body.
+ * - name always written when provided (sync with registry rename)
+ * - title/description: undefined = leave; null/"" = clear from frontmatter
+ * Creates the file (skeleton + body) if missing.
+ */
+export function updateMemberProfileFrontmatter(
+  memberId: string,
+  patch: { name?: string; title?: string | null; description?: string | null },
+  fallbackName: string,
+): MemberProfile {
+  const current = readMemberProfile(memberId, fallbackName);
+  const name =
+    patch.name !== undefined
+      ? (patch.name.trim() || fallbackName)
+      : current.frontmatter.name || fallbackName;
+
+  let title = current.frontmatter.title;
+  if (patch.title !== undefined) {
+    const t = (patch.title ?? "").trim();
+    title = t || undefined;
+  }
+
+  let description = current.frontmatter.description;
+  if (patch.description !== undefined) {
+    const d = (patch.description ?? "").trim();
+    description = d || undefined;
+  }
+
+  mkdirSync(memberDir(memberId), { recursive: true });
+  const path = memberProfilePath(memberId);
+  const raw = serializeProfile({ name, title, description }, current.body);
+  writeFileSync(path, raw, "utf-8");
+  return readMemberProfile(memberId, fallbackName);
+}
