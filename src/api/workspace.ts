@@ -440,9 +440,8 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/tools", async (_req, res, par
   sendJson(res, 200, getMemberActiveTools(params.id, params.memberRef));
 });
 
-/** Real, compiled Bossmode Core prompt text for this member in this room —
- * read-only, sourced directly from the same compileMemberPrompt() the runtime
- * uses to build the actual system prompt (never a static/hardcoded preview). */
+/** Real, compiled Communication segment for this member in this room —
+ * read-only, sourced from compileMemberPrompt() (identity batch-1: three-segment). */
 addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
@@ -461,7 +460,8 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, re
   }
   const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot });
-  const core = compiled.sections.find((s) => s.id === "bossmode-core");
+  // Batch-1: Communication replaces the old bossmode-core card content.
+  const core = compiled.sections.find((s) => s.id === "communication");
   sendJson(res, 200, {
     content: core?.content || "",
     charCount: core?.charCount ?? 0,

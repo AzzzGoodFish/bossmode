@@ -346,12 +346,13 @@ addRoute("POST", "/api/members", async (req, res) => {
       unifiedExtensions?: boolean;
       importFromArchive?: string;
     };
-    if (!body.name?.trim()) {
-      sendJson(res, 400, { error: "invalid_member_name", message: "name is required" });
-      return;
-    }
+    // Batch-1 one-click create: name optional → "New Member" (+ suffix).
     let member: MemberRecord;
     if (body.importFromArchive) {
+      if (!body.name?.trim()) {
+        sendJson(res, 400, { error: "invalid_member_name", message: "name is required for import" });
+        return;
+      }
       member = importMemberFromArchive({
         archivePath: body.importFromArchive,
         name: body.name.trim(),
@@ -380,6 +381,8 @@ addRoute("POST", "/api/members", async (req, res) => {
         mcpServers: body.mcpServers,
         unifiedModel: body.unifiedModel,
         unifiedExtensions: body.unifiedExtensions,
+        title: (body as { title?: string }).title,
+        description: (body as { description?: string }).description,
       });
     }
     sendJson(res, 200, { member: publicMember(member) });

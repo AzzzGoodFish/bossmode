@@ -10,6 +10,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
+import { writeMemberProfileSkeleton } from "./member-profile.js";
 
 export interface MemberGlobalConfig {
   model?: string | null;
@@ -39,8 +40,9 @@ export interface MemberRecord {
 }
 
 export interface CreateMemberInput {
-  name: string;
-  agentTemplate: string;
+  /** Empty/omitted → "New Member" (+ numeric suffix if taken). */
+  name?: string;
+  agentTemplate?: string;
   model?: string | null;
   credentialId?: string | null;
   thinkingLevel?: string | null;
@@ -49,6 +51,10 @@ export interface CreateMemberInput {
   mcpServers?: string[];
   unifiedModel?: boolean;
   unifiedExtensions?: boolean;
+  /** Optional frontmatter seed (identity title). */
+  title?: string;
+  /** Optional frontmatter seed (short description). */
+  description?: string;
 }
 
 export class MemberNameTakenError extends Error {
@@ -84,8 +90,8 @@ function ensureMembersRoot(): void {
   if (!existsSync(root)) mkdirSync(root, { recursive: true });
 }
 
-function normalizeName(name: string): string {
-  return name.trim();
+function normalizeName(name: string | undefined | null): string {
+  return String(name ?? "").trim();
 }
 
 function isValidMemberName(name: string): boolean {
@@ -156,9 +162,21 @@ export function resolveMemberRef(ref: string): MemberRecord | null {
   return findMemberByName(ref);
 }
 
+/** Allocate a unique display name starting from `base` ("New Member", "New Member 2", …). */
+export function allocateUniqueMemberName(base = "New Member"): string {
+  const root = normalizeName(base) || "New Member";
+  if (!findMemberByName(root)) return root;
+  for (let i = 2; i < 10_000; i++) {
+    const candidate = `${root} ${i}`;
+    if (!findMemberByName(candidate)) return candidate;
+  }
+  throw new Error("could not allocate unique member name");
+}
+
 export function createMember(input: CreateMemberInput): MemberRecord {
   ensureMembersRoot();
-  const name = normalizeName(input.name);
+  const rawName = normalizeName(input.name);
+  const name = rawName ? rawName : allocateUniqueMemberName("New Member");
   if (!isValidMemberName(name)) throw new Error("invalid_member_name");
   if (findMemberByName(name)) throw new MemberNameTakenError(name);
 
@@ -183,8 +201,14 @@ export function createMember(input: CreateMemberInput): MemberRecord {
     updatedAt: now,
   };
   writeRecord(rec);
-  // Ensure memory skeleton
+  // Legacy memory skeleton (batch 3 migrates; batch 1 still allows old readers).
   mkdirSync(join(memberDir(id), "memory"), { recursive: true });
+  // Birth skeleton: member.md frontmatter + empty body; skills/ + shared memory dirs.
+  writeMemberProfileSkeleton(id, {
+    name,
+    title: (input as { title?: string }).title,
+    description: (input as { description?: string }).description,
+  });
   return rec;
 }
 

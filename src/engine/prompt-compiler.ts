@@ -1,25 +1,28 @@
 /**
- * Member prompt compiler — 0.20 six-segment assembly.
- * Order (fish): template identity → Core → persona → scope principles → mainline → room principles → (messages)
- * Contract + product spec v3.
+ * Member prompt compiler — identity/memory redesign batch 1.
+ * Three segments: Member → Communication → Environment.
+ * Spec: docs/bossmode/architecture/spec-member-identity-three-memory-impl-v1.md
+ * Sketch: docs/bossmode/architecture/member-system-prompt-sketch-v2.md
  */
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
-import { formatBudgetHeader, readPrinciplesWithBudget } from "../workspace/principles-store.js";
-import { readMainlineWithBudget, resolveMainlineRefs } from "../workspace/mainline-store.js";
-import { readMemoryLayer } from "../workspace/member-memory-store.js";
-import { getEnvironmentCommunicationAsset } from "../workspace/environment-communication-asset.js";
+import { getBossmodeDir } from "../shared/config.js";
 import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../shared/types.js";
+import {
+  formatMemberPromptSegment,
+  memberArchiveDir,
+  memberProfilePath,
+  memberSkillsDir,
+  readMemberProfile,
+  sharedProjectsMemoryDir,
+  sharedUserMemoryDir,
+} from "../workspace/member-profile.js";
+import { buildSkillCatalog } from "./skill-catalog.js";
 
-export type PromptSectionId =
-  | "source-agent"
-  | "bossmode-core"
-  | "environment-communication"
-  | "persona"
-  | "member-principles"
-  | "member-mainline"
-  | "room-principles";
+export type PromptSectionId = "member" | "communication" | "environment";
 
 export interface CompiledPromptSection {
   id: PromptSectionId;
@@ -39,8 +42,10 @@ export interface CompiledMemberPrompt {
   fullPrompt: string;
   sections: CompiledPromptSection[];
   manifestHash: string;
-  /** Contract fingerprint: sha1 of code-owned prompt parts (core + environment-communication + scope-kind tool set). Excludes memory assets. */
+  /** Contract fingerprint: sha1 of code-owned parts (Communication + env kind). */
   contractFingerprint: string;
+  /** member.md over 4000 chars — panel may surface this. */
+  profileOverBudget?: boolean;
 }
 
 function hashContent(content: string): string {
@@ -72,241 +77,202 @@ function section(args: {
   };
 }
 
-/** Wrap a prompt asset with its section title and budget header (capacity is always visible). */
-function wrapAsset(title: string, budgetHeader: string, content: string): string {
-  return `---\n\n## ${title}\n\n${budgetHeader}\n\n${content.trim()}\n`;
+/** Communication segment — full member-identical text (sketch-v2 / writter). */
+export const COMMUNICATION_SEGMENT = `## Communication
+
+The chat tool is the only way your messages reach the room. Text you
+write outside a chat call is a private scratchpad — nobody sees it. A
+reply counts only when it goes out as a chat call. (One safety net: if
+a reply was expected and your turn ends without a chat call, your final
+text is posted automatically — a net, not a habit.)
+
+Reply first. When the user or another member reaches you, your first
+move is a chat reply, before any tool call: the direct answer if it's
+quick, or one line acknowledging the request plus your first step if
+it's real work. Never open with silent tool calls — to them that's
+indistinguishable from a frozen app.
+
+Ack ≠ delivery. Saying "on it" never counts as reporting back. If the
+turn produced something they're waiting on, the last thing you do before
+ending the turn is chat the result.
+
+Keep them posted on beats, not mechanics. On multi-step work, send a
+short line at each meaningful beat (a finding, a blocker, a decision) —
+never a long silent stretch, never a play-by-play of commands.
+
+Write like texting, not a memo:
+- One or two sentences by default; match their length; go shorter when
+  the moment is light.
+- Two or three beats → two or three short chat calls, not one welded
+  paragraph. Prose over bullet lists unless they asked for a list.
+- Lead with the thing itself — no "Done —", no "Quick version:", no
+  filler closings, no unprompted caveats.
+
+Tone: a warm, sharp colleague, not a help desk. Plain everyday words.
+No "Certainly", no "I'd be happy to". Prefer periods and commas; keep
+dashes for when nothing else fits. Mirror their emoji — if they rarely
+use them, you don't.
+
+Room mechanics:
+- @name activates that member; a plain name is just a mention. !name is
+  an urgent interrupt — emergencies only. Multiple @ activate all at
+  once; for "A then B", @ only the first and let them hand off.
+- In a DM every user message reaches you directly — no @ needed.
+- need_response lists who must reply; omit it for FYI.
+- reply_to quotes a previous message (msg:#<seq>) — quote, don't restate.`;
+
+/** Roster line: others comma-separated, self as "{name} (you)". */
+function formatMemberRoster(members: string[], selfName: string): string {
+  const others = members.filter((m) => m !== selfName);
+  return [...others, `${selfName} (you)`].join(", ");
 }
 
-function buildRoomCorePrompt(args: {
-  room: Room;
-  memberName: string;
-  sourceRole: string;
-  docsRoot: string;
-}): string {
-  const memberList = args.room.members.join(", ");
-  const role = args.memberName !== args.sourceRole ? ` (source role: ${args.sourceRole})` : "";
-  const leader = args.room.promptLeaderMemberId
-    ? args.room.roomMembers?.find((m) => m.id === args.room.promptLeaderMemberId)?.name || "configured member"
-    : "none configured";
-  return `---
+const TOOLS_AND_ATTACHMENTS_LINES = `- Messages arrive wrapped in envelopes with sender and sequence number.
+  Attachments land in the room's attachment store; reference them by path.
+  Long content belongs in the Library as a document, with a chat summary
+  in the room.`;
 
-## Bossmode Environment
-
-You are "${args.memberName}"${role} in a Bossmode group chat room "${args.room.name}".
-Room members: ${memberList}
-Working directory: ${args.room.cwd}
-Room leader: ${leader}
-
-Messages you receive are wrapped in envelopes that tell you where they came from.
-
-## Communication
-
-Speak with the \`chat\` tool — it is the only way your messages reach the room. Texts outside tool calls are invisible work notes, with one exception: when a reply is expected (you'll see a [REPLY EXPECTED] note) and your turn ends without a chat call, your final completed text is posted automatically.
-
-If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
-
-\`@name\` activates that member immediately — use \`@\` only when you need that member to respond or act right away. To simply mention a member without activating them, write the name without \`@\`.
-
-\`@name\` queues an activation — it does not interrupt the member's current work. \`!name\` is an **urgent interrupt**: it aborts the member's current turn immediately and your message becomes the next turn. **Use \`!\` only for true emergencies** — the aborted turn may leave partial work the member must verify afterwards. For routine coordination, always prefer \`@\`.
-
-Multiple \`@name\` in one message activate all of them at the same time — a single message cannot express "A first, then B". When work has a sequential dependency, \`@\` only the first member and let completion drive the next step: the first member hands off by \`@\`-ing the next when done, or you \`@\` the next after the first reports back.
-
-Example:
-- "developer, the RC is ready" — just a mention; developer is not activated.
-- "@developer please repack the RC" — activates developer immediately, asking for action now.
-
-When responding to or continuing a specific message, point at it with chat's \`reply_to\` (\`msg:#<seq>\`). The recipient can see the original — repeating its content is noise. When a deliverable is already visible in the stream, reference it instead of restating it.
-
-## Memory
-
-You have persistent memory assets, maintained with the read/edit/write_memory tools:
-
-**Persona** — who you are across all scopes (global identity notes).
-**Principles** — how you work in the **current scope** (this room). Store rules that save the user from correcting you twice.
-**Mainline** — what you work on in the **current scope**: a "## Focus" section plus a "## Dynamic Index" of pointers.
-
-You may **read** memory from other scopes you belong to (pass an optional scope parameter). You may only **write** the current scope's principles/mainline (and global persona).
-
-Curate both: keep only what stays useful. Progress, results, and anything that expires belong in chat history, not memory.
-`;
+function archiveNonEmpty(dir: string): boolean {
+  if (!existsSync(dir)) return false;
+  try {
+    const names = readdirSync(dir);
+    return names.some((n) => {
+      try {
+        return statSync(join(dir, n)).isFile() || statSync(join(dir, n)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
 }
 
-function buildDmCorePrompt(args: {
+function buildEnvironmentSegment(args: {
+  scopeKind: "room" | "dm" | "topic";
+  memberId: string;
   memberName: string;
-  sourceRole: string;
-  activeScopes?: string[];
-  docsRoot: string;
+  room?: Room | null;
+  topicTitle?: string | null;
+  contextWindowTokens: number;
 }): string {
-  const role = args.memberName !== args.sourceRole ? ` (source role: ${args.sourceRole})` : "";
-  const scopes = (args.activeScopes && args.activeScopes.length > 0)
-    ? args.activeScopes.join(", ")
-    : "dm only (no rooms yet)";
-  return `---
+  const boss = getBossmodeDir();
+  const profilePath = memberProfilePath(args.memberId);
+  const skillsPath = memberSkillsDir(args.memberId);
+  const archivePath = memberArchiveDir(args.memberId);
+  const userMem = sharedUserMemoryDir();
+  const projectsMem = sharedProjectsMemoryDir();
 
-## Bossmode Environment
+  const lines: string[] = ["## Environment", ""];
 
-You are "${args.memberName}"${role} — a digital employee in a one-to-one private chat with the user.
-This is your **DM scope** (not a multi-member room).
-Scopes you exist in: ${scopes}
-Working directory: the user's workspace (see tool environment).
+  if (args.scopeKind === "dm") {
+    lines.push(`- You are in a private chat with the user.`);
+  } else if (args.scopeKind === "topic") {
+    const roomName = args.room?.name || "room";
+    const title = args.topicTitle || "topic";
+    const roster = formatMemberRoster(args.room?.members || [], args.memberName);
+    lines.push(
+      `- You are in topic "${title}" of room "${roomName}". Members: ${roster}.`,
+    );
+  } else {
+    const roomName = args.room?.name || "room";
+    const roster = formatMemberRoster(args.room?.members || [], args.memberName);
+    lines.push(
+      `- You are in room "${roomName}" — a shared workspace. Members: ${roster}.`,
+    );
+  }
 
-Messages you receive are wrapped in envelopes that tell you where they came from.
+  lines.push(
+    `- Your profile: ${profilePath} — this file IS your persona. Its \`## Persona\` section holds who you are and how you work; when the user's feedback teaches you something lasting, use the edit tool to grow that section yourself.`,
+  );
 
-## Communication
+  const catalog = buildSkillCatalog(args.memberId, args.contextWindowTokens);
+  if (catalog.mode !== "absent" && catalog.lines.length > 0) {
+    lines.push(`- Your skills: ${skillsPath}`);
+    lines.push(...catalog.lines);
+    lines.push(
+      `  Read a skill's SKILL.md with the read tool when you need it. To make a recurring procedure reusable, write it as a new SKILL.md there.`,
+    );
+  }
 
-Reply with the \`chat\` tool — messages go directly to this private chat. No \`@\` routing. If your turn ends without a chat call, your final text is posted automatically.
+  lines.push(`- Shared memory (not injected — ls and read on demand):`);
+  lines.push(
+    `  - User memory: ${userMem} — who the user is, preferences, working habits. One shared record; keep it current when you learn something durable about the user.`,
+  );
+  lines.push(
+    `  - Project memories: ${projectsMem} — one folder per project. ls it before starting project work; write back what the project learns.`,
+  );
 
-If your activation includes an unread-messages notice, decide whether to read them (query_room_messages) before responding.
+  if (archiveNonEmpty(archivePath)) {
+    lines.push(
+      `- Legacy notes from the old system: ${archivePath}/. When relevant, read them and fold what is still true into your member.md or the shared memory dirs; remove each file once folded.`,
+    );
+  }
 
-When responding to or continuing a specific message, point at it with chat's \`reply_to\` (\`msg:#<seq>\`). The recipient can see the original — repeating its content is noise. When a deliverable is already visible in the stream, reference it instead of restating it.
+  lines.push(TOOLS_AND_ATTACHMENTS_LINES);
 
-## Tools unique to DM
-
-In private chat you can manage the user's workspace of digital employees:
-- Discover other members (id, name, identity)
-- \`create_room\` — open a project room, optionally set room principles, invite members by id; you become the room leader
-- \`edit_room\` — when you are leader of a room: rename, adjust members, update principles
-
-## Memory
-
-You have persistent memory assets, maintained with the read/edit/write_memory tools:
-
-**Persona** — who you are across all scopes (global identity notes).
-**Principles** — how you work in the **current scope** (this DM).
-**Mainline** — what you work on in the **current scope**.
-
-You may **read** memory, chat history, tasks, room principles, and library from any scope you belong to (optional scope parameter on query tools). You may only **write** the current scope's principles/mainline (and global persona).
-
-Curate carefully: progress and ephemeral detail stay in chat history.
-`;
+  return lines.join("\n");
 }
 
 /**
- * 0.20 scope-aware compiler.
- * Assembly order: template → Core → persona → scope principles → mainline → room principles (room only).
+ * Scope-aware three-segment compiler.
+ * Topic fork cache: Member + Communication byte-identical to room; only Environment first line differs.
  */
 export function compileMemberPromptForScope(args: {
   scopeId: ScopeId;
   memberId: string;
   memberName: string;
   agentDef: AgentDefinition;
-  /** Required when scope is room:* */
   room?: Room | null;
   docsRoot: string;
-  /** Optional list of scopes this member belongs to (for DM Core environment). */
   activeScopes?: string[];
+  /** Model context window for skill budget (tokens). Default 128000. */
+  contextWindowTokens?: number;
+  topicTitle?: string | null;
 }): CompiledMemberPrompt {
   const ref = parseScopeId(args.scopeId);
   if (!ref) throw new Error(`scope_not_found: ${args.scopeId}`);
 
-  const agentPrompt = args.agentDef.systemPrompt.trim() ? args.agentDef.systemPrompt : "";
-  const sourceRole = args.agentDef.name;
+  const scopeKind: "room" | "dm" | "topic" =
+    ref.kind === "dm" ? "dm" : ref.kind === "topic" ? "topic" : "room";
 
-  let corePrompt: string;
-  let roomPrinciplesContent = "";
-  let roomPrinciplesBudgetHeader = "";
-  let roomPrinciplesIncluded = false;
-
-  if (ref.kind === "dm") {
-    corePrompt = buildDmCorePrompt({
-      memberName: args.memberName,
-      sourceRole,
-      activeScopes: args.activeScopes,
-      docsRoot: args.docsRoot,
-    });
-  } else {
-    // room + topic: same Core/room-principles recipe (topic inherits parent room).
-    // Prompt cache invariant (plan-topic-threads-v1 §0/§3): topic compile output
-    // must be byte-identical to the parent room instance compile.
-    if (!args.room) throw new Error("room required for room/topic scope compile");
-    corePrompt = buildRoomCorePrompt({
-      room: args.room,
-      memberName: args.memberName,
-      sourceRole,
-      docsRoot: args.docsRoot,
-    });
-    const roomPrinciples = readPrinciplesWithBudget(args.room.id, "room");
-    roomPrinciplesContent = roomPrinciples.content;
-    roomPrinciplesBudgetHeader = formatBudgetHeader(roomPrinciples.budget);
-    roomPrinciplesIncluded = roomPrinciples.content.trim().length > 0;
+  if ((scopeKind === "room" || scopeKind === "topic") && !args.room) {
+    throw new Error("room required for room/topic scope compile");
   }
 
-  // Persona (global) + scope principles/mainline from 0.20 member-memory-store.
-  // Fall back to legacy room-keyed stores when new paths are empty (migration window).
-  // Topic inherits parent room memory assets (same scope key as room instance).
-  const assetScopeId: ScopeId =
-    ref.kind === "topic" && args.room
-      ? `room:${args.room.id}`
-      : args.scopeId;
-  const persona = readMemoryLayer(args.memberId, "persona");
-  let scopePrinciples = readMemoryLayer(args.memberId, "principles", assetScopeId);
-  let scopeMainline = readMemoryLayer(args.memberId, "mainline", assetScopeId);
-
-  if ((ref.kind === "room" || ref.kind === "topic") && args.room) {
-    if (!scopePrinciples.content.trim()) {
-      const legacy = readPrinciplesWithBudget(args.room.id, "member", args.memberId);
-      if (legacy.content.trim()) {
-        scopePrinciples = { content: legacy.content, meta: { length: legacy.content.length, budget: legacy.budget } };
-      }
-    }
-    if (!scopeMainline.content.trim()) {
-      const legacy = readMainlineWithBudget(args.room.id, args.memberId);
-      if (legacy.content.trim()) {
-        const resolved = resolveMainlineRefs(args.room.id, legacy.content);
-        scopeMainline = { content: resolved, meta: { length: resolved.length, budget: legacy.budget } };
-      }
-    } else if (args.room) {
-      // Resolve docs/task refs when we have a room context
-      scopeMainline = {
-        ...scopeMainline,
-        content: resolveMainlineRefs(args.room.id, scopeMainline.content),
-      };
-    }
-  }
-
-  // 0.20 experience ③: global user-editable Environment & Communication asset
-  // (shared framing + communication style, spliced into both room and DM Core
-  // variants — user file when edited, code default otherwise).
-  const ecAsset = getEnvironmentCommunicationAsset();
+  const profile = readMemberProfile(args.memberId, args.memberName);
+  const memberSeg = formatMemberPromptSegment(profile, args.memberName);
+  const communicationSeg = COMMUNICATION_SEGMENT;
+  const environmentSeg = buildEnvironmentSegment({
+    scopeKind,
+    memberId: args.memberId,
+    memberName: args.memberName,
+    room: args.room,
+    topicTitle: args.topicTitle,
+    contextWindowTokens: args.contextWindowTokens ?? 128_000,
+  });
 
   const sections = [
-    section({ id: "source-agent", title: "Source Agent", source: `agent:${args.agentDef.name}`, content: agentPrompt, included: agentPrompt.trim().length > 0 }),
-    section({ id: "bossmode-core", title: "Bossmode Core", source: "bossmode", content: corePrompt, included: true }),
-    section({ id: "environment-communication", title: "Environment & Communication", source: "asset:environment-communication", content: ecAsset.content, included: ecAsset.content.trim().length > 0 }),
-    section({ id: "persona", title: "Persona", source: `member:${args.memberId}`, content: persona.content, included: persona.content.trim().length > 0 }),
-    section({ id: "member-principles", title: "Scope Principles", source: `member:${args.memberId}:${args.scopeId}`, content: scopePrinciples.content, included: scopePrinciples.content.trim().length > 0 }),
-    section({ id: "member-mainline", title: "Scope Mainline", source: `member:${args.memberId}:${args.scopeId}`, content: scopeMainline.content, included: scopeMainline.content.trim().length > 0 }),
-    section({ id: "room-principles", title: "Room Principles", source: ref.kind === "room" ? `room:${ref.roomId}` : "none", content: roomPrinciplesContent, included: roomPrinciplesIncluded }),
+    section({ id: "member", title: "Member", source: `member:${args.memberId}`, content: memberSeg, included: true }),
+    section({ id: "communication", title: "Communication", source: "bossmode", content: communicationSeg, included: true }),
+    section({ id: "environment", title: "Environment", source: `scope:${args.scopeId}`, content: environmentSeg, included: true }),
   ];
 
-  const appendSystemPrompt: string[] = [corePrompt];
-  if (ecAsset.content.trim()) {
-    appendSystemPrompt.push(ecAsset.content.trim());
-  }
-  if (persona.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Persona", formatBudgetHeader(persona.meta.budget), persona.content));
-  }
-  if (scopePrinciples.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Scope Principles", formatBudgetHeader(scopePrinciples.meta.budget), scopePrinciples.content));
-  }
-  if (scopeMainline.content.trim()) {
-    appendSystemPrompt.push(wrapAsset("Scope Mainline", formatBudgetHeader(scopeMainline.meta.budget), scopeMainline.content));
-  }
-  if (roomPrinciplesIncluded) {
-    appendSystemPrompt.push(wrapAsset("Room Principles", roomPrinciplesBudgetHeader, roomPrinciplesContent));
-  }
+  // agentPrompt = identity (Member); append = Communication + Environment
+  // (pi systemPrompt / appendSystemPrompt split; fullPrompt is the join).
+  const agentPrompt = memberSeg;
+  const appendSystemPrompt = [communicationSeg, environmentSeg];
+  const fullPrompt = [memberSeg, communicationSeg, environmentSeg].join("\n\n");
+  const manifestHash = hashContent(
+    JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))),
+  );
 
-  const fullPrompt = [agentPrompt, ...appendSystemPrompt].filter((part) => part.trim().length > 0).join("\n\n");
-  const manifestHash = hashContent(JSON.stringify(sections.map((s) => ({ id: s.id, hash: s.contentHash, included: s.included }))));
-  // Contract fingerprint (fish 2026-08-07): only code-owned parts — core prompt +
-  // environment-communication asset + scope-kind (determines the tool set).
-  // Memory assets (persona/principles/mainline) are excluded — they change
-  // daily and must not trigger a contract-drift prompt.
-  // Topic inherits room tool surface — fingerprint as room so cache/drift match parent.
-  const fingerprintKind = ref.kind === "topic" ? "room" : ref.kind;
+  // Contract = code-owned Communication + scope kind (not member body, not paths).
+  const fingerprintKind = scopeKind === "topic" ? "room" : scopeKind;
   const contractFingerprint = createHash("sha1")
-    .update(`${fingerprintKind}\n${corePrompt}\n${ecAsset.content}`)
+    .update(`${fingerprintKind}\n${COMMUNICATION_SEGMENT}`)
     .digest("hex");
+
   logger.info("agent", "compilePrompt", {
     member: args.memberName,
     memberId: args.memberId,
@@ -316,22 +282,23 @@ export function compileMemberPromptForScope(args: {
     totalChars: fullPrompt.length,
     totalBytes: Buffer.byteLength(fullPrompt, "utf8"),
     totalTokens: `~${estimateTokens(fullPrompt)}`,
+    profileOverBudget: profile.overBudget || undefined,
   });
 
   return {
     agentPrompt,
     appendSystemPrompt,
-    envPrompt: corePrompt,
+    envPrompt: environmentSeg,
     fullPrompt,
     sections,
     manifestHash,
     contractFingerprint,
+    ...(profile.overBudget ? { profileOverBudget: true } : {}),
   };
 }
 
 /**
- * Backward-compatible room compiler used by existing room activation paths.
- * Delegates to scope-aware compiler with room:<id> scope.
+ * Room compiler — delegates to scope-aware compiler with room:<id>.
  */
 export function compileMemberPrompt(args: {
   room: Room;
@@ -339,6 +306,7 @@ export function compileMemberPrompt(args: {
   agentDef: AgentDefinition;
   docsRoot: string;
   activeTools?: string[];
+  contextWindowTokens?: number;
 }): CompiledMemberPrompt {
   const scopeId: ScopeId = `room:${args.room.id}`;
   return compileMemberPromptForScope({
@@ -348,5 +316,6 @@ export function compileMemberPrompt(args: {
     agentDef: args.agentDef,
     room: args.room,
     docsRoot: args.docsRoot,
+    contextWindowTokens: args.contextWindowTokens,
   });
 }
