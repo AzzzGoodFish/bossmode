@@ -36,12 +36,17 @@ import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cur
 import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../shared/types.js";
 import { memberTemplateWarning } from "../workforce/template-lifecycle.js";
+import { readMemberProfile, updateMemberProfileFrontmatter } from "../workspace/member-profile.js";
 
 function publicMember(m: MemberRecord) {
+  const profile = readMemberProfile(m.id, m.name);
   return {
     memberId: m.id,
     id: m.id,
     name: m.name,
+    /** Card fields from member.md frontmatter (identity batch-1). */
+    title: profile.frontmatter.title ?? null,
+    description: profile.frontmatter.description ?? null,
     agentTemplate: m.agentTemplate,
     templateWarning: memberTemplateWarning(m.agentTemplate),
     unifiedModel: m.unifiedModel,
@@ -405,6 +410,9 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as {
       name?: string;
+      /** member.md frontmatter card fields */
+      title?: string | null;
+      description?: string | null;
       unifiedModel?: boolean;
       unifiedExtensions?: boolean;
       agentTemplate?: string;
@@ -422,6 +430,8 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     }
     if (body.name && body.name.trim() !== m.name) {
       m = renameMember(m.id, body.name);
+      // Keep frontmatter name in sync with registry rename.
+      updateMemberProfileFrontmatter(m.id, { name: m.name }, m.name);
     }
     m = updateMember(m.id, {
       unifiedModel: body.unifiedModel,
@@ -436,6 +446,16 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         ...(body.mcpServers !== undefined ? { mcpServers: body.mcpServers } : {}),
       },
     });
+    if (body.title !== undefined || body.description !== undefined) {
+      updateMemberProfileFrontmatter(
+        m.id,
+        {
+          ...(body.title !== undefined ? { title: body.title } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+        },
+        m.name,
+      );
+    }
     sendJson(res, 200, { member: publicMember(m) });
   } catch (err) {
     const e = errCode(err);

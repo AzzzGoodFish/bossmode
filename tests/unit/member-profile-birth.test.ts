@@ -48,4 +48,39 @@ describe("member birth skeleton", () => {
     expect(b.name).toBe("New Member 2");
     expect(allocateUniqueMemberName("New Member")).toBe("New Member 3");
   });
+
+  it("updateMemberProfileFrontmatter writes title/description and preserves body", async () => {
+    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const {
+      updateMemberProfileFrontmatter,
+      readMemberProfile,
+      memberProfilePath,
+    } = await import("../../src/workspace/member-profile.js");
+    const { writeFileSync } = await import("node:fs");
+
+    const m = createMember({ name: "nova" });
+    writeFileSync(
+      memberProfilePath(m.id),
+      "---\nname: nova\n---\n\n## Persona\nI ship carefully.\n",
+      "utf-8",
+    );
+
+    updateMemberProfileFrontmatter(
+      m.id,
+      { title: "Architect", description: "Designs systems" },
+      m.name,
+    );
+    let p = readMemberProfile(m.id, m.name);
+    expect(p.frontmatter.title).toBe("Architect");
+    expect(p.frontmatter.description).toBe("Designs systems");
+    expect(p.body).toContain("## Persona");
+    expect(p.body).toContain("I ship carefully.");
+
+    // Clear title, leave description; body still intact.
+    updateMemberProfileFrontmatter(m.id, { title: "" }, m.name);
+    p = readMemberProfile(m.id, m.name);
+    expect(p.frontmatter.title).toBeUndefined();
+    expect(p.frontmatter.description).toBe("Designs systems");
+    expect(p.body).toContain("I ship carefully.");
+  });
 });
