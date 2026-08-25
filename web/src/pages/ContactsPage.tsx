@@ -33,20 +33,19 @@ export function ContactsPage({ onOpenDm, onOpenImport }: {
   const [roomNames, setRoomNames] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  // One-click hire (fish 2026-08-25, batch-1 identity rework): zero form — the
-  // backend assigns a unique default name, and the new member wakes up in its
-  // DM where the no-model banner guides the rest.
+  // One-click hire (fish 2026-08-25, batch-1 identity rework): zero form — send
+  // no name and the backend assigns "New Member N" (auto-increment); the new
+  // member wakes up in its DM where the guidance card guides the rest.
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const createMember = async () => {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await createGlobalMember({ name: "New Member" });
+      const res = await createGlobalMember({});
       onOpenDm(res.member.memberId);
     } catch (e) {
-      const msg = String((e as Error)?.message || e);
-      setCreateError(msg.includes("name_taken") ? "That name is taken." : msg);
+      setCreateError(String((e as Error)?.message || e));
       setCreating(false);
     }
   };

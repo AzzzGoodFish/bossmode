@@ -1660,7 +1660,8 @@ export async function getChats(): Promise<{ chats: ChatEntry[] }> {
 // -- 0.20: member creation + archive import --
 
 export interface CreateMemberInput {
-  name: string;
+  /** Omit for one-click birth — the backend assigns "New Member N" (auto-increment). */
+  name?: string;
   agentTemplate?: string;
   model?: string;
   credentialId?: string;

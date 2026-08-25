@@ -13,7 +13,7 @@ import { PanelRight, Search, SlidersHorizontal, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { ModelPicker } from "../components/ModelPicker";
+import { ModelPicker, type ModelPickerValue } from "../components/ModelPicker";
 import { DateSeparator, isGroupedWithPrev, shouldShowDateSeparator, MessageArtifactChips } from "../components/ChatArea";
 import { Sheet } from "../components/Sheet";
 import { MemberConfigPanel, isAssignableMcpServer } from "../components/StationPanel";
@@ -98,11 +98,11 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
 
   useEffect(() => { void load(); }, [load]);
 
-  // The no-model banner needs the model list without waiting for the panel.
-  const bannerNeedsModels = !!memberInfo && !memberInfo.model;
+  // The no-model guidance card needs the model list without waiting for the panel.
+  const noModel = !!memberInfo && !memberInfo.model;
   useEffect(() => {
-    if (bannerNeedsModels) void getConfiguredModels().then(setModels).catch(() => {});
-  }, [bannerNeedsModels]);
+    if (noModel) void getConfiguredModels().then(setModels).catch(() => {});
+  }, [noModel]);
 
   // Panel data loads on first open (Sheet is on-demand, same as the room).
   useEffect(() => {
@@ -366,25 +366,6 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
           </div>
         </div>
 
-        {/* No-model guidance (batch-1 identity rework, fish 2026-08-25): a new
-         * member is born model-less — the DM itself teaches the next step with
-         * the picker at hand. The banner clears itself once a model saves. */}
-        {memberInfo && !memberInfo.model && (
-          <div className="shrink-0 border-b border-line-soft bg-accent-dim/20 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="text-[12.5px] text-ink-2">
-              <span className="font-semibold text-ink-1">{member.name}</span> has no model yet — pick one to wake it up.
-            </span>
-            <div className="w-[280px]">
-              <ModelPicker
-                value={{ model: null, credentialId: null }}
-                models={models}
-                emptyLabel="Pick a model…"
-                onChange={(v) => { if (v.model) handleSwitchModel(v.model, v.credentialId); }}
-              />
-            </div>
-          </div>
-        )}
-
         {/* DM search bar — client-side filter (DM conversations are small enough) */}
         {searchOpen && (
           <div className="border-b border-line px-4 py-2 flex items-center gap-2 bg-surface-1 shrink-0">
@@ -415,7 +396,11 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             <div className="h-full flex items-center justify-center">
               <div className="text-center">
                 <p className="text-ink-3 text-lg">{member.name}</p>
-                <p className="text-ink-4 text-sm mt-1">Say something — everything here activates {member.name} directly</p>
+                {noModel ? (
+                  <NoModelCard name={member.name} models={models} onPick={(v) => handleSwitchModel(v.model, v.credentialId)} />
+                ) : (
+                  <p className="text-ink-4 text-sm mt-1">Say something — everything here activates {member.name} directly</p>
+                )}
               </div>
             </div>
           ) : (
@@ -458,6 +443,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
                   </div>
                 );
               })}
+              {noModel && <NoModelCard name={member.name} models={models} onPick={(v) => handleSwitchModel(v.model, v.credentialId)} />}
             </div>
           )}
         </div>
@@ -531,4 +517,32 @@ function resolveDmQuote(messages: DmMessage[], msg: DmMessage): { seq: number; m
   if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
   const firstLine = String(target.content || "").split("\n").find((l) => l.trim()) ?? "";
   return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
+}
+
+/** No-model guidance as a STREAM card, not page chrome (fish 2026-08-25: "pick
+ * 模型做成一条聊天消息的形式"). System voice, never the member's — a model-less
+ * member cannot speak yet, so a fake first-person message would be a lie; the
+ * member's real first message is the icebreak that follows model setup. The
+ * card disappears the moment a model saves. */
+function NoModelCard({ name, models, onPick }: {
+  name: string;
+  models: AvailableModelOption[];
+  onPick: (v: ModelPickerValue) => void;
+}) {
+  return (
+    <div className="mx-auto my-3 max-w-[380px] rounded-xl border border-accent/30 bg-accent-dim/15 px-4 py-3.5 text-left" role="status">
+      <div className="text-[9.5px] font-extrabold tracking-[0.08em] uppercase text-ink-4 mb-1.5">System</div>
+      <p className="text-[12.5px] text-ink-2 leading-relaxed">
+        <span className="font-semibold text-ink-1">{name}</span> has no model yet — it can't think or reply until you pick one.
+      </p>
+      <div className="mt-2.5">
+        <ModelPicker
+          value={{ model: null, credentialId: null }}
+          models={models}
+          emptyLabel="Pick a model…"
+          onChange={(v) => { if (v.model) onPick(v); }}
+        />
+      </div>
+    </div>
+  );
 }
