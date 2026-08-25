@@ -6,9 +6,9 @@
  * lifetime tokens. Click a row to open the DM. Data: GET /api/contacts.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, MessageSquare } from "lucide-react";
+import { Loader2, Plus, Search, MessageSquare } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
-import { getContacts, getRooms, type ContactEntry, type Room } from "../api/client";
+import { createGlobalMember, getContacts, getRooms, type ContactEntry, type Room } from "../api/client";
 
 type StatusFilter = "all" | "working" | "idle" | "error";
 
@@ -25,14 +25,30 @@ function scopeLabel(scopeId: string, roomNames: Map<string, string>): string {
   return roomNames.get(roomId) ?? "room";
 }
 
-export function ContactsPage({ onOpenDm, onCreateMember }: {
+export function ContactsPage({ onOpenDm, onOpenImport }: {
   onOpenDm: (memberId: string) => void;
-  onCreateMember?: () => void;
+  onOpenImport?: () => void;
 }) {
   const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
   const [roomNames, setRoomNames] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // One-click hire (fish 2026-08-25, batch-1 identity rework): zero form — send
+  // no name and the backend assigns "New Member N" (auto-increment); the new
+  // member wakes up in its DM where the guidance card guides the rest.
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const createMember = async () => {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await createGlobalMember({});
+      onOpenDm(res.member.memberId);
+    } catch (e) {
+      setCreateError(String((e as Error)?.message || e));
+      setCreating(false);
+    }
+  };
   const [filter, setFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
@@ -69,14 +85,27 @@ export function ContactsPage({ onOpenDm, onCreateMember }: {
               {contacts && ` ${contacts.length} members · ${workingCount} working now.`}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onCreateMember}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast text-sm font-medium rounded-lg hover:opacity-90 cursor-pointer shrink-0"
-          >
-            <Plus size={15} /> New member
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            {onOpenImport && (
+              <button
+                type="button"
+                onClick={onOpenImport}
+                className="text-[12px] text-ink-4 hover:text-ink-2 cursor-pointer transition-colors"
+              >
+                Import
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void createMember()}
+              disabled={creating}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-contrast text-sm font-medium rounded-lg hover:opacity-90 cursor-pointer shrink-0 disabled:opacity-60"
+            >
+              {creating ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} New member
+            </button>
+          </div>
         </div>
+        {createError && <div role="alert" className="text-[12px] text-blocked mb-3">Couldn't create the member. {createError}</div>}
 
         {/* search + filter */}
         <div className="flex flex-wrap items-center gap-3 mb-4">

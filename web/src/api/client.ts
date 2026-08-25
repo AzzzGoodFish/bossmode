@@ -1566,6 +1566,9 @@ export interface MemberDetail {
   memberId: string;
   name: string;
   agentTemplate: string;
+  /** member.md frontmatter (batch-1 identity rework): card fields, editable in settings. */
+  title?: string;
+  description?: string;
   unifiedModel: boolean;
   unifiedExtensions: boolean;
   global?: MemberGlobalConfig;
@@ -1657,8 +1660,9 @@ export async function getChats(): Promise<{ chats: ChatEntry[] }> {
 // -- 0.20: member creation + archive import --
 
 export interface CreateMemberInput {
-  name: string;
-  agentTemplate: string;
+  /** Omit for one-click birth — the backend assigns "New Member N" (auto-increment). */
+  name?: string;
+  agentTemplate?: string;
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;

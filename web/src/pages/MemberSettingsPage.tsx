@@ -37,6 +37,10 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
   const [nameDraft, setNameDraft] = useState("");
   const [nameSave, setNameSave] = useState<SaveState>("idle");
   const [nameError, setNameError] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descDraft, setDescDraft] = useState("");
+  const [cardSave, setCardSave] = useState<SaveState>("idle");
+  const [cardError, setCardError] = useState<string | null>(null);
   const [cfgSave, setCfgSave] = useState<SaveState>("idle");
   const [cfgError, setCfgError] = useState<string | null>(null);
   const [fireDraft, setFireDraft] = useState("");
@@ -46,7 +50,7 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
 
   useEffect(() => {
     getMemberDetail(memberId)
-      .then((m) => { setMember(m); setNameDraft(m.name); })
+      .then((m) => { setMember(m); setNameDraft(m.name); setTitleDraft(m.title ?? ""); setDescDraft(m.description ?? ""); })
       .catch((e) => setLoadError(String(e?.message || e)));
     getMemberScopes(memberId).then((r) => setScopes(r.scopes)).catch(() => {});
     getAvailableModels().then(setModels).catch(() => {});
@@ -68,6 +72,22 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
     set("saved");
     if (savedTimer.current) clearTimeout(savedTimer.current);
     savedTimer.current = setTimeout(() => set("idle"), 1800);
+  };
+
+  const saveCard = async () => {
+    if (!member) return;
+    const title = titleDraft.trim();
+    const description = descDraft.trim();
+    if (title === (member.title ?? "") && description === (member.description ?? "")) return;
+    setCardSave("saving"); setCardError(null);
+    try {
+      const res = await patchGlobalMember(member.memberId, { title, description });
+      setMember(res.member);
+      flashSaved(setCardSave);
+    } catch (e) {
+      setCardError(String((e as Error)?.message || e));
+      setCardSave("error");
+    }
   };
 
   const saveName = async () => {
@@ -149,7 +169,7 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
 
         {/* 1 · identity */}
         <section className="mb-7">
-          <SectionTitle title="Identity" hint="The template is the identity prompt source — edit it on the Templates page; changes apply to every member using it." />
+          <SectionTitle title="Identity" hint="Card fields stored in member.md frontmatter. The persona itself grows from your conversations — the member maintains it, not this form." />
           <label className="block text-[11px] font-semibold text-ink-3 mb-1.5">Name</label>
           <div className="flex items-center gap-2">
             <input
@@ -168,6 +188,35 @@ export function MemberSettingsPage({ memberId, onBack, onFired }: {
           </div>
           {nameError && <div role="alert" className="text-[11px] text-blocked mt-1.5">{nameError}</div>}
           <p className="text-[11px] text-ink-4 mt-1.5">Rename propagates everywhere on next activation — scopes, rooms, and memory stay linked by ID.</p>
+
+          <label className="block text-[11px] font-semibold text-ink-3 mt-4 mb-1.5">Title</label>
+          <input
+            value={titleDraft}
+            onChange={(e) => { setTitleDraft(e.target.value); setCardError(null); }}
+            placeholder="e.g. Architect — the role on the card"
+            className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
+          />
+
+          <label className="block text-[11px] font-semibold text-ink-3 mt-4 mb-1.5">Description</label>
+          <textarea
+            rows={2}
+            value={descDraft}
+            onChange={(e) => { setDescDraft(e.target.value); setCardError(null); }}
+            placeholder="What this member is for and how it works."
+            className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4 resize-none"
+          />
+
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              type="button"
+              onClick={() => void saveCard()}
+              disabled={cardSave === "saving" || (titleDraft.trim() === (member?.title ?? "") && descDraft.trim() === (member?.description ?? ""))}
+              className="px-3.5 py-2 rounded-lg border border-line text-xs font-semibold text-ink-2 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {cardSave === "saving" ? <Loader2 size={13} className="animate-spin" /> : cardSave === "saved" ? <span className="inline-flex items-center gap-1 text-onair"><Check size={13} />Saved</span> : "Save card"}
+            </button>
+            {cardError && <div role="alert" className="text-[11px] text-blocked">{cardError}</div>}
+          </div>
         </section>
 
         {/* 2 · model & extensions */}
