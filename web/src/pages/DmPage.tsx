@@ -9,10 +9,11 @@
  * WS room:message on dm:<memberId>.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelRight, Search, X } from "lucide-react";
+import { PanelRight, Search, SlidersHorizontal, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { ModelPicker } from "../components/ModelPicker";
 import { DateSeparator, isGroupedWithPrev, shouldShowDateSeparator, MessageArtifactChips } from "../components/ChatArea";
 import { Sheet } from "../components/Sheet";
 import { MemberConfigPanel, isAssignableMcpServer } from "../components/StationPanel";
@@ -96,6 +97,12 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
   }, [memberId, refreshMemberInfo]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // The no-model banner needs the model list without waiting for the panel.
+  const bannerNeedsModels = !!memberInfo && !memberInfo.model;
+  useEffect(() => {
+    if (bannerNeedsModels) void getConfiguredModels().then(setModels).catch(() => {});
+  }, [bannerNeedsModels]);
 
   // Panel data loads on first open (Sheet is on-demand, same as the room).
   useEffect(() => {
@@ -337,6 +344,17 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             <button onClick={() => { setSearchOpen(v => !v); setSearchQuery(""); }} className={toolBtn} title="Search messages">
               <Search size={13} />
             </button>
+            {/* onOpenSettings was a dead prop (nowhere invoked) — the settings
+             * page had no reachable entry. Birth flow lands in this DM, so the
+             * gear lives in the header (batch-1 identity rework, fish 2026-08-25). */}
+            <button
+              type="button"
+              onClick={() => onOpenSettings?.(member.memberId)}
+              title="Member settings — name, title, description"
+              className={toolBtn}
+            >
+              <SlidersHorizontal size={13} />
+            </button>
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}
@@ -347,6 +365,25 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             </button>
           </div>
         </div>
+
+        {/* No-model guidance (batch-1 identity rework, fish 2026-08-25): a new
+         * member is born model-less — the DM itself teaches the next step with
+         * the picker at hand. The banner clears itself once a model saves. */}
+        {memberInfo && !memberInfo.model && (
+          <div className="shrink-0 border-b border-line-soft bg-accent-dim/20 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-[12.5px] text-ink-2">
+              <span className="font-semibold text-ink-1">{member.name}</span> has no model yet — pick one to wake it up.
+            </span>
+            <div className="w-[280px]">
+              <ModelPicker
+                value={{ model: null, credentialId: null }}
+                models={models}
+                emptyLabel="Pick a model…"
+                onChange={(v) => { if (v.model) handleSwitchModel(v.model, v.credentialId); }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* DM search bar — client-side filter (DM conversations are small enough) */}
         {searchOpen && (

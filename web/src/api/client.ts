@@ -1566,6 +1566,9 @@ export interface MemberDetail {
   memberId: string;
   name: string;
   agentTemplate: string;
+  /** member.md frontmatter (batch-1 identity rework): card fields, editable in settings. */
+  title?: string;
+  description?: string;
   unifiedModel: boolean;
   unifiedExtensions: boolean;
   global?: MemberGlobalConfig;
@@ -1658,7 +1661,7 @@ export async function getChats(): Promise<{ chats: ChatEntry[] }> {
 
 export interface CreateMemberInput {
   name: string;
-  agentTemplate: string;
+  agentTemplate?: string;
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;

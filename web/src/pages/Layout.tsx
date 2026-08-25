@@ -387,7 +387,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
         {activePage?.type === "contacts" && (
           <ContactsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
-            onCreateMember={() => handleNavigate({ type: "member-create" })}
+            onOpenImport={() => handleNavigate({ type: "member-create" })}
           />
         )}
         {activePage?.type === "member-create" && (

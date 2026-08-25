@@ -32,11 +32,13 @@ function optionLabel(model: PickerModel): string {
   return `${name}   ${caps}${flags ? `   ${flags}` : ""}`;
 }
 
-export function ModelPicker({ value, models, onChange, disabled }: {
+export function ModelPicker({ value, models, onChange, disabled, emptyLabel = "Follow agent default" }: {
   value: ModelPickerValue;
   models: PickerModel[];
   onChange: (value: ModelPickerValue) => void;
   disabled?: boolean;
+  /** Placeholder option when nothing is selected (DM guidance banner overrides it). */
+  emptyLabel?: string;
 }) {
   const matched = value.model
     ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
@@ -62,7 +64,7 @@ export function ModelPicker({ value, models, onChange, disabled }: {
         }}
         className="w-full bg-surface-3 border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
       >
-        <option value="">Follow agent default</option>
+        <option value="">{emptyLabel}</option>
         {value.model && !matched && <option value={`legacy::${value.model}`}>{value.model} · unavailable</option>}
         {Object.entries(grouped).map(([group, items]) => (
           <optgroup key={group} label={group}>
