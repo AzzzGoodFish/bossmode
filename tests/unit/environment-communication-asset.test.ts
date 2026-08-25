@@ -92,31 +92,18 @@ describe("environment-communication asset", () => {
     expect(() => asset.saveEnvironmentCommunication("   ")).toThrow(/cannot be empty/);
   });
 
-  it("compile splices the product default into room prompts (section + text, after Core)", async () => {
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
-    const ids = compiled.sections.map((s) => s.id);
-    expect(ids).toContain("environment-communication");
-    expect(compiled.fullPrompt).toContain("A colleague, not a system");
-    const coreIdx = compiled.fullPrompt.indexOf("## Communication");
-    const ecIdx = compiled.fullPrompt.indexOf("A colleague, not a system");
-    expect(coreIdx).toBeGreaterThan(-1);
-    expect(coreIdx).toBeLessThan(ecIdx);
-  });
-
-  it("compile uses the user-edited content when a user file exists", async () => {
+  it("identity batch-1: compile no longer injects the E&C asset (Communication is code-owned)", async () => {
     const asset = await import("../../src/workspace/environment-communication-asset.js");
     asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
     vi.resetModules();
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
-    expect(compiled.fullPrompt).toContain("Custom framing.");
-    expect(compiled.fullPrompt).not.toContain("A colleague, not a system");
-  });
+    const { compileMemberPrompt, compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const roomCompiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
+    expect(roomCompiled.fullPrompt).toContain("The chat tool is the only way your messages reach the room");
+    expect(roomCompiled.fullPrompt).not.toContain("Custom framing.");
+    expect(roomCompiled.fullPrompt).not.toContain("A colleague, not a system");
 
-  it("compile splices the asset into the DM Core variant too (shared section)", async () => {
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPromptForScope({
+    const dmCompiled = compileMemberPromptForScope({
       scopeId: "dm:rm_qa",
       memberId: "rm_qa",
       memberName: "qa",
@@ -124,13 +111,7 @@ describe("environment-communication asset", () => {
       room: null,
       docsRoot: "/docs",
     });
-    const ids = compiled.sections.map((s) => s.id);
-    expect(ids).toContain("environment-communication");
-    expect(compiled.fullPrompt).toContain("A colleague, not a system");
-    // E&C sits after the DM Core's own Communication section.
-    const coreIdx = compiled.fullPrompt.indexOf("Reply with the `chat` tool");
-    const ecIdx = compiled.fullPrompt.indexOf("A colleague, not a system");
-    expect(coreIdx).toBeGreaterThan(-1);
-    expect(coreIdx).toBeLessThan(ecIdx);
+    expect(dmCompiled.fullPrompt).toContain("private chat with the user");
+    expect(dmCompiled.fullPrompt).not.toContain("Custom framing.");
   });
 });

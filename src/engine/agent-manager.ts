@@ -2301,9 +2301,21 @@ export async function activateDmMember(memberId: string): Promise<void> {
       })
       .join("\n\n");
 
-    const prompt = transcript
-      ? `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message with the chat tool.`
-      : `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
+    // Birth icebreaker (identity batch 1): empty persona → ask user to initialize.
+    let birthBlank = false;
+    try {
+      const { readMemberProfile, isBlankPersona } = await import("../workspace/member-profile.js");
+      birthBlank = isBlankPersona(readMemberProfile(memberId, rec.name));
+    } catch { /* profile module optional in tests */ }
+
+    let prompt: string;
+    if (transcript) {
+      prompt = `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message with the chat tool.`;
+    } else if (birthBlank) {
+      prompt = `You are in a private chat with the user. You just came online with a blank persona (your member.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, use the edit tool on your member.md body (the ## Persona section — create it if missing) to record what you learned.`;
+    } else {
+      prompt = `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
+    }
 
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "dm-activate");
@@ -2377,7 +2389,9 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
     }
 
     const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
-    // Cache invariant: compile with parent room → byte-identical to room instance.
+    const { getTopic, saveTopic } = await import("../workspace/topic-store.js");
+    const topicRec = getTopic(parentRoomId, topicId);
+    // Member+Communication byte-identical to room; Environment first line is topic-scoped.
     const compiled = compileMemberPromptForScope({
       scopeId,
       memberId,
@@ -2385,6 +2399,7 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
       agentDef,
       room,
       docsRoot: docsRootPath,
+      topicTitle: topicRec?.title ?? null,
     });
     setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     clearStaleMounts(scopeId, memberId);
@@ -2394,9 +2409,7 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
     const syntheticRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
 
     // Batch 2: prefix-fork the room session when seedMode=fork (degrades to fresh).
-    const { getTopic, saveTopic } = await import("../workspace/topic-store.js");
     const { forkRoomSessionPrefix, getTopicSession } = await import("./topic-session-fork.js");
-    const topicRec = getTopic(parentRoomId, topicId);
     const existingTopicSession = getTopicSession(parentRoomId, topicId, memberId);
     let resumeSession = existingTopicSession?.sessionFile
       ? { sessionId: existingTopicSession.sessionId, sessionFile: existingTopicSession.sessionFile }

@@ -77,7 +77,9 @@ describe("020 memory tool wiring (member-global store)", () => {
     expect(readFileSync(newPath, "utf-8")).toContain(MARKER);
     expect(existsSync(join(dir, "rooms", room.id, "memory", "members"))).toBe(false);
 
-    // 2. The compiler reads it back — the assertion rc.1–rc.3 lacked.
+    // 2. Identity batch-1: compiler no longer injects mainline (tools still write the file).
+    // File presence is the closed-loop proof until batch-3 archive migration.
+    expect(readFileSync(newPath, "utf-8")).toContain(MARKER);
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPromptForScope({
       scopeId: `room:${room.id}`,
@@ -87,7 +89,8 @@ describe("020 memory tool wiring (member-global store)", () => {
       room,
       docsRoot: join(dir, "knowledge", "docs"),
     });
-    expect(compiled.fullPrompt).toContain(MARKER);
+    expect(compiled.fullPrompt).toContain("# Member");
+    expect(compiled.fullPrompt).not.toContain(MARKER);
 
     // 3. read_memory returns the new-location content with metadata.
     const read = (await handleToolCallback("read_memory", room.id, "pm", { asset: "mainline" })) as any;

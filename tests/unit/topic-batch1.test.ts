@@ -151,7 +151,7 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
     rmSync(state.dir, { recursive: true, force: true });
   });
 
-  it("compileMemberPromptForScope topic output matches room output byte-for-byte", () => {
+  it("compileMemberPromptForScope topic shares Member+Communication with room (cache invariant)", () => {
     const room = writeRoom("roomB", "Boss Room");
     const agentDef = {
       name: "developer",
@@ -178,9 +178,17 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
       agentDef,
       room,
       docsRoot,
+      topicTitle: "xyz",
     });
 
-    expect(topicCompiled.fullPrompt).toBe(roomCompiled.fullPrompt);
+    // Spec 1.4: ①② byte-identical; Environment first line is topic-scoped.
+    const roomMember = roomCompiled.sections.find((s) => s.id === "member")!.content;
+    const topicMember = topicCompiled.sections.find((s) => s.id === "member")!.content;
+    const roomComm = roomCompiled.sections.find((s) => s.id === "communication")!.content;
+    const topicComm = topicCompiled.sections.find((s) => s.id === "communication")!.content;
+    expect(topicMember).toBe(roomMember);
+    expect(topicComm).toBe(roomComm);
     expect(topicCompiled.contractFingerprint).toBe(roomCompiled.contractFingerprint);
+    expect(topicCompiled.envPrompt).toContain('topic "xyz"');
   });
 });

@@ -38,20 +38,22 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(parseInstanceKey(key)).toEqual({ scopeId: "room:abc", memberId: "mem_x" });
   });
 
-  it("compileMemberPromptForScope (room) orders persona → scope principles → mainline → room principles", async () => {
+  it("compileMemberPromptForScope (room) is three-segment Member → Communication → Environment", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const mem = await import("../../src/workspace/member-memory-store.js");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
 
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
-    mem.writeMemoryLayer(member.id, "persona", "# Persona\nI am careful.", { type: "user" });
-    mem.writeMemoryLayer(member.id, "principles", "# Scope rules\nAlways test.", { type: "user" }, { scopeId: `room:room1` });
-    mem.writeMemoryLayer(member.id, "mainline", "## Focus\nShip 0.20", { type: "user" }, { scopeId: `room:room1` });
+    // Grow persona body beyond birth skeleton.
+    const { writeFileSync: wfs } = await import("node:fs");
+    wfs(
+      join(dir, "members", member.id, "member.md"),
+      "---\nname: architect\n---\n\nI am careful.\n",
+      "utf-8",
+    );
 
-    // Minimal room with principles file
     const roomDir = join(dir, "rooms", "room1");
     mkdirSync(join(roomDir, "memory"), { recursive: true });
-    writeFileSync(join(roomDir, "memory", "room-principles.md"), "# Room\nBe kind.\n", "utf-8");
     writeFileSync(join(roomDir, "room.json"), JSON.stringify({
       id: "room1",
       name: "Test Room",
@@ -73,25 +75,17 @@ describe("020 WS-B prompt + instanceKey", () => {
     });
 
     const ids = compiled.sections.filter((s) => s.included).map((s) => s.id);
-    expect(ids).toEqual([
-      "source-agent",
-      "bossmode-core",
-      "environment-communication",
-      "persona",
-      "member-principles",
-      "member-mainline",
-      "room-principles",
-    ]);
-    expect(compiled.envPrompt).toContain("group chat room");
-    expect(compiled.envPrompt).toContain("Speak with the `chat` tool");
-    expect(compiled.envPrompt).not.toContain("[room]");
+    expect(ids).toEqual(["member", "communication", "environment"]);
+    expect(compiled.envPrompt).toContain('room "Test Room"');
+    expect(compiled.fullPrompt).toContain("The chat tool is the only way");
+    expect(compiled.fullPrompt).not.toContain("[room]");
     expect(compiled.fullPrompt).toContain("I am careful.");
-    expect(compiled.fullPrompt).toContain("Always test.");
-    expect(compiled.fullPrompt).toContain("Ship 0.20");
-    expect(compiled.fullPrompt).toContain("Be kind.");
+    // Old assets no longer injected (batch 1).
+    expect(compiled.fullPrompt).not.toContain("## Scope Principles");
+    expect(compiled.fullPrompt).not.toContain("## Room Principles");
   });
 
-  it("compileMemberPromptForScope (dm) has no @ routing and no room principles", async () => {
+  it("compileMemberPromptForScope (dm) uses private-chat environment line", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
 
@@ -107,12 +101,9 @@ describe("020 WS-B prompt + instanceKey", () => {
     });
 
     expect(compiled.envPrompt).toContain("private chat");
-    expect(compiled.envPrompt).toContain("create_room");
-    // No @ routing in DM; no [room] marker mention at all (feature removed)
-    expect(compiled.envPrompt).toMatch(/no.*@/i);
-    expect(compiled.envPrompt).not.toContain("[room]");
-    const roomSection = compiled.sections.find((s) => s.id === "room-principles");
-    expect(roomSection?.included).toBe(false);
+    expect(compiled.fullPrompt).toContain("In a DM every user message reaches you directly");
+    expect(compiled.fullPrompt).not.toContain("[room]");
+    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
   });
 
   it("tool surface: dm has create_room, room has wait/tasks", async () => {

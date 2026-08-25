@@ -576,7 +576,8 @@ describe("agent-manager model hot switch", () => {
     expect(result).toEqual({ ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." });
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
-    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), agentPrompt: "test", skillNames: ["review"] });
+    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), skillNames: ["review"] });
+    expect(first.reloadCalls[0].agentPrompt).toContain("I am pm.");
     expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
   });
 
