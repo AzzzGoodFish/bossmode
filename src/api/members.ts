@@ -595,13 +595,33 @@ addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
     for (const key of ["model", "credentialId", "thinkingLevel", "skills", "extensions", "mcpServers"]) {
       if (Object.prototype.hasOwnProperty.call(body, key)) diff[key] = body[key];
     }
+    // Birth wake (identity batch-1 / rc.1 gap): model none→some must start the
+    // DM instance so icebreaker can run. Config-only write never activated.
+    const beforeModel = getEffectiveConfig(m.id, scope).model;
     // Unified write authority: unifiedModel/unifiedExtensions fields go global,
     // everything else lands in this scope's override (same rule as room PATCH).
     const updated = applyMemberConfigPatch(m.id, scope as ScopeId, diff);
+    const afterEff = getEffectiveConfig(m.id, scope);
     sendJson(res, 200, {
       member: publicMember(updated),
-      effective: getEffectiveConfig(m.id, scope),
+      effective: afterEff,
     });
+    if (!beforeModel && afterEff.model) {
+      try {
+        const { activateDmMember } = await import("../engine/agent-manager.js");
+        void activateDmMember(m.id).catch((err) => {
+          logger.error("members", "post-config DM activate failed", {
+            memberId: m.id,
+            error: String((err as Error)?.message || err),
+          });
+        });
+      } catch (err) {
+        logger.error("members", "post-config DM activate import failed", {
+          memberId: m.id,
+          error: String((err as Error)?.message || err),
+        });
+      }
+    }
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
