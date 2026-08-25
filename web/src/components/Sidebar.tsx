@@ -1,12 +1,13 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Plus, Contact, Hash, Fingerprint, Puzzle, Search, MessagesSquare,
+  CheckSquare, Loader2, Plus, Contact, Hash, Fingerprint, Puzzle, Search, MessagesSquare,
   Folder, LayoutTemplate,
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { Room, SkillInfo, KnowledgeTreeNode } from "../api/client";
-import { getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type ChatEntry, type TemplateInfo } from "../api/client";
+import { createGlobalMember, getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type ChatEntry, type TemplateInfo } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
@@ -87,6 +88,24 @@ export function Sidebar({
 }: SidebarProps) {
   const isMobile = useIsMobile();
   const [rooms, setRooms] = useState<Room[]>([]);
+  // Chats "+" menu (fish 2026-08-25): New room keeps the original flow; New
+  // member runs the batch-1 one-click birth (backend names it) and lands in
+  // the DM where the guidance card picks a model.
+  const [plusMenu, setPlusMenu] = useState<DOMRect | null>(null);
+  const [plusBusy, setPlusBusy] = useState(false);
+  const [plusError, setPlusError] = useState<string | null>(null);
+  const createMemberFromPlus = async () => {
+    setPlusBusy(true);
+    setPlusError(null);
+    try {
+      const res = await createGlobalMember({});
+      setPlusMenu(null);
+      onNavigate({ type: "dm", memberId: res.member.memberId });
+    } catch (e) {
+      setPlusError(String((e as Error)?.message || e));
+      setPlusBusy(false);
+    }
+  };
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
 
@@ -218,14 +237,26 @@ export function Sidebar({
         {/* Create entry lives in the panel title row for every domain that has one
             (Chat & List Unification v1); Skills has no create by design. */}
         {domain === "chats" && (
-          <button
-            onClick={() => onNavigate({ type: "room", id: "__new__" })}
-            title="New room"
-            data-tour="new-room"
-            className={createBtn}
-          >
-            <Plus size={13} />
-          </button>
+          <>
+            <button
+              onClick={(e) => setPlusMenu(plusMenu ? null : e.currentTarget.getBoundingClientRect())}
+              title="New…"
+              data-tour="new-room"
+              className={createBtn}
+            >
+              <Plus size={13} />
+            </button>
+            {plusMenu && (
+              <ChatsPlusMenu
+                anchorRect={plusMenu}
+                busy={plusBusy}
+                error={plusError}
+                onNewRoom={() => { setPlusMenu(null); onNavigate({ type: "room", id: "__new__" }); }}
+                onNewMember={() => void createMemberFromPlus()}
+                onClose={() => { setPlusMenu(null); setPlusError(null); }}
+              />
+            )}
+          </>
         )}
         {domain === "templates" && (
           <button
@@ -504,5 +535,48 @@ function TemplatesPanelList({ activePage, onNavigate }: { activePage: ActivePage
         );
       })}
     </>
+  );
+}
+
+/** Chats "+" pop (fish 2026-08-25): two creation paths — a new room, or a
+ * one-click member birth. Same pop family as the workstation pops. */
+function ChatsPlusMenu({ anchorRect, busy, error, onNewRoom, onNewMember, onClose }: {
+  anchorRect: DOMRect;
+  busy: boolean;
+  error: string | null;
+  onNewRoom: () => void;
+  onNewMember: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const width = 156;
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  const item = "w-full flex items-center gap-2 text-left text-[12px] px-2.5 py-2 rounded cursor-pointer transition-colors text-ink-2 hover:bg-surface-2 hover:text-ink-1 disabled:opacity-50";
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.right - width));
+  return createPortal(
+    <div ref={ref} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1" style={{ left, width, top: anchorRect.bottom + 6, boxShadow: "var(--shadow-pop)" }}>
+      <button type="button" onClick={onNewRoom} className={item}>
+        <Hash size={12} className="text-ink-4 shrink-0" /> New room
+      </button>
+      <button type="button" onClick={onNewMember} disabled={busy} className={item}>
+        {busy ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" /> : <Contact size={12} className="text-ink-4 shrink-0" />}
+        New member
+      </button>
+      {error && <div role="alert" className="text-[10.5px] text-blocked px-2.5 pt-0.5 pb-1">{error}</div>}
+    </div>,
+    document.body,
   );
 }
