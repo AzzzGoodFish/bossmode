@@ -14,7 +14,7 @@ import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
-import { MemberSettingsPage } from "./MemberSettingsPage";
+import { MemberPage } from "./MemberPage";
 import { Main } from "./Main";
 import { TopicPage } from "./TopicPage";
 import { createTopic } from "../api/client";
@@ -294,6 +294,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
             onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
+            onOpenMember={(memberId) => handleNavigate({ type: "member", memberId, scopeId: `room:${activePage.id}`, back: { type: "room", id: activePage.id } })}
             onOpenTopicDraft={(roomId, anchor) => handleNavigate({ type: "topic-draft", roomId, anchorMessageId: anchor.anchorMessageId, anchorSeq: anchor.anchorSeq, anchorTitle: anchor.title, anchorExcerpt: anchor.excerpt })}
             pendingJump={pendingJump}
             onConsumeJump={() => setPendingJump(null)}
@@ -313,6 +314,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             }}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
+            onOpenMember={(memberId) => handleNavigate({ type: "member", memberId, scopeId: `room:${activePage.roomId}`, back: { type: "topic", roomId: activePage.roomId, topicId: activePage.topicId } })}
           />
         )}
 
@@ -348,6 +350,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             }}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
+            onOpenMember={(memberId) => handleNavigate({ type: "member", memberId, scopeId: `room:${activePage.roomId}`, back: { type: "room", id: activePage.roomId } })}
           />
         )}
 
@@ -390,16 +393,19 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <DmPage
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "contacts" })}
-            onOpenSettings={(memberId) => handleNavigate({ type: "member-settings", memberId })}
+            onOpenSettings={(memberId) => handleNavigate({ type: "member", memberId, scopeId: `dm:${memberId}`, back: { type: "dm", memberId } })}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
-        {activePage?.type === "member-settings" && (
-          <MemberSettingsPage
+        {activePage?.type === "member" && (
+          <MemberPage
             memberId={activePage.memberId}
-            onBack={() => handleNavigate({ type: "dm", memberId: activePage.memberId })}
+            initialScopeId={activePage.scopeId}
+            onBack={() => handleNavigate(activePage.back ?? { type: "contacts" })}
             onFired={() => handleNavigate({ type: "contacts" })}
+            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
+            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
         {/* Settings */}

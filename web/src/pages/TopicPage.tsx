@@ -142,6 +142,7 @@ export function TopicPage({
   onJumpToRoomMessage,
   onOpenMcpSettings,
   onOpenExtensionsSettings,
+  onOpenMember,
 }: {
   roomId: string;
   /** Real topic id; null in draft mode. */
@@ -156,6 +157,8 @@ export function TopicPage({
   onJumpToRoomMessage?: (messageId: string) => void;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
+  /** Member-page merge v1: roster detail navigates to the member page. */
+  onOpenMember?: (memberId: string) => void;
 }) {
   const isDraft = !topicId;
   const { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage } = useTopicStream(roomId, topicId);
@@ -370,6 +373,7 @@ export function TopicPage({
               activityScope={isDraft || !topicId ? undefined : `topic:${topicId}`}
               onOpenMcpSettings={onOpenMcpSettings}
               onOpenExtensionsSettings={onOpenExtensionsSettings}
+              onOpenMember={(m) => onOpenMember?.(m.id || m.name)}
             />
           </ResizableRail>
         )}
