@@ -167,7 +167,12 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 min-w-0">
+    <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
+      {/* relative: the scrolled-up / jump-to-latest pills below anchor to
+       * THIS column's bottom edge — the stream's bottom, just above the
+       * composer. Without it they escape to a higher positioned ancestor
+       * that also wraps MessageInput and float over the input box
+       * (fish 2026-08-26: pill occluded typed text). */}
       {searchOpen && roomId && (
         <MessageSearchBar
           roomId={roomId}
