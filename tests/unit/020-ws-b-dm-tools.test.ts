@@ -32,7 +32,7 @@ describe("020 WS-B DM tools", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-wsb-dm-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("pm");
     seedAgent("developer");
     seedAgent("general");
@@ -84,27 +84,20 @@ describe("020 WS-B DM tools", () => {
     expect(rp.content).toContain("Ship it");
   });
 
-  it("edit_room leader can rename; non-leader denied", async () => {
+  it("edit_room any room member can rename (leader gate retired)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     reg.createMember({ name: "pm", agentTemplate: "pm" });
-    reg.createMember({ name: "developer", agentTemplate: "developer" });
+    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
 
     const created = await handleToolCallback("create_room", "", "pm", {
       name: "R1",
       cwd: dir,
-      memberIds: [],
+      memberIds: [dev.id],
     }) as any;
     expect(created.ok).toBe(true);
 
-    const denied = await handleToolCallback("edit_room", created.roomId, "developer", {
-      roomId: created.roomId,
-      name: "Hacked",
-    }) as any;
-    expect(denied.ok).toBe(false);
-    expect(denied.error).toMatch(/not_room_leader|leader/i);
-
-    const ok = await handleToolCallback("edit_room", created.roomId, "pm", {
+    const ok = await handleToolCallback("edit_room", created.roomId, "developer", {
       roomId: created.roomId,
       name: "R1-renamed",
     }) as any;
@@ -120,6 +113,8 @@ describe("020 WS-B DM tools", () => {
     expect(names).toContain("list_members");
     expect(names).toContain("edit_room");
     expect(names).not.toContain("wait");
+    expect(names).not.toContain("read_memory");
+    expect(names).not.toContain("write_memory");
     expect(names).not.toContain("create_task");
 
     const room = createBossmodeSdkTools({ roomId: "r1", agentName: "pm", roomMembers: ["pm", "qa"], scopeKind: "room" });

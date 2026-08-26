@@ -512,40 +512,42 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     const url = new URL(req.url || "", "http://localhost");
-    const layer = (url.searchParams.get("layer") || "persona") as "persona" | "principles" | "mainline";
+    const layer = (url.searchParams.get("layer") || "persona") as "persona" | "principles" | "mainline" | "profile";
     const scope = url.searchParams.get("scope") || undefined;
-    if (layer !== "persona" && !scope) {
-      sendJson(res, 400, { error: "scope_required", message: "scope required for principles/mainline" });
+    // Identity batch-2: principles/mainline panel layers retired → member.md only.
+    if (layer === "principles" || layer === "mainline") {
+      sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read member.md via layer=profile" });
+      return;
+    }
+    if (layer === "profile") {
+      const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
+      const profile = readMemberProfile(m.id, m.name);
+      sendJson(res, 200, {
+        layer: "profile",
+        path: memberProfilePath(m.id),
+        frontmatter: profile.frontmatter,
+        content: profile.body,
+        raw: profile.raw,
+        overBudget: profile.overBudget,
+        exists: profile.exists,
+      });
+      return;
+    }
+    // Legacy persona layer (batch-3 migrates into member.md). principles/mainline already 410 above.
+    if (layer !== "persona") {
+      sendJson(res, 400, { error: "invalid_layer", message: "layer must be profile or persona" });
       return;
     }
     if (scope && !parseScopeId(scope)) {
       sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
       return;
     }
-    // Rich payload matching the room members principles/mainline routes
-    // (revision/hash/budget header + parsed mainline + starter template) so the
-    // unified member panel renders identically from either scope.
-    const info = readMemoryLayerInfo(m.id, layer, scope as ScopeId | undefined);
-    const scopeRef = scope ? parseScopeId(scope) : null;
-    const scopeKey = scopeRef
-      ? (scopeRef.kind === "room"
-        ? scopeRef.roomId
-        : scopeRef.kind === "dm"
-          ? `dm:${scopeRef.memberId}`
-          : `topic:${scopeRef.topicId}`)
-      : null;
-    const scopeMessages = scopeKey ? mainlineStore.loadScopeMessages(scopeKey) : null;
-    const content = layer === "mainline" && scopeKey && scopeMessages
-      ? mainlineStore.resolveMainlineRefs(scopeKey, info.content, scopeMessages)
-      : info.content;
+    const info = readMemoryLayerInfo(m.id, "persona", scope as ScopeId | undefined);
     sendJson(res, 200, {
       ...info,
-      content,
-      parsed: layer === "mainline" ? mainlineStore.parseMainline(content, scopeMessages ? mainlineStore.buildMsgLookup(scopeMessages) : undefined) : undefined,
+      content: info.content,
       budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-      suggestedTemplate: info.content.trim()
-        ? undefined
-        : layer === "mainline" ? mainlineStore.MAINLINE_TEMPLATE : layer === "principles" ? principlesStore.PRINCIPLES_TEMPLATE : undefined,
+      suggestedTemplate: info.content.trim() ? undefined : undefined,
     });
   } catch (err) {
     const e = errCode(err);

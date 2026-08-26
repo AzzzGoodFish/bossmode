@@ -30,7 +30,7 @@ function ensureRoom(roomId: string, extra: Record<string, unknown> = {}) {
 }
 
 function writeDoc(relPath: string, content: string): string {
-  const abs = join(tmpDir, "knowledge", "docs", relPath);
+  const abs = join(tmpDir, "memory", "projects", relPath);
   mkdirSync(join(abs, ".."), { recursive: true });
   writeFileSync(abs, content, "utf-8");
   return abs;
@@ -108,7 +108,7 @@ describe("knowledge-activity", () => {
     const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
     ensureRoom("k6");
     writeDoc("proj/rel.md", "# Rel");
-    const docsRoot = join(tmpDir, "knowledge", "docs");
+    const docsRoot = join(tmpDir, "memory", "projects");
     maybeEmitKnowledgeActivity("k6", "dev", "write", { path: "proj/rel.md" }, false, docsRoot);
     const messages = await getRoomMessages("k6");
     expect(messages.find((m) => m.type === "knowledge_event")!.knowledge_event_meta?.path).toBe("proj/rel.md");

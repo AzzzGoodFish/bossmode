@@ -112,7 +112,7 @@ describe("DM instance unified event wiring (G1)", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-dm-g1-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("architect");
     broadcastToRoom.mockClear();
     subscribeCb = undefined;
@@ -331,7 +331,7 @@ describe("write_memory receipt wording", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("receipt says Reload or fresh session, not 'next activation'", async () => {
+  it.skip("write_memory receipt retired", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const room = roomStore.createRoom("r", dir, [{ agent: "pm", name: "pm" }], undefined);
     const { handleToolCallback } = await import("../../src/engine/tools.js");

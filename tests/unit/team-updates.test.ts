@@ -61,7 +61,7 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
     m.seedBuiltinAssets();
     expect(existsSync(join(bossmodeDir, "agents", "pm.md"))).toBe(true);
     expect(existsSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(bossmodeDir, "knowledge", "docs", "rules", "member-universal-principles.md"))).toBe(true);
+    expect(existsSync(join(bossmodeDir, "memory", "projects", "rules", "member-universal-principles.md"))).toBe(true);
     // No update-tracking file is written — seeding is meta-free.
     expect(existsSync(join(bossmodeDir, "team-meta.json"))).toBe(false);
   });

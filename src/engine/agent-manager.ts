@@ -898,7 +898,7 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
       return null;
     }
 
-    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    const docsRootPath = join(getBossmodeDir(), "memory", "projects");
     const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
     setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     clearStaleMounts(`room:${roomId}`, memberId);
@@ -1472,48 +1472,21 @@ export interface ContractDriftEntry {
  * tools/prompt changed) while the member's session was running with the old
  * contract. Called at daemon boot to populate the startup drift dialog.
  */
-export function computeContractDrift(roomId: string): ContractDriftEntry[] {
-  const room = roomStore.getRoom(roomId);
-  if (!room) return [];
-  const members = roomStore.getRoomMembers(roomId);
-  const scopeId = `room:${roomId}`;
-  const state = readRuntimeState(scopeId);
-  const drift: ContractDriftEntry[] = [];
-  for (const m of members) {
-    const entry = state[`${scopeId}:${m.id}`];
-    if (!entry?.contractVersion) continue; // first install / no record
-    if (entry.contractVersion < MEMBER_CONTRACT_VERSION) {
-      drift.push({
-        memberName: m.name,
-        memberId: m.id,
-        scopeId,
-        scopeLabel: room.name,
-        currentVersion: MEMBER_CONTRACT_VERSION,
-        alreadyNotified: entry.driftNotified === MEMBER_CONTRACT_VERSION,
-      });
-    }
-  }
-  return drift;
+export function computeContractDrift(_roomId: string): ContractDriftEntry[] {
+  // Identity batch-2: contract drift / Reload dialog retired.
+  return [];
 }
+
 
 /** Mount-stale info for a member in a scope (for status badges + WS).
  * Suppresses staleMounts for members with no live instance (activation = fresh mounts).
  */
-export function getMemberStale(scopeId: string, memberId: string): { mounts?: { since: number; fields: string[] }; contract?: boolean } | null {
-  const entry = getRuntimeStateEntry(scopeId, memberId);
-  const out: { mounts?: { since: number; fields: string[] }; contract?: boolean } = {};
-  // Liveness suppression: only surface mount staleness when the member has a
-  // running instance whose old mounts haven't been picked up yet.
-  if (entry.staleMounts) {
-    const ref = parseScopeId(scopeId);
-    const key = ref?.kind === "dm" ? instanceKey(scopeId, memberId) : instanceKey(ref!.roomId, memberId);
-    if (instances.has(key)) out.mounts = { since: entry.staleMounts.since, fields: entry.staleMounts.fields };
-  }
-  if (entry.driftNotified) out.contract = true;
-  return (out.mounts || out.contract) ? out : null;
+export function getMemberStale(_scopeId: string, _memberId: string): { mounts?: { since: number; fields: string[] }; contract?: boolean } | null {
+  // Identity batch-2: Reload/stale retired — activation recompiles; no badges.
+  return null;
 }
 
-/** Broadcast a status refresh for a room member (stale badges update live). */
+
 export function broadcastMemberStatus(roomId: string, memberRef: string): void {
   const member = resolveRoomMember(roomId, memberRef);
   if (!member) return;
@@ -1843,7 +1816,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     try {
       const agentDef2 = loadAgentDefinition(member.agent);
       if (agentDef2) {
-        const docsRoot2 = join(getBossmodeDir(), "knowledge", "docs");
+        const docsRoot2 = join(getBossmodeDir(), "memory", "projects");
         const compiled2 = compileMemberPrompt({ room, member, agentDef: agentDef2, docsRoot: docsRoot2 });
         setContractFingerprint(`room:${roomId}`, memberId, compiled2.contractFingerprint, MEMBER_CONTRACT_VERSION);
       }
@@ -1858,7 +1831,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
 
   const agentDef = loadAgentDefinition(member.agent);
   if (!agentDef) throw new Error(`Agent definition not found: ${member.agent}`);
-  const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+  const docsRootPath = join(getBossmodeDir(), "memory", "projects");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
   const skills = resolveSkills(member, agentDef);
   const skillPaths = [
@@ -2159,7 +2132,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
       return null;
     }
 
-    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    const docsRootPath = join(getBossmodeDir(), "memory", "projects");
     const compiled = compileMemberPromptForScope({
       scopeId,
       memberId,
@@ -2388,7 +2361,7 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
       return null;
     }
 
-    const docsRootPath = join(getBossmodeDir(), "knowledge", "docs");
+    const docsRootPath = join(getBossmodeDir(), "memory", "projects");
     const { getTopic, saveTopic } = await import("../workspace/topic-store.js");
     const topicRec = getTopic(parentRoomId, topicId);
     // Member+Communication byte-identical to room; Environment first line is topic-scoped.

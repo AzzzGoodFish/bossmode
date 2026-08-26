@@ -45,7 +45,8 @@ describe("020 conversations / scope surface", () => {
     const roomMember = toolSurfaceForScope("room:r1", { isRoomLeader: false });
     expect(roomMember.families).toContain("wait");
     expect(roomMember.families).not.toContain("create_room");
-    expect(roomMember.families).not.toContain("edit_room");
+    expect(roomMember.families).toContain("edit_room"); // leader gate retired
+    expect(roomMember.families).not.toContain("memory" as any);
 
     const roomLeader = toolSurfaceForScope("room:r1", { isRoomLeader: true });
     expect(roomLeader.families).toContain("edit_room");

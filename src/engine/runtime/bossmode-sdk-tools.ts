@@ -78,55 +78,7 @@ export function createBossmodeSdkTools(opts: {
         return textResult(truncate(messages.length === 0 ? "No messages found." : messages.map((m) => "[" + m.sender + "]: " + m.content).join("\n\n")));
       },
     }),
-    defineTool({
-      name: "read_memory",
-      label: "Read Memory",
-      description: "Read your persistent memory, with its budget header (usage/limit). asset: 'principles' (durable working rules) or 'mainline' (working focus: a '## Focus' section plus a '## Dynamic Index' list of refs — docs/..., task:<id>, msg:#<seq>; refs whose target no longer exists are marked [stale] on read, never auto-deleted). scope (optional): 'room' or 'member', principles only, default 'member'. Mainline is member-level only.",
-      parameters: Type.Object({
-        asset: Type.String({ description: "'principles' or 'mainline'" }),
-        scope: Type.Optional(Type.String({ description: "Asset level 'room' | 'member' (principles only, default 'member'), or a cross-scope read target 'room:<id>' | 'dm:<memberId>' (membership-checked; default current scope)" })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("read_memory", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Read memory failed");
-        const header = `${data.asset} (${data.scope}) · revision ${data.revision} · ${data.budgetHeader}`;
-        const body = data.content?.trim() ? data.content : `(empty — suggested template:\n${data.suggestedTemplate || "n/a"})`;
-        return textResult(truncate(`${header}\n\n${body}`));
-      },
-    }),
-    defineTool({
-      name: "edit_memory",
-      label: "Edit Memory",
-      description: "Edit persistent memory by exact text replacement — your own member memory, or the room principles if you are the room leader. oldText must occur exactly once. reason is required (the source of the change). Budgets: member principles 4,000 / room principles 8,000 / mainline 4,000 chars; over-budget edits are rejected with the current full text. Changes apply on Reload or a fresh session (a running session keeps its already-compiled prompt).",
-      parameters: Type.Object({
-        asset: Type.String({ description: "'principles' or 'mainline'" }),
-        oldText: Type.String({ description: "Exact text to replace. Must occur exactly once." }),
-        newText: Type.String({ description: "Replacement text" }),
-        reason: Type.String({ description: "Required: source of this change (user feedback, a decision, curation)" }),
-        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("edit_memory", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Edit memory failed");
-        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). ${data.message ?? "Applies on Reload or a fresh session."}`);
-      },
-    }),
-    defineTool({
-      name: "write_memory",
-      label: "Write Memory",
-      description: "Overwrite persistent memory wholesale — your own member memory, or the room principles if you are the room leader. reason is required (the source of the change). Budgets and over-budget rejection same as edit_memory. Changes apply on Reload or a fresh session (a running session keeps its already-compiled prompt).",
-      parameters: Type.Object({
-        asset: Type.String({ description: "'principles' or 'mainline'" }),
-        content: Type.String({ description: "Full markdown content to save" }),
-        reason: Type.String({ description: "Required: source of this change (user feedback, a decision, curation)" }),
-        scope: Type.Optional(Type.String({ description: "'room' or 'member' (principles only, default 'member')" })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("write_memory", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Write memory failed");
-        return textResult(`Saved ${data.scope} ${data.asset} revision ${data.revision} (${data.budgetHeader}). ${data.message ?? "Applies on Reload or a fresh session."}`);
-      },
-    }),
+
     defineTool({
       name: "create_task",
       label: "Create Task",
@@ -247,7 +199,7 @@ export function createBossmodeSdkTools(opts: {
     tools.push(defineTool({
       name: "create_topic",
       label: "Create topic",
-      description: "Create a focused topic in this room. Only the room leader can use this. message is the first post (title is its first line; @-mentions activate those members). brief is an optional instruction injected into the topic guide (behavior boundary, e.g. research only — do not touch main).",
+      description: "Create a focused topic in this room. message is the first post (title is its first line; @-mentions activate those members). brief is an optional instruction injected into the topic guide (behavior boundary, e.g. research only — do not touch main).",
       parameters: Type.Object({
         message: Type.String({ description: "First topic message — becomes the topic title (first line) and is posted into the topic. @ a member to bring them in." }),
         brief: Type.Optional(Type.String({ description: "Optional topic instruction injected into the guide before the concurrency reminder." })),
@@ -322,7 +274,7 @@ export function createBossmodeSdkTools(opts: {
       defineTool({
         name: "create_room",
         label: "Create room",
-        description: "Create a project room. You become the leader. Invite members by global member id (from list_members). Optional initial room principles.",
+        description: "Create a project room. Invite members by global member id (from list_members). Optional initial room principles.",
         parameters: Type.Object({
           name: Type.String({ description: "Room display name" }),
           cwd: Type.Optional(Type.String({ description: "Working directory (default: current process cwd)" })),
@@ -338,7 +290,7 @@ export function createBossmodeSdkTools(opts: {
       defineTool({
         name: "edit_room",
         label: "Edit room",
-        description: "Leader-only: rename room, update principles, add/remove members by global member id.",
+        description: "Rename room, update principles, add/remove members by global member id. Any room member may call this.",
         parameters: Type.Object({
           roomId: Type.String({ description: "Room id to edit" }),
           name: Type.Optional(Type.String({ description: "New room name" })),

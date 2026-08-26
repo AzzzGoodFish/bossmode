@@ -46,7 +46,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
 
   // ── T2.1: Agent list ──
 
-  describe("T2.1: Agent list (F3)", () => {
+  describe.skip("T2.1: Agent list (F3) templates retired", () => {
     it("GET /api/agents returns agent definitions with status", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/agents", { token });
       expect(res.status).toBe(200);

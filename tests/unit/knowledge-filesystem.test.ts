@@ -31,7 +31,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     expect(entry.id).toBe("bossmode/architecture/overview.md");
     expect(entry.title).toBe("Overview");
 
-    const abs = join(tmpDir, "knowledge", "docs", "bossmode", "architecture", "overview.md");
+    const abs = join(tmpDir, "memory", "projects", "bossmode", "architecture", "overview.md");
     expect(existsSync(abs)).toBe(true);
     const raw = readFileSync(abs, "utf-8");
     expect(raw).toBe("# Overview\n\nSome content.");
@@ -69,12 +69,12 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   it("deleteEntry removes file and cleans empty parent folders", async () => {
     const { addEntry, deleteEntry, getEntry } = await import("../../src/knowledge/store.js");
     addEntry("T", "c", "user", "deep/nested/folder/doc.md");
-    const abs = join(tmpDir, "knowledge", "docs", "deep", "nested", "folder", "doc.md");
+    const abs = join(tmpDir, "memory", "projects", "deep", "nested", "folder", "doc.md");
     expect(existsSync(abs)).toBe(true);
 
     expect(deleteEntry("deep/nested/folder/doc.md")).toBe(true);
     expect(getEntry("deep/nested/folder/doc.md")).toBeNull();
-    expect(existsSync(join(tmpDir, "knowledge", "docs", "deep"))).toBe(false);
+    expect(existsSync(join(tmpDir, "memory", "projects", "deep"))).toBe(false);
   });
 
   it("getDocumentTree returns hierarchical structure", async () => {
@@ -155,7 +155,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
 
   it("listEntries treats pre-existing frontmatter as plain markdown content", async () => {
     const { listEntries } = await import("../../src/knowledge/store.js");
-    const docsRoot = join(tmpDir, "knowledge", "docs", "manual");
+    const docsRoot = join(tmpDir, "memory", "projects", "manual");
     mkdirSync(docsRoot, { recursive: true });
     writeFileSync(
       join(docsRoot, "hand-written.md"),

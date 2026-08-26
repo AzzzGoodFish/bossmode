@@ -73,13 +73,13 @@ describe("create_topic tool", () => {
     expect(card?.sender).toBe("pm");
   });
 
-  it("rejects non-leader", async () => {
-    writeRoom("roomA");
-    const result = await handleToolCallback("create_topic", "roomA", "qa", {
-      message: "should fail",
+  it("allows non-leader to create a topic (leader gate retired)", async () => {
+    writeRoom("roomB", "rm_pm");
+    const result = await handleToolCallback("create_topic", "roomB", "qa", {
+      message: "Non-leader topic",
     }) as any;
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/leader/i);
+    expect(result.ok).toBe(true);
+    expect(result.title).toBeTruthy();
   });
 
   it("omits brief section when brief is absent", () => {

@@ -68,7 +68,7 @@ describe("cross-scope reads (flagship ①)", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-xs-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("dev");
     vi.resetModules();
   });
@@ -141,7 +141,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(dmTasks.error).toMatch(/room-scoped/);
   });
 
-  it("read_memory: scope param reads own member memory and room principles at another scope (dual value domain)", async () => {
+  it.skip("read_memory retired: scope param reads own member memory...", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const memStore = await import("../../src/workspace/member-memory-store.js");
     memStore.writeMemoryLayer(dev.id, "principles", "beta-scope rules", { type: "member", memberId: dev.id, name: "dev" }, { scopeId: `room:${roomB.id}`, reason: "test", operation: "write" });
@@ -177,7 +177,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(cur.content).not.toBe("beta-scope rules");
   });
 
-  it("scope param validation: invalid values and retired keys are explicit errors, never silent", async () => {
+  it.skip("scope param validation retired with read_memory", async () => {
     const { dev, roomA } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
     // Invalid scope value on read_memory.

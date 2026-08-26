@@ -112,13 +112,16 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(dm.kind).toBe("dm");
     expect(dm.families).toContain("create_room");
     expect(dm.families).not.toContain("wait");
+    expect(dm.families).not.toContain("memory");
     expect(dm.families).not.toContain("tasks");
 
     const room = toolSurfaceForScope("room:r1", { isRoomLeader: false });
     expect(room.families).toContain("wait");
+    expect(room.families).not.toContain("memory");
+    expect(room.families).toContain("edit_room"); // any member
     expect(room.families).toContain("tasks");
     expect(room.families).not.toContain("create_room");
-    expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: false })).toBe(false);
+    expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: false })).toBe(true);
     expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: true })).toBe(true);
   });
 

@@ -136,7 +136,7 @@ describe("HTTP server", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /api/agents with token returns 200", async () => {
+  it("GET /api/agents with token returns 410 (templates retired)", async () => {
     const res = await request({
       hostname: "127.0.0.1",
       port,
@@ -144,7 +144,7 @@ describe("HTTP server", () => {
       method: "GET",
       headers: { Authorization: `Bearer ${authToken}` },
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
   });
 
   it("GET /api/rooms with token returns 200", async () => {

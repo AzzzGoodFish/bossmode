@@ -27,7 +27,7 @@ describe("G3 ID-link cutover", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-g3-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("pm");
     seedAgent("developer");
     seedAgent("general");

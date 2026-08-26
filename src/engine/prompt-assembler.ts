@@ -42,7 +42,7 @@ export function buildAgentPrompt(
     overlayParts.push("docs/");
     renderTree(tree.children, "", overlayParts, new Set(activeRuleDocs || []));
     overlayParts.push("```\n");
-    const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
+    const docsPath = docsRoot || "~/.bossmode/memory/projects";
     overlayParts.push(
       `Documents are stored at \`${docsPath}/\`. Use the read tool to load a document by path. Use write/edit tools to create or update documents.`,
       "",
@@ -63,7 +63,7 @@ export function buildAgentPrompt(
     // Fallback (should be rare): flat list when tree is unavailable
     overlayParts.push("---\n\n# Project Documents\n");
     for (const entry of knowledgeEntries) overlayParts.push(`- **${entry.title}**`);
-    const docsPath = docsRoot || "~/.bossmode/knowledge/docs";
+    const docsPath = docsRoot || "~/.bossmode/memory/projects";
     overlayParts.push(`\nDocuments are stored at \`${docsPath}/\`. Use the read tool to load a document by path.`);
   }
 

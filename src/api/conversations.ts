@@ -119,19 +119,8 @@ addRoute("POST", "/api/conversations/:scope/reset-session", async (req, res, par
   sendJson(res, 200, { ...result, scopeId: target.scopeId });
 });
 
-addRoute("POST", "/api/conversations/:scope/reload", async (req, res, params) => {
-  const url = parseUrl(req);
-  const target = resolveTarget(params.scope, url.searchParams);
-  if ("error" in target) {
-    sendJson(res, target.status, { error: target.error });
-    return;
-  }
-  try {
-    const result = await reloadMemberResources(target.roomId, target.memberId);
-    sendJson(res, 200, { ...result, scopeId: target.scopeId });
-  } catch (err: any) {
-    sendJson(res, 409, { error: err.message || String(err) });
-  }
+addRoute("POST", "/api/conversations/:scope/reload", async (_req, res) => {
+  sendJson(res, 410, { error: "gone", message: "Reload retired — activation recompiles the latest prompt" });
 });
 
 addRoute("POST", "/api/conversations/:scope/abort", async (req, res, params) => {
@@ -286,7 +275,7 @@ addRoute("GET", "/api/members/:id/core-prompt", async (req, res, params) => {
       memberName: global.name,
       agentDef,
       room,
-      docsRoot: join(getBossmodeDir(), "knowledge", "docs"),
+      docsRoot: join(getBossmodeDir(), "memory", "projects"),
       activeScopes: [scopeId],
     });
     sendJson(res, 200, {

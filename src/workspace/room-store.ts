@@ -244,7 +244,7 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
   const dir = roomDir(room.id);
   try {
     mkdirSync(dir, { recursive: true });
-    if (room.docsPath) mkdirSync(join(getBossmodeDir(), "knowledge", "docs", room.docsPath), { recursive: true });
+    if (room.docsPath) mkdirSync(join(getBossmodeDir(), "memory", "projects", room.docsPath), { recursive: true });
 
     // 0.20: no room-local team/agents materialization; agents resolve from global pool at activation.
 
