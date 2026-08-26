@@ -51,6 +51,16 @@ function truncate(s: string, max: number): string {
   return t.slice(0, Math.max(0, max - 1)).trimEnd() + "…";
 }
 
+/** List member skills for panel API (full descriptions, no budget ladder). */
+export function listMemberSkills(memberId: string): Array<{ name: string; path: string; description: string }> {
+  const skillsDir = memberSkillsDir(memberId);
+  return scanSkills(skillsDir).map((e) => ({
+    name: e.relPath.replace(/\/SKILL\.md$/, ""),
+    path: e.relPath,
+    description: e.description,
+  }));
+}
+
 function scanSkills(skillsDir: string): SkillCatalogEntry[] {
   if (!existsSync(skillsDir)) return [];
   let names: string[] = [];
