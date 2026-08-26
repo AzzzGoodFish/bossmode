@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import { MobileTopBar } from "../components/MobileTopBar";
 import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
 import {
@@ -336,22 +337,12 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 Off: new topics fork the room session at the anchor. On: members start with the topic guide only. Applies to topics created after you change this.
               </div>
             </div>
-            <button
-              onClick={handleTopicSeedModeToggle}
+            <ToggleSwitch
+              on={runtimeSettings.topicSeedMode === "fresh"}
+              onToggle={() => handleTopicSeedModeToggle()}
+              label="Start topic members fresh"
               disabled={runtimeSaving}
-              role="switch"
-              aria-checked={runtimeSettings.topicSeedMode === "fresh"}
-              aria-label="Start topic members fresh"
-              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
-                runtimeSettings.topicSeedMode === "fresh" ? "bg-accent" : "bg-surface-3"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  runtimeSettings.topicSeedMode === "fresh" ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
+            />
           </div>
         </div>
 

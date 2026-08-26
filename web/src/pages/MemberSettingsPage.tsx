@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { BackLink } from "../components/BackLink";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import { StaffBadge } from "../components/StaffBadge";
 import {
   getMemberDetail, getMemberScopes, getAvailableModels, getContacts,
@@ -334,17 +335,3 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-function ToggleSwitch({ on, onToggle, label }: { on: boolean; onToggle: (v: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={() => onToggle(!on)}
-      className={`relative shrink-0 w-9 h-5 rounded-full transition-colors cursor-pointer ${on ? "bg-accent" : "bg-line-strong"}`}
-    >
-      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-    </button>
-  );
-}
