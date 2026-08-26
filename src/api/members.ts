@@ -504,6 +504,50 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
   sendJson(res, 200, { scopes });
 });
 
+/** member.md read-only panel surface (identity batch-2 / designer contract). */
+addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
+  try {
+    const m = resolveMemberRef(params.id);
+    if (!m) {
+      sendJson(res, 404, { error: "not_found", message: "Member not found" });
+      return;
+    }
+    const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
+    const profile = readMemberProfile(m.id, m.name);
+    sendJson(res, 200, {
+      path: memberProfilePath(m.id),
+      frontmatter: {
+        name: profile.frontmatter.name,
+        title: profile.frontmatter.title ?? null,
+        description: profile.frontmatter.description ?? null,
+      },
+      body: profile.body,
+      charCount: profile.raw.length,
+      overBudget: profile.overBudget,
+      exists: profile.exists,
+    });
+  } catch (err) {
+    const e = errCode(err);
+    sendJson(res, e.status, { error: e.error, message: e.message });
+  }
+});
+
+/** Member skills/ directory list (reuses skill-catalog scan rules). */
+addRoute("GET", "/api/members/:id/skills", async (_req, res, params) => {
+  try {
+    const m = resolveMemberRef(params.id);
+    if (!m) {
+      sendJson(res, 404, { error: "not_found", message: "Member not found" });
+      return;
+    }
+    const { listMemberSkills } = await import("../engine/skill-catalog.js");
+    sendJson(res, 200, { skills: listMemberSkills(m.id) });
+  } catch (err) {
+    const e = errCode(err);
+    sendJson(res, e.status, { error: e.error, message: e.message });
+  }
+});
+
 addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
   try {
     const m = resolveMemberRef(params.id);
