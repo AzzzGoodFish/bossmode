@@ -13,7 +13,7 @@ beforeAll(async () => {
     configurable: true,
   });
   ({ mentionTextParts } = await import("../../web/src/components/MessageBubble.tsx"));
-  ({ compactModelId, memberModelAvailabilityLabel, memberMcpStatusLabel, memberMcpDisplayState } = await import("../../web/src/components/StationPanel.tsx"));
+  ({ compactModelId, memberModelAvailabilityLabel, memberMcpStatusLabel, memberMcpDisplayState } = await import("../../web/src/components/member-scope.tsx"));
 });
 
 describe("room member presentation", () => {

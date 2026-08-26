@@ -51,6 +51,8 @@ interface MainProps {
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
+  /** Member-page merge v1: roster detail navigates to the member page. */
+  onOpenMember?: (memberId: string) => void;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
   /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
@@ -87,6 +89,7 @@ export function Main({
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
   onNavigateToTask,
+  onOpenMember,
   onOpenMcpSettings,
   onOpenExtensionsSettings,
   onOpenTopicPage,
@@ -465,6 +468,7 @@ export function Main({
             onOpenExtensionsSettings={onOpenExtensionsSettings}
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
+            onOpenMember={(m) => onOpenMember?.(m.id || m.name)}
           />
         </ResizableRail>
 
