@@ -273,6 +273,8 @@ export type AgentRuntimeName = "pi-cli";
 export interface AgentMemberConfig extends MemberBase {
   type: "agent";
   agent: string;             // references agent definition name
+  /** member.md frontmatter title — UI card chip (replaces template label). */
+  title?: string;
   /** Optional member-level model override. When omitted, runtime uses the agent definition model. */
   model?: string;
   runtime: AgentRuntimeName;
