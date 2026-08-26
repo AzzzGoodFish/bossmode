@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent, reloadMemberResources,
-  getRoomPrinciples, getMemberPrinciples, getMemberMainline, getAgent, getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions,
-  getMemberScopedStats, getMemberMemoryAsset, getMemberCorePromptScoped, getConversationTools,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type Principles, type Mainline, type MainlineIndexEntry, type PromptAssetBudget, type AgentDetail, type MemberStats, type ExtensionRecord, type MemberActiveTool,
+  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
+  getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
+  getMemberScopedStats, getMemberCorePromptScoped, getConversationTools,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
@@ -20,7 +20,6 @@ import { ActivityTab, ThinkingTrace, ToolCard, ReplyCard, UserPromptCard, Compac
 interface StationPanelProps {
   members: string[];
   agentStatus: AgentStatusMap;
-  staleMembers?: Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }>;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
   /** Topic page: activity reads/watches this scope; member config still uses roomId. */
@@ -105,7 +104,7 @@ export function isAssignableMcpServer(server: McpServerSummary): boolean {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, staleMembers, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -242,16 +241,6 @@ export function StationPanel({ members, agentStatus, staleMembers, contextUsage,
     } catch (err) {
       console.error("Failed to compact member context", err);
       toast("Couldn’t compact this conversation. Try again.", "error");
-    }
-  }, [roomId, toast]);
-
-  const handleReloadMember = useCallback(async (member: MemberInfo) => {
-    try {
-      const result = await reloadMemberResources(roomId, member.id || member.name);
-      toast(result.message || `${member.name} reloaded`, result.reloaded ? "success" : "info");
-    } catch (err) {
-      console.error("Failed to reload member", err);
-      toast("Couldn’t apply the latest changes. Try again; restart the member if the problem continues.", "error");
     }
   }, [roomId, toast]);
 
@@ -502,7 +491,7 @@ This clears the member's working session memory and starts fresh. Room messages 
     try {
       const updated = await updateRoomMember(roomId, member.id, { extensions: next });
       setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
-      toast(`Saved. Reload ${member.name} to apply extension tools.`, "success");
+      toast("Saved.", "success");
     } catch (err) {
       console.error("Failed to save member extensions", err);
       toast("Couldn’t save extension access. Try again.", "error");
@@ -536,7 +525,7 @@ This clears the member's working session memory and starts fresh. Room messages 
           const hasUnread = unreadAgents?.has(name);
           const activity = currentActivityLine(feedEvents[name] || [], status, liveStreams[name]);
           const usage = contextUsage?.[name];
-          const agentLabel = displayAgentLabel(info?.agent || info?.sourceAgent || name);
+          const cardTitle = info?.title || null;
           const modelRef = info?.model || "";
           const modelLabel = compactModelId(modelRef, models);
           const isConfigured = !!info?.model && !!info?.credentialId;
@@ -566,8 +555,6 @@ This clears the member's working session memory and starts fresh. Room messages 
                 <RosterAvatar
                   name={name}
                   status={status}
-                  stale={!!staleMembers?.[name]}
-                  staleTitle={staleMembers?.[name] ? [staleMembers[name].contract && "App updated", staleMembers[name].mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""}
                   usage={usage}
                   onOpen={() => setSelectedMember(name)}
                 />
@@ -578,7 +565,7 @@ This clears the member's working session memory and starts fresh. Room messages 
                     <button
                       onClick={(e) => { e.stopPropagation(); setSelectedMember(name); }}
                       className="text-[12.5px] leading-none font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[40%]"
-                      title={`Configure ${name} · Agent: ${agentLabel}`}
+                      title={cardTitle ? `Configure ${name} · ${cardTitle}` : `Configure ${name}`}
                     >
                       <span className="truncate">{name}</span>
                       {hasUnread && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
@@ -784,7 +771,6 @@ This clears the member's working session memory and starts fresh. Room messages 
             activityScope={activityScope}
             member={memberInfos[selectedMember]}
             status={agentStatus[selectedMember] || "inactive"}
-            stale={staleMembers?.[selectedMember]}
             contextUsage={contextUsage[selectedMember]}
             existingMemberNames={members}
             models={models}
@@ -798,7 +784,6 @@ This clears the member's working session memory and starts fresh. Room messages 
             onSwitchModel={(model, credentialId) => handleSwitchModel(memberInfos[selectedMember], model, credentialId)}
             onSwitchThinking={(thinkingLevel) => handleSwitchThinking(memberInfos[selectedMember], thinkingLevel)}
             onCompact={() => handleCompactMember(memberInfos[selectedMember])}
-            onReload={() => handleReloadMember(memberInfos[selectedMember])}
             onRestart={() => handleRestartMember(memberInfos[selectedMember])}
             onResetSession={() => handleResetSession(memberInfos[selectedMember])}
             onToggleMcp={(server) => toggleMemberMcpServer(memberInfos[selectedMember], server)}
@@ -846,22 +831,6 @@ function availabilityTone(status?: string): string {
 
 type PanelTab = "overview" | "assets" | "activity" | "session";
 
-function BudgetMeter({ budget }: { budget?: PromptAssetBudget }) {
-  if (!budget) return null;
-  const tone = budgetTone(budget);
-  const numCls = tone === "over" ? "text-blocked" : tone === "warn" ? "text-think" : "text-ink-2";
-  const barCls = tone === "over" ? "bg-blocked" : tone === "warn" ? "bg-think" : "bg-accent";
-  return (
-    <span className="ml-auto flex items-center gap-2 shrink-0" title={budget.overLimit ? "Over budget — pending curation" : "Prompt asset capacity"}>
-      <span className="text-[10.5px] text-ink-4 whitespace-nowrap">
-        <span className={`font-semibold ${numCls}`}>{budget.pct}%</span> — {budget.usage.toLocaleString("en-US")} / {budget.limit.toLocaleString("en-US")}
-      </span>
-      <span className="w-[74px] h-[5px] rounded-full bg-surface-3 overflow-hidden">
-        <span className={`block h-full rounded-full ${barCls}`} style={{ width: `${Math.max(2, Math.min(100, budget.pct))}%` }} />
-      </span>
-    </span>
-  );
-}
 
 function AssetRevLine({ left, right }: { left: string; right?: string }) {
   return (
@@ -899,11 +868,10 @@ type PromptView = "markdown" | "raw";
  * preview; expanded = hint line merged with [Markdown | Raw] toggle in one
  * row (hint left truncated with title tooltip, toggle right) + content area
  * 320px max-height inner scroll. */
-function AccordionCard({ title, tag, hint, budget, preview, defaultView, empty, renderContent }: {
+function AccordionCard({ title, tag, hint, preview, defaultView, empty, renderContent }: {
   title: string;
   tag?: React.ReactNode;
   hint?: React.ReactNode;
-  budget?: PromptAssetBudget;
   preview: string;
   defaultView?: PromptView;
   empty?: React.ReactNode;
@@ -923,7 +891,7 @@ function AccordionCard({ title, tag, hint, budget, preview, defaultView, empty, 
           <ChevronRight size={13} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
           <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
           {tag}
-          <span className="ml-auto shrink-0">{budget && <BudgetMeter budget={budget} />}</span>
+
         </span>
         {!open && preview && (
           <span className="mt-1 flex items-center gap-2 min-w-0 pl-[36px]">
@@ -986,113 +954,9 @@ const INDEX_KIND_CLS: Record<string, string> = {
   msg: "bg-surface-3 text-ink-3",
 };
 
-function MainlineIndexList({ index, onJumpToMessage }: { index: MainlineIndexEntry[]; onJumpToMessage?: (messageId: string) => Promise<void> }) {
-  if (index.length === 0) return null;
-  const jumpMsg = (entry: MainlineIndexEntry) => {
-    if (!entry.msgId || entry.stale || !onJumpToMessage) return;
-    void onJumpToMessage(entry.msgId);
-  };
-  return (
-    <ul className="mt-2.5 flex flex-col gap-1.5">
-      {index.map((entry, i) => {
-        const clickableMsg = entry.kind === "msg" && !!entry.msgId && !entry.stale && !!onJumpToMessage;
-        const display = entry.kind === "msg" && entry.summary
-          ? (entry.note ? entry.note : entry.summary)
-          : entry.note;
-        return (
-          <li key={`${entry.raw}:${i}`}>
-            <button
-              type="button"
-              disabled={!clickableMsg}
-              onClick={() => jumpMsg(entry)}
-              title={entry.kind === "msg" && entry.stale ? "Message no longer available" : entry.kind === "msg" && clickableMsg ? "Jump to message" : undefined}
-              className={`w-full flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${entry.stale ? "border-dashed border-line opacity-60 cursor-default" : "border-line-soft bg-surface-1"} ${clickableMsg ? "hover:bg-surface-2 hover:border-line-strong cursor-pointer" : "cursor-default"}`}
-            >
-              {entry.kind !== "other" && (
-                <span className={`text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 shrink-0 ${INDEX_KIND_CLS[entry.kind]}`}>{entry.kind}</span>
-              )}
-              <span className={`font-mono text-[11.5px] text-ink-1 truncate ${entry.stale ? "line-through" : ""}`}>{entry.kind === "other" ? entry.note : entry.ref}</span>
-              {entry.stale && <span className="text-[9.5px] font-bold uppercase text-blocked shrink-0">stale</span>}
-              {entry.kind !== "other" && display && (
-                <span className="ml-auto text-[11px] text-ink-4 truncate max-w-[40%] text-right shrink-0">{display}</span>
-              )}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
 
-function revisionLine(asset: Principles | Mainline): string {
-  return `revision ${asset.revision} · updated ${formatRelativeTime(asset.updatedAt)}`;
-}
 
-function PrinciplesCard({ title, hint, principles, full, emptyTitle, emptyHint }: {
-  title: string;
-  hint: string;
-  principles: Principles | null;
-  full?: boolean;
-  emptyTitle: string;
-  emptyHint: string;
-}) {
-  void full; // accordion caps content height uniformly (320px) — the old full/non-full split is gone
-  return (
-    <AccordionCard
-      title={title}
-      budget={principles?.budget}
-      hint={hint}
-      preview={principles ? firstContentLine(principles.content) : "Loading…"}
-      empty={principles === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : principles.content.trim() ? undefined : <EmptyAsset title={emptyTitle} hint={emptyHint} />}
-      renderContent={(view) => (
-        <>
-          <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-            {view === "markdown" ? <Markdown content={principles!.content} /> : principles!.content}
-          </div>
-          <AssetRevLine left={revisionLine(principles!)} right="member-curated" />
-        </>
-      )}
-    />
-  );
-}
 
-function MainlineCard({ member, mainline, full, onJumpToMessage }: { member: MemberInfo; mainline: Mainline | null; full?: boolean; onJumpToMessage?: (messageId: string) => Promise<void> }) {
-  void full;
-  return (
-    <AccordionCard
-      title="Mainline"
-      tag={<AssetTag>focus · index</AssetTag>}
-      budget={mainline?.budget}
-      hint="What this member is working on — durable focus plus live pointers into docs, tasks and messages."
-      preview={mainline ? firstContentLine(mainline.content) : "Loading…"}
-      empty={mainline === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : mainline.content.trim() ? undefined : <EmptyAsset title="No mainline yet" hint={`Once @${member.name} settles into work, it pins its focus and key references here.`} />}
-      renderContent={(view) => (
-        <>
-          {mainline!.parsed.focus && (
-            <div className="mb-2.5">
-              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-4 mb-1">Focus</div>
-              <div className={`text-[12.5px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-                {view === "markdown" ? <Markdown content={mainline!.parsed.focus} /> : mainline!.parsed.focus}
-              </div>
-            </div>
-          )}
-          {mainline!.parsed.index.length > 0 && (
-            <div className="mb-2.5">
-              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-4 mb-1">Index</div>
-              <MainlineIndexList index={mainline!.parsed.index} onJumpToMessage={onJumpToMessage} />
-            </div>
-          )}
-          <AssetRevLine
-            left={revisionLine(mainline!)}
-            right={mainline!.parsed.index.length > 0
-              ? `${mainline!.parsed.index.length} pinned references${mainline!.parsed.index.some((i) => i.stale) ? " · stale shown honestly" : ""}`
-              : undefined}
-          />
-        </>
-      )}
-    />
-  );
-}
 
 function formatDuration(ms: number): string {
   if (ms <= 0) return "0h";
@@ -1140,81 +1004,60 @@ function StatusGrid({ status, member, contextUsage, stats, models, dm }: {
   );
 }
 
-/** Overview memory block: budget usage only, no content (content lives in
- * Prompt assets). */
-function MemoryBudgets({ principlesBudget, mainlineBudget }: { principlesBudget?: PromptAssetBudget; mainlineBudget?: PromptAssetBudget }) {
-  return (
-    <PanelCard title="Memory" tag={<AssetTag>principles · mainline</AssetTag>} hint="How full this member's persistent memory is. See Prompt assets for content.">
-      <div className="space-y-2.5 mt-3">
-        <div>
-          <div className="flex items-center justify-between text-[11px] text-ink-4 mb-1"><span>Principles</span><span>{principlesBudget ? formatBudgetShort(principlesBudget) : "—"}</span></div>
-          <BudgetBar budget={principlesBudget} />
-        </div>
-        <div>
-          <div className="flex items-center justify-between text-[11px] text-ink-4 mb-1"><span>Mainline</span><span>{mainlineBudget ? formatBudgetShort(mainlineBudget) : "—"}</span></div>
-          <BudgetBar budget={mainlineBudget} />
-        </div>
-      </div>
-    </PanelCard>
-  );
-}
 
-function formatBudgetShort(budget: PromptAssetBudget): string {
-  return `${formatTokens(budget.usage)}/${formatTokens(budget.limit)}`;
-}
 
-function BudgetBar({ budget }: { budget?: PromptAssetBudget }) {
-  const pct = budget ? Math.max(2, Math.min(100, budget.pct)) : 0;
-  const tone = !budget ? "bg-surface-3" : budget.overLimit ? "bg-blocked" : budget.pct >= 80 ? "bg-think" : "bg-accent";
-  return (
-    <div className="h-2 rounded-full bg-surface-3 overflow-hidden">
-      <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
 
-function IdentityCard({ member }: { member: MemberInfo }) {
-  const agentName = member.agent || member.sourceAgent || member.name;
-  const [agent, setAgent] = useState<AgentDetail | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    setAgent(null);
-    setLoadFailed(false);
-    getAgent(agentName)
-      .then((detail) => { if (!cancelled) setAgent(detail); })
-      .catch(() => { if (!cancelled) setLoadFailed(true); });
-    return () => { cancelled = true; };
-  }, [agentName]);
-  // Agents without skills metadata legitimately have none (built-in templates ship without it).
-  const skills = agent?.skills ?? [];
-  const description = agent?.description ?? "";
-  const rawText = [displayAgentLabel(agent?.name || agentName), description, skills.length ? `Skills: ${skills.join(", ")}` : ""].filter(Boolean).join("\n\n");
+/** member.md — the panel's single memory asset (batch-2 §2.2): Markdown body,
+ * file path, over-budget nudge, and the one-line guidance that replaces the old
+ * write_memory note ("want them to remember something? say it in chat"). */
+function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | null; memberName: string }) {
   return (
     <AccordionCard
-      title="Identity"
-      tag={<AssetTag>from Agent · stable</AssetTag>}
-      hint={<>Who this member is. Defined by the <b className="text-ink-2">{displayAgentLabel(agentName)}</b> Agent template; identical across rooms that use it.</>}
-      preview={description ? firstContentLine(description) : displayAgentLabel(agentName)}
-      empty={loadFailed ? <EmptyAsset title="Agent template unavailable" hint="The Agent definition could not be loaded; this member still runs on its saved configuration." /> : !agent ? <div className="text-xs text-ink-4 py-1">Loading…</div> : undefined}
+      title="member.md"
+      tag={<AssetTag>persona · self-maintained</AssetTag>}
+      hint={<>
+        This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.
+        {profile?.path ? <span className="block mt-1 font-mono text-[10px] text-ink-4 truncate" title={profile.path}>{profile.path}</span> : null}
+      </>}
+      preview={profile ? (firstContentLine(profile.body) || "Blank slate — the persona grows from your first conversations.") : "Loading…"}
+      empty={profile === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : (profile as MemberProfileDoc & { __failed?: boolean }).__failed ? <EmptyAsset title="Unavailable" hint="member.md could not be loaded." /> : profile.body.trim() ? undefined : <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />}
       renderContent={(view) => (
         <>
-          <div className={`text-[12.5px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-            {view === "markdown" ? (
-              <>
-                <b className="text-ink-1">{displayAgentLabel(agent!.name)}</b>
-                {description ? ` — ${description}` : ""}
-              </>
-            ) : rawText}
+          <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+            {view === "markdown" ? <Markdown content={profile!.body} /> : profile!.body}
           </div>
-          {skills.length > 0 && (
-            <div className="mt-1.5 text-[11.5px] text-ink-4">
-              Skills: {skills.map((skill) => <code key={skill} className="bg-surface-3 rounded px-1 py-0.5 text-[11px] mr-1">{skill}</code>)}
-            </div>
-          )}
+          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={profile!.path}>{profile!.path}</div>
+          {profile!.overBudget && <div className="mt-1.5 text-[11px] text-think">Persona is getting long (over 4,000 chars) — consider asking {memberName} to trim it.</div>}
         </>
       )}
     />
+  );
+}
+
+/** The member's skills/ directory, read-only (batch-2 §2.2): the global Skills
+ * page is gone — skills are the member's private, self-maintained assets. */
+function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null }) {
+  return (
+    <PanelCard
+      title="Skills"
+      tag={<AssetTag>{skills === null ? "…" : `${skills.length} on file`}</AssetTag>}
+      hint="Reusable work instructions the member maintains for itself. Read-only here — the member writes them."
+    >
+      {skills === null ? (
+        <div className="text-xs text-ink-4 py-1">Loading…</div>
+      ) : skills.length === 0 ? (
+        <div className="text-[12px] text-ink-4 py-1">No skills yet — the member writes its own as recurring work settles into routine.</div>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {skills.map((sk) => (
+            <div key={sk.path} className="rounded-lg border border-line-soft bg-surface-2 px-3 py-2">
+              <div className="text-[12px] font-semibold text-ink-1">{sk.name}</div>
+              {sk.description ? <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{sk.description}</div> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </PanelCard>
   );
 }
 
@@ -1259,11 +1102,9 @@ export function MemberConfigPanel({
   onSwitchModel,
   onSwitchThinking,
   onCompact,
-  onReload,
   onRestart,
   onResetSession,
   onToggleMcp,
-  stale,
   installedExtensions,
   extensionsLoadStatus,
   onRetryExtensions,
@@ -1292,11 +1133,9 @@ export function MemberConfigPanel({
   onSwitchModel: (model: string | null, credentialId: string | null) => void;
   onSwitchThinking: (thinkingLevel: string | null) => void;
   onCompact: () => void;
-  onReload: () => void | Promise<void>;
   onRestart: () => void;
   onResetSession: () => void;
   onToggleMcp: (server: string) => void;
-  stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean };
   installedExtensions: ExtensionRecord[];
   extensionsLoadStatus: "loading" | "ready" | "error";
   onRetryExtensions: () => void;
@@ -1312,9 +1151,11 @@ export function MemberConfigPanel({
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(member.name);
   const [savingName, setSavingName] = useState(false);
-  const [roomPrinciples, setRoomPrinciples] = useState<Principles | null>(null);
-  const [memberPrinciples, setMemberPrinciples] = useState<Principles | null>(null);
-  const [mainline, setMainline] = useState<Mainline | null>(null);
+  // Batch-2 §2.2 content switch: the panel's memory asset is now exactly one
+  // file (member.md) plus the member's skills/ list — principles/mainline/
+  // room-principles are retired asset classes.
+  const [profile, setProfile] = useState<MemberProfileDoc | null>(null);
+  const [memberSkills, setMemberSkills] = useState<MemberSkillEntry[] | null>(null);
   const [stats, setStats] = useState<MemberStats | null>(null);
   const [corePrompt, setCorePrompt] = useState<{ content: string; charCount: number } | null>(null);
   const [activeToolsReloadKey, setActiveToolsReloadKey] = useState(0);
@@ -1323,43 +1164,17 @@ export function MemberConfigPanel({
 
   useEffect(() => {
     let cancelled = false;
-    setRoomPrinciples(null);
-    setMemberPrinciples(null);
-    setMainline(null);
-    if (dmScope) {
-      // DM scope: member assets come from the members-shaped memory API; the
-      // room-principles layer does not exist here (card hidden below).
-      Promise.all([
-        getMemberMemoryAsset(dmScope.memberId, "principles", dmScope.scopeId),
-        getMemberMemoryAsset(dmScope.memberId, "mainline", dmScope.scopeId),
-      ]).then(([principlesAsset, mainlineAsset]) => {
-        if (cancelled) return;
-        setMemberPrinciples(principlesAsset);
-        setMainline(mainlineAsset as Mainline);
-      }).catch(() => {
-        if (cancelled) return;
-        setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
-        setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
-      });
-      return () => { cancelled = true; };
-    }
-    Promise.all([
-      getRoomPrinciples(roomId),
-      getMemberPrinciples(roomId, member.id || member.name),
-      getMemberMainline(roomId, member.id || member.name),
-    ]).then(([roomAsset, memberAsset, mainlineAsset]) => {
-      if (cancelled) return;
-      setRoomPrinciples(roomAsset);
-      setMemberPrinciples(memberAsset);
-      setMainline(mainlineAsset);
-    }).catch(() => {
-      if (cancelled) return;
-      setRoomPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
-      setMemberPrinciples({ content: "", revision: 0, contentHash: "", contentLength: 0 });
-      setMainline({ content: "", revision: 0, contentHash: "", contentLength: 0, parsed: { focus: "", index: [] } });
-    });
+    setProfile(null);
+    setMemberSkills(null);
+    const profileId = dmScope ? dmScope.memberId : (member.id || member.name);
+    getMemberProfile(profileId)
+      .then((doc) => { if (!cancelled) setProfile(doc); })
+      .catch(() => { if (!cancelled) setProfile({ path: "", frontmatter: { name: member.name }, body: "", charCount: 0, overBudget: false, __failed: true } as MemberProfileDoc & { __failed?: boolean }); });
+    getMemberSkills(profileId)
+      .then((r) => { if (!cancelled) setMemberSkills(r.skills); })
+      .catch(() => { if (!cancelled) setMemberSkills([]); });
     return () => { cancelled = true; };
-  }, [roomId, member.id, member.name, dmScope?.scopeId, dmScope?.memberId]);
+  }, [member.id, member.name, dmScope?.scopeId, dmScope?.memberId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1400,19 +1215,13 @@ export function MemberConfigPanel({
     }
   };
 
-  // Tab badge and footer count the member's own assets (room principles are shared context,
-  // not member assets): principles = 1, mainline = 2 (focus + index) per the approved prototype.
-  const memberAssetCount = promptAssetCount([memberPrinciples, mainline]);
-  const badgeCount = memberAssetCount === null
-    ? null
-    : (memberPrinciples!.content.trim() ? 1 : 0) + (mainline!.content.trim() ? 2 : 0);
 
   return (
     <div className="flex h-full flex-col">
       <div className="px-5 pt-5 flex flex-col gap-4 shrink-0">
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" stale={!!stale} staleTitle={stale ? [stale.contract && "App updated", stale.mounts && "Configuration changed"].filter(Boolean).join(" · ") + " — Reload to apply" : ""} />
+            <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {editingName ? (
@@ -1449,7 +1258,7 @@ export function MemberConfigPanel({
                 <div className="text-[11px] text-blocked mt-1">This room already has a member named {draftNameTrimmed}. Pick another name.</div>
               ) : null}
               <div className="text-xs text-ink-4 mt-1 truncate">
-                {displayAgentLabel(member.agent || member.sourceAgent || member.name)} · <span className="font-mono">@{member.name}</span>
+                {member.title ? `${member.title} · ` : ""}<span className="font-mono">@{member.name}</span>
                 {member.createdAt ? ` · ${dmScope ? "member" : "in this room"} since ${formatSinceDate(member.createdAt)}` : ""}
               </div>
             </div>
@@ -1460,7 +1269,7 @@ export function MemberConfigPanel({
         </header>
 
         <div className="flex gap-1 rounded-xl border border-line-soft bg-inset p-1">
-          {([["overview", "Overview"], ["assets", "Prompt assets"], ["activity", "Activity"], ["session", "Session & tools"]] as const).map(([key, label]) => (
+          {([["overview", "Overview"], ["assets", "Profile & skills"], ["activity", "Activity"], ["session", "Session & tools"]] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -1468,8 +1277,6 @@ export function MemberConfigPanel({
               className={`flex-1 rounded-lg px-2 py-1.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${tab === key ? "bg-surface-1 text-ink-1 border border-line-soft shadow-sm" : "text-ink-3 hover:text-ink-1 border border-transparent"}`}
             >
               {label}
-              {key === "assets" && badgeCount !== null ? <span className="ml-1 text-[11px] font-normal text-ink-4">{badgeCount}</span> : null}
-              {key === "session" && stale ? <span className="inline-block ml-1 w-1.5 h-1.5 rounded-full bg-blocked align-middle" title="Reload needed" /> : null}
             </button>
           ))}
         </div>
@@ -1489,7 +1296,6 @@ export function MemberConfigPanel({
         {tab === "overview" && (
           <div className="space-y-4 pb-6">
             <StatusGrid status={status} member={member} contextUsage={contextUsage} stats={stats} models={models} dm={!!dmScope} />
-            <MemoryBudgets principlesBudget={memberPrinciples?.budget} mainlineBudget={mainline?.budget} />
             <PanelCard title="Model" tag={<AssetTag tone={dmScope ? "dm" : "room"}>{dmScope ? "this DM" : "this room"}</AssetTag>} hint={dmScope ? "Model and thinking level for this member in this DM. Applies on the next turn." : "Model and thinking level for this member in this room. Applies on the next turn."}>
               <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
                 <label className="block space-y-1.5 min-w-0">
@@ -1523,36 +1329,9 @@ export function MemberConfigPanel({
 
         {tab === "assets" && (
           <div className="space-y-4 pb-6">
-            <IdentityCard member={member} />
+            <MemberMdCard profile={profile} memberName={member.name} />
+            <MemberSkillsCard skills={memberSkills} />
             <CoreCard corePrompt={corePrompt} />
-            <PrinciplesCard
-              title="Principles"
-              hint="Member-level principles. Injected into every prompt compile; takes effect on Reload / next activation."
-              principles={memberPrinciples}
-              full
-              emptyTitle="Empty"
-              emptyHint="Nothing curated yet."
-            />
-            <MainlineCard member={member} mainline={mainline} full onJumpToMessage={onJumpToMessage} />
-            {!dmScope && (
-              <AccordionCard
-                title="Room principles"
-                tag={<AssetTag>shared · leader-written</AssetTag>}
-                budget={roomPrinciples?.budget}
-                hint="Room-wide working rules, shared by all members."
-                preview={roomPrinciples ? firstContentLine(roomPrinciples.content) : "Loading…"}
-                empty={roomPrinciples === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : roomPrinciples.content.trim() ? undefined : <EmptyAsset title="Empty" hint="No room principles yet — the Room leader can write them in chat." />}
-                renderContent={(view) => (
-                  <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-                    {view === "markdown" ? <Markdown content={roomPrinciples!.content} /> : roomPrinciples!.content}
-                  </div>
-                )}
-              />
-            )}
-            <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 px-3 py-2 text-[11px] text-ink-3 leading-relaxed">
-              <span className="font-extrabold text-accent-ink shrink-0">i</span>
-              <span>Assets are written by the member through its own tools (<span className="font-mono">read/edit/write_memory</span>), with a recorded reason per change. To change them, just tell @{member.name} in chat — e.g. “remember to always run serial tests”.</span>
-            </div>
           </div>
         )}
 
@@ -1588,24 +1367,6 @@ export function MemberConfigPanel({
                     className="shrink-0 min-w-20 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-sm cursor-pointer transition-colors hover:bg-surface-3 hover:text-ink-1 hover:border-line-strong active:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
                     Run
-                  </button>
-                </div>
-                <div className="rounded-xl border border-accent/30 bg-accent-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-accent-ink leading-5">Reload</div>
-                    <div className="text-[11px] text-ink-3 leading-relaxed">Apply the latest prompts, principles, mainline and tools without clearing the conversation.</div>
-                    {stale && <div className="mt-1">
-                      {stale.contract && <div className="flex items-center gap-1.5 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />App updated — Reload to apply; Reset if the update reworked the conversation contract.</div>}
-                      {stale.mounts && <div className="flex items-center gap-1.5 text-[11px] text-blocked leading-snug"><span className="w-1.5 h-1.5 rounded-full bg-blocked shrink-0" />{(stale.mounts.fields || []).map(f => f === "mcpServers" ? "MCP servers" : "Extensions").join(" · ")} changed — Reload to apply.</div>}
-                    </div>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { void Promise.resolve(onReload()).finally(() => setActiveToolsReloadKey((k) => k + 1)); }}
-                    className="relative shrink-0 min-w-20 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm cursor-pointer transition-opacity hover:opacity-90 active:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                  >
-                    Reload
-                    {stale && <span className="stale-dot" style={{ top: -3, right: -3 }} />}
                   </button>
                 </div>
                 <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
@@ -1902,11 +1663,9 @@ function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> 
 /** Roster avatar = badge button + hover usage bubble (fish 2026-08-21:
  * "10% · 100k / 1000k" on hover, not inline). Bubble replaces the native
  * title when usage data exists (no double tooltips). */
-function RosterAvatar({ name, status, stale, staleTitle, usage, onOpen }: {
+function RosterAvatar({ name, status, usage, onOpen }: {
   name: string;
   status: string;
-  stale: boolean;
-  staleTitle: string;
   usage?: ContextUsageData;
   onOpen: () => void;
 }) {
@@ -1938,7 +1697,7 @@ function RosterAvatar({ name, status, stale, staleTitle, usage, onOpen }: {
         title={usagePct === null ? `Configure ${name} · ${statusLabel(status)}` : undefined}
         aria-label={`Configure ${name} · ${statusLabel(status)}${usagePct !== null ? ` · context ${usagePct}%` : ""}`}
       >
-        <RosterBadge name={name} status={status} stale={stale} staleTitle={staleTitle} usagePct={usagePct} usageTone={usageTone} />
+        <RosterBadge name={name} status={status} usagePct={usagePct} usageTone={usageTone} />
       </button>
       {bubble && usagePct !== null && usage && createPortal(
         <div
@@ -1961,11 +1720,9 @@ function RosterAvatar({ name, status, stale, staleTitle, usage, onOpen }: {
  * (fill = percentage, tone heats amber ≥70 / red ≥90); the member's live
  * status becomes a 5-o'clock presence dot — two stacked rings read as mud.
  * No usage data (provider silent) → plain disc, no fake track. */
-function RosterBadge({ name, status, stale, staleTitle, usagePct, usageTone }: {
+function RosterBadge({ name, status, usagePct, usageTone }: {
   name: string;
   status: string;
-  stale?: boolean;
-  staleTitle?: string;
   usagePct: number | null;
   usageTone: "ok" | "warn" | "over" | null;
 }) {
@@ -1986,7 +1743,6 @@ function RosterBadge({ name, status, stale, staleTitle, usagePct, usageTone }: {
         {name.charAt(0).toUpperCase()}
       </span>
       {status === "working" && <span className="absolute bottom-[1px] right-[1px] w-1.5 h-1.5 rounded-full bg-onair animate-pulse ring-1 ring-surface-1" />}
-      {stale && <span className="stale-dot on" title={staleTitle || "Reload needed"} />}
     </span>
   );
 }

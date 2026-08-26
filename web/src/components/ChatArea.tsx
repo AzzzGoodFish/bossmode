@@ -20,7 +20,6 @@ interface ChatAreaProps {
   onCloseSearch?: () => void;
   members?: string[];
   onNavigateToTask?: (taskId: string) => void;
-  onNavigateToKnowledge?: (path: string) => void;
   onPreviewArtifact?: (preview: MessageArtifactPreviewState) => void;
   onPreviewAttachment?: (preview: ChatAttachmentPreviewState) => void;
   activeArtifactPreview?: { messageId: string; selectedIndex: number } | null;
@@ -35,7 +34,7 @@ interface ChatAreaProps {
 }
 
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onNavigateToKnowledge, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
   const [atBottom, setAtBottom] = useState(true);
@@ -229,7 +228,6 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       messageId={msg.id}
                       meta={msg.knowledge_event_meta}
                       onPreview={onPreviewArtifact ? () => onPreviewArtifact({ kind: "message", messageId: msg.id, title: msg.knowledge_event_meta!.title, artifacts: [msg.knowledge_event_meta!.path], selectedIndex: 0 }) : undefined}
-                      onOpenInLibrary={onNavigateToKnowledge ? () => onNavigateToKnowledge(msg.knowledge_event_meta!.path) : undefined}
                     />
                   ) : msg.type === "topic_event" && msg.topic_event_meta ? (
                     <TopicEventCard meta={msg.topic_event_meta} roomId={roomId} onOpen={onOpenTopic ? () => onOpenTopic(msg.topic_event_meta!.topicId) : undefined} onJumpToAnchor={msg.topic_event_meta.anchorMessageId ? () => void scrollToMessage(msg.topic_event_meta!.anchorMessageId!) : undefined} />
@@ -415,12 +413,10 @@ function KnowledgeEventCard({
   messageId,
   meta,
   onPreview,
-  onOpenInLibrary,
 }: {
   messageId: string;
   meta: KnowledgeEventMeta;
   onPreview?: () => void;
-  onOpenInLibrary?: () => void;
 }) {
   const verb = meta.tool === "write" ? "updated the document" : "edited the document";
   return (
@@ -443,11 +439,6 @@ function KnowledgeEventCard({
           </span>
         )}
         <span className="font-mono text-[10px] text-ink-4 truncate max-w-[200px]" title={meta.path}>{meta.path}</span>
-        {onOpenInLibrary && (
-          <button onClick={onOpenInLibrary} className="shrink-0 text-[10px] text-ink-4 hover:text-accent-ink cursor-pointer underline-offset-2 hover:underline">
-            Open in Library
-          </button>
-        )}
       </div>
     </div>
   );

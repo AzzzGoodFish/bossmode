@@ -69,6 +69,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
       id: detail.memberId,
       name: detail.name,
       agent: detail.agentTemplate,
+      title: detail.title ?? null,
       model: eff?.model ?? detail.global?.model ?? null,
       credentialId: eff?.credentialId ?? detail.global?.credentialId ?? null,
       thinkingLevel: eff?.thinkingLevel ?? detail.global?.thinkingLevel ?? "",
@@ -252,16 +253,6 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
     }
   }, [dmScopeId, memberId, member?.name, toast]);
 
-  const handleReload = useCallback(async () => {
-    try {
-      const result = await conversationMemberAction(dmScopeId, memberId, "reload");
-      toast(result.message || `${member?.name} reloaded`, result.reloaded ? "success" : "info");
-    } catch (err) {
-      console.error("Failed to reload member", err);
-      toast("Couldn’t apply the latest changes. Try again; restart the member if the problem continues.", "error");
-    }
-  }, [dmScopeId, memberId, member?.name, toast]);
-
   const handleResetSession = useCallback(async () => {
     const ok = await confirm(`Reset session for @${member?.name}?\n\nThis clears the member's working session memory and starts fresh. Messages and activity history stay visible.`);
     if (!ok) return;
@@ -329,7 +320,7 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
           >
             <StaffBadge name={member.name} status={statusFromAgent(status)} size="sm" />
             <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{member.name}</h2>
-            <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{member.agentTemplate}</span>
+            {member.title ? <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{member.title}</span> : null}
             <span className="text-[11px] text-ink-4">
               {status === "working" ? <span className="text-onair font-medium">● Working</span> : "Idle"}
             </span>
@@ -488,7 +479,6 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             onSwitchModel={handleSwitchModel}
             onSwitchThinking={handleSwitchThinking}
             onCompact={handleCompact}
-            onReload={handleReload}
             onRestart={() => { /* hidden in dm scope — restart needs a dm-safe route (follow-up) */ }}
             onResetSession={handleResetSession}
             onToggleMcp={handleToggleMcp}

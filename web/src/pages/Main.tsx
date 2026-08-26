@@ -6,7 +6,6 @@ import { MobileDrawer } from "../components/MobileDrawer";
 import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
 import { ContractDriftDialog } from "../components/ContractDriftDialog";
-import { StalePill } from "../components/StalePill";
 import { Search, Plus, Settings, X } from "lucide-react";
 import { TasksTab } from "./TasksTab";
 import {
@@ -52,7 +51,6 @@ interface MainProps {
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
-  onNavigateToKnowledge?: (path: string) => void;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
   /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
@@ -89,7 +87,6 @@ export function Main({
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
   onNavigateToTask,
-  onNavigateToKnowledge,
   onOpenMcpSettings,
   onOpenExtensionsSettings,
   onOpenTopicPage,
@@ -135,7 +132,6 @@ export function Main({
     room,
     messages,
     agentStatus,
-    staleMembers,
     contextUsage,
     loading,
     hasMore,
@@ -366,7 +362,6 @@ export function Main({
 
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <TopicRailToggle open={topicRailOpen} activeCount={topicActiveCount} onToggle={toggleTopicRail} />
-          <StalePill roomId={room.id} staleMembers={staleMembers} agentStatus={displayAgentStatus} />
           <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
             {reconnecting && <span className="text-[10px] text-think animate-pulse hidden sm:block">reconnecting</span>}
             {!connected && !reconnecting && <span className="text-[10px] text-blocked hidden sm:block">offline</span>}
@@ -402,7 +397,7 @@ export function Main({
         <div className="flex-1 flex flex-col min-w-0">
           {view === "chat" ? (
             <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onNavigateToKnowledge={onNavigateToKnowledge} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
+              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
                 if (!selectedRoomId) return;
                 const firstLine = (msg.content || "").split("\n").find((l) => l.trim())?.trim() ?? "";
                 const excerpt = (msg.content || "").replace(/\s+/g, " ").slice(0, 120);
@@ -463,7 +458,6 @@ export function Main({
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}
-            staleMembers={staleMembers}
             contextUsage={displayContextUsage}
             roomId={room.id}
             onJumpToMessage={jumpToMessage}
@@ -480,8 +474,7 @@ export function Main({
             <StationPanel
               members={displayMembers}
               agentStatus={displayAgentStatus}
-              staleMembers={staleMembers}
-              contextUsage={displayContextUsage}
+                contextUsage={displayContextUsage}
               roomId={room.id}
               onJumpToMessage={jumpToMessage}
               onOpenMcpSettings={onOpenMcpSettings}
