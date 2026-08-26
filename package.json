@@ -21,6 +21,7 @@
   "files": [
     "dist",
     "templates",
+    "assets/skills",
     "web/dist",
     "scripts/migrate-identity-memory-v1.mjs",
     "vendor/pi-mcp-adapter/*.ts",

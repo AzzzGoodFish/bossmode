@@ -191,7 +191,15 @@ function buildEnvironmentSegment(args: {
     lines.push(`- Your skills: ${skillsPath}`);
     lines.push(...catalog.lines);
     lines.push(
-      `  Read a skill's SKILL.md with the read tool when you need it. To make a recurring procedure reusable, write it as a new SKILL.md there.`,
+      `  Read a skill's SKILL.md with the read tool when you need it. To make a recurring procedure reusable, write it as a new SKILL.md under your skills/ directory.`,
+    );
+  }
+
+  // Platform guide pointer (rc.7) — details live in bossmode-guide skill, progressive disclosure.
+  if (catalog.platformSkillsDir) {
+    const guidePath = `${catalog.platformSkillsDir}/bossmode-guide/SKILL.md`;
+    lines.push(
+      `- When unsure how to manage your identity, memory dirs, or skills, read the platform guide: ${guidePath}`,
     );
   }
 
