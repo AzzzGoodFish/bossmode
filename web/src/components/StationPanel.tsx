@@ -1015,7 +1015,10 @@ function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | nul
     <AccordionCard
       title="member.md"
       tag={<AssetTag>persona · self-maintained</AssetTag>}
-      hint={<>This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.</>}
+      hint={<>
+        This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.
+        {profile?.path ? <span className="block mt-1 font-mono text-[10px] text-ink-4 truncate" title={profile.path}>{profile.path}</span> : null}
+      </>}
       preview={profile ? (firstContentLine(profile.body) || "Blank slate — the persona grows from your first conversations.") : "Loading…"}
       empty={profile === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : (profile as MemberProfileDoc & { __failed?: boolean }).__failed ? <EmptyAsset title="Unavailable" hint="member.md could not be loaded." /> : profile.body.trim() ? undefined : <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />}
       renderContent={(view) => (
