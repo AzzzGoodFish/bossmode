@@ -288,19 +288,12 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               <div className="text-sm font-medium text-ink-1">Continue previous sessions</div>
               <div className="text-xs text-ink-3 mt-0.5">Continue each member’s conversation after Bossmode restarts. Changes apply to sessions started afterward.</div>
             </div>
-            <button
-              onClick={handleSessionResumeToggle}
+            <ToggleSwitch
+              on={!!runtimeSettings.sessionResume}
+              onToggle={() => handleSessionResumeToggle()}
+              label="Continue previous sessions"
               disabled={runtimeSaving}
-              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
-                runtimeSettings.sessionResume ? "bg-accent" : "bg-surface-3"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  runtimeSettings.sessionResume ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
+            />
           </div>
         </div>
 
@@ -313,19 +306,12 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
                 General agents are unchanged. Reload member after changing.
               </div>
             </div>
-            <button
-              onClick={handlePiBuiltinPromptToggle}
+            <ToggleSwitch
+              on={!!runtimeSettings.piBuiltinPrompt}
+              onToggle={() => handlePiBuiltinPromptToggle()}
+              label="Built-in prompt"
               disabled={runtimeSaving}
-              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${
-                runtimeSettings.piBuiltinPrompt ? "bg-accent" : "bg-surface-3"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  runtimeSettings.piBuiltinPrompt ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
+            />
           </div>
         </div>
 
@@ -731,14 +717,12 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
               <div className="text-xs text-ink-3 mt-0.5">Add the servers you use here, then assign them from each member profile.</div>
               {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} configured</div>}
             </div>
-            <button
-              onClick={() => setEnabled(!enabled)}
+            <ToggleSwitch
+              on={enabled}
+              onToggle={(v) => setEnabled(v)}
+              label={enabled ? "Disable MCP servers" : "Enable MCP servers"}
               disabled={!settings || saving}
-              className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-60 ${enabled ? "bg-accent" : "bg-surface-3"}`}
-              aria-label={enabled ? "Disable MCP servers" : "Enable MCP servers"}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
-            </button>
+            />
           </div>
           {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
           <details className="rounded border border-line-soft bg-inset/50 p-3">

@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { Sheet } from "./Sheet";
+import { ToggleSwitch } from "./ToggleSwitch";
 import { Markdown } from "./Markdown";
 import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
@@ -1440,14 +1441,12 @@ export function MemberConfigPanel({
                           </div>
                           {ext.error && <div className="text-[11px] text-blocked mt-1">{ext.error}</div>}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onToggleExtension(ext.name)}
-                          className={`relative w-10 h-5 rounded-full transition-colors shrink-0 cursor-pointer ${checked ? "bg-accent" : "bg-surface-3"}`}
+                        <ToggleSwitch
+                          on={checked}
+                          onToggle={() => onToggleExtension(ext.name)}
+                          label={`${ext.name} for this member`}
                           title={checked ? "Disable for this member" : "Enable for this member"}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
-                        </button>
+                        />
                       </div>
                     );
                   })}
@@ -1494,15 +1493,13 @@ export function MemberConfigPanel({
                         </div>
                         {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server in Settings → Integrations.</div>}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onToggleMcp(server.name)}
+                      <ToggleSwitch
+                        on={checked}
+                        onToggle={() => onToggleMcp(server.name)}
+                        label={`${server.name} for this member`}
                         disabled={disabled}
-                        className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50 cursor-pointer ${checked ? "bg-accent" : "bg-surface-3"}`}
                         title={invalid ? "This server needs attention in Settings" : unavailable ? "This server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
-                      </button>
+                      />
                     </div>
                   );
                 })}
