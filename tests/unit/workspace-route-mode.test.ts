@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-let workspaceResourceRouteMode: typeof import("../../web/src/pages/Layout").workspaceResourceRouteMode;
 let patchRoomAgentStatus: typeof import("../../web/src/pages/Layout").patchRoomAgentStatus;
 
 beforeAll(async () => {
@@ -9,15 +8,7 @@ beforeAll(async () => {
     setItem: () => {},
     removeItem: () => {},
   });
-  ({ workspaceResourceRouteMode, patchRoomAgentStatus } = await import("../../web/src/pages/Layout"));
-});
-
-describe("workspace resource route mode", () => {
-  it("treats null as list, __new__ as create, and names as detail", () => {
-    expect(workspaceResourceRouteMode(null)).toBe("list");
-    expect(workspaceResourceRouteMode("__new__")).toBe("create");
-    expect(workspaceResourceRouteMode("pm")).toBe("detail");
-  });
+  ({ patchRoomAgentStatus } = await import("../../web/src/pages/Layout"));
 });
 
 describe("room list live agent status patch", () => {

@@ -22,10 +22,11 @@ describe("Sidebar domainOf — 0.20 merged chat IA", () => {
     expect(domainOf(null)).toBe("chats");
   });
 
-  it("routes secondary domains to their own panels", () => {
-    expect(domainOf({ type: "templates" })).toBe("templates");
-    expect(domainOf({ type: "skill", name: "x" })).toBe("skills");
-    expect(domainOf({ type: "knowledge" })).toBe("library");
+  it("routes system settings to its own panel; retired resource pages fall back to chats", () => {
+    // Templates/Skills/Library pages were removed in the identity rework (batch 2.5);
+    // their legacy page types now fall through to the default chats domain.
     expect(domainOf({ type: "settings", section: "models" })).toBe("system");
+    expect(domainOf({ type: "templates" })).toBe("chats");
+    expect(domainOf({ type: "knowledge" })).toBe("chats");
   });
 });

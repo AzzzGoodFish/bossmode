@@ -14,7 +14,6 @@ describe("production UI mock guard", () => {
       "pages/DmPage.tsx",
       "pages/MemberCreatePage.tsx",
       "pages/MemberSettingsPage.tsx",
-      "pages/TemplatesPage.tsx",
       "components/CreateRoomDialog.tsx",
     ]) {
       const source = readWebSource(path);

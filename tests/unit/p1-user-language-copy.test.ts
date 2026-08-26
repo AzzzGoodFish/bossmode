@@ -56,7 +56,6 @@ describe("P1 user-language hygiene", () => {
       "web/src/components/ActivityTab.tsx",
       "web/src/pages/Main.tsx",
       "web/src/pages/TaskDetailPage.tsx",
-      "web/src/pages/KnowledgePage.tsx",
     ].map(source).join("\n");
     expect(activeSources).not.toMatch(/toast\((err|error)\.?message|\$\{err\.message\}/);
   });
