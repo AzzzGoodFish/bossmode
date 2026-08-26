@@ -205,6 +205,8 @@ export interface MemberInfo {
   id: string;
   name: string;
   agent: string;
+  /** member.md frontmatter title — the card field that replaces the template label. */
+  title?: string | null;
   sourceAgent?: string;
   roomId?: string;
   model?: string | null;
@@ -1539,6 +1541,8 @@ export interface ContactEntry {
   memberId: string;
   name: string;
   agentTemplate: string;
+  /** member.md frontmatter title — the card field that replaces the template chip. */
+  title?: string | null;
   status: "idle" | "working" | "error";
   activeScopes: string[];
   model: string | null;
@@ -1575,6 +1579,31 @@ export interface MemberDetail {
   scopeOverrides?: Record<string, Record<string, unknown>>;
   createdAt?: number;
   updatedAt?: number;
+}
+
+/** member.md read outlet (batch-2 §2.2 + architect 2026-08-26): the persona
+ * file is the panel's single memory asset. Write endpoints answer 410. */
+export interface MemberProfileDoc {
+  path: string;
+  frontmatter: { name: string; title?: string; description?: string };
+  body: string;
+  charCount: number;
+  overBudget: boolean;
+}
+
+export async function getMemberProfile(id: string): Promise<MemberProfileDoc> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/profile`);
+}
+
+/** The member's own skills/ directory, read-only for the panel (batch-2 §2.2). */
+export interface MemberSkillEntry {
+  name: string;
+  path: string;
+  description: string;
+}
+
+export async function getMemberSkills(id: string): Promise<{ skills: MemberSkillEntry[] }> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/skills`);
 }
 
 export async function getMemberDetail(id: string): Promise<MemberDetail> {

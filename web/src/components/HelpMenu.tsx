@@ -3,14 +3,13 @@ import { CircleHelp, RotateCcw, BookOpen, Info } from "lucide-react";
 
 interface HelpMenuProps {
   onReplayTour: () => void;
-  onOpenDocs?: () => void;
 }
 
 /**
  * Rail Help control — Replay product tour / Documentation / About.
  * Documentation opens Library (in-app knowledge). About is a small popover.
  */
-export function HelpMenu({ onReplayTour, onOpenDocs }: HelpMenuProps) {
+export function HelpMenu({ onReplayTour }: HelpMenuProps) {
   const [open, setOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -80,18 +79,6 @@ export function HelpMenu({ onReplayTour, onOpenDocs }: HelpMenuProps) {
           >
             <RotateCcw size={14} className="shrink-0" />
             Replay product tour
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex items-center gap-2.5 w-full text-left px-3.5 py-2.5 text-[12.5px] text-ink-2 hover:bg-surface-2 hover:text-ink-1 cursor-pointer bg-transparent border-0"
-            onClick={() => {
-              setOpen(false);
-              onOpenDocs?.();
-            }}
-          >
-            <BookOpen size={14} className="shrink-0" />
-            Documentation
           </button>
           <button
             type="button"

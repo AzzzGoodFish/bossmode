@@ -15,14 +15,10 @@ import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
 import { MemberSettingsPage } from "./MemberSettingsPage";
-import { TemplatesPage } from "./TemplatesPage";
 import { Main } from "./Main";
 import { TopicPage } from "./TopicPage";
 import { createTopic } from "../api/client";
 import { useDialog } from "../components/dialogs";
-import { SkillDetailPage } from "./SkillDetailPage";
-import { SkillsPage } from "./SkillsPage";
-import { KnowledgePage } from "./KnowledgePage";
 import { SettingsPage } from "./SettingsPage";
 import { AllTasksPage } from "./AllTasksPage";
 import { TaskDetailPage } from "./TaskDetailPage";
@@ -37,11 +33,6 @@ interface LayoutProps {
 const UNREAD_EVENT_TYPES = new Set(["message_end", "agent_end", "user_steer"]);
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "bossmode_sidebar_collapsed";
 
-export function workspaceResourceRouteMode(name: string | null): "list" | "create" | "detail" {
-  if (name === null) return "list";
-  if (name === "__new__") return "create";
-  return "detail";
-}
 
 export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: string, status: string): Room[] {
   let changed = false;
@@ -300,7 +291,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
             onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
-            onNavigateToKnowledge={(path) => setActivePage({ type: "knowledge", path })}
             onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
             onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
             onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
@@ -412,40 +402,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onFired={() => handleNavigate({ type: "contacts" })}
           />
         )}
-        {activePage?.type === "templates" && (
-          <TemplatesPage
-            selected={activePage.name}
-            startCreating={activePage.create}
-            onSelect={(name) => handleNavigate(name ? { type: "templates", name } : { type: "templates" })}
-          />
-        )}
-
-        {/* Skill list / detail / create */}
-        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "list" && (
-          <SkillsPage onSelectSkill={(name) => setActivePage({ type: "skill", name })} />
-        )}
-        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "create" && (
-          <SkillDetailPage
-            name=""
-            isCreate
-            onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
-            onCreated={(name) => { setActivePage({ type: "skill", name }); refreshSidebar(); }}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          />
-        )}
-        {activePage?.type === "skill" && workspaceResourceRouteMode(activePage.name) === "detail" && (
-          <SkillDetailPage
-            name={activePage.name || ""}
-            onBack={() => { setActivePage({ type: "skill", name: null }); refreshSidebar(); }}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          />
-        )}
-
-        {/* Knowledge */}
-        {activePage?.type === "knowledge" && (
-          <KnowledgePage initialPath={activePage.path} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
-        )}
-
         {/* Settings */}
         {activePage?.type === "settings" && (
           <SettingsPage section={activePage.section ?? "models"} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />

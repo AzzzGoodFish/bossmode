@@ -273,7 +273,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
                       >
                         <StaffBadge name={c.name} size="xs" />
                         <span className="text-[12.5px] font-medium text-ink-1 flex-1 truncate">{c.name}</span>
-                        <span className="text-[10.5px] text-ink-4">{c.agentTemplate}</span>
+                        {c.title ? <span className="text-[10.5px] text-ink-4">{c.title}</span> : null}
                         {memberBusyId === c.memberId && <Loader2 size={12} className="animate-spin text-ink-4" />}
                       </button>
                     ))

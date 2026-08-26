@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
-  LogOut, BookOpen, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Loader2, Plus, Contact, Hash, Fingerprint, Puzzle, Search, MessagesSquare,
-  Folder, LayoutTemplate,
+  LogOut, MessageSquare, Settings, Sun, Moon,
+  CheckSquare, Loader2, Plus, Contact, Hash, Search, MessagesSquare,
+  
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
-import type { Room, SkillInfo, KnowledgeTreeNode } from "../api/client";
-import { createGlobalMember, getRooms, getSkills, getKnowledgeTree, getChats, getTemplates, type ChatEntry, type TemplateInfo } from "../api/client";
+import type { Room } from "../api/client";
+import { createGlobalMember, getRooms, getChats, type ChatEntry } from "../api/client";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
@@ -19,19 +19,16 @@ export type ActivePage =
   | { type: "dm"; memberId: string }
   | { type: "member-create" }
   | { type: "member-settings"; memberId: string }
-  | { type: "templates"; name?: string; create?: boolean }
   | { type: "room"; id: string }
   | { type: "topic"; roomId: string; topicId: string }
   /** Topic draft (topic-threads v3, fish): opened from a message's topic button; nothing persists until the first message sends. */
   | { type: "topic-draft"; roomId: string; anchorMessageId: string; anchorSeq?: number; anchorTitle: string; anchorExcerpt: string }
-  | { type: "skill"; name: string | null }
-  | { type: "knowledge"; path?: string }
   | { type: "settings"; section?: SettingsSection }
   | { type: "all-tasks" }
   | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
-type Domain = "chats" | "templates" | "skills" | "library" | "system";
+type Domain = "chats" | "system";
 
 export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
@@ -42,12 +39,6 @@ export function domainOf(page: ActivePage): Domain {
     case "member-create":
     case "member-settings":
       return "chats";
-    case "templates":
-      return "templates";
-    case "skill":
-      return "skills";
-    case "knowledge":
-      return "library";
     case "settings":
       return "system";
     default:
@@ -106,9 +97,6 @@ export function Sidebar({
       setPlusBusy(false);
     }
   };
-  const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [knowledgeFolders, setKnowledgeFolders] = useState<KnowledgeTreeNode[]>([]);
-
   // Derive the active domain from the page while allowing rail-only browsing.
   const pageDomain = domainOf(activePage);
   const [browseDomain, setBrowseDomain] = useState<Domain | null>(null);
@@ -117,13 +105,6 @@ export function Sidebar({
 
   const refresh = () => {
     getRooms().then(setRooms).catch(console.error);
-    getSkills().then(setSkills).catch(console.error);
-    getKnowledgeTree()
-      .then((root) => {
-        const folders = (root.children ?? []).filter((c) => c.kind === "folder");
-        setKnowledgeFolders(folders);
-      })
-      .catch(console.error);
   };
 
   useEffect(() => { refresh(); }, [refreshKey]);
@@ -135,9 +116,6 @@ export function Sidebar({
   }, [rooms, onRoomsLoaded]);
 
 
-  const selectedSkillName = activePage?.type === "skill" ? activePage.name : null;
-  const selectedKnowledgeFolder =
-    activePage?.type === "knowledge" && activePage.path ? activePage.path.split("/")[0] : null;
   const activeSettingsSection = activePage?.type === "settings" ? (activePage.section ?? "models") : null;
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
@@ -170,18 +148,6 @@ export function Sidebar({
       </button>
       <div className="flex-1" />
       <div className="w-5 h-px bg-line-soft my-1.5" />
-      <button onClick={() => { setBrowseDomain("templates"); onNavigate({ type: "templates" }); }} title="Templates" aria-label="Templates" className={railBtn(domain === "templates")}>
-        {domain === "templates" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <Fingerprint size={18} />
-      </button>
-      <button onClick={() => { setBrowseDomain("skills"); onNavigate({ type: "skill", name: null }); }} title="Skills" aria-label="Skills" className={railBtn(domain === "skills")}>
-        {domain === "skills" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <Puzzle size={18} />
-      </button>
-      <button onClick={() => { setBrowseDomain("library"); onNavigate({ type: "knowledge" }); }} title="Library" aria-label="Library" className={railBtn(domain === "library")}>
-        {domain === "library" && <span className="absolute -left-[7px] top-2 bottom-2 w-0.5 rounded bg-accent" />}
-        <BookOpen size={18} />
-      </button>
       <div className="w-5 h-px bg-line-soft my-1.5" />
       <button onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme" className={railBtn(false)}>
         <Sun size={16} className="hidden dark:block" />
@@ -190,7 +156,6 @@ export function Sidebar({
       {onReplayTour && (
         <HelpMenu
           onReplayTour={onReplayTour}
-          onOpenDocs={() => onNavigate({ type: "knowledge" })}
         />
       )}
       <button
@@ -216,7 +181,7 @@ export function Sidebar({
   );
 
   /* ── Context panel ── */
-  const panelTitle = { chats: "Chats", templates: "Templates", skills: "Skills", library: "Library", system: "Settings" }[domain];
+  const panelTitle = { chats: "Chats", system: "Settings" }[domain];
 
   const itemCls = (active: boolean) =>
     `w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${
@@ -258,72 +223,10 @@ export function Sidebar({
             )}
           </>
         )}
-        {domain === "templates" && (
-          <button
-            onClick={() => onNavigate({ type: "templates", create: true })}
-            title="New template"
-            className={createBtn}
-          >
-            <Plus size={13} />
-          </button>
-        )}
-        {domain === "library" && (
-          <button
-            onClick={() => onNavigate({ type: "knowledge", path: "__new__" })}
-            title="New document"
-            className={createBtn}
-          >
-            <Plus size={13} />
-          </button>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 p-2">
         {domain === "chats" && <ChatsPanelList activePage={activePage} onNavigate={onNavigate} />}
-        {domain === "templates" && <TemplatesPanelList activePage={activePage} onNavigate={onNavigate} />}
-
-        {domain === "skills" && (
-          <>
-            <SectionHead
-              label={`SKILLS · ${skills.length}`}
-              onLabelClick={() => onNavigate({ type: "skill", name: null })}
-              active={activePage?.type === "skill" && activePage.name === null}
-            />
-            {skills.map((s) => (
-              <button key={s.name} onClick={() => onNavigate({ type: "skill", name: s.name })} className={itemCls(selectedSkillName === s.name)}>
-                <div className="flex items-center gap-2.5">
-                  {leadBlock(<Puzzle size={12} />)}
-                  <span className={`text-[12.5px] font-medium truncate ${selectedSkillName === s.name ? "text-ink-1" : "text-ink-2"}`}>{s.name}</span>
-                </div>
-              </button>
-            ))}
-          </>
-        )}
-
-
-        {domain === "library" && (
-          <>
-            <SectionHead
-              label={`LIBRARY · ${knowledgeFolders.length}`}
-              onLabelClick={() => onNavigate({ type: "knowledge" })}
-              active={activePage?.type === "knowledge" && !activePage.path}
-            />
-            <button onClick={() => onNavigate({ type: "knowledge" })} className={itemCls(activePage?.type === "knowledge" && !activePage.path)}>
-              <div className="flex items-center gap-2.5">
-                {leadBlock(<BookOpen size={12} />)}
-                <span className="text-[12.5px] font-medium text-ink-2">All documents</span>
-              </div>
-            </button>
-            {knowledgeFolders.map((f) => (
-              <button key={f.path} onClick={() => onNavigate({ type: "knowledge", path: f.path })} className={itemCls(selectedKnowledgeFolder === f.name)}>
-                <div className="flex items-center gap-2.5">
-                  {leadBlock(<Folder size={12} />)}
-                  <span className={`text-[12.5px] font-medium truncate ${selectedKnowledgeFolder === f.name ? "text-ink-1" : "text-ink-2"}`}>{f.name}</span>
-                </div>
-              </button>
-            ))}
-          </>
-        )}
 
         {domain === "system" && (
           <>
@@ -501,42 +404,6 @@ function ChatRow({ c, activePage, onNavigate }: { c: ChatEntry; activePage: Acti
   );
 }
 
-function TemplatesPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
-  const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    getTemplates().then((r) => { if (!cancelled) setTemplates(r); }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-  if (!templates) return <div className="px-2 py-3 text-[11.5px] text-ink-4">Loading…</div>;
-  return (
-    <>
-      <SectionHead
-        label={`TEMPLATES · ${templates.length}`}
-        onLabelClick={() => onNavigate({ type: "templates" })}
-        active={activePage?.type === "templates" && !activePage.name}
-      />
-      {templates.map((t) => {
-        const active = activePage?.type === "templates" && activePage.name === t.name;
-        return (
-          <button
-            key={t.name}
-            onClick={() => onNavigate({ type: "templates", name: t.name })}
-            className={`w-full text-left rounded-lg px-2.5 py-2 mb-px transition-colors cursor-pointer ${active ? "bg-accent-dim" : "hover:bg-surface-1"}`}
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-md bg-surface-2 border border-line-soft text-ink-3 flex items-center justify-center shrink-0"><LayoutTemplate size={12} /></span>
-              <div className="min-w-0 flex-1">
-                <div className={`text-[12.5px] font-medium truncate ${active ? "text-ink-1" : "text-ink-2"}`}>{t.name}</div>
-                <div className="text-[10.5px] text-ink-4 truncate">{t.builtin ? "built-in" : `${t.referencedBy.length} member${t.referencedBy.length === 1 ? "" : "s"}`}</div>
-              </div>
-            </div>
-          </button>
-        );
-      })}
-    </>
-  );
-}
 
 /** Chats "+" pop (fish 2026-08-25): two creation paths — a new room, or a
  * one-click member birth. Same pop family as the workstation pops. */

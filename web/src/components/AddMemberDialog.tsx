@@ -87,7 +87,7 @@ export function AddMemberDialog({ currentMemberIds, onAdd, onClose }: AddMemberD
                 <StaffBadge name={c.name} size="sm" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-ink-1">{c.name}</span>
-                  <span className="mt-0.5 block truncate text-xs text-ink-4">{c.agentTemplate}</span>
+                  {c.title ? <span className="mt-0.5 block truncate text-xs text-ink-4">{c.title}</span> : null}
                 </span>
                 {busyId === c.memberId && <Loader2 size={14} className="animate-spin text-ink-4 shrink-0" />}
               </button>

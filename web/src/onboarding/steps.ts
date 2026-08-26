@@ -75,7 +75,7 @@ export const TOUR_STEPS: TourStep[] = [
     title: "2 · Create a room",
     paragraphs: [
       "A room is your team's workspace: conversations, tasks and memory live here.",
-      "Click +, add members from templates, name it, done.",
+      "Click +, pick New member — it wakes up in a DM; give it a model and it introduces itself.",
     ],
     primary: "Next",
     place: "right",
@@ -98,7 +98,7 @@ export const TOUR_STEPS: TourStep[] = [
     key: "done",
     title: "You're all set",
     paragraphs: [
-      "That's the whole loop: model → room → chat. Everything else (templates, skills, usage stats) layers on top when you need it.",
+      "That's the whole loop: member → model → room → chat. Everything else (skills, usage stats) layers on top when you need it.",
       "Replay this tour anytime: Help (?) → Replay product tour.",
     ],
     primary: "Finish",
