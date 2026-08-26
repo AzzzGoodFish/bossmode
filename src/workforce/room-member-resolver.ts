@@ -2,6 +2,7 @@ import { loadAgentDefinition } from "./agent-store.js";
 import * as memberStore from "./member-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getEffectiveConfig } from "../workspace/member-registry.js";
+import { readMemberProfile } from "../workspace/member-profile.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../shared/types.js";
 
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
@@ -37,6 +38,14 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     } catch { /* registry cold / member missing */ }
   }
 
+  // Card title from member.md frontmatter (identity batch-2 UI — no template chip).
+  let title: string | undefined;
+  if (globalId && globalId.startsWith("mem_")) {
+    try {
+      title = readMemberProfile(globalId, roomMember.name).frontmatter.title;
+    } catch { /* cold */ }
+  }
+
   return {
     id: roomMember.id,
     name: roomMember.name,
@@ -52,6 +61,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     mcpServers: effMcp,
     extensions: effExt,
     createdAt: roomMember.createdAt,
+    ...(title ? { title } : {}),
   };
 }
 

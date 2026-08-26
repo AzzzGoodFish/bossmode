@@ -300,9 +300,12 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
       const dmStatus = getScopeLiveStatus?.(scopeIdOf({ kind: "dm", memberId: m.id })) || "idle";
       const status = workingScopes.length > 0 || dmStatus === "working" ? "working" : "idle";
 
+      const profile = readMemberProfile(m.id, m.name);
       return {
         memberId: m.id,
         name: m.name,
+        /** member.md frontmatter title — replaces template chip on Contacts. */
+        title: profile.frontmatter.title ?? null,
         agentTemplate: m.agentTemplate,
         status,
         activeScopes: membershipScopes,
