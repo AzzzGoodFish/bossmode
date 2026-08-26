@@ -1017,7 +1017,7 @@ function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | nul
       tag={<AssetTag>persona · self-maintained</AssetTag>}
       hint={<>This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.</>}
       preview={profile ? (firstContentLine(profile.body) || "Blank slate — the persona grows from your first conversations.") : "Loading…"}
-      empty={profile === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : profile.body.trim() ? undefined : <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />}
+      empty={profile === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : (profile as MemberProfileDoc & { __failed?: boolean }).__failed ? <EmptyAsset title="Unavailable" hint="member.md could not be loaded." /> : profile.body.trim() ? undefined : <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />}
       renderContent={(view) => (
         <>
           <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
@@ -1166,7 +1166,7 @@ export function MemberConfigPanel({
     const profileId = dmScope ? dmScope.memberId : (member.id || member.name);
     getMemberProfile(profileId)
       .then((doc) => { if (!cancelled) setProfile(doc); })
-      .catch(() => { if (!cancelled) setProfile(null); });
+      .catch(() => { if (!cancelled) setProfile({ path: "", frontmatter: { name: member.name }, body: "", charCount: 0, overBudget: false, __failed: true } as MemberProfileDoc & { __failed?: boolean }); });
     getMemberSkills(profileId)
       .then((r) => { if (!cancelled) setMemberSkills(r.skills); })
       .catch(() => { if (!cancelled) setMemberSkills([]); });
