@@ -99,14 +99,19 @@ function readText(p) {
   }
 }
 
-function hasPersonaSection(text) {
-  // "## Persona" with non-empty content after the heading counts as already folded.
-  const m = text.match(/^##\s+Persona\s*$/m);
-  if (!m || m.index === undefined) return false;
-  const after = text.slice(m.index + m[0].length);
-  const nextHeading = after.search(/^##\s+/m);
-  const section = nextHeading >= 0 ? after.slice(0, nextHeading) : after;
-  return section.trim().length > 0;
+function normalizePersonaBlob(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/^##\s+Persona\s*$/gim, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** True when member.md already contains this persona body (content match, not heading-only). */
+function memberAlreadyHasPersonaContent(memberMdText, personaContent) {
+  const needle = normalizePersonaBlob(personaContent);
+  if (!needle) return false;
+  return normalizePersonaBlob(memberMdText).includes(needle);
 }
 
 function parseFrontmatter(raw) {
@@ -198,39 +203,45 @@ function step2PersonaMerge() {
     const personaContent = personaBody.trim() || personaRaw;
 
     let existing = existsSync(memberMd) ? readText(memberMd) : "";
-    if (existing && hasPersonaSection(existing)) {
-      record({ step, op: "skip", from: personaPath, to: memberMd, note: "member.md already has ## Persona content" });
-      continue;
-    }
+    const alreadyFolded = existing && memberAlreadyHasPersonaContent(existing, personaContent);
 
-    // Build member.md
-    let fmBlock = "---\nname: " + id + "\n---\n";
-    let bodyRest = "";
-    if (existing) {
-      const parsed = parseFrontmatter(existing);
-      if (parsed.fm) fmBlock = parsed.fm.endsWith("\n") ? parsed.fm : parsed.fm + "\n";
-      bodyRest = parsed.body.replace(/^##\s+Persona\s*\n[\s\S]*?(?=^##\s|\Z)/m, "").trim();
-      // Prefer name from existing frontmatter — keep as-is
-    } else {
-      // Try member.json for display name
-      const mj = join(membersRoot, id, "member.json");
-      if (existsSync(mj)) {
-        try {
-          const rec = JSON.parse(readText(mj));
-          if (rec.name) fmBlock = `---\nname: ${rec.name}\n---\n`;
-        } catch { /* ignore */ }
+    if (!alreadyFolded) {
+      // Build member.md
+      let fmBlock = "---\nname: " + id + "\n---\n";
+      let bodyRest = "";
+      if (existing) {
+        const parsed = parseFrontmatter(existing);
+        if (parsed.fm) fmBlock = parsed.fm.endsWith("\n") ? parsed.fm : parsed.fm + "\n";
+        // Drop an empty/partial ## Persona heading block if present; keep other sections.
+        bodyRest = parsed.body
+          .replace(/^##\s+Persona\s*\n[\s\S]*?(?=^##\s|$)/m, "")
+          .trim();
+      } else {
+        const mj = join(membersRoot, id, "member.json");
+        if (existsSync(mj)) {
+          try {
+            const rec = JSON.parse(readText(mj));
+            if (rec.name) fmBlock = `---\nname: ${rec.name}\n---\n`;
+          } catch { /* ignore */ }
+        }
       }
+
+      const parts = [fmBlock.trimEnd(), "", "## Persona", "", personaContent];
+      if (bodyRest) parts.push("", bodyRest);
+      const next = parts.join("\n").replace(/\n{3,}/g, "\n\n") + "\n";
+
+      record({ step, op: "write", from: personaPath, to: memberMd, note: `chars=${next.length}` });
+      if (APPLY) {
+        ensureDir(dirname(memberMd));
+        writeFileSync(memberMd, next, "utf-8");
+      }
+    } else {
+      record({ step, op: "skip", from: personaPath, to: memberMd, note: "member.md already contains persona body" });
     }
 
-    const parts = [fmBlock.trimEnd(), "", "## Persona", "", personaContent];
-    if (bodyRest) parts.push("", bodyRest);
-    const next = parts.join("\n").replace(/\n{3,}/g, "\n\n") + "\n";
-
-    record({ step, op: "write", from: personaPath, to: memberMd, note: `chars=${next.length}` });
-    if (APPLY) {
-      ensureDir(dirname(memberMd));
-      writeFileSync(memberMd, next, "utf-8");
-    }
+    // Always archive persona.md after fold/skip so a second --apply cannot re-read it (F1: file presence).
+    const archivePersona = join(membersRoot, id, "archive", "persona.md");
+    copyOrMoveFile(personaPath, archivePersona, step, { move: true });
   }
 }
 

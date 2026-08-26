@@ -58,6 +58,8 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Drop duplicate Enter/clicks while the send request is still in flight (room lag). */
+  const sendingRef = useRef(false);
 
   const upload = useUpload(onError, roomId ? `room:${roomId}` : null);
 
@@ -96,6 +98,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   };
 
   const handleSend = async () => {
+    if (sendingRef.current || disabled) return;
     const trimmed = value.trim();
     if (!trimmed && !upload.hasPending) return;
     const scope = uploadScope ?? roomId;
@@ -105,26 +108,31 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
 
     const attachments: Array<{ storedFilename: string; originalFilename: string; size?: number }> = [];
 
-    // Upload pending files
-    if (upload.hasPending && scope) {
-      const results = await upload.uploadAll(scope);
-      for (const r of results) {
-        attachments.push({ storedFilename: r.filename, originalFilename: r.originalFilename, size: r.size });
-      }
-      // Only clear successful uploads — keep errored/cancelled items so user can retry.
-      upload.clearSuccessful();
-    }
-
-    if (!content && attachments.length === 0) return;
-
-    // Only clear the draft after a successful send. If auth expired / network
-    // failed mid-send, keep localStorage draft so re-login restores the text.
+    sendingRef.current = true;
     try {
-      await onSend(content, attachments.length > 0 ? attachments : undefined);
-      clearDraft();
-      setShowMentions(false);
-    } catch (err) {
-      onError?.(err instanceof Error ? err.message : String(err));
+      // Upload pending files
+      if (upload.hasPending && scope) {
+        const results = await upload.uploadAll(scope);
+        for (const r of results) {
+          attachments.push({ storedFilename: r.filename, originalFilename: r.originalFilename, size: r.size });
+        }
+        // Only clear successful uploads — keep errored/cancelled items so user can retry.
+        upload.clearSuccessful();
+      }
+
+      if (!content && attachments.length === 0) return;
+
+      // Only clear the draft after a successful send. If auth expired / network
+      // failed mid-send, keep localStorage draft so re-login restores the text.
+      try {
+        await onSend(content, attachments.length > 0 ? attachments : undefined);
+        clearDraft();
+        setShowMentions(false);
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      sendingRef.current = false;
     }
   };
 

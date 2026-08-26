@@ -41,14 +41,14 @@ beforeEach(() => {
   writeFileSync(join(boss, "members", mid, "memory", "scopes", "room-abc", "principles.md"), "# P\nBe kind.\n");
   writeFileSync(join(boss, "members", mid, "memory", "scopes", "room-abc", "mainline.md"), "## Focus\nShip it\n");
 
-  // Member already has ## Persona — skip merge
+  // Member already contains this persona body — skip merge, still archive persona.md
   const mid2 = "mem_test_b";
   mkdirSync(join(boss, "members", mid2, "memory"), { recursive: true });
   writeFileSync(
     join(boss, "members", mid2, "member.md"),
     "---\nname: bob\n---\n\n## Persona\n\nAlready folded.\n",
   );
-  writeFileSync(join(boss, "members", mid2, "memory", "persona.md"), "Should not overwrite.\n");
+  writeFileSync(join(boss, "members", mid2, "memory", "persona.md"), "Already folded.\n");
 
   // Library docs
   mkdirSync(join(boss, "knowledge", "docs", "bossmode"), { recursive: true });
@@ -78,7 +78,7 @@ describe("migrate-identity-memory-v1", () => {
     expect(existsSync(join(boss, "migrations", "identity-memory-v1.done.json"))).toBe(false);
   });
 
-  it("apply merges persona, archives scopes, moves library and room principles", () => {
+  it("apply merges persona, archives persona.md + scopes, moves library and room principles", () => {
     const outJson = join(boss, "report.json");
     const r = run(["--apply"], { MIGRATE_JSON_OUT: outJson });
     expect(r.status).toBe(0);
@@ -90,13 +90,18 @@ describe("migrate-identity-memory-v1", () => {
     expect(md).toContain("## Persona");
     expect(md).toContain("I am careful.");
     expect(md).toContain("Ship tests first.");
+    // source moved to archive (file-presence completion)
+    expect(existsSync(join(boss, "members", "mem_test_a", "memory", "persona.md"))).toBe(false);
+    expect(existsSync(join(boss, "members", "mem_test_a", "archive", "persona.md"))).toBe(true);
 
-    // skip member with existing Persona
+    // skip member with persona body already present — still archives persona.md
     const bob = readFileSync(join(boss, "members", "mem_test_b", "member.md"), "utf-8");
     expect(bob).toContain("Already folded.");
-    expect(bob).not.toContain("Should not overwrite");
+    expect((bob.match(/Already folded\./g) || []).length).toBe(1);
+    expect(existsSync(join(boss, "members", "mem_test_b", "memory", "persona.md"))).toBe(false);
+    expect(existsSync(join(boss, "members", "mem_test_b", "archive", "persona.md"))).toBe(true);
 
-    // archive
+    // archive scopes
     expect(existsSync(join(boss, "members", "mem_test_a", "archive", "principles-room-abc.md"))).toBe(true);
     expect(existsSync(join(boss, "members", "mem_test_a", "archive", "mainline-room-abc.md"))).toBe(true);
     expect(existsSync(join(boss, "members", "mem_test_a", "memory", "scopes", "room-abc", "principles.md"))).toBe(false);
@@ -119,13 +124,19 @@ describe("migrate-identity-memory-v1", () => {
     expect(existsSync(report.backupDir as string)).toBe(true);
   });
 
-  it("apply is idempotent for persona skip and archive already moved", () => {
+  it("apply twice is idempotent — no duplicated Persona, body unchanged", () => {
     expect(run(["--apply"]).status).toBe(0);
     const md1 = readFileSync(join(boss, "members", "mem_test_a", "member.md"), "utf-8");
+    const personaHits1 = (md1.match(/## Persona/g) || []).length;
+    expect(personaHits1).toBe(1);
+
     const r2 = run(["--apply"]);
     expect(r2.status).toBe(0);
-    expect(r2.stdout).toMatch(/already has ## Persona|skip-exists|no persona/i);
     const md2 = readFileSync(join(boss, "members", "mem_test_a", "member.md"), "utf-8");
     expect(md2).toBe(md1);
+    expect((md2.match(/## Persona/g) || []).length).toBe(1);
+    expect((md2.match(/I am careful\./g) || []).length).toBe(1);
+    // persona source stays gone
+    expect(existsSync(join(boss, "members", "mem_test_a", "memory", "persona.md"))).toBe(false);
   });
 });
