@@ -74,13 +74,17 @@ describe("member profile + skills panel APIs", () => {
     const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/skills`, { token });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.skills).toEqual([
-      {
-        name: "review",
-        path: "review/SKILL.md",
-        description: "Review pull requests carefully",
-      },
-    ]);
+    expect(body.skills.some((s: { name: string; platform?: boolean }) => s.name === "bossmode-guide" && s.platform === true)).toBe(true);
+    expect(body.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "review",
+          path: "review/SKILL.md",
+          description: "Review pull requests carefully",
+          platform: false,
+        }),
+      ]),
+    );
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((r) => ts.server.close(() => r()));

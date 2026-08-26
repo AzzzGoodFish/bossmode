@@ -70,11 +70,13 @@ describe("prompt compiler (three-segment)", () => {
     expect(prompt).not.toContain("QA ROLE"); // agent template not used as identity
   });
 
-  it("birth state: no member.md → I am <name> only; no skills line; no archive line", async () => {
+  it("birth state: no member.md → I am <name> only; platform guide present; no archive line", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("I am qa.");
-    expect(compiled.fullPrompt).not.toMatch(/Your skills:/);
+    // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
+    expect(compiled.fullPrompt).toMatch(/bossmode-guide/);
+    expect(compiled.fullPrompt).toMatch(/When unsure how to manage your identity/);
     expect(compiled.fullPrompt).not.toMatch(/Legacy notes/);
   });
 
