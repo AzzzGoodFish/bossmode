@@ -666,14 +666,15 @@ export function ToolCard({ event, toolEnd, diff, time, query, member, compact }:
   const canPreview = !isError && isMarkdownResult(event.toolName, resultText);
   const summaryText = resultText.slice(0, 120).replace(/\n/g, " ").trim();
 
-  // Failed cards must jump out of the river (fish 2026-08-21 ③): red left edge + Failed tag.
+  // Failed cards carry their state on the card face alone (fish 2026-08-26:
+  // remove the Failed chip + ✗ mark — the red left edge already says it).
   const cardBorder = isError ? "border-blocked/40 border-l-2 border-l-blocked" : isRunning ? "border-think/40" : "border-line-soft";
   // Live dot is a real CSS circle (fish: ● glyph rides the baseline and reads
   // off-center against the small caps tags).
   const statusMark = isRunning
     ? <span className="w-1.5 h-1.5 rounded-full bg-think animate-pulse shrink-0" title="running" />
     : isError
-      ? <span className="text-blocked text-[10px] font-bold leading-none shrink-0" title="error">✗</span>
+      ? null
       : toolEnd
         ? <span className="text-onair text-[10px] font-bold leading-none shrink-0" title="done">✓</span>
         : null;
@@ -688,7 +689,6 @@ export function ToolCard({ event, toolEnd, diff, time, query, member, compact }:
           <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform mr-[4px] ${expanded ? "rotate-90" : ""}`} />
           <MemberHead member={member} />
           <span className="text-[9.5px] font-extrabold leading-none tracking-[0.08em] uppercase text-ink-3 truncate min-w-0 shrink max-w-[96px] ml-[7px] mr-[7px]">TOOL·{tool.label}</span>
-          {isError && <span className="text-[9px] font-bold leading-none rounded-full px-1.5 py-px text-blocked bg-blocked/10 shrink-0 whitespace-nowrap mr-[6px]">Failed</span>}
           <span className="font-mono text-[11px] leading-none text-ink-3 truncate flex-1 min-w-0 mr-[6px]">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {/* diff chips ride the tab face only — the compact river header has no budget for them */}
           {!compact && diff && <span className="font-mono text-[10px] leading-none text-ink-4 shrink-0 whitespace-nowrap mr-[6px]">+{diff.added} −{diff.removed}</span>}
