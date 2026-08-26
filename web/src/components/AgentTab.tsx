@@ -659,48 +659,55 @@ function AgentChat({
     });
   }, []);
 
+  const steerSendingRef = useRef(false);
+
   const handleSend = async () => {
+    if (steerSendingRef.current || uploading) return;
     const trimmed = input.trim();
     if (!trimmed && pendingFiles.length === 0) return;
 
     let content = trimmed;
-
-    if (pendingFiles.length > 0) {
-      setUploading(true);
-      try {
-        const lines: string[] = [];
-        for (const pf of pendingFiles) {
-          const result = await uploadFile(roomId, pf.file);
-          lines.push(`Attachment: [original filename: ${result.originalFilename}](${result.path})`);
+    steerSendingRef.current = true;
+    try {
+      if (pendingFiles.length > 0) {
+        setUploading(true);
+        try {
+          const lines: string[] = [];
+          for (const pf of pendingFiles) {
+            const result = await uploadFile(roomId, pf.file);
+            lines.push(`Attachment: [original filename: ${result.originalFilename}](${result.path})`);
+          }
+          const attachText = lines.join("\n");
+          content = content ? `${content}\n${attachText}` : attachText;
+        } catch (err) {
+          console.error("Upload failed:", err);
+          setUploading(false);
+          return;
         }
-        const attachText = lines.join("\n");
-        content = content ? `${content}\n${attachText}` : attachText;
-      } catch (err) {
-        console.error("Upload failed:", err);
+        pendingFiles.forEach((pf) => { if (pf.preview) URL.revokeObjectURL(pf.preview); });
+        setPendingFiles([]);
         setUploading(false);
+      }
+
+      if (isResetSessionCommand(content) && pendingFiles.length === 0) {
+        const ok = await confirm(buildResetSessionConfirmMessage(roomId, agentName));
+        if (!ok) return;
+        try {
+          const result = await resetAgentSession(roomId, agentName);
+          onResetSessionSuccess(result.message);
+          clearInput();
+        } catch (err) {
+          console.error("Failed to reset member session", err);
+          onResetSessionError("Couldn’t reset this session. Try again.");
+        }
         return;
       }
-      pendingFiles.forEach((pf) => { if (pf.preview) URL.revokeObjectURL(pf.preview); });
-      setPendingFiles([]);
-      setUploading(false);
-    }
 
-    if (isResetSessionCommand(content) && pendingFiles.length === 0) {
-      const ok = await confirm(buildResetSessionConfirmMessage(roomId, agentName));
-      if (!ok) return;
-      try {
-        const result = await resetAgentSession(roomId, agentName);
-        onResetSessionSuccess(result.message);
-        clearInput();
-      } catch (err) {
-        console.error("Failed to reset member session", err);
-        onResetSessionError("Couldn’t reset this session. Try again.");
-      }
-      return;
+      if (content) onSend(content);
+      clearInput();
+    } finally {
+      steerSendingRef.current = false;
     }
-
-    if (content) onSend(content);
-    clearInput();
   };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
