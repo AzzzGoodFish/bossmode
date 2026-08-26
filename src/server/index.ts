@@ -18,6 +18,7 @@ import { runMemberOverridesCleanupMigration } from "../workspace/member-override
 import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
+import { runIdentityMigrationOnStartup } from "../workspace/identity-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
@@ -168,6 +169,14 @@ export function startServer(opts: ServerOptions): Promise<void> {
     }
   } catch (err) {
     logger.error("server", "agent-events-rekey migration failed", { error: String(err) });
+  }
+
+  // Identity/three-memory redesign: auto-migrate leftover legacy assets before listen.
+  // Data-driven (F1); failure never blocks startup — archive prompt lines remain visible.
+  try {
+    runIdentityMigrationOnStartup();
+  } catch (err) {
+    logger.error("server", "identity-memory-v1 startup migration failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so
