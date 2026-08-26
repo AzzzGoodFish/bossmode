@@ -3,7 +3,7 @@
  * merge v1, fish 2026-08-26: settings page + room Sheet become ONE page).
  *
  * Everything here moved VERBATIM from StationPanel.tsx's MemberConfigPanel
- * family (fusion, not repaint — fish: 落地时注意和现有UI融合好) plus four
+ * family (fusion, not repaint — fish 2026-08-26: blend into the existing UI) plus four
  * extractions that turn panel JSX into reusable sections:
  *   ExtensionsAccordion / McpToolsAccordion / ContextSessionCard / ScopeModelCard.
  * StationPanel imports the shared utils back from here; nothing here imports

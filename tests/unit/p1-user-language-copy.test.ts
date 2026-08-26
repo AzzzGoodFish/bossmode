@@ -17,7 +17,8 @@ describe("P1 user-language hygiene", () => {
   });
 
   it("keeps member controls free of implementation and mixed-language copy", () => {
-    const station = source("web/src/components/StationPanel.tsx");
+    // Member-scope controls moved from StationPanel to member-scope.tsx (member page merge, batch 4).
+    const station = source("web/src/components/member-scope.tsx");
     for (const phrase of ["Weak identity hint", "Agent hint is read-only", "runtime actions", "instance rebuild", "Full reload", "model prefill", "fault recovery", "MCP registry", "globally disabled", "Compact room-local overrides", "Keeps prompt, tools and session", "not in available models", "System → Models"]) {
       expect(station).not.toContain(phrase);
     }

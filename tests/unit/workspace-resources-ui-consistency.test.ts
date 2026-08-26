@@ -11,7 +11,7 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
     expect(back).toContain("size={18}");
 
     for (const path of [
-      "web/src/pages/MemberSettingsPage.tsx",
+      "web/src/pages/MemberPage.tsx",
       "web/src/pages/MemberCreatePage.tsx",
     ]) {
       const src = source(path);
@@ -24,7 +24,7 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
   it("lays pages out on the full-width canvas (no narrow centered column)", () => {
     for (const path of [
       "web/src/pages/MemberCreatePage.tsx",
-      "web/src/pages/MemberSettingsPage.tsx",
+      "web/src/pages/MemberPage.tsx",
       "web/src/pages/ChatsPage.tsx",
       "web/src/pages/ContactsPage.tsx",
     ]) {
