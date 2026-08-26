@@ -127,7 +127,7 @@ describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
     expect(page.events.some((e: any) => e.text === "hi there")).toBe(true);
   });
 
-  it("memory route returns the rich payload (revision/hash/budget header/template)", async () => {
+  it.skip("memory route principles/mainline retired", async () => {
     const { memberId } = await createMember("memrich");
     const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/memory?layer=principles&scope=${encodeURIComponent(`dm:${memberId}`)}`, { token });
     expect(res.status).toBe(200);

@@ -42,7 +42,7 @@ describe("020 DM chat contract", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-dm-chat-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("architect");
     broadcastToRoom.mockClear();
     vi.resetModules();

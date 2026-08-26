@@ -184,7 +184,7 @@ function enumerateTemplates(): TemplateFile[] {
           relativePath: rulePath,
           name: basename(rulePath, ".md"),
           templateContent: readFileSync(abs, "utf-8"),
-          localPath: join(bossmodeDir(), "knowledge", "docs", ...rulePath.split("/")),
+          localPath: join(bossmodeDir(), "memory", "projects", ...rulePath.split("/")),
         });
       }
     };
@@ -338,7 +338,7 @@ export function seedBuiltinAssets(): void {
   // Clean up legacy rule files that were superseded by canonical names
   let cleaned = 0;
   for (const legacyPath of Object.keys(LEGACY_RULE_NAMES)) {
-    const absPath = join(bossmodeDir(), "knowledge", "docs", ...legacyPath.split("/"));
+    const absPath = join(bossmodeDir(), "memory", "projects", ...legacyPath.split("/"));
     if (existsSync(absPath)) {
       try {
         unlinkSync(absPath);

@@ -24,8 +24,8 @@ const ACTOR = { type: "member" as const, memberId: "rm_1", name: "pm" };
 async function seedRefs() {
   const { addMessage } = await import("../../src/workspace/message-store.js");
   const { createTask } = await import("../../src/workspace/task-store.js");
-  mkdirSync(join(tmpDir, "knowledge", "docs", "bossmode"), { recursive: true });
-  writeFileSync(join(tmpDir, "knowledge", "docs", "bossmode", "prd.md"), "# PRD", "utf-8");
+  mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
+  writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "prd.md"), "# PRD", "utf-8");
   const task = createTask("room-a", { title: "版本主任务", createdBy: "pm" });
   const message = addMessage("room-a", { sender: "user", content: "裁定", mentions: [] });
   return { task, message };
@@ -139,8 +139,8 @@ describe("mainline-store", () => {
     const staleTwice = resolveMainlineRefs("room-a", staleOnce);
     expect(staleTwice.match(/\[stale\]/g)).toHaveLength(1);
     // Target appears → stale mark dropped on next read
-    mkdirSync(join(tmpDir, "knowledge", "docs", "bossmode"), { recursive: true });
-    writeFileSync(join(tmpDir, "knowledge", "docs", "bossmode", "later.md"), "x", "utf-8");
+    mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
+    writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "later.md"), "x", "utf-8");
     const healed = resolveMainlineRefs("room-a", staleTwice);
     expect(healed).not.toContain("[stale]");
     expect(healed).toContain("- docs/bossmode/later.md — 稍后创建");

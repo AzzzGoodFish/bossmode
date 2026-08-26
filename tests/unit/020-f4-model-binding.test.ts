@@ -73,7 +73,7 @@ describe("F4 model binding persists to the registry", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-f4-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("pm");
     seedAgent("dev");
     seedAgent("qa");
@@ -238,7 +238,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     dir = mkdtempSync(join(tmpdir(), "bm-f4heal-"));
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "knowledge", "docs"), { recursive: true });
+    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     seedAgent("pm");
     broadcastToRoom.mockClear();
     subscribeCb = undefined;

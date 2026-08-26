@@ -48,7 +48,7 @@ describe("room-store", () => {
       expect(existsSync(join(roomDir, "room.json"))).toBe(true);
       expect(existsSync(join(roomDir, "messages.jsonl"))).toBe(true);
       expect(existsSync(join(roomDir, "cursors.json"))).toBe(true);
-      expect(existsSync(join(tempDir, "knowledge", "docs", "test-room"))).toBe(true);
+      expect(existsSync(join(tempDir, "memory", "projects", "test-room"))).toBe(true);
     });
 
     it("should initialize cursors to null for all members", () => {
@@ -71,7 +71,7 @@ describe("room-store", () => {
     it("accepts an explicit normalized docsPath and can clear legacy bindings", () => {
       const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]), undefined, { docsPath: "bossmode" });
       expect(room.docsPath).toBe("bossmode/");
-      expect(existsSync(join(tempDir, "knowledge", "docs", "bossmode"))).toBe(true);
+      expect(existsSync(join(tempDir, "memory", "projects", "bossmode"))).toBe(true);
       const cleared = roomStore.updateRoomDocsPath(room.id, null);
       expect(cleared?.docsPath).toBeUndefined();
     });

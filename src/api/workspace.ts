@@ -261,35 +261,13 @@ addRoute("DELETE", "/api/rooms/:id", async (_req, res, params) => {
 
 // Contract drift detection (auto-reload prompt, fish 2026-08-07): list members
 // whose stored fingerprint doesn't match the current build.
-addRoute("GET", "/api/rooms/:id/contract-drift", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const drift = computeContractDrift(params.id);
-  sendJson(res, 200, { drift });
+addRoute("GET", "/api/rooms/:id/contract-drift", async (_req, res) => {
+  sendJson(res, 410, { error: "gone", message: "Contract drift / Reload retired" });
 });
 
 // Dismiss a contract-drift notification (user clicked "稍后" / "Reset").
-addRoute("POST", "/api/rooms/:id/contract-drift/dismiss", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const scopeId = `room:${params.id}`;
-  const drift = computeContractDrift(params.id);
-  const { markDriftNotified } = await import("../workspace/runtime-state.js");
-  for (const d of drift) {
-    if (!d.alreadyNotified) markDriftNotified(scopeId, d.memberId, d.currentVersion);
-  }
-  // Broadcast refreshed status so the frontend picks up stale=contract red dots immediately.
-  for (const d of drift) {
-    const member = roomStore.getRoomMembers(params.id).find((m) => m.id === d.memberId);
-    if (member) broadcastMemberStatus(params.id, member.id);
-  }
-  sendJson(res, 200, { ok: true });
+addRoute("POST", "/api/rooms/:id/contract-drift/dismiss", async (_req, res) => {
+  sendJson(res, 410, { error: "gone", message: "Contract drift / Reload retired" });
 });
 
 addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
@@ -458,7 +436,7 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, re
     sendJson(res, 404, { error: "Agent definition not found for this member" });
     return;
   }
-  const docsRoot = join(getBossmodeDir(), "knowledge", "docs");
+  const docsRoot = join(getBossmodeDir(), "memory", "projects");
   const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot });
   // Batch-1: Communication replaces the old bossmode-core card content.
   const core = compiled.sections.find((s) => s.id === "communication");
@@ -980,30 +958,8 @@ addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) 
 
 // ── Agent Reload ──
 
-addRoute("POST", "/api/rooms/:id/agents/:agent/reload", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-
-  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
-  if (!member) {
-    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
-    return;
-  }
-
-  try {
-    const result = await reloadMemberResources(params.id, member.id);
-    // Broadcast refreshed status so the frontend clears stale badges immediately
-    // (especially for un-activated members whose status doesn't otherwise change).
-    broadcastMemberStatus(params.id, member.id);
-    logger.info("api", "POST /api/rooms/:id/agents/:agent/reload", { agent: params.agent, roomId: params.id, reloaded: result.reloaded });
-    sendJson(res, 200, result);
-  } catch (err: any) {
-    logger.warn("api", "member reload failed", { agent: params.agent, roomId: params.id, error: err.message || String(err) });
-    sendJson(res, 409, { error: err.message || String(err) });
-  }
+addRoute("POST", "/api/rooms/:id/agents/:agent/reload", async (_req, res) => {
+  sendJson(res, 410, { error: "gone", message: "Reload retired — activation recompiles the latest prompt" });
 });
 
 // ── Agent Reset ──

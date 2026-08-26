@@ -60,19 +60,19 @@ describe("Acceptance: Authentication (F2)", () => {
     expect(res.status).toBe(400);
   });
 
-  // T1.4: Token-based auth on protected endpoints
+  // T1.4: Token-based auth on protected endpoints (use /api/rooms — /api/agents is 410 gone)
   it("T1.4: protected endpoint without token returns 401", async () => {
-    const res = await jsonRequest(ts.port, "GET", "/api/agents");
+    const res = await jsonRequest(ts.port, "GET", "/api/rooms");
     expect(res.status).toBe(401);
   });
 
   it("T1.4: protected endpoint with valid token returns 200", async () => {
-    const res = await jsonRequest(ts.port, "GET", "/api/agents", { token });
+    const res = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
     expect(res.status).toBe(200);
   });
 
   it("T1.4: protected endpoint with invalid token returns 401", async () => {
-    const res = await jsonRequest(ts.port, "GET", "/api/agents", { token: "invalid-xxx" });
+    const res = await jsonRequest(ts.port, "GET", "/api/rooms", { token: "invalid-xxx" });
     expect(res.status).toBe(401);
   });
 

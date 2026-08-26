@@ -1,15 +1,11 @@
-// Single-namespace Knowledge store (0.8.0)
+// Project-memory Knowledge store (identity batch 2.5)
 // =========================================
-// All documents live under a single global root:
+// All documents live under the shared project-memory root:
 //
-//     ~/.bossmode/knowledge/docs/
+//     ~/.bossmode/memory/projects/
 //
-// Document ID = path relative to docs/, e.g. "bossmode/architecture/overview.md".
-// Hierarchy is expressed by directory structure — no type field, no flat list.
-//
-// Library v0.17 stores files as plain files. Markdown is no longer parsed for
-// frontmatter and writes no longer inject frontmatter; title is derived from the
-// first Markdown heading or filename.
+// Document ID = path relative to that root, e.g. "bossmode/architecture/overview.md".
+// Hierarchy is directory structure. Physical migrate from knowledge/docs is batch 3.
 
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
@@ -23,7 +19,8 @@ import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
 
 /** Resolved at call time so tests can override BOSSMODE_DIR. */
 function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
-function docsRoot(): string { return join(knowledgeDir(), "docs"); }
+/** Project memory root (was knowledge/docs — batch 2.5 rename; migrate in batch 3). */
+function docsRoot(): string { return join(getBossmodeDir(), "memory", "projects"); }
 
 export type KnowledgeFileKind = "markdown" | "text" | "png";
 

@@ -15,7 +15,7 @@ import * as roomStore from "../workspace/room-store.js";
 import type { KnowledgeEventMeta } from "../shared/types.js";
 
 function docsRoot(): string {
-  return resolve(join(getBossmodeDir(), "knowledge", "docs"));
+  return resolve(join(getBossmodeDir(), "memory", "projects"));
 }
 
 /** Dedup window: the same agent touching the same doc repeatedly (multi-edit

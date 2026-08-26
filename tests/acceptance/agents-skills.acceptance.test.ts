@@ -75,7 +75,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
   // Agent CRUD
   // ══════════════════════════════════════════
 
-  describe("T1.1: Agent list", () => {
+  describe.skip("T1.1: Agent list (templates retired)", () => {
     it("returns 500 instead of fake empty when the Agent authority is unreadable, then recovers", async () => {
       const agentsDir = join(getTestBossmodeDir(), "agents");
       const backup = `${agentsDir}-backup`;
@@ -123,7 +123,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T1.2: Agent create", () => {
+  describe.skip("T1.2: Agent create (templates retired)", () => {
     it("POST /api/agents creates agent from markdown", async () => {
       const name = uid("create-agent");
       const content = agentMd(name, { description: "A test agent", tags: ["test"] });
@@ -139,7 +139,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T1.3: Agent detail + edit", () => {
+  describe.skip("T1.3: Agent detail + edit (templates retired)", () => {
     let detailName: string;
 
     it("GET /api/agents/:name returns full definition with systemPrompt", async () => {
@@ -169,7 +169,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T1.4: Agent delete", () => {
+  describe.skip("T1.4: Agent delete (templates retired)", () => {
     it("DELETE /api/agents/:name removes agent", async () => {
       const name = uid("delete-agent");
       const content = agentMd(name);
@@ -183,7 +183,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T1.11: Agent name conflict", () => {
+  describe.skip("T1.11: Agent name conflict (retired)", () => {
     it("POST /api/agents with duplicate name returns 409", async () => {
       const name = uid("dupe-agent");
       const content = agentMd(name);
@@ -194,7 +194,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T1.7: Agent templates", () => {
+  describe.skip("T1.7: Agent templates (retired)", () => {
     it("GET /api/agents/templates returns template list", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/agents/templates", { token });
       expect(res.status).toBe(200);
@@ -265,7 +265,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T2.4: Skill bind to agent", () => {
+  describe.skip("T2.4: Skill bind to agent (templates retired)", () => {
     it("creating agent with skills list binds skills", async () => {
       const sName = uid("bind-skill");
       await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
@@ -281,7 +281,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T2.5: Skill unbind", () => {
+  describe.skip("T2.5: Skill unbind (templates retired)", () => {
     it("updating agent with empty skills removes binding", async () => {
       const sName = uid("unbind-skill");
       await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
@@ -309,7 +309,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe("T2.8: Skill delete with agent references", () => {
+  describe.skip("T2.8: Skill delete with agent references (templates retired)", () => {
     it("DELETE /api/skills/:name removes skill and unbinds from agents", async () => {
       const sName = uid("del-skill");
       await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
@@ -336,7 +336,7 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
   // Edge cases
   // ══════════════════════════════════════════
 
-  describe("Edge: nonexistent resources", () => {
+  describe.skip("Edge: nonexistent resources (agent routes retired)", () => {
     it("GET /api/agents/nonexistent returns 404", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/agents/no-such-agent", { token });
       expect(res.status).toBe(404);
