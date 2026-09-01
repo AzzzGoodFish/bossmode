@@ -1,6 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { buildChatToolDescription, CHAT_MESSAGE_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
+import { renderQueryRowsForMember } from "../query-render.js";
 import {
   QUERY_ROOM_MESSAGES_DESCRIPTION,
   CREATE_TASK_DESCRIPTION,
@@ -75,7 +76,9 @@ export function createBossmodeSdkTools(opts: {
         if (data?.ok === false) throw new Error(data.error || "Query messages failed");
         if (data && typeof data === "object" && "path" in data) return textResult("Messages written to: " + data.path + " (count: " + data.count + ")");
         const messages = Array.isArray(data) ? data : [];
-        return textResult(truncate(messages.length === 0 ? "No messages found." : messages.map((m) => "[" + m.sender + "]: " + m.content).join("\n\n")));
+        // Member-view rendering (shared with file output): No./sender/time header,
+        // replyTo quote block, content, attachment lines.
+        return textResult(truncate(renderQueryRowsForMember(messages)));
       },
     }),
 
