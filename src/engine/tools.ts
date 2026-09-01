@@ -24,6 +24,7 @@ import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 import { processAgentAttachments } from "./agent-attachments.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
+import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
@@ -443,23 +444,15 @@ export async function handleToolCallback(
         if (maxMsg) roomStore.setCursor(roomId, qActor.id, maxMsg.id);
       }
 
-      // File output mode: write markdown file and return path (avoids 25K truncation)
-      if (params?.output === "file") {
-        const filePath = join(tmpdir(), `bossmode-search-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
-        const content = renderMessagesAsMarkdown(messages, searchOpts, targetRoomId);
-        writeFileSync(filePath, content, "utf-8");
-        logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
-        return { ok: true, path: filePath, count: messages.length, format: "markdown" };
-      }
-
-      // Default: inline text (may be truncated by MAX_RESULT_CHARS).
-      // Include replyTo + short quote excerpt when present (plan-reply-to-v1 §3).
+      // Member-view rows (built once, shared by both output modes):
+      // replyTo resolved against the full scope (works across the page window),
+      // attachments resolved to store paths (unavailable on miss).
       const byId = new Map(messages.map((m) => [m.id, m]));
       // Also index full scope for resolving reply targets outside the page window.
       const scopeAll = loadScopeMessages(targetRoomId);
       const scopeById = new Map(scopeAll.map((m) => [m.id, m]));
-      return messages.map((m) => {
-        const base: Record<string, unknown> = { sender: m.sender, content: m.content, ts: m.ts, seq: m.seq };
+      const rows: QueryRow[] = messages.map((m) => {
+        const base: QueryRow = { sender: m.sender, content: m.content, ts: m.ts, seq: m.seq };
         const readAttachments = resolveMessageAttachmentsForRead(targetRoomId, m);
         if (readAttachments.length > 0) {
           base.attachments = readAttachments;
@@ -476,6 +469,19 @@ export async function handleToolCallback(
         }
         return base;
       });
+
+      // File output mode: write markdown file and return path (avoids 25K truncation)
+      if (params?.output === "file") {
+        const filePath = join(tmpdir(), `bossmode-search-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
+        const content = renderMessagesAsMarkdown(rows, searchOpts);
+        writeFileSync(filePath, content, "utf-8");
+        logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
+        return { ok: true, path: filePath, count: messages.length, format: "markdown" };
+      }
+
+      // Default: inline rows — the SDK layer renders them via the shared
+      // member-view renderer (renderQueryRowsForMember) so both modes match.
+      return rows;
     }
     case "create_topic": {
       const message = String(params?.message ?? "").trim();
@@ -1004,23 +1010,15 @@ function resolveMessageAttachmentsForRead(
   });
 }
 
-function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.SearchOptions, scopeRoomId: string): string {
+function renderMessagesAsMarkdown(rows: QueryRow[], opts: messageStore.SearchOptions): string {
   const header = [
     "# Message Search Results\n",
     opts.query ? `**Query**: \`${opts.query}\`  ` : "",
     opts.from ? `**From**: \`${opts.from}\`  ` : "",
-    `**Count**: ${messages.length}`,
+    `**Count**: ${rows.length}`,
     "\n---\n",
   ].filter(Boolean).join("\n");
 
-  const body = messages.map((m) => {
-    const time = new Date(m.ts).toISOString();
-    const attachLines = resolveMessageAttachmentsForRead(scopeRoomId, m)
-      .map((a) => `Attachment: [original filename: ${a.originalFilename}](${a.path})`)
-      .join("\n");
-    const content = attachLines ? `${m.content}\n${attachLines}` : m.content;
-    return `## [${m.sender}] ${time}\n\n${content}`;
-  }).join("\n\n---\n\n");
-
-  return header + "\n" + body;
+  // Same member-view rendering as inline mode (one shape, both outputs).
+  return header + "\n" + renderQueryRowsForMember(rows);
 }
