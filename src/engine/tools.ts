@@ -1,5 +1,5 @@
 // Agent tool callback handler — business logic for chat/messages/summary tools
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -23,6 +23,7 @@ import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.j
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
 import { processAgentAttachments } from "./agent-attachments.js";
+import * as attachmentStore from "../workspace/attachment-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
@@ -445,7 +446,7 @@ export async function handleToolCallback(
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {
         const filePath = join(tmpdir(), `bossmode-search-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
-        const content = renderMessagesAsMarkdown(messages, searchOpts);
+        const content = renderMessagesAsMarkdown(messages, searchOpts, targetRoomId);
         writeFileSync(filePath, content, "utf-8");
         logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
         return { ok: true, path: filePath, count: messages.length, format: "markdown" };
@@ -459,6 +460,10 @@ export async function handleToolCallback(
       const scopeById = new Map(scopeAll.map((m) => [m.id, m]));
       return messages.map((m) => {
         const base: Record<string, unknown> = { sender: m.sender, content: m.content, ts: m.ts, seq: m.seq };
+        const readAttachments = resolveMessageAttachmentsForRead(targetRoomId, m);
+        if (readAttachments.length > 0) {
+          base.attachments = readAttachments;
+        }
         if (m.replyTo) {
           const target = scopeById.get(m.replyTo.messageId) || byId.get(m.replyTo.messageId);
           base.replyTo = {
@@ -969,7 +974,37 @@ function renderTaskAsMarkdown(task: Task | null): string {
   return lines.join("\n");
 }
 
-function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.SearchOptions): string {
+/** Resolve a message's attachments for member-facing reads (fish No.16834):
+ *  {originalFilename, path} — path is the attachment-store absolute path for the
+ *  owning scope (room dir / DM dir / topic → parent room dir), or "unavailable"
+ *  when the file is missing (envelope catch behavior). */
+function resolveMessageAttachmentsForRead(
+  scopeRoomId: string,
+  msg: RoomMessage,
+): Array<{ originalFilename: string; path: string }> {
+  if (!msg.attachments?.length) return [];
+  return msg.attachments.map((a) => {
+    try {
+      let absPath: string;
+      if (scopeRoomId.startsWith("dm:")) {
+        absPath = attachmentStore.getDmAttachmentPath(scopeRoomId.slice(3), a.storedFilename);
+      } else {
+        const owner = scopeRoomId.startsWith("topic:")
+          ? (resolveChatScopeRoomId(scopeRoomId) || scopeRoomId)
+          : scopeRoomId;
+        absPath = attachmentStore.getAttachmentPath(owner, a.storedFilename);
+      }
+      if (!existsSync(absPath)) {
+        return { originalFilename: a.originalFilename, path: "unavailable" };
+      }
+      return { originalFilename: a.originalFilename, path: absPath };
+    } catch {
+      return { originalFilename: a.originalFilename, path: "unavailable" };
+    }
+  });
+}
+
+function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.SearchOptions, scopeRoomId: string): string {
   const header = [
     "# Message Search Results\n",
     opts.query ? `**Query**: \`${opts.query}\`  ` : "",
@@ -980,7 +1015,11 @@ function renderMessagesAsMarkdown(messages: RoomMessage[], opts: messageStore.Se
 
   const body = messages.map((m) => {
     const time = new Date(m.ts).toISOString();
-    return `## [${m.sender}] ${time}\n\n${m.content}`;
+    const attachLines = resolveMessageAttachmentsForRead(scopeRoomId, m)
+      .map((a) => `Attachment: [original filename: ${a.originalFilename}](${a.path})`)
+      .join("\n");
+    const content = attachLines ? `${m.content}\n${attachLines}` : m.content;
+    return `## [${m.sender}] ${time}\n\n${content}`;
   }).join("\n\n---\n\n");
 
   return header + "\n" + body;
