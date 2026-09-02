@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
+import { copyText } from "../utils/clipboard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -13,12 +14,12 @@ const SyntaxHighlighter = PrismLight;
  */
 function CodeBlockFrame({ language, raw, children }: { language: string; raw: string; children: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   const copy = () => {
-    if (!navigator.clipboard?.writeText) return;
-    navigator.clipboard.writeText(raw).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    }).catch(() => {});
+    void copyText(raw).then((ok) => {
+      if (ok) { setCopied(true); window.setTimeout(() => setCopied(false), 1200); }
+      else { setFailed(true); window.setTimeout(() => setFailed(false), 1500); }
+    });
   };
   return (
     <div className="my-2 overflow-hidden rounded-md border border-line-soft">
@@ -27,11 +28,11 @@ function CodeBlockFrame({ language, raw, children }: { language: string; raw: st
         <button
           type="button"
           onClick={copy}
-          className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] cursor-pointer ${copied ? "text-onair" : "text-ink-3 hover:text-ink-1 hover:bg-surface-3"}`}
-          title={copied ? "Copied" : "Copy code"}
+          className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] cursor-pointer ${copied ? "text-onair" : failed ? "text-blocked" : "text-ink-3 hover:text-ink-1 hover:bg-surface-3"}`}
+          title={copied ? "Copied" : failed ? "Copy failed — select the text manually" : "Copy code"}
         >
-          {copied ? <Check size={11} /> : <Copy size={11} />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? <Check size={11} /> : failed ? <X size={11} /> : <Copy size={11} />}
+          {copied ? "Copied" : failed ? "Failed" : "Copy"}
         </button>
       </div>
       {children}
