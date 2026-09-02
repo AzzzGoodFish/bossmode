@@ -94,3 +94,24 @@ describe("applyMemberConfigPatch — unified write authority", () => {
     expect(eff.sources.model).toBe("global");
   });
 });
+
+describe("batch-5b disk peel + scopeless config PATCH", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bm-panel-scope2-"));
+    mkdirSync(join(dir, "members"), { recursive: true });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("writeRecord peels unified flags + scopeOverrides from disk", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { reg, member } = await seedMember("peelcheck", { unifiedModel: false });
+    // Any write (title patch path) strips legacy fields from disk.
+    reg.updateMember(member.id, { global: { thinkingLevel: "high" } });
+    const raw = readFileSync(join(dir, "members", member.id, "member.json"), "utf-8");
+    expect(raw).not.toContain("unifiedModel");
+    expect(raw).not.toContain("unifiedExtensions");
+    expect(raw).not.toContain("scopeOverrides");
+    // Read side still normalizes flags for in-memory consumers.
+    expect(reg.getMember(member.id)!.unifiedModel).toBe(true);
+  });
+});
