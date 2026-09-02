@@ -28,7 +28,7 @@ describe("createBossmodeSdkTools schema normalization", () => {
   });
 
   it("marks all-optional tools with required: []", () => {
-    for (const name of ["query_room_messages", "list_tasks", "query_integration"]) {
+    for (const name of ["query_room_messages", "list_tasks"]) {
       const tool = tools.find((t) => t.name === name);
       expect(tool, `tool "${name}" should exist`).toBeDefined();
       expect((tool!.parameters as { required?: unknown }).required).toEqual([]);
@@ -40,6 +40,11 @@ describe("createBossmodeSdkTools schema normalization", () => {
     expect((commentTask!.parameters as { required?: string[] }).required).toEqual(
       expect.arrayContaining(["taskId", "comment"]),
     );
+  });
+
+  it("linear integration tools are removed from the tool surface", () => {
+    expect(tools.find((t) => t.name === "query_integration")).toBeUndefined();
+    expect(tools.find((t) => t.name === "configure_integration")).toBeUndefined();
   });
 });
 

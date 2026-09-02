@@ -397,6 +397,116 @@ addRoute("GET", "/api/members/:id", async (_req, res, params) => {
   sendJson(res, 200, { member: publicMember(m) });
 });
 
+/** Item-5 preview (pm 2026-09-02): render the member's actual compiled system
+ * prompt for a scope by calling the same compiler with the same arguments the
+ * activation points pass — byte-identical to what a real turn injects. */
+addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
+  try {
+    const m = resolveMemberRef(params.id);
+    if (!m) {
+      sendJson(res, 404, { error: "not_found", message: "Member not found" });
+      return;
+    }
+    const url = new URL(req.url || "", "http://localhost");
+    const scopeParam = url.searchParams.get("scope") || "";
+    const ref = parseScopeId(scopeParam);
+    if (!scopeParam || !ref) {
+      sendJson(res, 400, { error: "scope_not_found", message: "scope query required" });
+      return;
+    }
+
+    const { compileMemberPromptForScope } = await import("../engine/prompt-compiler.js");
+    const { loadAgentDefinition } = await import("../workforce/agent-store.js");
+    const { getRoom, resolveRoomMemberRef } = await import("../workspace/room-store.js");
+    const { getBossmodeDir } = await import("../shared/config.js");
+    const { join } = await import("node:path");
+
+    const agentDef = loadAgentDefinition(m.agentTemplate) || {
+      name: m.agentTemplate,
+      description: m.agentTemplate,
+      systemPrompt: `You are ${m.name}.`,
+      tags: [],
+      skills: [],
+    };
+    const docsRoot = join(getBossmodeDir(), "memory", "projects");
+
+    if (ref.kind === "dm") {
+      // DM activation passes room=null + roster-labeled activeScopes.
+      if (ref.memberId !== m.id) {
+        sendJson(res, 404, { error: "not_found", message: "scope belongs to another member" });
+        return;
+      }
+      const { buildDmScopeLabels } = await import("../engine/agent-manager.js");
+      const compiled = compileMemberPromptForScope({
+        scopeId: scopeParam,
+        memberId: m.id,
+        memberName: m.name,
+        agentDef,
+        room: null,
+        docsRoot,
+        activeScopes: buildDmScopeLabels(m.id, scopeParam),
+      });
+      sendJson(res, 200, {
+        text: compiled.fullPrompt,
+        charCount: compiled.fullPrompt.length,
+        scopeId: scopeParam,
+        contractFingerprint: compiled.contractFingerprint,
+      });
+      return;
+    }
+
+    if (ref.kind === "room") {
+      const room = getRoom(ref.roomId);
+      if (!room || !resolveRoomMemberRef(ref.roomId, m.name)) {
+        sendJson(res, 404, { error: "not_found", message: "member not in this room" });
+        return;
+      }
+      const compiled = compileMemberPromptForScope({
+        scopeId: scopeParam,
+        memberId: m.id,
+        memberName: m.name,
+        agentDef,
+        room,
+        docsRoot,
+      });
+      sendJson(res, 200, {
+        text: compiled.fullPrompt,
+        charCount: compiled.fullPrompt.length,
+        scopeId: scopeParam,
+        contractFingerprint: compiled.contractFingerprint,
+      });
+      return;
+    }
+
+    // topic: parent-room roster + topic title, mirroring topic activation.
+    const room = getRoom(ref.roomId);
+    if (!room || !resolveRoomMemberRef(ref.roomId, m.name)) {
+      sendJson(res, 404, { error: "not_found", message: "member not in this room" });
+      return;
+    }
+    const { getTopic } = await import("../workspace/topic-store.js");
+    const topicRec = getTopic(ref.roomId, ref.topicId);
+    const compiled = compileMemberPromptForScope({
+      scopeId: scopeParam,
+      memberId: m.id,
+      memberName: m.name,
+      agentDef,
+      room,
+      docsRoot,
+      topicTitle: topicRec?.title ?? null,
+    });
+    sendJson(res, 200, {
+      text: compiled.fullPrompt,
+      charCount: compiled.fullPrompt.length,
+      scopeId: scopeParam,
+      contractFingerprint: compiled.contractFingerprint,
+    });
+  } catch (err) {
+    const e = errCode(err);
+    sendJson(res, e.status, { error: e.error, message: e.message });
+  }
+});
+
 addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as {
