@@ -7,7 +7,7 @@ import {
   getMemberScopedStats, getMemberCorePromptScoped, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
-import { useMemberFloat, memberHue } from "./member-float";
+import { useMemberFloat } from "./member-float";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { formatTokens, compactModelId, memberModelAvailabilityLabel, statusLabel } from "./member-scope";
 
@@ -1181,7 +1181,6 @@ function MemberPeekCard({ anchor, member, status, events, stream, roomId, models
 
   const recent = events.filter((e) => isActivityStreamEvent(e) && (e.type === "message_end" ? !!e.text : e.type === "tool_start")).slice(-3).reverse();
   const live = currentActivityLine(events, status, stream);
-  const hue = memberHue(member.name);
 
   const CARD_W = 300;
   const CARD_H = 430;
@@ -1224,8 +1223,6 @@ function MemberPeekCard({ anchor, member, status, events, stream, roomId, models
       role="dialog"
       aria-label={`${member.name} peek card`}
     >
-      {/* banner — hue from the member's name (their face color) */}
-      <div className="h-11" style={{ background: `linear-gradient(120deg, hsl(${hue} 45% 38% / .8), hsl(${hue} 40% 22% / .35))` }} />
       <div className="relative">
         <button
           type="button"
@@ -1240,8 +1237,8 @@ function MemberPeekCard({ anchor, member, status, events, stream, roomId, models
           </div>
         )}
       </div>
-      <div className="px-3.5 -mt-6">
-        <div className="rounded-full ring-4 ring-surface-2 inline-flex">
+      <div className="px-3.5 pt-3">
+        <div className="inline-flex">
           <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
         </div>
       </div>

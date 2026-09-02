@@ -59,13 +59,7 @@ export function MemberFloatProvider({ children, onFired }: { children: React.Rea
   );
 }
 
-/** Banner hue derived from the member's name — every member's card/float gets
- * its own face color (prototype member-peek-v1, fish-picked). */
-export function memberHue(name: string): number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
+
 
 // ── the float ───────────────────────────────────────────────────────────────
 
@@ -120,7 +114,6 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
     }
   };
 
-  const hue = memberHue(member?.name ?? "?");
   const hasActivityTab = !!scope;
 
   return (
@@ -131,11 +124,10 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
         role="dialog"
         aria-label={member ? `${member.name} details` : "Member details"}
       >
-        {/* banner + header */}
-        <div className="h-14 shrink-0" style={{ background: `linear-gradient(120deg, hsl(${hue} 45% 38% / .85), hsl(${hue} 40% 22% / .4))` }} />
-        <button onClick={onClose} title="Close" className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-black/40 text-ink-1 hover:bg-black/60 flex items-center justify-center cursor-pointer z-10"><X size={14} /></button>
-        <div className="px-5 flex items-end gap-3.5 -mt-7 shrink-0">
-          <div className="rounded-full ring-4 ring-surface-1"><StaffBadge name={member?.name ?? "?"} status={scope ? statusFromAgent(scope.status) : "offline"} size="lg" /></div>
+        {/* header — no banner strip (fish 2026-09-02: drop the gradient) */}
+        <button onClick={onClose} title="Close" className="absolute top-3 right-3 w-7 h-7 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-surface-2 flex items-center justify-center cursor-pointer z-10 transition-colors"><X size={14} /></button>
+        <div className="px-5 pt-4 flex items-center gap-3.5 shrink-0">
+          <StaffBadge name={member?.name ?? "?"} status={scope ? statusFromAgent(scope.status) : "offline"} size="lg" />
           <div className="min-w-0 pb-0.5">
             {member ? (
               <>
