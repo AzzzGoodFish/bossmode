@@ -994,7 +994,6 @@ function MemberPeekCard({ anchor, member, status, events, stream, roomId, models
       <div className="px-3.5 pt-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[15px] font-bold text-ink-1 truncate">{member.name}</span>
-          <span className="text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-accent-dim text-accent-ink shrink-0">this room</span>
         </div>
         <div className="text-[11px] text-ink-3 mt-0.5 truncate">
           {member.title ? `${member.title} · ` : ""}<span className="font-mono">@{member.name}</span>

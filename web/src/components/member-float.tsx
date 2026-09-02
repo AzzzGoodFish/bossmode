@@ -17,22 +17,22 @@
  *   absent (Contacts)     → global-only: Profile + Settings (no Activity tab)
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, ChevronRight, Loader2, SendHorizonal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Info, Loader2, SendHorizonal, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ActivityTab } from "./ActivityTab";
 import { useDialog } from "./dialogs";
 import {
-  MemberMdCard, MemberSkillsCard, CoreCard, ContextSessionCard,
+  MemberSkillsCard, ContextSessionCard,
   ExtensionsAccordion, McpToolsAccordion, ActiveToolsSection, isAssignableMcpServer,
+  formatTokens,
 } from "./member-scope";
-import { ModelPicker } from "./ModelPicker";
 import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
   steerAgent, restartMember, resetAgentSession,
-  getMemberStats, getMemberCorePrompt,
-  getMemberScopedStats, getMemberCorePromptScoped,
+  getMemberStats,
+  getMemberScopedStats,
   getConversationSession, conversationMemberAction, getMcpSettings, getExtensions, sendDmMessage,
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
   type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
@@ -133,7 +133,6 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
               <>
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-[17px] font-bold text-ink-1 truncate">{member.name}</span>
-                  {scope && <span className="text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-accent-dim text-accent-ink shrink-0">{scope.kind === "dm" ? "this DM" : "this room"}</span>}
                 </div>
                 <div className="text-[11px] text-ink-3 mt-0.5 truncate">
                   {member.title ? `${member.title} · ` : ""}<span className="font-mono">@{member.name}</span>
@@ -166,7 +165,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
         {member && (
           <div className="flex-1 overflow-y-auto min-h-[260px] px-5 py-4">
             {tab === "profile" && <ProfileTab member={member} setMember={setMember} scopes={scopes} />}
-            {tab === "assets" && <AssetsTab member={member} setMember={setMember} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
+            {tab === "assets" && <AssetsTab member={member} setMember={setMember} scope={scope} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
             {tab === "activity" && scope && (
               <div className="h-[420px] rounded-xl border border-line-soft overflow-hidden">
                 <ActivityTab
@@ -252,9 +251,13 @@ function ProfileTab({ member, setMember, scopes }: {
       <section>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Name</div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-[11px] font-semibold text-ink-3">Name</span>
+              <span className="inline-flex cursor-help" title="The name is the routing key — it can’t be changed here.">
+                <Info size={11} className="text-ink-4" />
+              </span>
+            </div>
             <div className="rounded-lg border border-line-soft bg-surface-1 px-3 py-2 text-[13px] text-ink-1">{member.name}</div>
-            <div className="text-[10.5px] text-ink-4 mt-1">The routing key — can’t be changed here.</div>
           </div>
           <div>
             <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Title</div>
@@ -262,7 +265,7 @@ function ProfileTab({ member, setMember, scopes }: {
               <input
                 value={titleDraft}
                 onChange={(e) => { setTitleDraft(e.target.value); setCardError(null); }}
-                placeholder="e.g. Architect — the role on the card"
+                placeholder="e.g. Architect"
                 className="flex-1 min-w-0 rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
               />
               <button
@@ -279,8 +282,31 @@ function ProfileTab({ member, setMember, scopes }: {
         </div>
       </section>
 
-      {/* persona (global content) */}
-      <MemberMdCard profile={profile} memberName={member.name} />
+      {/* persona — the member.md body in a plain read-only box (fish
+       * 2026-09-02: name/title/persona/about only; the ⓘ carries the
+       * "this is the persona file" note + path). */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="text-[11px] font-semibold text-ink-3">Persona</span>
+          <span
+            className="inline-flex cursor-help"
+            title={profile?.path
+              ? `This file IS ${member.name}'s persona — the member grows it from your feedback.\n${profile.path}`
+              : `This file IS ${member.name}'s persona — the member grows it from your feedback.`}
+          >
+            <Info size={11} className="text-ink-4" />
+          </span>
+        </div>
+        <div className="rounded-lg border border-line-soft bg-surface-1 px-3 py-2 max-h-[300px] overflow-y-auto">
+          {profile === null ? (
+            <div className="text-[12px] text-ink-4 py-1">Loading…</div>
+          ) : !profile.body.trim() ? (
+            <div className="text-[12px] text-ink-4 py-1">No persona yet — the member writes here as your feedback teaches it something lasting.</div>
+          ) : (
+            <div className="whitespace-pre-wrap font-mono text-[12px] text-ink-2 leading-relaxed">{profile.body}</div>
+          )}
+        </div>
+      </section>
 
       {/* about */}
       <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
@@ -304,9 +330,10 @@ function ProfileTab({ member, setMember, scopes }: {
 // global lists, never per-scope. Memory is shared platform directories,
 // shown as read-only pointers, never as a member-private asset (pm boundary).
 
-function AssetsTab({ member, setMember, onOpenSettings }: {
+function AssetsTab({ member, setMember, scope, onOpenSettings }: {
   member: MemberDetail;
   setMember: (m: MemberDetail) => void;
+  scope: MemberScopeInfo | null;
   onOpenSettings: (section: "integrations" | "extensions") => void;
 }) {
   const { toast } = useDialog();
@@ -381,24 +408,144 @@ function AssetsTab({ member, setMember, onOpenSettings }: {
         onOpenMcpSettings={() => onOpenSettings("integrations")}
       />
 
+      {/* active tools — this scope's live session (moved from Settings,
+       * fish 2026-09-02 item 3: Settings keeps config, Assets lists tools) */}
+      {scope && (
+        <ActiveToolsSection
+          roomId={scope.kind === "dm" ? scope.scopeId : scope.scopeId.replace(/^room:/, "")}
+          memberRef={member.memberId || member.name}
+          status={scope.status}
+          reloadKey={0}
+          dmScope={scope.kind === "dm" ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined}
+        />
+      )}
+
       {/* memory — shared platform directories, pointers only */}
       <section className="rounded-xl border border-line-soft bg-surface-1">
         <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
           <h3 className="text-[13.5px] font-bold text-ink-1">Memory</h3>
-          <span className="text-[10px] text-ink-4">shared · read pointers</span>
         </div>
         <div className="px-4 py-3 space-y-2">
           {["~/.bossmode/memory/user/", "~/.bossmode/memory/projects/"].map((path) => (
             <div key={path} className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2">
               <span className="font-mono text-[11.5px] text-ink-3 truncate">{path}</span>
-              <span className="ml-auto shrink-0 text-[9px] font-bold tracking-[0.06em] uppercase text-ink-4">shared · all members</span>
             </div>
           ))}
           <p className="text-[11px] text-ink-4 leading-relaxed">
-            Memory is shared across all members — not this member’s private asset. It reads the same directories everyone else does.
+            Shared across all members — the same directories everyone reads.
           </p>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ModelRowSelect({ value, models, onChange }: {
+  value: { model: string | null; credentialId: string | null };
+  models: AvailableModelOption[];
+  onChange: (v: { model: string | null; credentialId: string | null }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => { if (!wrapRef.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onPointerDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const current = value.model
+    ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
+    : undefined;
+  const rows = [...models].sort((a, b) =>
+    (a.providerDisplayName || a.providerSlug).localeCompare(b.providerDisplayName || b.providerSlug) || (a.displayName || a.modelId).localeCompare(b.displayName || b.modelId));
+  const pairCount = new Map<string, number>();
+  for (const m of rows) {
+    const k = `${m.displayName || m.modelId}::${m.providerDisplayName || m.providerSlug}`;
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  const quietLabel = (m: AvailableModelOption) => {
+    const provider = m.providerDisplayName || m.providerSlug;
+    const k = `${m.displayName || m.modelId}::${provider}`;
+    return pairCount.get(k)! > 1 ? `${provider} · ${m.profileName}` : provider;
+  };
+
+  const caps = (m: AvailableModelOption) => {
+    const parts = [m.provider || m.providerSlug];
+    if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} ctx`);
+    if (m.maxTokens) parts.push(`${formatTokens(m.maxTokens)} out`);
+    if (m.reasoning) parts.push("thinking");
+    if (m.images) parts.push("images");
+    return parts.join(" · ");
+  };
+
+  const rowLabel = (m: AvailableModelOption) => m.displayName || m.modelId;
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 rounded-lg border border-line bg-inset px-3 py-2 text-left cursor-pointer hover:border-line-strong transition-colors"
+      >
+        {current ? (
+          <>
+            <span className="text-[13px] font-semibold text-ink-1 truncate">{rowLabel(current)}</span>
+            <span className="text-[11px] text-ink-4 truncate">{quietLabel(current)}</span>
+          </>
+        ) : value.model ? (
+          <>
+            <span className="text-[13px] font-semibold text-think truncate">{value.model}</span>
+            <span className="text-[11px] text-think truncate">unavailable</span>
+          </>
+        ) : (
+          <span className="text-[13px] text-ink-4">Not configured</span>
+        )}
+        <ChevronDown size={12} className={`ml-auto shrink-0 text-ink-4 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-64 overflow-y-auto rounded-lg border border-line-strong bg-surface-3 p-1" style={{ boxShadow: "var(--shadow-pop)" }}>
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onChange({ model: null, credentialId: null }); }}
+            className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+          >
+            <span className="text-[12.5px] text-ink-4">Not configured</span>
+            {!value.model && <Check size={12} className="ml-auto shrink-0 text-accent-ink" />}
+          </button>
+          {value.model && !current && (
+            <div className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 opacity-70">
+              <span className="text-[12.5px] font-medium text-think truncate">{value.model}</span>
+              <span className="text-[10.5px] text-think truncate">unavailable</span>
+              <Check size={12} className="ml-auto shrink-0 text-think" />
+            </div>
+          )}
+          {rows.map((m) => {
+            const selected = current ? m.profileId === current.profileId && m.ref === current.ref : false;
+            return (
+              <button
+                key={`${m.profileId}::${m.ref}`}
+                type="button"
+                title={caps(m)}
+                onClick={() => { setOpen(false); onChange({ model: m.ref, credentialId: m.profileId }); }}
+                className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+              >
+                <span className="text-[12.5px] font-medium text-ink-1 truncate">{rowLabel(m)}</span>
+                <span className="text-[10.5px] text-ink-4 truncate">{quietLabel(m)}</span>
+                {selected && <Check size={12} className="ml-auto shrink-0 text-accent-ink" />}
+              </button>
+            );
+          })}
+          {rows.length === 0 && (
+            <div className="px-2.5 py-2 text-[11px] text-think">No models available. Connect a provider in Settings → Models.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -424,18 +571,11 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
 
   const dm = scope?.kind === "dm";
   const roomId = scope && !dm ? scope.scopeId.replace(/^room:/, "") : null;
-  const dmScope = dm && scope ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined;
-
   const [contextUsage, setContextUsage] = useState<ContextUsageData | undefined>();
-  const [corePrompt, setCorePrompt] = useState<{ content: string; charCount: number } | null>(null);
 
   useEffect(() => {
     if (!scope) return;
     let cancelled = false;
-    (dm
-      ? getMemberCorePromptScoped(member.memberId, scope.scopeId)
-      : getMemberCorePrompt(roomId!, member.memberId)
-    ).then((r) => { if (!cancelled) setCorePrompt(r); }).catch(() => { if (!cancelled) setCorePrompt({ content: "", charCount: 0 }); });
     getConversationSession(scope.scopeId, member.memberId).then((s) => { if (!cancelled) setContextUsage(s.contextUsage); }).catch(() => {});
     return () => { cancelled = true; if (savedTimer.current) clearTimeout(savedTimer.current); };
   }, [dm, roomId, member.memberId, scope]);
@@ -502,14 +642,13 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
       {/* the member's model — global, applies to every scope */}
       <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
         <div className="text-[13px] font-semibold text-ink-1">Model</div>
-        <div className="text-[11px] text-ink-4 mt-0.5">One model for this member everywhere. Applies on the next turn.</div>
+        <div className="text-[11px] text-ink-4 mt-0.5">Applies on the next turn.</div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
           <label className="block space-y-1.5 min-w-0">
-            <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
-            <ModelPicker
+            <span className="text-[11px] font-medium text-ink-3">Model</span>
+            <ModelRowSelect
               value={{ model: globalModel, credentialId: globalCredentialId }}
               models={models}
-              emptyLabel="Not configured"
               onChange={(v) => void saveConfig({ model: v.model, credentialId: v.credentialId })}
             />
           </label>
@@ -533,11 +672,7 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
 
       {/* this scope's live session — operational actions stay scope-bound */}
       {scope && (
-        <>
-          <ContextSessionCard contextUsage={contextUsage} onCompact={handleCompact} onResetSession={handleResetSession} onRestart={handleRestart} dm={!!dm} />
-          <ActiveToolsSection roomId={dm ? scope.scopeId : roomId!} memberRef={member.memberId || member.name} status={scope.status} reloadKey={0} dmScope={dmScope} />
-          <CoreCard corePrompt={corePrompt} />
-        </>
+        <ContextSessionCard contextUsage={contextUsage} onCompact={handleCompact} onResetSession={handleResetSession} onRestart={handleRestart} dm={!!dm} />
       )}
 
       {/* danger */}
