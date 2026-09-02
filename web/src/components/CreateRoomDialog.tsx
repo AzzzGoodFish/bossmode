@@ -172,7 +172,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-ink-1">Create Room</h2>
-            <p className="mt-1 text-sm text-ink-4">Set up the workspace, then add the members who will work here.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close Create Room" className="rounded-md p-1.5 text-ink-4 hover:bg-surface-2 hover:text-ink-1">
             <X size={18} />
@@ -242,7 +241,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                 <div className="flex min-h-40 flex-col items-center justify-center px-4 py-6 text-center">
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-2 text-ink-4"><Users size={19} /></div>
                   <p className="text-sm font-medium text-ink-2">No members yet</p>
-                  <p className="mt-1 max-w-sm text-xs leading-5 text-ink-4">Add members from templates — rename or trim before creating.</p>
                   <button type="button" onClick={() => setPickerOpen(true)} className="mt-4 flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90">
                     <Plus size={14} /> Add member
                   </button>
@@ -279,10 +277,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
 
             {drafts.length > 0 && (
               <div className="mt-3 grid gap-3 rounded-lg border border-line-soft bg-surface-1 p-3 md:grid-cols-[1fr_1fr] md:items-center">
-                <div className="flex items-start gap-2">
-                  <Info size={14} className="mt-0.5 shrink-0 text-ink-4" />
-                  <p className="text-[11px] leading-4 text-ink-4">Model, thinking, and tools use the Agent defaults. Change them from the member profile after the Room is created.</p>
-                </div>
                 <label className="flex items-center justify-end gap-2 text-xs text-ink-3">
                   <span className="flex items-center gap-1.5 whitespace-nowrap"><Crown size={12} className="text-think" /> Room leader</span>
                   <select value={leaderName} onChange={(event) => setLeaderName(event.target.value)} className="min-w-0 max-w-52 flex-1 rounded-md border border-line bg-inset px-2.5 py-1.5 font-mono text-xs text-ink-1 outline-none focus:border-line-strong">
@@ -302,7 +296,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-1 px-6 py-4">
-          <p className="hidden text-xs text-ink-4 sm:block">The Room and its members are created together.</p>
           <div className="ml-auto flex gap-2">
             <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-ink-4 hover:bg-surface-2 hover:text-ink-1">Cancel</button>
             <button
@@ -458,12 +451,6 @@ function DraftMemberEditor({
             )}
           </label>
 
-          {selectedAgent && (
-            <div className="flex items-start gap-2 rounded-lg border border-line-soft bg-inset p-3">
-              <Info size={14} className="mt-0.5 shrink-0 text-ink-4" />
-              <p className="text-[11px] leading-4 text-ink-4"><span className="font-medium text-ink-3">{displayAgentName(selectedAgentInfo?.name || selectedAgent)}</span> defaults will be used for model, thinking, and tools. You can change them after creating the Room.</p>
-            </div>
-          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

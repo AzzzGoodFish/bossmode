@@ -286,7 +286,7 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-ink-1">Continue previous sessions</div>
-              <div className="text-xs text-ink-3 mt-0.5">Continue each member’s conversation after Bossmode restarts. Changes apply to sessions started afterward.</div>
+              <div className="text-xs text-ink-3 mt-0.5">Continue each member’s conversation after Bossmode restarts. Applies to new sessions.</div>
             </div>
             <ToggleSwitch
               on={!!runtimeSettings.sessionResume}
@@ -714,7 +714,7 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-ink-1">MCP servers</div>
-              <div className="text-xs text-ink-3 mt-0.5">Add the servers you use here, then assign them from each member profile.</div>
+              <div className="text-xs text-ink-3 mt-0.5">Per-member toggle lives in the member card → Assets.</div>
               {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} configured</div>}
             </div>
             <ToggleSwitch
@@ -916,7 +916,7 @@ function ModelCredentialsSection({ profiles, onAdd, onCustom, onEdit, onDelete, 
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider">Model providers</h2>
-          <p className="text-xs text-ink-3 mt-1">Connect a provider, then choose its available models for each member.</p>
+          <p className="text-xs text-ink-3 mt-1">Connect a provider, then choose the models available to your members.</p>
           {catalogStatus && (
             <p className="text-[11px] text-ink-4 mt-1" title={catalogStatus.fetchedAtIso || undefined}>
               {catalogStatus.freshnessLabel}

@@ -14,14 +14,13 @@
  * Settings tab as the single global select.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, FileText } from "lucide-react";
-import { Markdown } from "./Markdown";
+import { ChevronRight } from "lucide-react";
 import { ToggleSwitch } from "./ToggleSwitch";
 import {
   getMemberActiveTools, getConversationTools,
   type AvailableModelOption, type ContextUsageData, type ExtensionRecord,
   type McpServerSummary, type MemberActiveTool, type MemberInfo,
-  type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
+  type MemberSkillEntry, type MemberStats,
 } from "../api/client";
 
 // ── shared small utils (moved from StationPanel; imported back there) ──────
@@ -114,61 +113,6 @@ function firstContentLine(content: string): string {
   return line ?? "";
 }
 
-type PromptView = "markdown" | "raw";
-
-/** Prompt-assets unified accordion card (fish-approved prototype
- * prompt-assets-accordion-v1). */
-export function AccordionCard({ title, tag, hint, preview, defaultView, empty, renderContent }: {
-  title: string;
-  tag?: React.ReactNode;
-  hint?: React.ReactNode;
-  preview: string;
-  defaultView?: PromptView;
-  empty?: React.ReactNode;
-  renderContent: (view: PromptView) => React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState<PromptView>(defaultView ?? "markdown");
-  return (
-    <section className="rounded-xl border border-line-soft bg-surface-1 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="w-full block px-4 py-2.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
-      >
-        <span className="flex items-center gap-2 min-w-0">
-          <ChevronRight size={13} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
-          <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
-          {tag}
-
-        </span>
-        {!open && preview && (
-          <span className="mt-1 flex items-center gap-2 min-w-0 pl-[36px]">
-            <span className="text-[11.5px] text-ink-4 truncate min-w-0">{preview}</span>
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="border-t border-line-soft px-4 py-3">
-          <div className="flex items-center gap-2 mb-2 min-w-0">
-            {hint ? (
-              <span className="text-[11.5px] text-ink-4 leading-relaxed truncate min-w-0" title={typeof hint === "string" ? hint : undefined}>{hint}</span>
-            ) : null}
-            <span className="ml-auto shrink-0 flex items-center gap-0.5 rounded-md border border-line-soft bg-surface-2 p-0.5 text-[11px] font-medium">
-              <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
-              <button type="button" onClick={() => setView("raw")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Raw</button>
-            </span>
-          </div>
-          <div className="max-h-[320px] overflow-y-auto">
-            {empty ?? renderContent(view)}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 export function PanelCard({ title, tag, aside, hint, children }: {
   title: string;
   tag?: React.ReactNode;
@@ -198,106 +142,7 @@ function EmptyAsset({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-// ── status grid (verbatim from StationPanel) ────────────────────────────────
-
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "0h";
-  const hours = ms / 3_600_000;
-  if (hours < 1) return `${Math.round(ms / 60_000)}m`;
-  if (hours < 100) return `${hours.toFixed(1)}h`;
-  return `${Math.round(hours)}h`;
-}
-
-function StatSlot({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <div className="rounded-lg border border-line-soft bg-inset px-3 py-2.5">
-      <div className="text-[10px] font-semibold tracking-[0.06em] text-ink-4">{label}</div>
-      <div className="mt-1 text-[20px] font-semibold text-ink-1 leading-tight tabular-nums">{value}</div>
-      {detail ? <div className="mt-0.5 text-[11px] text-ink-4 leading-tight">{detail}</div> : null}
-    </div>
-  );
-}
-
-/** Overview status block: six real, data-backed cells. Every value is sourced
- * from live state or the persistent per-member stats accumulator (never
- * fabricated) — a member with no recorded activity shows real zeros. */
-export function StatusGrid({ status, member, contextUsage, stats, models, dm }: {
-  status: string;
-  member: MemberInfo;
-  contextUsage?: ContextUsageData;
-  stats: MemberStats | null;
-  models: AvailableModelOption[];
-  dm?: boolean;
-}) {
-  const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
-  const pct = hasUsage ? Math.round(contextUsage.percentage!) : null;
-  const totalTokens = stats ? stats.tokens.input + stats.tokens.output + stats.tokens.cacheRead + stats.tokens.cacheWrite : 0;
-  return (
-    <PanelCard title="Status" tag={<AssetTag tone={dm ? "dm" : "room"}>{dm ? "this DM" : "this room"}</AssetTag>} hint={dm ? "Live state and cumulative activity for this member, in this DM." : "Live state and cumulative activity for this member, in this room."}>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
-        <StatSlot label="STATUS" value={statusLabel(status)} />
-        <StatSlot label="MODEL" value={member.model ? compactModelId(member.model, models) : "—"} />
-        <StatSlot label="CONTEXT" value={pct !== null ? `${pct}%` : "—"} detail={contextUsage?.totalTokens ? `${formatTokens(contextUsage.totalTokens)} tok` : undefined} />
-        <StatSlot label="TOKENS · TOTAL" value={stats ? formatTokens(totalTokens) : "—"} detail="cumulative" />
-        <StatSlot label="ACTIVE TIME" value={stats ? formatDuration(stats.activeMs) : "—"} detail="cumulative" />
-        <StatSlot label="ACTIVITY" value={stats ? String(stats.turns) : "—"} detail={stats ? `turns · ${stats.toolCalls} tool calls` : undefined} />
-      </div>
-    </PanelCard>
-  );
-}
-
 // ── profile & skills (verbatim from StationPanel) ───────────────────────────
-
-/** member.md — the single memory asset: Markdown body, file path, over-budget
- * nudge, and the one-line guidance that replaces the old write_memory note. */
-/** member.md — the single memory asset as a CLASSIC document card (fish
- * 2026-09-02: disliked the expand-to-read card, wants a classic document — no more click-to-expand;
- * the persona body is simply visible, Markdown/Raw toggle rides the header).
- * CoreCard keeps the accordion on purpose: the compiled core is a platform
- * diagnostic, identical for every member — progressive disclosure is right
- * there and wrong here. */
-export function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | null; memberName: string }) {
-  const [view, setView] = useState<"markdown" | "raw">("raw");
-  const failed = (profile as (MemberProfileDoc & { __failed?: boolean }) | null)?.__failed;
-  return (
-    <section className="rounded-xl border border-line-soft bg-surface-1">
-      <div className="flex items-center gap-2 min-w-0 px-4 py-2.5 border-b border-line-soft">
-        <FileText size={13} className="shrink-0 text-ink-4" />
-        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">member.md</h3>
-        <AssetTag>persona · self-maintained</AssetTag>
-        {profile && !failed && <span className="text-[10px] text-ink-4 shrink-0 tabular-nums">{profile.charCount.toLocaleString()} chars{profile.overBudget ? " · over budget" : ""}</span>}
-        <span className="ml-auto shrink-0 flex items-center gap-0.5 rounded-md border border-line-soft bg-surface-2 p-0.5 text-[11px] font-medium">
-          <button type="button" onClick={() => setView("raw")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Raw</button>
-          <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
-        </span>
-      </div>
-      <div className="px-4 py-3">
-        <p className="text-[11.5px] text-ink-4 leading-relaxed mb-2.5">
-          This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.
-        </p>
-        {profile === null ? (
-          <div className="text-xs text-ink-4 py-1">Loading…</div>
-        ) : failed ? (
-          <EmptyAsset title="Unavailable" hint="member.md could not be loaded." />
-        ) : !profile.body.trim() ? (
-          <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />
-        ) : (
-          <>
-            <div className="rounded-lg border border-line-soft bg-inset/50 px-3.5 py-3 max-h-[340px] overflow-y-auto">
-              <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-                {view === "markdown" ? <Markdown content={profile.body} /> : `---\nname: ${profile.frontmatter.name}${profile.frontmatter.title ? `\ntitle: ${profile.frontmatter.title}` : ""}\n---\n\n${profile.body}`}
-              </div>
-            </div>
-            {profile.overBudget && <div className="mt-1.5 text-[11px] text-think">Persona is getting long (over 4,000 chars) — consider asking {memberName} to trim it.</div>}
-          </>
-        )}
-        {profile && profile.path ? (
-          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={profile.path}>{profile.path}</div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
 
 /** The member's skills/ directory, read-only: skills are the member's private,
  * self-maintained assets. */
@@ -306,7 +151,6 @@ export function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null
     <PanelCard
       title="Skills"
       tag={<AssetTag>{skills === null ? "…" : `${skills.length} on file`}</AssetTag>}
-      hint="Reusable work instructions the member maintains for itself. Read-only here — the member writes them."
     >
       {skills === null ? (
         <div className="text-xs text-ink-4 py-1">Loading…</div>
@@ -329,24 +173,6 @@ export function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null
 /** Real, compiled Bossmode Core prompt — sourced from the same compiler the
  * runtime uses; never a static/hardcoded preview. Compiled per scope, so this
  * card lives in scope views (a Global-defaults view has no session). */
-export function CoreCard({ corePrompt }: { corePrompt: { content: string; charCount: number } | null }) {
-  return (
-    <AccordionCard
-      title="Core"
-      tag={<AssetTag>platform · shared</AssetTag>}
-      hint="Bossmode Core — environment, communication and Memory guidance shared by every member. Same structure for all; only values (room/member names) differ."
-      preview={corePrompt ? firstContentLine(corePrompt.content) : "Loading…"}
-      defaultView="raw"
-      empty={corePrompt === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : corePrompt.content.trim() ? undefined : <EmptyAsset title="Unavailable" hint="Could not load the compiled Core prompt for this member." />}
-      renderContent={(view) => (
-        <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-          {view === "markdown" ? <Markdown content={corePrompt!.content} /> : corePrompt!.content}
-        </div>
-      )}
-    />
-  );
-}
-
 // ── scope model card (extracted; adds the merge payoff: unified⇄scope link) ─
 
 /** Model card for one scope. When the member's global config has Unified model
@@ -369,14 +195,12 @@ export function ContextSessionCard({ contextUsage, onCompact, onResetSession, on
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-ink-1">Context &amp; Session</div>
-          <div className="text-xs text-ink-4 mt-0.5">Manage this member’s conversation context and apply recent changes.</div>
         </div>
       </div>
       {hasUsage ? (
         <div className="rounded-lg border border-line-soft bg-surface-1 p-3 space-y-2">
           <div className="flex items-center justify-between text-xs text-ink-4"><span>Context used</span><span>{pct}% · {formatTokens(contextUsage!.totalTokens || 0)}</span></div>
           <div className="h-2 rounded-full bg-surface-3 overflow-hidden"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} /></div>
-          <div className="text-[11px] text-ink-4">Compact shortens conversation history.</div>
         </div>
       ) : (
         <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Context usage is unavailable for this member.</div>
@@ -399,7 +223,7 @@ export function ContextSessionCard({ contextUsage, onCompact, onResetSession, on
         <div className="rounded-xl border border-blocked/30 bg-blocked-dim/25 px-3 py-2.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-blocked leading-5">Reset session</div>
-            <div className="text-[11px] text-ink-3 leading-relaxed">Start fresh and clear working memory. Room messages stay visible. Requires confirm.</div>
+            <div className="text-[11px] text-ink-3 leading-relaxed">Start fresh and clear working memory. Room messages stay visible.</div>
           </div>
           <button
             type="button"
@@ -581,7 +405,7 @@ export function McpToolsAccordion({ mcpEnabled, mcpServers, mcpLoadStatus, onRet
   const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
   return (
     <SessionSectionAccordion
-      title="Tools"
+      title="MCP Servers"
       summary={mcpAccordionSummary(mcpDisplayState, mcpServers, memberMcpServers)}
       action={
         <button type="button" onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Manage servers</button>

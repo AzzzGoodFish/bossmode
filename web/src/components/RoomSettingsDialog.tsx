@@ -241,7 +241,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
                 <option value="">No leader</option>
                 {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
-              <p className="text-xs text-ink-4">The Room leader can update the Room Principles. You can change or clear the leader at any time.</p>
+              <p className="text-xs text-ink-4">The leader can edit Room Principles.</p>
               {currentLeader && <p className="text-xs text-ink-3">Current leader: <span className="font-mono text-ink-2">@{currentLeader.name}</span></p>}
               {missingLeader && <p className="text-xs text-blocked">Saved leader is no longer a current room member. Select a new leader or clear it.</p>}
             </section>

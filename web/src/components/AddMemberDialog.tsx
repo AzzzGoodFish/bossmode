@@ -56,7 +56,7 @@ export function AddMemberDialog({ currentMemberIds, onAdd, onClose }: AddMemberD
       <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-ink-1">Add member</h2>
-          <p className="mt-0.5 text-xs text-ink-4">Invite a contact into this room. To bring someone new, hire them in Contacts first.</p>
+          <p className="mt-0.5 text-xs text-ink-4">New here? Hire members from Contacts first.</p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-ink-4 hover:bg-surface-2 hover:text-ink-1">
           <X size={18} />

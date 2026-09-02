@@ -45,7 +45,6 @@ export function MemberPickerDialog({ open, onClose, onPickAgent }: MemberPickerD
       <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-ink-1">Add member</h2>
-          <p className="mt-0.5 text-xs text-ink-4">Pick a template, then give it a member name for this room.</p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-ink-4 hover:bg-surface-2 hover:text-ink-1">
           <X size={18} />
