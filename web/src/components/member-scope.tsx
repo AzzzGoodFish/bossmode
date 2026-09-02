@@ -465,11 +465,10 @@ function activeToolsAccordionSummary(
   error: boolean,
   sessionActive: boolean,
   tools: MemberActiveTool[],
-  message?: string,
 ): string {
   if (loading) return "Loading…";
   if (error) return "Couldn’t load";
-  if (!sessionActive) return message || "No active session";
+  if (!sessionActive) return "No active session";
   if (tools.length === 0) return "0 live";
   let builtin = 0;
   let bossmode = 0;
@@ -569,7 +568,6 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
   const [loading, setLoading] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
   const [tools, setTools] = useState<MemberActiveTool[]>([]);
-  const [message, setMessage] = useState<string | undefined>();
   const [error, setError] = useState(false);
   const [filter, setFilter] = useState<ToolFilter>("all");
   const [query, setQuery] = useState("");
@@ -583,12 +581,10 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
         const data = await getConversationTools(dmScope.scopeId, dmScope.memberId);
         setSessionActive(!!data.live?.sessionActive);
         setTools(Array.isArray(data.live?.tools) ? data.live!.tools : []);
-        setMessage(data.live?.message);
       } else {
         const data = await getMemberActiveTools(roomId, memberRef);
         setSessionActive(!!data.sessionActive);
         setTools(Array.isArray(data.tools) ? data.tools : []);
-        setMessage(data.message);
       }
     } catch {
       setError(true);
@@ -608,7 +604,7 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
     return t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
   });
   const groups = groupToolsBySource(filtered);
-  const summary = activeToolsAccordionSummary(loading, error, sessionActive, tools, message);
+  const summary = activeToolsAccordionSummary(loading, error, sessionActive, tools);
 
   return (
     <SessionSectionAccordion
@@ -632,11 +628,7 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
           <button type="button" onClick={() => void load()} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
         </div>
       ) : !sessionActive ? (
-        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4 leading-relaxed space-y-1">
-          <div className="font-semibold text-ink-2">No active session.</div>
-          <div>{message || "Start or Reload this member to see active tools."}</div>
-          <div className="text-ink-4">Tools are read from the running session — we don’t guess from config.</div>
-        </div>
+        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">No active session.</div>
       ) : tools.length === 0 ? (
         <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Session is active but no tools are enabled.</div>
       ) : (
