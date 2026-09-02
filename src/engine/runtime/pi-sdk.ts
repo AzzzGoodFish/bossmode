@@ -54,7 +54,7 @@ export function resolvePiSystemPromptSources(args: {
   };
 }
 
-function readPiBuiltinPromptFlag(): boolean {
+export function readPiBuiltinPromptFlag(): boolean {
   try {
     return readConfig().runtime?.piBuiltinPrompt === true;
   } catch {

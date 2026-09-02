@@ -826,7 +826,7 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
 }
 
 // Resolve skills: member config > agent definition > empty
-function resolveSkills(member: AgentMemberConfig, agentDef: { skills?: string[] }): string[] {
+export function resolveSkills(member: AgentMemberConfig, agentDef: { skills?: string[] }): string[] {
   return member.skills ?? agentDef.skills ?? [];
 }
 
@@ -1909,7 +1909,7 @@ export function destroyTopicInstances(topicId: string): number {
 
 // -- DM activation (0.20, no @ required) -------------------------------------
 
-function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
+export function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
   const rec = getMember(memberId);
   if (!rec) return null;
   const scopeId = scopeIdOf({ kind: "dm", memberId });
