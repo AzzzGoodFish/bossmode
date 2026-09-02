@@ -123,7 +123,7 @@ export function TaskPreviewPanel({
           <CheckSquare size={14} className="text-accent-ink shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-ink-1 truncate" title={title}>{title}</div>
-            <div className="font-mono text-[10px] text-ink-4 truncate">{load.status === "ready" && load.task.linearIssueIdentifier ? load.task.linearIssueIdentifier : taskId}</div>
+            <div className="font-mono text-[10px] text-ink-4 truncate">{taskId}</div>
           </div>
           {onOpenFull && (
             <button onClick={onOpenFull} title="Open in Tasks board" aria-label="Open in Tasks board" className="w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink-1 hover:bg-surface-2 cursor-pointer">
@@ -167,7 +167,6 @@ export function TaskPreviewSurface({
       testid="task-preview-surface"
       icon={<CheckSquare size={15} className="text-accent-ink shrink-0" />}
       title={task ? task.title : "Task"}
-      meta={task?.linearIssueIdentifier ? <span className="hidden sm:block font-mono text-[10px] text-ink-4">{task.linearIssueIdentifier}</span> : undefined}
       actions={<>
         {onOpenFull && (
           <button

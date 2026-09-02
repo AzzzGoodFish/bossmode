@@ -53,7 +53,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   const [roomName, setRoomName] = useState("");
   const [roomMembers, setRoomMembers] = useState<string[]>([]);
 
-  // Form state — single editable mode (Linear/Notion style)
+  // Form state — single editable mode (always-editable detail form)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [references, setReferences] = useState<string[]>([]);
@@ -210,7 +210,7 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
               </>
             )}
           </span>
-          {/* Inline chips in header — Linear style */}
+          {/* Inline chips in header */}
           {!isCreate && (
             <div className="hidden md:flex items-center gap-1.5 ml-2">
               <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${statusMeta.chip}`}>
@@ -226,11 +226,6 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                   <Avatar name={assignee} size={14} />
                   {assignee}
                 </span>
-              )}
-              {task?.linearIssueUrl && (
-                <a href={task.linearIssueUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-accent-ink bg-accent-dim hover:underline">
-                  Linear {task.linearIssueIdentifier || "↗"}
-                </a>
               )}
             </div>
           )}
@@ -432,14 +427,6 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                   <MetaRow label="Updated">
                     <div className="text-xs text-ink-3 px-2">{formatDate(task.updatedAt)}</div>
                   </MetaRow>
-                  {(task.linearIssueUrl || task.linearSyncError) && (
-                    <MetaRow label="Linear">
-                      <div className="px-2 space-y-1">
-                        {task.linearIssueUrl && <a href={task.linearIssueUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-ink hover:underline">{task.linearIssueIdentifier || "Open Linear issue"}</a>}
-                        {task.linearSyncError && <div className="text-xs text-think">Sync error: {task.linearSyncError}</div>}
-                      </div>
-                    </MetaRow>
-                  )}
                 </>
               )}
             </div>

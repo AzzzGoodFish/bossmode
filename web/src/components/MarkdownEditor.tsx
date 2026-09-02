@@ -1,5 +1,5 @@
 // WYSIWYG Markdown editor — lazy-loaded MDXEditor wrapper
-// Linear-style: no toolbar, pure markdown shortcuts (`# `, `- `, ` ``` `, etc.).
+// Minimal chrome: no toolbar, pure markdown shortcuts (`# `, `- `, ` ``` `, etc.).
 // Only loaded when TaskDetailPage / KnowledgePage renders; zero impact on other views.
 import { Suspense, lazy, useRef, useEffect, useState } from "react";
 
@@ -50,7 +50,7 @@ function InnerEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
           },
         }),
         mod.markdownShortcutPlugin(),
-        // No toolbarPlugin / diffSourcePlugin — Linear-style minimal chrome.
+        // No toolbarPlugin / diffSourcePlugin — minimal chrome by design.
         // All formatting via markdown shortcuts (`# `, `- `, ` ``` `, etc.) +
         // standard keyboard shortcuts (Cmd+B / Cmd+I / Cmd+K).
       ]);
