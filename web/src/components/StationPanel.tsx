@@ -4,15 +4,16 @@ import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-r
 import {
   abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
   getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
-  getMemberScopedStats, getMemberCorePromptScoped, getConversationTools,
+  getMemberScopedStats, getMemberCorePromptScoped, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
+import { useMemberFloat, memberHue } from "./member-float";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
 import { formatTokens, compactModelId, memberModelAvailabilityLabel, statusLabel } from "./member-scope";
 
 import { ToggleSwitch } from "./ToggleSwitch";
 import { Markdown } from "./Markdown";
-import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, toolDisplay, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
@@ -31,9 +32,6 @@ interface StationPanelProps {
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
-  /** Member-page merge v1: roster detail opens navigate to the member page
-   * (scope = this room); the room-side Sheet is retired. */
-  onOpenMember?: (member: MemberInfo) => void;
 }
 
 function displayAgentLabel(agentName: string): string {
@@ -68,7 +66,7 @@ export function thinkLevelTextClass(level?: string | null): string {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage, onOpenMember }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -288,12 +286,20 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
     return () => { document.body.style.userSelect = ""; };
   }, [rosterDragging]);
 
+  // Member peek (Discord-style popout, fish 2026-09-02): roster row click
+  // opens the card — glancing never leaves the conversation.
+  const [peek, setPeek] = useState<{ name: string; rect: DOMRect } | null>(null);
   const closePops = useCallback(() => {
     setOpenChip(null);
     setChipAnchor(null);
     setOpenThinkingChip(null);
     setThinkingAnchor(null);
+    setPeek(null);
   }, []);
+  const openPeek = (name: string, el: HTMLElement) => {
+    closePops();
+    setPeek((prev) => prev?.name === name ? null : { name, rect: el.getBoundingClientRect() });
+  };
 
   /** Card river (fish 2026-08-21): flat one-line cards, each self-tagged with
    * its member. No turn headers, no agent start/end rows, no tool grouping
@@ -425,8 +431,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => { if (info) onOpenMember?.(info); }}
-                onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && info) { e.preventDefault(); onOpenMember?.(info); } }}
+                onClick={(e) => { if (info) openPeek(name, e.currentTarget); }}
+                onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && info) { e.preventDefault(); openPeek(name, e.currentTarget); } }}
                 title={`${name} detail — memory, session & tools`}
                 className="flex items-center gap-2 px-3 py-[6px] cursor-pointer select-none hover:bg-surface-2 transition-colors"
               >
@@ -438,14 +444,14 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                   name={name}
                   status={status}
                   usage={usage}
-                  onOpen={() => { if (info) onOpenMember?.(info); }}
+                  onOpen={(el) => { if (info) openPeek(name, el); }}
                 />
                 <div className="flex-1 min-w-0">
                   {/* line 1: name + model/think/⋯ — usage numbers live in the
                    * avatar's hover bubble (fish 2026-08-21: inline % crowded the row). */}
                   <div className="flex items-center gap-0.5 min-w-0">
                     <button
-                      onClick={(e) => { e.stopPropagation(); if (info) onOpenMember?.(info); }}
+                      onClick={(e) => { e.stopPropagation(); if (info) openPeek(name, e.currentTarget); }}
                       className="text-[12.5px] leading-none font-semibold text-ink-1 truncate flex items-center gap-1.5 cursor-pointer hover:text-accent-ink transition-colors shrink-0 max-w-[40%]"
                       title={cardTitle ? `Configure ${name} · ${cardTitle}` : `Configure ${name}`}
                     >
@@ -483,8 +489,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                           think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span> ▾
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); if (info) onOpenMember?.(info); }}
-                          title={`${name} detail — memory, session & tools`}
+                          onClick={(e) => { e.stopPropagation(); if (info) openPeek(name, e.currentTarget); }}
+                          title={`${name} — peek card`}
                           className="font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-ink-1 hover:bg-surface-2"
                         >
                           ⋯
@@ -646,6 +652,19 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
           </div>
         )}
       </div>
+      {peek && memberInfos[peek.name] && (
+        <MemberPeekCard
+          anchor={peek.rect}
+          member={memberInfos[peek.name]}
+          status={agentStatus[peek.name] || "inactive"}
+          events={feedEvents[peek.name] || []}
+          stream={liveStreams[peek.name]}
+          roomId={roomId}
+          models={models}
+          onClose={() => setPeek(null)}
+          onRemoved={() => { setPeek(null); void onMembersChanged?.(); }}
+        />
+      )}
     </div>
   );
 }
@@ -801,7 +820,7 @@ function RosterAvatar({ name, status, usage, onOpen }: {
   name: string;
   status: string;
   usage?: ContextUsageData;
-  onOpen: () => void;
+  onOpen: (el: HTMLElement) => void;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [bubble, setBubble] = useState<DOMRect | null>(null);
@@ -822,7 +841,7 @@ function RosterAvatar({ name, status, usage, onOpen }: {
       <button
         ref={btnRef}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+        onClick={(e) => { e.stopPropagation(); onOpen(e.currentTarget); }}
         onMouseEnter={open}
         onMouseLeave={close}
         onFocus={open}
@@ -1120,3 +1139,172 @@ export function ThinkingPop({
   );
 }
 
+
+// ── Member peek card (Discord-style popout, fish 2026-09-02 picked) ────────
+// Glance layer of the depth ladder: roster click → THIS card (never leaves
+// the conversation) → ⋯ "View details" → the detail float (member-float.tsx).
+// The full-page member settings route is retired per the same ruling.
+
+function MemberPeekCard({ anchor, member, status, events, stream, roomId, models, onClose, onRemoved }: {
+  anchor: DOMRect;
+  member: MemberInfo;
+  status: string;
+  events: AgentEvent[];
+  stream?: LiveStream;
+  roomId: string;
+  models: AvailableModelOption[];
+  onClose: () => void;
+  onRemoved: () => void;
+}) {
+  const { toast, confirm } = useDialog();
+  const float_ = useMemberFloat();
+  const [stats, setStats] = useState<MemberStats | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dmDraft, setDmDraft] = useState("");
+  const [dmSent, setDmSent] = useState(false);
+  const [dmSending, setDmSending] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMemberStats(member.id || member.name, roomId).then((r) => { if (!cancelled) setStats(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [member.id, member.name, roomId]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (cardRef.current && !cardRef.current.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+
+  const recent = events.filter((e) => isActivityStreamEvent(e) && (e.type === "message_end" ? !!e.text : e.type === "tool_start")).slice(-3).reverse();
+  const live = currentActivityLine(events, status, stream);
+  const hue = memberHue(member.name);
+
+  const CARD_W = 300;
+  const CARD_H = 430;
+  const left = Math.max(8, anchor.left - CARD_W - 8);
+  const top = Math.min(Math.max(8, anchor.top - 6), window.innerHeight - CARD_H - 8);
+
+  const sendDm = async () => {
+    const text = dmDraft.trim();
+    if (!text || dmSending) return;
+    setDmSending(true);
+    try {
+      await sendDmMessage(member.id || member.name, text);
+      setDmDraft(""); setDmSent(true);
+      window.setTimeout(() => setDmSent(false), 1400);
+    } catch (e) {
+      toast(`Couldn't send. ${String((e as Error)?.message || e)}`, "error");
+    } finally {
+      setDmSending(false);
+    }
+  };
+
+  const removeFromRoom = async () => {
+    setMenuOpen(false);
+    const ok = await confirm(`Remove ${member.name} from this room?\n\nThey leave this room (their global identity and DM stay).`);
+    if (!ok) return;
+    try {
+      await removeRoomMember(roomId, member.id || member.name);
+      toast(`${member.name} left the room`, "success");
+      onRemoved();
+    } catch (e) {
+      toast(`Couldn't remove ${member.name}. ${String((e as Error)?.message || e)}`, "error");
+    }
+  };
+
+  return (
+    <div
+      ref={cardRef}
+      className="fixed z-[60] w-[300px] rounded-xl border border-line-strong bg-surface-2 shadow-pop overflow-hidden"
+      style={{ left, top }}
+      role="dialog"
+      aria-label={`${member.name} peek card`}
+    >
+      {/* banner — hue from the member's name (their face color) */}
+      <div className="h-11" style={{ background: `linear-gradient(120deg, hsl(${hue} 45% 38% / .8), hsl(${hue} 40% 22% / .35))` }} />
+      <div className="relative">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          title="More"
+          className="absolute top-2 right-2 w-6 h-6 rounded-md bg-black/40 text-ink-1 hover:bg-black/60 flex items-center justify-center cursor-pointer text-[13px] leading-none"
+        >⋯</button>
+        {menuOpen && (
+          <div className="absolute top-9 right-2 min-w-[170px] rounded-lg border border-line-strong bg-inset shadow-pop overflow-hidden z-10">
+            <button type="button" onClick={() => { setMenuOpen(false); float_.open(member.id || member.name, `room:${roomId}`); onClose(); }} className="w-full text-left px-3 py-2 text-[12.5px] text-ink-1 hover:bg-accent-dim hover:text-accent-ink cursor-pointer">View details</button>
+            <button type="button" onClick={() => void removeFromRoom()} className="w-full text-left px-3 py-2 text-[12.5px] text-blocked hover:bg-blocked-dim cursor-pointer">Remove from room…</button>
+          </div>
+        )}
+      </div>
+      <div className="px-3.5 -mt-6">
+        <div className="rounded-full ring-4 ring-surface-2 inline-flex">
+          <StaffBadge name={member.name} status={statusFromAgent(status)} size="lg" />
+        </div>
+      </div>
+      <div className="px-3.5 pt-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[15px] font-bold text-ink-1 truncate">{member.name}</span>
+          <span className="text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-accent-dim text-accent-ink shrink-0">this room</span>
+        </div>
+        <div className="text-[11px] text-ink-3 mt-0.5 truncate">
+          {member.title ? `${member.title} · ` : ""}<span className="font-mono">@{member.name}</span>
+          {" · "}<span className={status === "working" ? "text-onair" : ""}>{live.text}</span>
+        </div>
+      </div>
+
+      {/* this-room stats trio */}
+      <div className="mx-3.5 mt-2.5 rounded-lg border border-line-soft bg-surface-1 px-3 py-2.5">
+        <div className="text-[9px] font-bold tracking-[0.07em] text-ink-4 uppercase mb-1.5">In this room</div>
+        <div className="flex gap-3">
+          <div className="flex-1 min-w-0"><div className="text-[8.5px] font-bold tracking-wide text-ink-4">MODEL</div><div className="text-[12px] font-bold text-ink-1 font-mono truncate">{member.model ? compactModelId(member.model, models) : "—"}</div></div>
+          <div className="flex-1 min-w-0"><div className="text-[8.5px] font-bold tracking-wide text-ink-4">TOKENS</div><div className="text-[12px] font-bold text-ink-1 font-mono truncate">{stats ? formatTokens(stats.tokens.input + stats.tokens.output + stats.tokens.cacheRead + stats.tokens.cacheWrite) : "…"}</div></div>
+          <div className="flex-1 min-w-0"><div className="text-[8.5px] font-bold tracking-wide text-ink-4">ACTIVITY</div><div className="text-[12px] font-bold text-ink-1 font-mono truncate">{stats ? stats.turns : "…"}</div></div>
+        </div>
+      </div>
+
+      {/* recent activity — three mini river rows */}
+      <div className="mx-3.5 mt-2.5 rounded-lg border border-line-soft bg-surface-1 px-3 py-2.5">
+        <div className="text-[9px] font-bold tracking-[0.07em] text-ink-4 uppercase mb-1">Recent activity</div>
+        {recent.length === 0 ? (
+          <div className="text-[11px] text-ink-4 py-1">No activity yet in this room.</div>
+        ) : (
+          <div className="space-y-1">
+            {recent.map((e, i) => {
+              const isReply = e.type === "message_end";
+              const td = isReply ? null : toolDisplay(e.toolName, e.args);
+              return (
+                <div key={i} className="flex items-center gap-1.5 min-w-0 text-[11px]">
+                  <span className={`text-[8.5px] font-extrabold tracking-[0.06em] uppercase shrink-0 ${isReply ? "text-onair" : "text-ink-3"}`}>{isReply ? "Reply" : `Tool·${td?.label ?? "call"}`}</span>
+                  <span className="text-ink-3 truncate min-w-0 flex-1 font-mono text-[10.5px]">{isReply ? truncateText(e.text, 60) : truncateText(td?.detail || "", 60)}</span>
+                  <span className="text-[9px] text-ink-4 font-mono shrink-0">{formatEventTime(typeof e.ts === "number" ? e.ts : undefined)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* inline DM (Discord signature) */}
+      <div className="flex items-center gap-1.5 px-3.5 py-3">
+        <input
+          value={dmDraft}
+          onChange={(e) => setDmDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void sendDm(); }}
+          placeholder={dmSent ? "Sent ✓" : `Message @${member.name}…`}
+          className="flex-1 min-w-0 rounded-lg border border-line bg-inset px-2.5 py-1.5 text-[12px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
+        />
+        <button
+          type="button"
+          onClick={() => void sendDm()}
+          disabled={!dmDraft.trim() || dmSending}
+          title="Send to this member’s DM"
+          className="shrink-0 w-8 h-8 rounded-lg bg-accent text-accent-contrast flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-[13px]"
+        >➤</button>
+      </div>
+    </div>
+  );
+}
