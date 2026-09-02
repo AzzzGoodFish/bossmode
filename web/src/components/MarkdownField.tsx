@@ -98,7 +98,7 @@ export function MarkdownField({
               className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Check size={14} /> Save
-              <span className="hidden md:inline ml-1 text-[10px] text-accent-contrast/80 font-mono">⌘↵</span>
+              <span className="hidden md:inline ml-1 text-[10px] text-accent-contrast/80 font-mono">Cmd+Enter</span>
             </button>
             <button
               onClick={handleCancel}

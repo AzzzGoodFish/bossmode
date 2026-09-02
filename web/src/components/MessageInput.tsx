@@ -340,7 +340,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={disabled || upload.isUploading}
-          placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... ⏎ send · ⇧⏎ newline · @ mention · Ctrl+V paste")}
+          placeholder={upload.isUploading ? "Uploading..." : (placeholder ?? "Type a message... Enter send · Shift+Enter newline · @ mention · Ctrl+V paste")}
           rows={1}
           className={`flex-1 bg-inset border rounded-lg px-3 py-2 text-base md:text-sm text-ink-1
                      resize-none focus:outline-none
