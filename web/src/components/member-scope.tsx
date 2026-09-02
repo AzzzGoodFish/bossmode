@@ -5,16 +5,18 @@
  * Everything here moved VERBATIM from StationPanel.tsx's MemberConfigPanel
  * family (fusion, not repaint — fish 2026-08-26: blend into the existing UI) plus four
  * extractions that turn panel JSX into reusable sections:
- *   ExtensionsAccordion / McpToolsAccordion / ContextSessionCard / ScopeModelCard.
+ *   ExtensionsAccordion / McpToolsAccordion / ContextSessionCard.
  * StationPanel imports the shared utils back from here; nothing here imports
  * StationPanel (no cycle).
+ *
+ * Batch 5b (config globally unified): ScopeModelCard retired — there is no
+ * per-scope model override anymore, the member's model lives in the float's
+ * Settings tab as the single global select.
  */
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, FileText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { ToggleSwitch } from "./ToggleSwitch";
-import { ModelPicker } from "./ModelPicker";
-import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 import {
   getMemberActiveTools, getConversationTools,
   type AvailableModelOption, type ContextUsageData, type ExtensionRecord,
@@ -255,7 +257,7 @@ export function StatusGrid({ status, member, contextUsage, stats, models, dm }: 
  * diagnostic, identical for every member — progressive disclosure is right
  * there and wrong here. */
 export function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | null; memberName: string }) {
-  const [view, setView] = useState<"markdown" | "raw">("markdown");
+  const [view, setView] = useState<"markdown" | "raw">("raw");
   const failed = (profile as (MemberProfileDoc & { __failed?: boolean }) | null)?.__failed;
   return (
     <section className="rounded-xl border border-line-soft bg-surface-1">
@@ -265,8 +267,8 @@ export function MemberMdCard({ profile, memberName }: { profile: MemberProfileDo
         <AssetTag>persona · self-maintained</AssetTag>
         {profile && !failed && <span className="text-[10px] text-ink-4 shrink-0 tabular-nums">{profile.charCount.toLocaleString()} chars{profile.overBudget ? " · over budget" : ""}</span>}
         <span className="ml-auto shrink-0 flex items-center gap-0.5 rounded-md border border-line-soft bg-surface-2 p-0.5 text-[11px] font-medium">
-          <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
           <button type="button" onClick={() => setView("raw")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Raw</button>
+          <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
         </span>
       </div>
       <div className="px-4 py-3">
@@ -283,7 +285,7 @@ export function MemberMdCard({ profile, memberName }: { profile: MemberProfileDo
           <>
             <div className="rounded-lg border border-line-soft bg-inset/50 px-3.5 py-3 max-h-[340px] overflow-y-auto">
               <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-                {view === "markdown" ? <Markdown content={profile.body} /> : profile.body}
+                {view === "markdown" ? <Markdown content={profile.body} /> : `---\nname: ${profile.frontmatter.name}${profile.frontmatter.title ? `\ntitle: ${profile.frontmatter.title}` : ""}\n---\n\n${profile.body}`}
               </div>
             </div>
             {profile.overBudget && <div className="mt-1.5 text-[11px] text-think">Persona is getting long (over 4,000 chars) — consider asking {memberName} to trim it.</div>}
@@ -350,56 +352,6 @@ export function CoreCard({ corePrompt }: { corePrompt: { content: string; charCo
 /** Model card for one scope. When the member's global config has Unified model
  * ON, the pickers lock and a banner says so — the relationship used to span
  * two pages and stayed invisible (member-page merge v1). */
-export function ScopeModelCard({ dm, member, models, unifiedModel, globalModelLabel, onGoGlobal, onSwitchModel, onSwitchThinking }: {
-  dm: boolean;
-  member: MemberInfo;
-  models: AvailableModelOption[];
-  unifiedModel: boolean;
-  globalModelLabel: string | null;
-  onGoGlobal: () => void;
-  onSwitchModel: (model: string | null, credentialId: string | null) => void;
-  onSwitchThinking: (thinkingLevel: string | null) => void;
-}) {
-  const locked = unifiedModel;
-  return (
-    <PanelCard title="Model" tag={<AssetTag tone={dm ? "dm" : "room"}>{dm ? "this DM" : "this room"}</AssetTag>} hint={dm ? "Model and thinking level for this member in this DM. Applies on the next turn." : "Model and thinking level for this member in this room. Applies on the next turn."}>
-      {locked && (
-        <div className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-accent/25 bg-accent-dim px-2.5 py-1.5 text-[11px] text-accent-ink">
-          <span className="min-w-0 truncate">Following global defaults{globalModelLabel ? ` — ${globalModelLabel}` : ""}. To override per scope, turn off Unified model in</span>
-          <button type="button" onClick={onGoGlobal} className="shrink-0 font-bold underline underline-offset-2 cursor-pointer hover:opacity-80">Global defaults</button>
-        </div>
-      )}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
-        <label className="block space-y-1.5 min-w-0">
-          <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
-          <ModelPicker
-            value={{ model: member.model ?? null, credentialId: member.credentialId ?? null }}
-            models={models}
-            disabled={locked}
-            onChange={(value) => onSwitchModel(value.model, value.credentialId)}
-          />
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-[11px] font-medium text-ink-3">Think level</span>
-          <select
-            value={member.thinkingLevel || "off"}
-            disabled={locked}
-            onChange={(e) => onSwitchThinking(e.target.value === "off" ? null : e.target.value)}
-            className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {(() => {
-              const boundModel = findModelOptionForBinding(member.model, member.credentialId, models);
-              const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
-              const current = member.thinkingLevel || "off";
-              const all = options.includes(current) ? options : [current, ...options];
-              return all.map((level) => <option key={level} value={level}>{level}</option>);
-            })()}
-          </select>
-        </label>
-      </div>
-    </PanelCard>
-  );
-}
 
 // ── context & session (extracted verbatim layout from MemberConfigPanel) ────
 

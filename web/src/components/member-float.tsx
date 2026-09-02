@@ -4,7 +4,7 @@
  * now fully Discord-shaped:
  *
  *   peek card (roster click — glance, never leaves the conversation)
- *   → detail float (this file — read-deep + config, Profile/Activity/Settings)
+ *   → detail float (this file — read-deep + config, Profile/Assets/Activity/Settings)
  *
  * The full-page member route is retired; MemberPage's sections move in here
  * as tabs (Profile first — fish: "profile 是基本信息"). No character arrows
@@ -18,43 +18,43 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronRight, Loader2, SendHorizonal, X } from "lucide-react";
-import { ToggleSwitch } from "./ToggleSwitch";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ActivityTab } from "./ActivityTab";
 import { useDialog } from "./dialogs";
 import {
-  MemberMdCard, MemberSkillsCard, CoreCard, ScopeModelCard, ContextSessionCard,
+  MemberMdCard, MemberSkillsCard, CoreCard, ContextSessionCard,
   ExtensionsAccordion, McpToolsAccordion, ActiveToolsSection, isAssignableMcpServer,
-  formatTokens, compactModelId,
 } from "./member-scope";
+import { ModelPicker } from "./ModelPicker";
+import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 import {
-  getMemberDetail, getMemberScopes, getAvailableModels, getContacts,
+  getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
-  getRoomMembers, updateRoomMember, steerAgent, restartMember, resetAgentSession,
+  steerAgent, restartMember, resetAgentSession,
   getMemberStats, getMemberCorePrompt,
-  getMemberEffectiveConfig, patchMemberScopeConfig, getMemberScopedStats, getMemberCorePromptScoped,
+  getMemberScopedStats, getMemberCorePromptScoped,
   getConversationSession, conversationMemberAction, getMcpSettings, getExtensions, sendDmMessage,
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
-  type MemberInfo, type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
+  type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
   type ContextUsageData, type McpServerSummary, type ExtensionRecord,
 } from "../api/client";
 
-const NAME_RE = /^[a-z0-9][a-z0-9-_]{0,31}$/i;
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 // ── context ─────────────────────────────────────────────────────────────────
 
-type FloatTarget = { memberId: string; scopeId?: string };
-const MemberFloatCtx = createContext<{ open: (memberId: string, scopeId?: string) => void }>({ open: () => {} });
+type FloatTab = "profile" | "assets" | "activity" | "settings";
+type FloatTarget = { memberId: string; scopeId?: string; tab?: FloatTab };
+const MemberFloatCtx = createContext<{ open: (memberId: string, scopeId?: string, tab?: FloatTab) => void }>({ open: () => {} });
 export const useMemberFloat = () => useContext(MemberFloatCtx);
 
-export function MemberFloatProvider({ children, onFired }: { children: React.ReactNode; onFired?: () => void }) {
+export function MemberFloatProvider({ children, onFired, onOpenSettings }: { children: React.ReactNode; onFired?: () => void; onOpenSettings?: (section: "integrations" | "extensions") => void }) {
   const [target, setTarget] = useState<FloatTarget | null>(null);
-  const open = useCallback((memberId: string, scopeId?: string) => setTarget({ memberId, scopeId }), []);
+  const open = useCallback((memberId: string, scopeId?: string, tab?: FloatTab) => setTarget({ memberId, scopeId, tab }), []);
   return (
     <MemberFloatCtx.Provider value={{ open }}>
       {children}
-      {target && <MemberDetailFloat memberId={target.memberId} scopeId={target.scopeId} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} />}
+      {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} onOpenSettings={onOpenSettings} />}
     </MemberFloatCtx.Provider>
   );
 }
@@ -63,19 +63,20 @@ export function MemberFloatProvider({ children, onFired }: { children: React.Rea
 
 // ── the float ───────────────────────────────────────────────────────────────
 
-function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
+function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, onOpenSettings }: {
   memberId: string;
   scopeId?: string;
+  initialTab?: FloatTab;
   onClose: () => void;
   onFired: () => void;
+  onOpenSettings?: (section: "integrations" | "extensions") => void;
 }) {
   const { toast } = useDialog();
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [scopes, setScopes] = useState<MemberScopeInfo[]>([]);
   const [models, setModels] = useState<AvailableModelOption[]>([]);
-  const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"profile" | "activity" | "settings">("profile");
+  const [tab, setTab] = useState<FloatTab>(initialTab ?? "profile");
   const [dmDraft, setDmDraft] = useState("");
   const [dmSent, setDmSent] = useState(false);
   const [dmSending, setDmSending] = useState(false);
@@ -84,7 +85,6 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
     getMemberDetail(memberId).then(setMember).catch((e) => setLoadError(String(e?.message || e)));
     getMemberScopes(memberId).then((r) => setScopes(r.scopes)).catch(() => {});
     getAvailableModels().then(setModels).catch(() => {});
-    getContacts().then((r) => setExistingNames(new Set(r.contacts.map((c) => c.name.toLowerCase())))).catch(() => {});
   }, [memberId]);
 
   useEffect(() => {
@@ -149,14 +149,14 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
         {/* tabs — Profile first (fish 2026-09-02: profile 是基本信息放首位) */}
         {member && (
           <div className="flex gap-0.5 px-5 mt-3.5 border-b border-line-soft shrink-0">
-            {(["profile", "activity", "settings"] as const).filter((t) => t !== "activity" || hasActivityTab).map((t) => (
+            {(["profile", "assets", "activity", "settings"] as const).filter((t) => t !== "activity" || hasActivityTab).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
                 className={`px-3 py-2 text-[12.5px] font-semibold border-b-2 cursor-pointer transition-colors ${tab === t ? "text-ink-1 border-accent" : "text-ink-3 border-transparent hover:text-ink-1"}`}
               >
-                {t === "profile" ? "Profile" : t === "activity" ? "Activity" : "Settings"}
+                {t === "profile" ? "Profile" : t === "assets" ? "Assets" : t === "activity" ? "Activity" : "Settings"}
               </button>
             ))}
           </div>
@@ -165,7 +165,8 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
         {/* body */}
         {member && (
           <div className="flex-1 overflow-y-auto min-h-[260px] px-5 py-4">
-            {tab === "profile" && <ProfileTab member={member} setMember={setMember} scopes={scopes} existingNames={existingNames} setExistingNames={setExistingNames} />}
+            {tab === "profile" && <ProfileTab member={member} setMember={setMember} scopes={scopes} />}
+            {tab === "assets" && <AssetsTab member={member} setMember={setMember} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
             {tab === "activity" && scope && (
               <div className="h-[420px] rounded-xl border border-line-soft overflow-hidden">
                 <ActivityTab
@@ -207,28 +208,20 @@ function MemberDetailFloat({ memberId, scopeId, onClose, onFired }: {
 
 // ── Profile tab: identity form + persona + skills + about ───────────────────
 
-function ProfileTab({ member, setMember, scopes, existingNames, setExistingNames }: {
+function ProfileTab({ member, setMember, scopes }: {
   member: MemberDetail;
   setMember: (m: MemberDetail) => void;
   scopes: MemberScopeInfo[];
-  existingNames: Set<string>;
-  setExistingNames: (fn: (prev: Set<string>) => Set<string>) => void;
 }) {
-  const [nameDraft, setNameDraft] = useState(member.name);
-  const [nameSave, setNameSave] = useState<SaveState>("idle");
-  const [nameError, setNameError] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState(member.title ?? "");
-  const [descDraft, setDescDraft] = useState(member.description ?? "");
   const [cardSave, setCardSave] = useState<SaveState>("idle");
   const [cardError, setCardError] = useState<string | null>(null);
   const [profile, setProfile] = useState<MemberProfileDoc | null>(null);
-  const [memberSkills, setMemberSkills] = useState<MemberSkillEntry[] | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     getMemberProfile(member.memberId).then((doc) => { if (!cancelled) setProfile(doc); }).catch(() => {});
-    getMemberSkills(member.memberId).then((r) => { if (!cancelled) setMemberSkills(r.skills); }).catch(() => { if (!cancelled) setMemberSkills([]); });
     return () => { cancelled = true; if (savedTimer.current) clearTimeout(savedTimer.current); };
   }, [member.memberId]);
 
@@ -238,30 +231,13 @@ function ProfileTab({ member, setMember, scopes, existingNames, setExistingNames
     savedTimer.current = setTimeout(() => set("idle"), 1800);
   };
 
-  const saveName = async () => {
-    const next = nameDraft.trim();
-    if (!NAME_RE.test(next)) { setNameError("Letters, digits, - and _ only, up to 32 chars."); return; }
-    if (next.toLowerCase() !== member.name.toLowerCase() && existingNames.has(next.toLowerCase())) { setNameError("That name is taken."); return; }
-    if (next === member.name) return;
-    setNameSave("saving"); setNameError(null);
-    try {
-      const res = await patchGlobalMember(member.memberId, { name: next });
-      setMember(res.member);
-      setExistingNames((prev) => { const s = new Set(prev); s.delete(member.name.toLowerCase()); s.add(next.toLowerCase()); return s; });
-      flashSaved(setNameSave);
-    } catch (e) {
-      setNameError(String((e as Error)?.message || e));
-      setNameSave("error");
-    }
-  };
 
   const saveCard = async () => {
     const title = titleDraft.trim();
-    const description = descDraft.trim();
-    if (title === (member.title ?? "") && description === (member.description ?? "")) return;
+    if (title === (member.title ?? "")) return;
     setCardSave("saving"); setCardError(null);
     try {
-      const res = await patchGlobalMember(member.memberId, { title, description });
+      const res = await patchGlobalMember(member.memberId, { title });
       setMember(res.member);
       flashSaved(setCardSave);
     } catch (e) {
@@ -270,65 +246,41 @@ function ProfileTab({ member, setMember, scopes, existingNames, setExistingNames
     }
   };
 
-  const nameChanged = nameDraft.trim() !== member.name;
-
   return (
     <div className="space-y-4 pb-2">
-      {/* identity — the card fields */}
+      {/* identity — name read-only (routing key, T1), title editable */}
       <section>
-        <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Name</div>
-        <div className="flex items-center gap-2">
-          <input
-            value={nameDraft}
-            onChange={(e) => { setNameDraft(e.target.value); setNameError(null); }}
-            className="flex-1 min-w-0 rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent"
-          />
-          <button
-            type="button"
-            onClick={() => void saveName()}
-            disabled={!nameChanged || nameSave === "saving"}
-            className="shrink-0 px-3.5 py-2 rounded-lg border border-line text-xs font-semibold text-ink-2 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {nameSave === "saving" ? <Loader2 size={13} className="animate-spin" /> : nameSave === "saved" ? <span className="inline-flex items-center gap-1 text-onair"><Check size={13} />Saved</span> : "Rename"}
-          </button>
-        </div>
-        {nameError && <div role="alert" className="text-[11px] text-blocked mt-1.5">{nameError}</div>}
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Name</div>
+            <div className="rounded-lg border border-line-soft bg-surface-1 px-3 py-2 text-[13px] text-ink-1">{member.name}</div>
+            <div className="text-[10.5px] text-ink-4 mt-1">The routing key — can’t be changed here.</div>
+          </div>
           <div>
             <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Title</div>
-            <input
-              value={titleDraft}
-              onChange={(e) => { setTitleDraft(e.target.value); setCardError(null); }}
-              placeholder="e.g. Architect — the role on the card"
-              className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                value={titleDraft}
+                onChange={(e) => { setTitleDraft(e.target.value); setCardError(null); }}
+                placeholder="e.g. Architect — the role on the card"
+                className="flex-1 min-w-0 rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
+              />
+              <button
+                type="button"
+                onClick={() => void saveCard()}
+                disabled={cardSave === "saving" || titleDraft.trim() === (member.title ?? "")}
+                className="shrink-0 px-3.5 py-2 rounded-lg border border-line text-xs font-semibold text-ink-2 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {cardSave === "saving" ? <Loader2 size={13} className="animate-spin" /> : cardSave === "saved" ? <span className="inline-flex items-center gap-1 text-onair"><Check size={13} />Saved</span> : "Save"}
+              </button>
+            </div>
+            {cardError && <div role="alert" className="text-[11px] text-blocked mt-1.5">{cardError}</div>}
           </div>
-          <div>
-            <div className="text-[11px] font-semibold text-ink-3 mb-1.5">Description</div>
-            <input
-              value={descDraft}
-              onChange={(e) => { setDescDraft(e.target.value); setCardError(null); }}
-              placeholder="What this member is for and how it works."
-              className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent placeholder:text-ink-4"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <button
-            type="button"
-            onClick={() => void saveCard()}
-            disabled={cardSave === "saving" || (titleDraft.trim() === (member.title ?? "") && descDraft.trim() === (member.description ?? ""))}
-            className="px-3.5 py-2 rounded-lg border border-line text-xs font-semibold text-ink-2 hover:bg-surface-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {cardSave === "saving" ? <Loader2 size={13} className="animate-spin" /> : cardSave === "saved" ? <span className="inline-flex items-center gap-1 text-onair"><Check size={13} />Saved</span> : "Save card"}
-          </button>
-          {cardError && <div role="alert" className="text-[11px] text-blocked">{cardError}</div>}
         </div>
       </section>
 
-      {/* persona + skills (global content) */}
+      {/* persona (global content) */}
       <MemberMdCard profile={profile} memberName={member.name} />
-      <MemberSkillsCard skills={memberSkills} />
 
       {/* about */}
       <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
@@ -347,7 +299,113 @@ function ProfileTab({ member, setMember, scopes, existingNames, setExistingNames
   );
 }
 
-// ── Settings tab: scope config (when scoped) + global config + danger ───────
+// ── Assets tab: what the member HAS (skills / extensions / tools / memory) ──
+// Config is globally unified (batch 5b) — toggles here write the member's
+// global lists, never per-scope. Memory is shared platform directories,
+// shown as read-only pointers, never as a member-private asset (pm boundary).
+
+function AssetsTab({ member, setMember, onOpenSettings }: {
+  member: MemberDetail;
+  setMember: (m: MemberDetail) => void;
+  onOpenSettings: (section: "integrations" | "extensions") => void;
+}) {
+  const { toast } = useDialog();
+  const [memberSkills, setMemberSkills] = useState<MemberSkillEntry[] | null>(null);
+  const [mcpEnabled, setMcpEnabled] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
+  const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [installedExtensions, setInstalledExtensions] = useState<ExtensionRecord[]>([]);
+  const [extensionsLoadStatus, setExtensionsLoadStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    getMemberSkills(member.memberId).then((r) => { if (!cancelled) setMemberSkills(r.skills); }).catch(() => { if (!cancelled) setMemberSkills([]); });
+    setMcpLoadStatus("loading");
+    getMcpSettings().then((s) => { if (cancelled) return; setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => { if (!cancelled) setMcpLoadStatus("error"); });
+    setExtensionsLoadStatus("loading");
+    getExtensions().then((e) => { if (cancelled) return; setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => { if (!cancelled) setExtensionsLoadStatus("error"); });
+    return () => { cancelled = true; };
+  }, [member.memberId]);
+
+  const saveGlobal = useCallback(async (patch: Record<string, unknown>, successMsg: string, errorMsg: string) => {
+    try {
+      const res = await patchGlobalMember(member.memberId, patch);
+      setMember(res.member);
+      toast(successMsg, "success");
+    } catch (err) {
+      console.error("Failed to update member assets", err);
+      const detail = err instanceof Error && err.message ? ` ${err.message}` : "";
+      toast(`${errorMsg}${detail}`, "error");
+    }
+  }, [member.memberId, setMember, toast]);
+
+  const handleToggleMcp = useCallback(async (server: string) => {
+    const current = new Set(member.global?.mcpServers ?? []);
+    if (current.has(server)) current.delete(server); else current.add(server);
+    const assignableNames = new Set(mcpServers.filter(isAssignableMcpServer).map((s) => s.name));
+    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name) && assignableNames.has(name));
+    await saveGlobal({ mcpServers: nextServers }, `${member.name} tool access saved. Restart the member to apply it.`, "Couldn’t save tool access.");
+  }, [member, mcpServers, saveGlobal]);
+
+  const handleToggleExtension = useCallback(async (extId: string) => {
+    const current = new Set(member.global?.extensions ?? []);
+    const hit = [...current].find((c) => c === extId || c === `npm:${extId}` || extId.endsWith(c) || c.endsWith(extId));
+    if (hit) current.delete(hit); else current.add(extId);
+    await saveGlobal({ extensions: Array.from(current) }, "Saved.", "Couldn’t save extension access.");
+  }, [member, saveGlobal]);
+
+  return (
+    <div className="space-y-4 pb-2">
+      <MemberSkillsCard skills={memberSkills} />
+      <ExtensionsAccordion
+        installedExtensions={installedExtensions}
+        extensionsLoadStatus={extensionsLoadStatus}
+        onRetryExtensions={() => {
+          setExtensionsLoadStatus("loading");
+          void getExtensions().then((e) => { setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => setExtensionsLoadStatus("error"));
+        }}
+        memberExtensions={member.global?.extensions ?? []}
+        onToggleExtension={handleToggleExtension}
+        onOpenExtensionsSettings={() => onOpenSettings("extensions")}
+      />
+      <McpToolsAccordion
+        mcpEnabled={mcpEnabled}
+        mcpServers={mcpServers}
+        mcpLoadStatus={mcpLoadStatus}
+        onRetryMcp={() => {
+          setMcpLoadStatus("loading");
+          void getMcpSettings().then((s) => { setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => setMcpLoadStatus("error"));
+        }}
+        memberMcpServers={member.global?.mcpServers ?? []}
+        onToggleMcp={handleToggleMcp}
+        onOpenMcpSettings={() => onOpenSettings("integrations")}
+      />
+
+      {/* memory — shared platform directories, pointers only */}
+      <section className="rounded-xl border border-line-soft bg-surface-1">
+        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+          <h3 className="text-[13.5px] font-bold text-ink-1">Memory</h3>
+          <span className="text-[10px] text-ink-4">shared · read pointers</span>
+        </div>
+        <div className="px-4 py-3 space-y-2">
+          {["~/.bossmode/memory/user/", "~/.bossmode/memory/projects/"].map((path) => (
+            <div key={path} className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2">
+              <span className="font-mono text-[11.5px] text-ink-3 truncate">{path}</span>
+              <span className="ml-auto shrink-0 text-[9px] font-bold tracking-[0.06em] uppercase text-ink-4">shared · all members</span>
+            </div>
+          ))}
+          <p className="text-[11px] text-ink-4 leading-relaxed">
+            Memory is shared across all members — not this member’s private asset. It reads the same directories everyone else does.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Settings tab: the member's global model + this scope's session + fire ───
+// Batch 5b: config is globally unified — no per-scope model card, no unified
+// toggles, no "following global" banner. The model select IS the global one.
 
 function SettingsTab({ member, setMember, scope, models, onFired }: {
   member: MemberDetail;
@@ -368,36 +426,8 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
   const roomId = scope && !dm ? scope.scopeId.replace(/^room:/, "") : null;
   const dmScope = dm && scope ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined;
 
-  const [memberInfo, setMemberInfo] = useState<MemberInfo | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsageData | undefined>();
   const [corePrompt, setCorePrompt] = useState<{ content: string; charCount: number } | null>(null);
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
-  const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [installedExtensions, setInstalledExtensions] = useState<ExtensionRecord[]>([]);
-  const [extensionsLoadStatus, setExtensionsLoadStatus] = useState<"loading" | "ready" | "error">("loading");
-
-  const loadMemberInfo = useCallback(async () => {
-    if (!scope) return;
-    if (dm && scope) {
-      const eff = await getMemberEffectiveConfig(member.memberId, scope.scopeId).catch(() => null);
-      setMemberInfo({
-        id: member.memberId, name: member.name, agent: member.agentTemplate, title: member.title ?? null,
-        model: eff?.model ?? member.global?.model ?? null,
-        credentialId: eff?.credentialId ?? member.global?.credentialId ?? null,
-        thinkingLevel: eff?.thinkingLevel ?? member.global?.thinkingLevel ?? "",
-        mcpServers: eff?.mcpServers ?? member.global?.mcpServers ?? [],
-        extensions: eff?.extensions ?? member.global?.extensions ?? [],
-        createdAt: member.createdAt,
-      });
-    } else if (roomId) {
-      const members = await getRoomMembers(roomId).catch(() => [] as MemberInfo[]);
-      const found = members.find((m) => m.id === member.memberId || m.name === member.name);
-      if (found) setMemberInfo(found);
-    }
-  }, [dm, roomId, member, scope]);
-
-  useEffect(() => { void loadMemberInfo(); }, [loadMemberInfo]);
 
   useEffect(() => {
     if (!scope) return;
@@ -407,48 +437,9 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
       : getMemberCorePrompt(roomId!, member.memberId)
     ).then((r) => { if (!cancelled) setCorePrompt(r); }).catch(() => { if (!cancelled) setCorePrompt({ content: "", charCount: 0 }); });
     getConversationSession(scope.scopeId, member.memberId).then((s) => { if (!cancelled) setContextUsage(s.contextUsage); }).catch(() => {});
-    setMcpLoadStatus("loading");
-    getMcpSettings().then((s) => { if (cancelled) return; setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => { if (!cancelled) setMcpLoadStatus("error"); });
-    setExtensionsLoadStatus("loading");
-    getExtensions().then((e) => { if (cancelled) return; setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => { if (!cancelled) setExtensionsLoadStatus("error"); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; if (savedTimer.current) clearTimeout(savedTimer.current); };
   }, [dm, roomId, member.memberId, scope]);
 
-  const applyPatch = useCallback(
-    async (patch: Record<string, unknown>, successMsg: string, errorMsg: string) => {
-      if (!scope) return;
-      try {
-        if (dm) { await patchMemberScopeConfig(member.memberId, scope.scopeId, patch); await loadMemberInfo(); }
-        else { const updated = await updateRoomMember(roomId!, member.memberId, patch); setMemberInfo(updated); }
-        toast(successMsg, "success");
-      } catch (err) {
-        console.error("Failed to update member config", err);
-        const detail = err instanceof Error && err.message ? ` ${err.message}` : "";
-        toast(`${errorMsg}${detail}`, "error");
-      }
-    },
-    [dm, roomId, member, scope, loadMemberInfo, toast],
-  );
-
-  const handleSwitchModel = useCallback((model: string | null, credentialId: string | null) =>
-    applyPatch({ model, credentialId }, `${member.name} model updated. It applies on the next turn.`, "Couldn’t update the model."), [applyPatch, member.name]);
-  const handleSwitchThinking = useCallback((thinkingLevel: string | null) =>
-    applyPatch({ thinkingLevel }, `${member.name} thinking → ${thinkingLevel ?? "default"}`, "Couldn’t update the thinking level."), [applyPatch, member.name]);
-  const handleToggleMcp = useCallback(async (server: string) => {
-    if (!memberInfo) return;
-    const current = new Set(memberInfo.mcpServers || []);
-    if (current.has(server)) current.delete(server); else current.add(server);
-    const assignableNames = new Set(mcpServers.filter(isAssignableMcpServer).map((s) => s.name));
-    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name) && assignableNames.has(name));
-    await applyPatch({ mcpServers: nextServers }, `${memberInfo.name} tool access saved. Restart the member to apply it.`, "Couldn’t save tool access.");
-  }, [memberInfo, mcpServers, applyPatch]);
-  const handleToggleExtension = useCallback(async (extId: string) => {
-    if (!memberInfo) return;
-    const current = new Set(memberInfo.extensions || []);
-    const hit = [...current].find((c) => c === extId || c === `npm:${extId}` || extId.endsWith(c) || c.endsWith(extId));
-    if (hit) current.delete(hit); else current.add(extId);
-    await applyPatch({ extensions: Array.from(current) }, "Saved.", "Couldn’t save extension access.");
-  }, [memberInfo, applyPatch]);
   const handleCompact = useCallback(async () => {
     if (!scope) return;
     try {
@@ -498,99 +489,40 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
     catch (e) { setFireError(String((e as Error)?.message || e)); setFiring(false); }
   };
 
-  const groupedModels = useMemo(() => {
-    const groups = new Map<string, AvailableModelOption[]>();
-    for (const m of models) {
-      const key = m.profileName || m.providerSlug;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(m);
-    }
-    return [...groups.entries()];
-  }, [models]);
+  const globalModel = member.global?.model ?? null;
+  const globalCredentialId = member.global?.credentialId ?? null;
+  const globalThinking = member.global?.thinkingLevel ?? "";
+  const boundModel = findModelOptionForBinding(globalModel, globalCredentialId, models);
+  const thinkingOptions = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
+  const thinkingCurrent = globalThinking || "off";
+  const thinkingAll = thinkingOptions.includes(thinkingCurrent) ? thinkingOptions : [thinkingCurrent, ...thinkingOptions];
 
   return (
     <div className="space-y-4 pb-2">
-      {/* scope config — only when the float is scope-bound */}
-      {scope && memberInfo && (
-        <>
-          <ScopeModelCard
-            dm={!!dm}
-            member={memberInfo}
-            models={models}
-            unifiedModel={member.unifiedModel}
-            globalModelLabel={member.global?.model ?? null}
-            onGoGlobal={() => { document.getElementById("mf-global-defaults")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-            onSwitchModel={handleSwitchModel}
-            onSwitchThinking={handleSwitchThinking}
-          />
-          <ContextSessionCard contextUsage={contextUsage} onCompact={handleCompact} onResetSession={handleResetSession} onRestart={handleRestart} dm={!!dm} />
-          <ActiveToolsSection roomId={dm ? scope.scopeId : roomId!} memberRef={memberInfo.id || memberInfo.name} status={scope.status} reloadKey={0} dmScope={dmScope} />
-          <ExtensionsAccordion
-            installedExtensions={installedExtensions}
-            extensionsLoadStatus={extensionsLoadStatus}
-            onRetryExtensions={() => {
-              setExtensionsLoadStatus("loading");
-              void getExtensions().then((e) => { setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => setExtensionsLoadStatus("error"));
-            }}
-            memberExtensions={memberInfo.extensions || []}
-            onToggleExtension={handleToggleExtension}
-          />
-          <McpToolsAccordion
-            mcpEnabled={mcpEnabled}
-            mcpServers={mcpServers}
-            mcpLoadStatus={mcpLoadStatus}
-            onRetryMcp={() => {
-              setMcpLoadStatus("loading");
-              void getMcpSettings().then((s) => { setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => setMcpLoadStatus("error"));
-            }}
-            memberMcpServers={memberInfo.mcpServers || []}
-            onToggleMcp={handleToggleMcp}
-            onOpenMcpSettings={() => {}}
-          />
-          <CoreCard corePrompt={corePrompt} />
-        </>
-      )}
-
-      {/* global config — always present */}
-      <section id="mf-global-defaults">
-        <div className="text-[10px] font-bold tracking-[0.06em] text-ink-4 uppercase mb-2">Global defaults</div>
-        <div className="rounded-xl border border-line divide-y divide-line-soft">
-          <div className="px-4 py-3.5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[13px] font-semibold text-ink-1">Unified model</div>
-                <div className="text-[11px] text-ink-4 mt-0.5">
-                  {member.unifiedModel ? "Every scope uses the global model below." : "Model is configured per scope."}
-                </div>
-              </div>
-              <ToggleSwitch on={member.unifiedModel} onToggle={(v) => void saveConfig({ unifiedModel: v })} label="Unified model" />
-            </div>
-            {member.unifiedModel && (
-              <select
-                value={member.global?.model ?? ""}
-                onChange={(e) => void saveConfig({ model: e.target.value || null })}
-                className="mt-3 w-full rounded-lg border border-line bg-inset px-3 py-2 text-[13px] text-ink-1 outline-none focus:border-accent cursor-pointer"
-              >
-                <option value="">Not configured</option>
-                {groupedModels.map(([group, items]) => (
-                  <optgroup key={group} label={group}>
-                    {items.map((m) => (
-                      <option key={m.ref} value={m.ref}>{m.displayName || m.modelId} · {m.ref}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            )}
-          </div>
-          <div className="px-4 py-3.5 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[13px] font-semibold text-ink-1">Unified extensions</div>
-              <div className="text-[11px] text-ink-4 mt-0.5">
-                {member.unifiedExtensions ? "Skills, extensions, and MCP servers are shared across scopes." : "Extensions are configured per scope."}
-              </div>
-            </div>
-            <ToggleSwitch on={member.unifiedExtensions} onToggle={(v) => void saveConfig({ unifiedExtensions: v })} label="Unified extensions" />
-          </div>
+      {/* the member's model — global, applies to every scope */}
+      <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
+        <div className="text-[13px] font-semibold text-ink-1">Model</div>
+        <div className="text-[11px] text-ink-4 mt-0.5">One model for this member everywhere. Applies on the next turn.</div>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
+          <label className="block space-y-1.5 min-w-0">
+            <span className="text-[11px] font-medium text-ink-3">Model / credential</span>
+            <ModelPicker
+              value={{ model: globalModel, credentialId: globalCredentialId }}
+              models={models}
+              emptyLabel="Not configured"
+              onChange={(v) => void saveConfig({ model: v.model, credentialId: v.credentialId })}
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-[11px] font-medium text-ink-3">Think level</span>
+            <select
+              value={thinkingCurrent}
+              onChange={(e) => void saveConfig({ thinkingLevel: e.target.value === "off" ? null : e.target.value })}
+              className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
+            >
+              {thinkingAll.map((level) => <option key={level} value={level}>{level}</option>)}
+            </select>
+          </label>
         </div>
         <div className="flex items-center gap-2 mt-2 min-h-4">
           {cfgSave === "saving" && <span className="text-[11px] text-ink-4 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Saving…</span>}
@@ -598,6 +530,15 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
           {cfgError && <span role="alert" className="text-[11px] text-blocked">{cfgError}</span>}
         </div>
       </section>
+
+      {/* this scope's live session — operational actions stay scope-bound */}
+      {scope && (
+        <>
+          <ContextSessionCard contextUsage={contextUsage} onCompact={handleCompact} onResetSession={handleResetSession} onRestart={handleRestart} dm={!!dm} />
+          <ActiveToolsSection roomId={dm ? scope.scopeId : roomId!} memberRef={member.memberId || member.name} status={scope.status} reloadKey={0} dmScope={dmScope} />
+          <CoreCard corePrompt={corePrompt} />
+        </>
+      )}
 
       {/* danger */}
       <section>

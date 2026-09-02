@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, updateRoomMember, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
+  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
   getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
   getMemberScopedStats, getMemberCorePromptScoped, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
@@ -68,12 +68,9 @@ export function thinkLevelTextClass(level?: string | null): string {
 /** Room member stations with status, model controls, context usage, and actions. */
 export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
+  const float = useMemberFloat();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
   const [models, setModels] = useState<AvailableModelOption[]>([]);
-  const [openChip, setOpenChip] = useState<string | null>(null);
-  const [chipAnchor, setChipAnchor] = useState<DOMRect | null>(null);
-  const [openThinkingChip, setOpenThinkingChip] = useState<string | null>(null);
-  const [thinkingAnchor, setThinkingAnchor] = useState<DOMRect | null>(null);
   const [feedEvents, setFeedEvents] = useState<Record<string, AgentEvent[]>>({});
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedFilter, setFeedFilter] = useState<string | null>(null);
@@ -150,40 +147,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
 
   useEffect(() => { void refreshExtensions(); }, [refreshExtensions]);
 
-  // Close the model picker when clicking outside it.
-  useEffect(() => {
-    if (!openChip) return;
-    const close = () => { setOpenChip(null); setChipAnchor(null); };
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, [openChip]);
-
-  const handleSwitchModel = useCallback(
-    async (member: MemberInfo, model: string | null, credentialId: string | null) => {
-      setOpenChip(null);
-      try {
-        const updated = await updateRoomMember(roomId, member.id, { model, credentialId });
-        setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
-        toast(`${member.name} model updated. It applies on the next turn.`, "success");
-      } catch (err) {
-        console.error("Failed to update member model", err);
-        const detail = err instanceof Error && err.message ? err.message : "Check the connection in Settings → Models, then try again.";
-        toast(`Couldn’t update the model. ${detail}`, "error");
-      }
-    },
-    [roomId, toast],
-  );
-
-  const handleSwitchThinking = useCallback(async (member: MemberInfo, thinkingLevel: string | null) => {
-    try {
-      const updated = await updateRoomMember(roomId, member.id, { thinkingLevel });
-      setMemberInfos((prev) => ({ ...prev, [member.name]: updated }));
-      toast(`${member.name} thinking → ${thinkingLevel ?? "default"}`, "success");
-    } catch (err) {
-      console.error("Failed to update thinking level", err);
-      toast("Couldn’t update the thinking level. Try again.", "error");
-    }
-  }, [roomId, toast]);
 
 
 
@@ -290,10 +253,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   // opens the card — glancing never leaves the conversation.
   const [peek, setPeek] = useState<{ name: string; rect: DOMRect } | null>(null);
   const closePops = useCallback(() => {
-    setOpenChip(null);
-    setChipAnchor(null);
-    setOpenThinkingChip(null);
-    setThinkingAnchor(null);
     setPeek(null);
   }, []);
   const openPeek = (name: string, el: HTMLElement) => {
@@ -460,33 +419,24 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                     </button>
                     {info && (
                       <>
+                        {/* batch 5b: model/think are global per member — chips
+                         * display the value and open the float Settings tab
+                         * (the one place to change it). No per-scope pops. */}
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenThinkingChip(null);
-                            setThinkingAnchor(null);
-                            if (openChip === name) { setOpenChip(null); setChipAnchor(null); }
-                            else { setOpenChip(name); setChipAnchor(e.currentTarget.getBoundingClientRect()); }
-                          }}
-                          title={modelChipTitle}
+                          onClick={(e) => { e.stopPropagation(); float.open(info.id || name, `room:${roomId}`, "settings"); }}
+                          title={`${modelChipTitle} · global — opens member settings`}
                           className={`font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors truncate min-w-0 max-w-[104px] hover:bg-accent-dim ${
                             !isConfigured || !modelAvailable ? "text-think" : "text-ink-4 hover:text-accent-ink"
                           }`}
                         >
-                          {modelChipLabel} ▾
+                          {modelChipLabel}
                         </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenChip(null);
-                            setChipAnchor(null);
-                            if (openThinkingChip === name) { setOpenThinkingChip(null); setThinkingAnchor(null); }
-                            else { setOpenThinkingChip(name); setThinkingAnchor(e.currentTarget.getBoundingClientRect()); }
-                          }}
-                          title={`think · ${info.thinkingLevel || "off"} · This room only`}
+                          onClick={(e) => { e.stopPropagation(); float.open(info.id || name, `room:${roomId}`, "settings"); }}
+                          title={`think · ${info.thinkingLevel || "off"} · global — opens member settings`}
                           className="font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-accent-ink hover:bg-accent-dim"
                         >
-                          think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span> ▾
+                          think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span>
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); if (info) openPeek(name, e.currentTarget); }}
@@ -513,34 +463,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                   </button>
                 )}
               </div>
-              {openChip === name && info && (
-                <ModelPop
-                  anchorRect={chipAnchor}
-                  models={models}
-                  current={{ model: info.model ?? null, credentialId: info.credentialId ?? null }}
-                  onClose={() => { setOpenChip(null); setChipAnchor(null); }}
-                  onSelect={(model, credentialId) => {
-                    setOpenChip(null);
-                    setChipAnchor(null);
-                    handleSwitchModel(info, model, credentialId);
-                  }}
-                />
-              )}
-              {openThinkingChip === name && info && (
-                <ThinkingPop
-                  anchorRect={thinkingAnchor}
-                  currentThinking={info.thinkingLevel || "off"}
-                  models={models}
-                  modelRef={info.model ?? null}
-                  credentialId={info.credentialId ?? null}
-                  onClose={() => { setOpenThinkingChip(null); setThinkingAnchor(null); }}
-                  onSelect={(thinkingLevel) => {
-                    setOpenThinkingChip(null);
-                    setThinkingAnchor(null);
-                    void handleSwitchThinking(info, thinkingLevel);
-                  }}
-                />
-              )}
             </div>
           );
         })}
@@ -901,7 +823,7 @@ function RosterBadge({ name, status, usagePct, usageTone }: {
 }
 
 /** Activity-feed member filter pop (fish 2026-08-21): opened from the
- * "all members ▾" control in the feed header. Same pop family as ModelPop. */
+ * "all members ▾" control in the feed header. */
 function FilterPop({ members, current, anchorRect, onSelect, onClose }: {
   members: string[];
   current: string | null;
@@ -965,179 +887,6 @@ function FilterPop({ members, current, anchorRect, onSelect, onClose }: {
   );
 }
 
-export function ModelPop({
-  models,
-  current,
-  anchorRect = null,
-  onSelect,
-  onClose,
-}: {
-  models: AvailableModelOption[];
-  current: { model: string | null; credentialId: string | null };
-  anchorRect?: DOMRect | null;
-  onSelect: (model: string, credentialId: string) => void;
-  onClose?: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const width = 260;
-  const gap = 6;
-  const maxHeight = 288;
-  const grouped = models.reduce<Record<string, AvailableModelOption[]>>((acc, m) => {
-    const key = modelProfileLabel(m);
-    (acc[key] ||= []).push(m);
-    return acc;
-  }, {});
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (ref.current?.contains(event.target as Node)) return;
-      onClose?.();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose?.();
-    };
-    const onResize = () => onClose?.();
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onResize);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [onClose]);
-
-  const content = (
-    <>
-      {Object.entries(grouped).map(([group, items]) => (
-        <div key={group}>
-          <div className="px-2 pt-1.5 pb-0.5 text-[9px] font-semibold tracking-[0.05em] text-ink-4 truncate" title={group}>{group}</div>
-          {items.map((m) => {
-            const isCurrent = current.model === m.ref && (!current.credentialId || current.credentialId === m.profileId);
-            return (
-              <button
-                key={`${m.profileId}::${m.ref}`}
-                onClick={() => onSelect(m.ref, m.profileId)}
-                className={`w-full text-left font-mono text-[11px] px-2 py-1.5 rounded-md flex items-center gap-2 cursor-pointer transition-colors ${
-                  isCurrent ? "text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"
-                }`}
-              >
-                <span className="truncate flex-1" title={m.displayName || m.modelId}>{m.displayName || m.modelId}</span>
-                {isCurrent && <span className="text-[9px] text-ink-4 shrink-0">Current</span>}
-              </button>
-            );
-          })}
-        </div>
-      ))}
-      {models.length === 0 && <p className="text-[11px] text-think px-2 py-2">No models available. Connect a provider in Settings → Models.</p>}
-      <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">
-        Model changes apply to this member in this Room on the next turn.
-      </p>
-    </>
-  );
-
-  if (!anchorRect) {
-    return (
-      <div ref={ref} onClick={(e) => e.stopPropagation()} className="absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto w-[260px]" style={{ boxShadow: "var(--shadow-pop)" }}>
-        {content}
-      </div>
-    );
-  }
-
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.right - width));
-  const opensUp = window.innerHeight - anchorRect.bottom < maxHeight + gap && anchorRect.top > maxHeight + gap;
-  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
-
-  return createPortal(
-    <div
-      ref={ref}
-      onClick={(e) => e.stopPropagation()}
-      className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5 max-h-72 overflow-y-auto w-[260px]"
-      style={{ left, ...vertical, boxShadow: "var(--shadow-pop)" }}
-    >
-      {content}
-    </div>,
-    document.body,
-  );
-}
-
-import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
-
-export function ThinkingPop({
-  currentThinking,
-  anchorRect = null,
-  onSelect,
-  onClose,
-  models,
-  modelRef,
-  credentialId,
-}: {
-  currentThinking: string;
-  anchorRect?: DOMRect | null;
-  onSelect: (thinkingLevel: string | null) => void;
-  onClose?: () => void;
-  models?: AvailableModelOption[];
-  modelRef?: string | null;
-  credentialId?: string | null;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const width = 200;
-  const gap = 6;
-  const boundModel = models ? findModelOptionForBinding(modelRef, credentialId, models) : undefined;
-  const levels = availableThinkingLevels(boundModel);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (ref.current?.contains(event.target as Node)) return;
-      onClose?.();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose?.();
-    };
-    const onResize = () => onClose?.();
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onResize);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [onClose]);
-
-  const content = (
-    <>
-      <div className="px-2 pt-1.5 pb-1 text-[9px] font-semibold tracking-[0.05em] text-ink-4">THINKING EFFORT</div>
-      <div className="grid grid-cols-2 gap-1 px-1">
-        {levels.map((level) => (
-          <button
-            key={level.label}
-            onClick={() => onSelect(level.value)}
-            className={`text-left font-mono text-[10.5px] px-2 py-1.5 rounded cursor-pointer transition-colors ${level.value !== null && currentThinking === level.value ? "bg-accent-dim" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1"}`}
-          >
-            <span className={`font-semibold ${thinkLevelTextClass(level.label)}`}>{level.label}</span>
-          </button>
-        ))}
-      </div>
-      <p className="text-[10px] text-ink-4 px-2 pt-1.5 pb-1 border-t border-line-soft mt-1 leading-relaxed">Applies to this member in this Room.</p>
-    </>
-  );
-
-  if (!anchorRect) {
-    return <div ref={ref} onClick={(e) => e.stopPropagation()} className="absolute top-full mt-1.5 z-30 bg-surface-3 border border-line-strong rounded-lg p-1.5 w-[200px]" style={{ boxShadow: "var(--shadow-pop)" }}>{content}</div>;
-  }
-
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.right - width));
-  const opensUp = window.innerHeight - anchorRect.bottom < 210 && anchorRect.top > 210;
-  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
-
-  return createPortal(
-    <div ref={ref} onClick={(e) => e.stopPropagation()} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5 w-[200px]" style={{ left, ...vertical, boxShadow: "var(--shadow-pop)" }}>
-      {content}
-    </div>,
-    document.body,
-  );
-}
 
 
 // ── Member peek card (Discord-style popout, fish 2026-09-02 picked) ────────
