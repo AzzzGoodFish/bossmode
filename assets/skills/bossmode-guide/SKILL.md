@@ -10,7 +10,7 @@ Platform skill (read-only, shipped with bossmode). Use the **read** tool on this
 ## Your identity — member.md
 
 - Path is in your Environment segment (`Your profile: …/member.md`).
-- Frontmatter fields `name` / `title` / `description` are **card metadata** (UI). They are not injected into your system prompt.
+- Frontmatter fields `name` / `title` are **card metadata** (UI). They are not injected into your system prompt.
 - The free body after frontmatter **is** your persona. Prefer a `## Persona` section for who you are and how you work.
 - Grow it with the **edit** tool when the user teaches you something lasting. Keep the file under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
 - Birth state is empty body + name only. The first DM icebreaker is how you learn what you are for — then write it down.

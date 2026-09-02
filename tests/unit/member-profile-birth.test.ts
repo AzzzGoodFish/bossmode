@@ -49,7 +49,7 @@ describe("member birth skeleton", () => {
     expect(allocateUniqueMemberName("New Member")).toBe("New Member 3");
   });
 
-  it("updateMemberProfileFrontmatter writes title/description and preserves body", async () => {
+  it("updateMemberProfileFrontmatter writes title (description retired) and preserves body", async () => {
     const { createMember } = await import("../../src/workspace/member-registry.js");
     const {
       updateMemberProfileFrontmatter,
@@ -65,22 +65,28 @@ describe("member birth skeleton", () => {
       "utf-8",
     );
 
-    updateMemberProfileFrontmatter(
-      m.id,
-      { title: "Architect", description: "Designs systems" },
-      m.name,
-    );
+    updateMemberProfileFrontmatter(m.id, { title: "Architect" }, m.name);
     let p = readMemberProfile(m.id, m.name);
     expect(p.frontmatter.title).toBe("Architect");
-    expect(p.frontmatter.description).toBe("Designs systems");
     expect(p.body).toContain("## Persona");
     expect(p.body).toContain("I ship carefully.");
 
-    // Clear title, leave description; body still intact.
+    // Clear title; body still intact.
     updateMemberProfileFrontmatter(m.id, { title: "" }, m.name);
     p = readMemberProfile(m.id, m.name);
     expect(p.frontmatter.title).toBeUndefined();
-    expect(p.frontmatter.description).toBe("Designs systems");
     expect(p.body).toContain("I ship carefully.");
+
+    // Legacy description line in an existing file is dropped on next write.
+    writeFileSync(
+      memberProfilePath(m.id),
+      "---\nname: nova\ntitle: T\ndescription: stale\n---\n\nBody.\n",
+      "utf-8",
+    );
+    updateMemberProfileFrontmatter(m.id, { title: "T2" }, m.name);
+    p = readMemberProfile(m.id, m.name);
+    expect(p.frontmatter.title).toBe("T2");
+    expect(p.frontmatter.description).toBeUndefined();
+    expect(readFileSync(memberProfilePath(m.id), "utf-8")).not.toMatch(/description:/);
   });
 });

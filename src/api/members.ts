@@ -44,9 +44,8 @@ function publicMember(m: MemberRecord) {
     memberId: m.id,
     id: m.id,
     name: m.name,
-    /** Card fields from member.md frontmatter (identity batch-1). */
+    /** Card field from member.md frontmatter (identity batch-1; description retired batch-5). */
     title: profile.frontmatter.title ?? null,
-    description: profile.frontmatter.description ?? null,
     agentTemplate: m.agentTemplate,
     templateWarning: memberTemplateWarning(m.agentTemplate),
     unifiedModel: m.unifiedModel,
@@ -390,7 +389,6 @@ addRoute("POST", "/api/members", async (req, res) => {
         unifiedModel: body.unifiedModel,
         unifiedExtensions: body.unifiedExtensions,
         title: (body as { title?: string }).title,
-        description: (body as { description?: string }).description,
       });
     }
     sendJson(res, 200, { member: publicMember(member) });
@@ -413,9 +411,8 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as {
       name?: string;
-      /** member.md frontmatter card fields */
+      /** member.md frontmatter card field (description retired batch-5 — ignored) */
       title?: string | null;
-      description?: string | null;
       unifiedModel?: boolean;
       unifiedExtensions?: boolean;
       agentTemplate?: string;
@@ -449,13 +446,10 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         ...(body.mcpServers !== undefined ? { mcpServers: body.mcpServers } : {}),
       },
     });
-    if (body.title !== undefined || body.description !== undefined) {
+    if (body.title !== undefined) {
       updateMemberProfileFrontmatter(
         m.id,
-        {
-          ...(body.title !== undefined ? { title: body.title } : {}),
-          ...(body.description !== undefined ? { description: body.description } : {}),
-        },
+        { ...(body.title !== undefined ? { title: body.title } : {}) },
         m.name,
       );
     }
@@ -522,7 +516,6 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       frontmatter: {
         name: profile.frontmatter.name,
         title: profile.frontmatter.title ?? null,
-        description: profile.frontmatter.description ?? null,
       },
       body: profile.body,
       charCount: profile.raw.length,
