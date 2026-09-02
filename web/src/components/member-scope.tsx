@@ -249,7 +249,7 @@ export function StatusGrid({ status, member, contextUsage, stats, models, dm }: 
 /** member.md — the single memory asset: Markdown body, file path, over-budget
  * nudge, and the one-line guidance that replaces the old write_memory note. */
 /** member.md — the single memory asset as a CLASSIC document card (fish
- * 2026-09-02: "展开式我不太喜欢，改为更经典的设计" — no more click-to-expand;
+ * 2026-09-02: disliked the expand-to-read card, wants a classic document — no more click-to-expand;
  * the persona body is simply visible, Markdown/Raw toggle rides the header).
  * CoreCard keeps the accordion on purpose: the compiled core is a platform
  * diagnostic, identical for every member — progressive disclosure is right
