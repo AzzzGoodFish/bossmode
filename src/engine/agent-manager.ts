@@ -1195,8 +1195,8 @@ export async function activateAll(roomId: string, ctx?: { needResponse?: string[
 
 /**
  * Persist a model binding to the 0.20 authority — the member registry (F4,
- * 2026-08-04). unifiedModel=true → the member's global binding; false → this
- * room's scope override. The pre-0.20 room.json memberOverrides write was
+ * 2026-08-04). Batch-5b: config is always the member's global binding
+ * (unified flags retired). The pre-0.20 room.json memberOverrides write was
  * invisible to every read side (display / effective-config / activate-heal),
  * which produced "switch works once, display shows old, heal silently rolls
  * back". Legacy non-mem_ rooms still persist to memberOverrides — that is the
@@ -1211,26 +1211,10 @@ export interface RoomMemberConfigPatch {
   skills?: string[] | null;
 }
 
-/** Split a config patch by the member's unified flags (same grouping as
- * getEffectiveConfig): model/credentialId/thinkingLevel ← unifiedModel;
- * skills/extensions/mcpServers ← unifiedExtensions. Mixed members split
- * across both writes. */
-function splitPatchByUnifiedFlags(rec: { unifiedModel: boolean; unifiedExtensions: boolean }, patch: RoomMemberConfigPatch): { globalPatch: Record<string, unknown>; scopePatch: Record<string, unknown> } {
-  const globalPatch: Record<string, unknown> = {};
-  const scopePatch: Record<string, unknown> = {};
-  for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
-    if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
-  }
-  for (const key of ["mcpServers", "extensions", "skills"] as const) {
-    if (key in patch) (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
-  }
-  return { globalPatch, scopePatch };
-}
-
 /**
  * Persist a room-member config patch to the 0.20 authority — the member
- * registry (F4, 2026-08-04). Routing follows the member's unified flags.
- * The pre-0.20 room.json memberOverrides write is invisible to every read
+ * registry (F4, 2026-08-04). Batch-5b: all fields write global (scope
+ * overrides retired). The pre-0.20 room.json memberOverrides write is invisible to every read
  * side for mem_* members (display / effective-config / activate-heal) —
  * "applies once, display stale, heal rolls back". Legacy non-mem_ rooms
  * keep memberOverrides (the only authority their read side consults).

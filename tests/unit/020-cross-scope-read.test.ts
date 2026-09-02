@@ -225,7 +225,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(labels.some((l) => l.includes("this DM"))).toBe(true);
   });
 
-  it("members config PATCH write path: applyMemberConfigPatch routes by unified flags on any scope", async () => {
+  it("members config PATCH write path: batch-5b writes global on any scope", async () => {
     const { dev, roomA } = await seedWorld();
     const reg = await import("../../src/workspace/member-registry.js");
 
@@ -235,7 +235,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(rec.global.thinkingLevel).toBe("high");
     expect(rec.scopeOverrides[`dm:${dev.id}`]).toBeUndefined();
 
-    // Scoped member (unifiedModel=false) patched at DM scope → dm: scope override.
+    // Scoped-flag member (disk says false) patched at DM scope → still global.
     const scoped = reg.createMember({
       name: "scoped",
       agentTemplate: "dev",
@@ -245,16 +245,17 @@ describe("cross-scope reads (flagship ①)", () => {
     });
     reg.applyMemberConfigPatch(scoped.id, `dm:${scoped.id}`, { thinkingLevel: "low" });
     rec = reg.getMember(scoped.id)!;
-    expect(rec.global.thinkingLevel).toBeNull();
-    expect(rec.scopeOverrides[`dm:${scoped.id}`]?.thinkingLevel).toBe("low");
+    expect(rec.global.thinkingLevel).toBe("low");
+    expect(rec.scopeOverrides[`dm:${scoped.id}`]).toBeUndefined();
 
-    // Room scope delegates to the F4 path (scope override for scoped member).
+    // Room scope same story: global write, no memberOverrides residue.
     const roomStore = await import("../../src/workspace/room-store.js");
     const room2 = roomStore.createRoom("delta", dir, [{ agent: "dev", name: "scoped" }], undefined);
     roomStore.stampGlobalMemberIds(room2.id, [scoped.id], scoped.id);
     reg.applyMemberConfigPatch(scoped.id, `room:${room2.id}`, { thinkingLevel: "max" });
     rec = reg.getMember(scoped.id)!;
-    expect(rec.scopeOverrides[`room:${room2.id}`]?.thinkingLevel).toBe("max");
+    expect(rec.global.thinkingLevel).toBe("max");
+    expect(rec.scopeOverrides[`room:${room2.id}`]).toBeUndefined();
     expect(roomStore.getRoom(room2.id)!.memberOverrides).toBeUndefined();
     expect(reg.getEffectiveConfig(scoped.id, `room:${roomA.id}`)).toBeDefined();
   });

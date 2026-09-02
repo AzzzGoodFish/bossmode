@@ -104,7 +104,7 @@ describe("F4 model binding persists to the registry", () => {
     expect(resolveRoomMember(room.id, member.id)?.model).toBe("testprov/claude-b");
   });
 
-  it("unifiedModel=false: switch writes this room's scope override; global untouched", async () => {
+  it("batch-5b: switch always writes global even when the disk flag says scoped", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({
@@ -120,11 +120,10 @@ describe("F4 model binding persists to the registry", () => {
     await manager.switchMemberModel(room.id, member.id, "testprov/claude-b", cred.id);
 
     const rec = reg.getMember(member.id)!;
-    expect(rec.global.model).toBe("testprov/claude-a");
-    expect(rec.scopeOverrides[`room:${room.id}`]?.model).toBe("testprov/claude-b");
+    expect(rec.global.model).toBe("testprov/claude-b");
+    expect(rec.scopeOverrides[`room:${room.id}`]).toBeUndefined();
     expect(reg.getEffectiveConfig(member.id, `room:${room.id}`).model).toBe("testprov/claude-b");
-    // Other scopes still see the global.
-    expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-a");
+    expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-b");
   });
 
   it("non-model patch (thinking/mcp/extensions) routes by the same unified flags", async () => {
@@ -146,7 +145,7 @@ describe("F4 model binding persists to the registry", () => {
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
     expect(resolveRoomMember(room1.id, unified.id)?.thinkingLevel).toBe("high");
 
-    // Fully scoped member: everything goes to this room's scope override.
+    // Batch-5b: scoped/mixed members also write global (flags ignored).
     const scoped = reg.createMember({
       name: "dev",
       agentTemplate: "pm",
@@ -158,25 +157,9 @@ describe("F4 model binding persists to the registry", () => {
     const room2 = await makeStampedRoom(scoped.id, "dev");
     manager.persistRoomMemberConfigPatch(room2.id, scoped.id, { thinkingLevel: "low", mcpServers: ["playwright"] });
     rec = reg.getMember(scoped.id)!;
-    expect(rec.global.thinkingLevel).toBeNull();
-    expect(rec.scopeOverrides[`room:${room2.id}`]?.thinkingLevel).toBe("low");
-    expect(rec.scopeOverrides[`room:${room2.id}`]?.mcpServers).toEqual(["playwright"]);
-
-    // Mixed flags: thinking (unifiedModel) global, mcp (unifiedExtensions) scope.
-    const mixed = reg.createMember({
-      name: "qa",
-      agentTemplate: "pm",
-      model: "testprov/claude-a",
-      credentialId: cred.id,
-      unifiedModel: true,
-      unifiedExtensions: false,
-    });
-    const room3 = await makeStampedRoom(mixed.id, "qa");
-    manager.persistRoomMemberConfigPatch(room3.id, mixed.id, { thinkingLevel: "max", mcpServers: ["playwright"] });
-    rec = reg.getMember(mixed.id)!;
-    expect(rec.global.thinkingLevel).toBe("max");
-    expect(rec.scopeOverrides[`room:${room3.id}`]?.mcpServers).toEqual(["playwright"]);
-    expect(rec.scopeOverrides[`room:${room3.id}`]?.thinkingLevel).toBeUndefined();
+    expect(rec.global.thinkingLevel).toBe("low");
+    expect(rec.global.mcpServers).toEqual(["playwright"]);
+    expect(rec.scopeOverrides[`room:${room2.id}`]).toBeUndefined();
   });
 
   it("clearMemberModelBinding clears on the same authority", async () => {
@@ -196,10 +179,9 @@ describe("F4 model binding persists to the registry", () => {
       credentialId: cred.id,
       unifiedModel: false,
     });
-    reg.patchScopeOverride(scoped.id, `room:${room.id}`, { model: "testprov/claude-b" });
     manager.clearMemberModelBinding(room.id, scoped.id);
-    expect(reg.getMember(scoped.id)!.scopeOverrides[`room:${room.id}`]?.model ?? null).toBeNull();
-    expect(reg.getMember(scoped.id)!.global.model).toBe("testprov/claude-a");
+    expect(reg.getMember(scoped.id)!.global.model).toBeNull();
+    expect(reg.getMember(scoped.id)!.scopeOverrides[`room:${room.id}`]).toBeUndefined();
   });
 });
 

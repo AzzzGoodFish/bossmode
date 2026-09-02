@@ -154,18 +154,17 @@ describe("cleanup-member-overrides-v1", () => {
       agentTemplate: "qa",
       model: "testprov/claude-a",
       credentialId: cred.id,
-      unifiedExtensions: false, // scope overrides only apply when extensions are not unified
     });
     const room = await makeStampedRoom(member.id, "qa");
-    // fish restored playwright into the new authority (scope override).
-    reg.patchScopeOverride(member.id, `room:${room.id}`, { mcpServers: ["playwright"] });
+    // Batch-5b: the new authority is always global — fish restored playwright globally.
+    reg.updateMember(member.id, { global: { mcpServers: ["playwright"] } });
 
     writeOverrides(room.id, { qa: { mcpServers: ["playwright"] } });
     const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
     expect(result.entriesRemoved).toBe(1);
     expect(readOverrides(room.id)).toBeUndefined();
-    // The restored scope override is untouched.
+    // The restored global config is untouched.
     expect(reg.getEffectiveConfig(member.id, `room:${room.id}`).mcpServers).toEqual(["playwright"]);
   });
 

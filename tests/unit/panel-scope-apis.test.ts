@@ -48,42 +48,49 @@ describe("applyMemberConfigPatch — unified write authority", () => {
     expect(rec.scopeOverrides[`dm:${member.id}`]).toBeUndefined();
   });
 
-  it("scope-overriding member: model/thinking land in the dm scope override", async () => {
-    const { reg, member } = await seedMember("dev", { unifiedModel: false });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "openai/gpt-x", thinkingLevel: "low" });
-    const rec = reg.getMember(member.id)!;
-    expect(rec.scopeOverrides[`dm:${member.id}`]).toEqual({ model: "openai/gpt-x", thinkingLevel: "low" });
-    expect(rec.global.model ?? null).toBeNull();
+  it("batch-5b: scoped member writes land global (flags ignored)", async () => {
+    const { reg, member } = await seedMember("scopedflow", { unifiedModel: false });
+    const memberId = member.id;
+    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: "openai/gpt-x", thinkingLevel: "high" });
+    const rec = reg.getMember(memberId)!;
+    expect(rec.global.model).toBe("openai/gpt-x");
+    expect(rec.global.thinkingLevel).toBe("high");
+    expect(rec.scopeOverrides[`dm:${memberId}`]).toBeUndefined();
   });
 
-  it("mixed member splits across both writes (model global, mcp scope)", async () => {
-    const { reg, member } = await seedMember("dev", { unifiedModel: true, unifiedExtensions: false });
-    reg.applyMemberConfigPatch(member.id, "room:room-1", { model: "m1", mcpServers: ["web"] });
-    const rec = reg.getMember(member.id)!;
+  it("batch-5b: mixed-flag member writes everything global", async () => {
+    const { reg, member } = await seedMember("mixedflow", { unifiedModel: true, unifiedExtensions: false });
+    const memberId = member.id;
+    reg.applyMemberConfigPatch(memberId, "room:room-1", { model: "m1", mcpServers: ["web"] });
+    const rec = reg.getMember(memberId)!;
     expect(rec.global.model).toBe("m1");
-    expect(rec.scopeOverrides["room:room-1"]).toEqual({ mcpServers: ["web"] });
+    expect(rec.global.mcpServers).toEqual(["web"]);
+    expect(rec.scopeOverrides["room:room-1"]).toBeUndefined();
   });
 
-  it("null clears a scope override field (falls back to global)", async () => {
-    const { reg, member } = await seedMember("dev", { unifiedModel: false });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "m1", thinkingLevel: "high" });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { thinkingLevel: null });
-    const rec = reg.getMember(member.id)!;
-    expect(rec.scopeOverrides[`dm:${member.id}`]).toEqual({ model: "m1" });
+  it("batch-5b: null clears the global field (scope overrides gone)", async () => {
+    const { reg, member } = await seedMember("clearflow", { unifiedModel: false });
+    const memberId = member.id;
+    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: "m1" });
+    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: null });
+    const rec = reg.getMember(memberId)!;
+    expect(rec.global.model).toBeNull();
+    expect(rec.scopeOverrides[`dm:${memberId}`]).toBeUndefined();
   });
 
-  it("clearing the last override field removes the scope entry entirely", async () => {
+  it("batch-5b: null clear never creates a scope entry", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: false });
     reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "m1" });
     reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: null });
     expect(reg.getMember(member.id)!.scopeOverrides[`dm:${member.id}`]).toBeUndefined();
   });
 
-  it("effective config reads the dm scope override", async () => {
+  it("batch-5b: effective config reads the global config (flags ignored)", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: false });
     reg.updateMember(member.id, { global: { model: "global-model" } });
     reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "dm-model" });
     const eff = reg.getEffectiveConfig(member.id, `dm:${member.id}`);
     expect(eff.model).toBe("dm-model");
+    expect(eff.sources.model).toBe("global");
   });
 });

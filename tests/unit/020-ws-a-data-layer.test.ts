@@ -89,37 +89,17 @@ describe("member-registry", () => {
     expect(reg.listMembers()).toHaveLength(0);
   });
 
-  it("scopeOverrides store diff-only; effective-config reports sources", async () => {
+  it("scope overrides retired (batch-5b): patches write global, never scope", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const m = reg.createMember({
-      name: "dev",
-      agentTemplate: "developer",
-      model: "global-model",
-      credentialId: "cred-g",
-      thinkingLevel: "high",
-    });
-
-    // unified on → scope override ignored for model family
-    reg.patchScopeOverride(m.id, "room:r1", { model: "scope-model" });
-    let eff = reg.getEffectiveConfig(m.id, "room:r1");
-    expect(eff.model).toBe("global-model");
-    expect(eff.sources.model).toBe("global");
-
+    const m = reg.createMember({ name: "patchscope" });
     reg.updateMember(m.id, { unifiedModel: false });
-    eff = reg.getEffectiveConfig(m.id, "room:r1");
+    reg.applyMemberConfigPatch(m.id, "room:r1", { model: "scope-model" });
+    const eff = reg.getEffectiveConfig(m.id, "room:r1");
     expect(eff.model).toBe("scope-model");
-    expect(eff.sources.model).toBe("scope");
-    expect(eff.credentialId).toBe("cred-g"); // not overridden
-    expect(eff.sources.credentialId).toBe("global");
-
-    // clear override field
-    reg.patchScopeOverride(m.id, "room:r1", { model: null });
-    eff = reg.getEffectiveConfig(m.id, "room:r1");
-    expect(eff.model).toBe("global-model");
     expect(eff.sources.model).toBe("global");
-
     const rec = reg.getMember(m.id)!;
     expect(rec.scopeOverrides["room:r1"]).toBeUndefined();
+    expect(rec.unifiedModel).toBe(true); // normalized on read
   });
 });
 
