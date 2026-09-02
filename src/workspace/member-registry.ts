@@ -107,10 +107,12 @@ function readRecordRaw(memberId: string): MemberRecord | null {
     if (!raw?.id || !raw?.name) return null;
     return {
       ...raw,
-      unifiedModel: raw.unifiedModel !== false,
-      unifiedExtensions: raw.unifiedExtensions !== false,
+      // Batch-5b: unified flags retired — config is always global. Legacy disk
+      // values are ignored; the next write persists the normalized shape.
+      unifiedModel: true,
+      unifiedExtensions: true,
       global: raw.global || {},
-      scopeOverrides: raw.scopeOverrides || {},
+      scopeOverrides: {},
     };
   } catch {
     return null;
@@ -184,8 +186,8 @@ export function createMember(input: CreateMemberInput): MemberRecord {
     id,
     name,
     agentTemplate: input.agentTemplate || "general",
-    unifiedModel: input.unifiedModel !== false,
-    unifiedExtensions: input.unifiedExtensions !== false,
+    unifiedModel: true,
+    unifiedExtensions: true,
     global: {
       model: input.model ?? null,
       credentialId: input.credentialId ?? null,
@@ -224,14 +226,15 @@ export function renameMember(id: string, newName: string): MemberRecord {
 
 export function updateMember(
   id: string,
-  patch: Partial<Pick<MemberRecord, "unifiedModel" | "unifiedExtensions" | "agentTemplate">> & {
+  patch: Partial<Pick<MemberRecord, "agentTemplate">> & {
     global?: Partial<MemberGlobalConfig>;
+    /** Retired (batch-5b) — sent values are ignored. */
+    unifiedModel?: boolean;
+    unifiedExtensions?: boolean;
   },
 ): MemberRecord {
   const rec = getMember(id);
   if (!rec) throw new MemberNotFoundError(id);
-  if (patch.unifiedModel !== undefined) rec.unifiedModel = !!patch.unifiedModel;
-  if (patch.unifiedExtensions !== undefined) rec.unifiedExtensions = !!patch.unifiedExtensions;
   if (patch.agentTemplate !== undefined) rec.agentTemplate = patch.agentTemplate;
   if (patch.global) {
     rec.global = { ...rec.global, ...patch.global };
@@ -241,45 +244,22 @@ export function updateMember(
   return rec;
 }
 
-/**
- * Patch scope override (diff-only). Pass null for a field to clear that override
- * (fall back to global). Empty override object is removed from the map.
- */
+/** Scope overrides retired (batch-5b): config is always global. Kept as a
+ *  no-op for legacy callers; writes nothing, returns the normalized record. */
 export function patchScopeOverride(
   id: string,
-  scopeId: ScopeId,
-  diff: MemberScopeOverride | null,
+  _scopeId: ScopeId,
+  _diff: MemberScopeOverride | null,
 ): MemberRecord {
   const rec = getMember(id);
   if (!rec) throw new MemberNotFoundError(id);
-  if (!parseScopeId(scopeId)) throw new Error("scope_not_found");
-
-  if (diff === null) {
-    delete rec.scopeOverrides[scopeId];
-  } else {
-    const prev = { ...(rec.scopeOverrides[scopeId] || {}) };
-    for (const [k, v] of Object.entries(diff) as Array<[keyof MemberGlobalConfig, unknown]>) {
-      if (v === null || v === undefined) {
-        delete (prev as any)[k];
-      } else {
-        (prev as any)[k] = v;
-      }
-    }
-    if (Object.keys(prev).length === 0) delete rec.scopeOverrides[scopeId];
-    else rec.scopeOverrides[scopeId] = prev;
-  }
-  rec.updatedAt = Date.now();
-  writeRecord(rec);
   return rec;
 }
 
 /**
- * Single write authority for member config patches (0.20 unified semantics):
- * model/credentialId/thinkingLevel go global when unifiedModel=true, else this
- * scope's override; mcpServers/extensions go global when unifiedExtensions=true,
- * else scope override (mixed members split across both writes). Null clears a
- * field (global: reset to null; scope: fall back to global). Every API write
- * path — room PATCH, members PATCH, panel model switch — delegates here.
+ * Single write authority for member config patches (batch-5b): config is
+ * always global — every field writes the member's global config. scopeId is
+ * accepted for call-site compatibility and stale bookkeeping only.
  */
 export function applyMemberConfigPatch(
   id: string,
@@ -289,24 +269,15 @@ export function applyMemberConfigPatch(
   const rec = getMember(id);
   if (!rec) throw new MemberNotFoundError(id);
   const globalPatch: Record<string, unknown> = {};
-  const scopePatch: Record<string, unknown> = {};
-  for (const key of ["model", "credentialId", "thinkingLevel"] as const) {
-    if (key in patch) (rec.unifiedModel ? globalPatch : scopePatch)[key] = patch[key];
-  }
   const mountFieldsChanged: string[] = [];
+  for (const key of ["model", "credentialId", "thinkingLevel", "mcpServers", "extensions"] as const) {
+    if (key in patch) globalPatch[key] = patch[key];
+  }
   for (const key of ["mcpServers", "extensions"] as const) {
-    if (key in patch) {
-      (rec.unifiedExtensions ? globalPatch : scopePatch)[key] = patch[key];
-      mountFieldsChanged.push(key);
-    }
+    if (key in patch) mountFieldsChanged.push(key);
   }
   if (Object.keys(globalPatch).length > 0) updateMember(id, { global: globalPatch as Partial<MemberGlobalConfig> });
-  if (Object.keys(scopePatch).length > 0) patchScopeOverride(id, scopeId, scopePatch as MemberScopeOverride);
 
-  // Auto-reload prompt (fish 2026-08-07): mount config changed → mark the
-  // affected member stale so the UI shows a reload badge.
-  // A member's mount config is their own (0.20+): changing A's mounts never
-  // affects B. Only mark the member being edited.
   if (mountFieldsChanged.length > 0) {
     markStaleMounts(scopeId, id, mountFieldsChanged);
   }
@@ -325,29 +296,22 @@ export interface EffectiveConfig extends MemberGlobalConfig {
   };
 }
 
-/** Resolve effective config for a scope — single implementation for UI + runtime. */
-export function getEffectiveConfig(id: string, scopeId: ScopeId): EffectiveConfig {
+/**
+ * Resolve effective config (batch-5b): config is always the global one —
+ * scopeId is accepted for call-site compatibility and ignored.
+ */
+export function getEffectiveConfig(id: string, _scopeId: ScopeId): EffectiveConfig {
   const rec = getMember(id);
   if (!rec) throw new MemberNotFoundError(id);
-  const ov = rec.scopeOverrides[scopeId] || {};
   const g = rec.global;
+  const all = "global" as const;
 
-  const pick = <K extends keyof MemberGlobalConfig>(
-    key: K,
-    unified: boolean,
-  ): { value: MemberGlobalConfig[K]; source: "global" | "scope" } => {
-    if (!unified && Object.prototype.hasOwnProperty.call(ov, key) && (ov as any)[key] !== undefined) {
-      return { value: (ov as any)[key], source: "scope" };
-    }
-    return { value: g[key], source: "global" };
-  };
-
-  const model = pick("model", rec.unifiedModel);
-  const credentialId = pick("credentialId", rec.unifiedModel);
-  const thinkingLevel = pick("thinkingLevel", rec.unifiedModel);
-  const skills = pick("skills", rec.unifiedExtensions);
-  const extensions = pick("extensions", rec.unifiedExtensions);
-  const mcpServers = pick("mcpServers", rec.unifiedExtensions);
+  const model = { value: g.model, source: all };
+  const credentialId = { value: g.credentialId, source: all };
+  const thinkingLevel = { value: g.thinkingLevel, source: all };
+  const skills = { value: g.skills, source: all };
+  const extensions = { value: g.extensions, source: all };
+  const mcpServers = { value: g.mcpServers, source: all };
 
   return {
     model: model.value ?? null,

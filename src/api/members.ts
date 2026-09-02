@@ -640,8 +640,8 @@ addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
     // Birth wake (identity batch-1 / rc.1 gap): model none→some must start the
     // DM instance so icebreaker can run. Config-only write never activated.
     const beforeModel = getEffectiveConfig(m.id, scope).model;
-    // Unified write authority: unifiedModel/unifiedExtensions fields go global,
-    // everything else lands in this scope's override (same rule as room PATCH).
+    // Batch-5b: config writes are always global (unified flags + scope
+    // overrides retired); scopeId is compatibility-only.
     const updated = applyMemberConfigPatch(m.id, scope as ScopeId, diff);
     const afterEff = getEffectiveConfig(m.id, scope);
     sendJson(res, 200, {

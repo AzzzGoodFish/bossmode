@@ -125,7 +125,7 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: true })).toBe(true);
   });
 
-  it("getEffectiveConfig respects unifiedModel off + scope override", async () => {
+  it("getEffectiveConfig is global-only (unified flags retired, batch-5b)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const member = reg.createMember({
       name: "dev",
@@ -136,8 +136,8 @@ describe("020 WS-B prompt + instanceKey", () => {
     });
     reg.patchScopeOverride(member.id, "room:r1", { model: "scope/model", credentialId: "cred-s" });
     const eff = reg.getEffectiveConfig(member.id, "room:r1");
-    expect(eff.model).toBe("scope/model");
-    expect(eff.sources.model).toBe("scope");
-    expect(eff.credentialId).toBe("cred-s");
+    expect(eff.model).toBe("global/model");
+    expect(eff.credentialId).toBe("cred-g");
+    expect(eff.sources.model).toBe("global");
   });
 });

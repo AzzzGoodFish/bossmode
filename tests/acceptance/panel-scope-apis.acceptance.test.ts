@@ -159,7 +159,7 @@ describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
     expect(member.global.model).toBe("global-model-x");
     expect(member.scopeOverrides?.[scope]).toBeUndefined();
 
-    // Flip to scope-overriding → next patch lands in the dm scope override
+    // Batch-5b: flip request is accepted but ignored — next patch still lands global.
     const flip = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { unifiedModel: false },
@@ -172,10 +172,10 @@ describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
     expect(p2.status).toBe(200);
     detail = await jsonRequest(ts.port, "GET", `/api/members/${memberId}`, { token });
     member = JSON.parse(detail.body).member;
-    expect(member.scopeOverrides?.[scope]?.model).toBe("dm-model-y");
-    expect(member.global.model).toBe("global-model-x");
+    expect(member.global.model).toBe("dm-model-y");
+    expect(member.scopeOverrides?.[scope]).toBeUndefined();
 
-    // Effective config in the dm scope resolves the override
+    // Effective config resolves the global value
     const eff = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/effective-config?scope=${encodeURIComponent(scope)}`, { token });
     expect(eff.status).toBe(200);
     expect(JSON.parse(eff.body).model).toBe("dm-model-y");
