@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { FileText, FileCode, Image as ImageIcon, Eye, Download, X, CornerUpLeft, MessagesSquare, Copy, Check } from "lucide-react";
+import { copyText } from "../utils/clipboard";
+
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
@@ -92,11 +94,15 @@ export function MessageBubble({
   sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply, onCreateTopic,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   // W1-1 (assistant-ui ActionBar, fish-picked 2026-08-20): copy message text —
   // self-contained in the hover family, no call-site plumbing.
   const handleCopy = () => {
-    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 1200); };
-    if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(content).then(done).catch(() => {}); }
+    const flash = (ok: boolean) => {
+      if (ok) { setCopied(true); window.setTimeout(() => setCopied(false), 1200); }
+      else { setCopyFailed(true); window.setTimeout(() => setCopyFailed(false), 1500); }
+    };
+    void copyText(content).then(flash);
   };
   const isUser = sender === "user";
   const isSystem = sender === "system";
@@ -123,8 +129,8 @@ export function MessageBubble({
       {(onReply || onCreateTopic || content) && (
         <div className="absolute -top-3 right-2 z-10 hidden group-hover:flex items-center bg-surface-1 border border-line rounded-lg shadow-pop p-0.5">
           {content && (
-            <button type="button" onClick={handleCopy} title={copied ? "Copied" : "Copy"} aria-label="Copy message" className={`w-7 h-[26px] flex items-center justify-center rounded cursor-pointer ${copied ? "text-onair" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}>
-              {copied ? <Check size={13} /> : <Copy size={13} />}
+            <button type="button" onClick={handleCopy} title={copied ? "Copied" : copyFailed ? "Copy failed — select the text manually" : "Copy"} aria-label="Copy message" className={`w-7 h-[26px] flex items-center justify-center rounded cursor-pointer ${copied ? "text-onair" : copyFailed ? "text-blocked" : "text-ink-3 hover:text-ink-1 hover:bg-surface-2"}`}>
+              {copied ? <Check size={13} /> : copyFailed ? <X size={13} /> : <Copy size={13} />}
             </button>
           )}
           {onReply && (
