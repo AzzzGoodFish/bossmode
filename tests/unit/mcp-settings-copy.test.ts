@@ -8,7 +8,8 @@ const settingsPage = readFileSync(resolve(root, "web/src/pages/SettingsPage.tsx"
 
 describe("MCP Settings product copy", () => {
   it("shows a real empty state and actionable next step", () => {
-    expect(settingsPage).toContain("Add the servers you use here, then assign them from each member profile.");
+    // Assignment pointer moved to the member card (batch profile-plain).
+    expect(settingsPage).toContain("Per-member toggle lives in the member card");
     expect(settingsPage).toContain("No MCP servers configured.");
     expect(settingsPage).toContain("Check whether your configured servers can connect.");
     expect(settingsPage).toContain("Secrets stay on this device and are hidden after saving.");
