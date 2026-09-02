@@ -425,6 +425,10 @@ function AssetsTab({ member, setMember, scope, onOpenSettings }: {
       <section className="rounded-xl border border-line-soft bg-surface-1">
         <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
           <h3 className="text-[13.5px] font-bold text-ink-1">Memory</h3>
+          <span className="inline-flex cursor-help" title="Shared across all members — the same directories everyone reads.">
+            <Info size={11} className="text-ink-4" />
+          </span>
+          <span className="text-[10px] text-ink-4">2 directories</span>
         </div>
         <div className="px-4 py-3 space-y-2">
           {["~/.bossmode/memory/user/", "~/.bossmode/memory/projects/"].map((path) => (
@@ -432,9 +436,6 @@ function AssetsTab({ member, setMember, scope, onOpenSettings }: {
               <span className="font-mono text-[11.5px] text-ink-3 truncate">{path}</span>
             </div>
           ))}
-          <p className="text-[11px] text-ink-4 leading-relaxed">
-            Shared across all members — the same directories everyone reads.
-          </p>
         </div>
       </section>
 
