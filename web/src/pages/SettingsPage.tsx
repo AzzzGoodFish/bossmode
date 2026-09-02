@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { Plus, KeyRound, Pencil, Trash2, Link2, PlugZap, RefreshCw } from "lucide-react";
+import { Plus, KeyRound, Pencil, Trash2, PlugZap, RefreshCw } from "lucide-react";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, LinearIntegrationStatus, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
+import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
@@ -31,9 +31,6 @@ import {
   getOAuthConnectionJob,
   submitOAuthConnectionInput,
   cancelOAuthConnection,
-  getLinearIntegrationStatus,
-  connectLinearIntegration,
-  disconnectLinearIntegration,
   getExtensions,
   installExtension,
   uninstallExtension,
@@ -109,7 +106,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showConnectProvider, setShowConnectProvider] = useState(false);
-  const [linearStatus, setLinearStatus] = useState<LinearIntegrationStatus>({ connected: false });
   const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
   const [extensionsData, setExtensionsData] = useState<ExtensionsListResponse | null>(null);
   const [extPackage, setExtPackage] = useState("");
@@ -121,7 +117,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   useEffect(() => {
     getRuntimeSettings().then((v) => setRuntimeSettings(normalizeRuntimeSettings(v))).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
-    getLinearIntegrationStatus().then(setLinearStatus).catch(console.error);
     getMcpSettings().then(setMcpSettings).catch(console.error);
     refreshExtensions();
     getEnvironmentCommunication().then((a) => { setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source); }).catch(console.error);
@@ -264,7 +259,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       {section === "integrations" && (
         <div className="space-y-6">
           <McpIntegrationSection settings={mcpSettings} onSettings={setMcpSettings} />
-          <LinearIntegrationSection status={linearStatus} onStatus={setLinearStatus} />
         </div>
       )}
 
@@ -785,61 +779,6 @@ function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings
     </section>
   );
 }
-function LinearIntegrationSection({ status, onStatus }: { status: LinearIntegrationStatus; onStatus: (status: LinearIntegrationStatus) => void }) {
-  const { toast, confirm } = useDialog();
-  const [apiKey, setApiKey] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const connect = async () => {
-    if (!apiKey.trim()) { toast("Linear API key is required", "error"); return; }
-    setSaving(true);
-    try {
-      const next = await connectLinearIntegration(apiKey.trim());
-      onStatus(next);
-      setApiKey("");
-      toast("Linear connected", "success");
-    } catch (err) { console.error("Failed to connect Linear", err); toast(userActionError("connect Linear", "Check the API key, then try again."), "error"); }
-    finally { setSaving(false); }
-  };
-
-  const disconnect = async () => {
-    if (!(await confirm("Disconnect Linear and clear room Linear bindings?"))) return;
-    setSaving(true);
-    try {
-      const result = await disconnectLinearIntegration();
-      onStatus({ connected: false });
-      toast(`Linear disconnected. Cleared ${result.clearedRooms} Room bindings.`, "success");
-    } catch (err) { console.error("Failed to disconnect Linear", err); toast(userActionError("disconnect Linear"), "error"); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <section className="mb-8">
-      <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">Integrations</h2>
-      <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 w-8 h-8 rounded bg-surface-2 flex items-center justify-center"><Link2 size={16} /></div>
-            <div>
-              <div className="text-sm font-medium text-ink-1">Linear</div>
-              <div className="text-xs text-ink-3 mt-0.5">Sync Bossmode room tasks to Linear issues. API key is stored locally and never exposed to agents.</div>
-              {status.connected && <div className="text-xs text-onair mt-1">Connected as {status.viewer?.name || "Linear user"}</div>}
-              {!status.connected && status.error && <div className="text-xs text-think mt-1">Connection error: {status.error}</div>}
-            </div>
-          </div>
-          {status.connected && <button onClick={disconnect} disabled={saving} className="px-3 py-1.5 border rounded-lg text-sm text-ink-2 border-line hover:bg-surface-2 cursor-pointer disabled:opacity-50">Disconnect</button>}
-        </div>
-        {!status.connected && (
-          <div className="flex gap-2">
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="lin_api_..." className="flex-1 bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" />
-            <button onClick={connect} disabled={saving || !apiKey.trim()} className="px-3 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{saving ? "Connecting..." : "Connect Linear"}</button>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 const PROTOCOLS: ModelProtocol[] = [
   "openai-completions", "openai-responses", "openai-codex-responses", "anthropic-messages",
   "azure-openai-responses", "google-generative-ai", "google-gemini-cli", "google-vertex",
