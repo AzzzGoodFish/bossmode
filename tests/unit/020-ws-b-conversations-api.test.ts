@@ -67,7 +67,7 @@ describe("020 conversations / scope surface", () => {
     expect(eff.sources.model).toBe("global");
   });
 
-  it("core-prompt dm compile for members/:id/core-prompt contract", async () => {
+  it("dm-scope compile via compileMemberPromptForScope", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const m = reg.createMember({ name: "architect", agentTemplate: "architect" });
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
