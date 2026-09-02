@@ -10,7 +10,7 @@
  * StationPanel (no cycle).
  */
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { ToggleSwitch } from "./ToggleSwitch";
 import { ModelPicker } from "./ModelPicker";
@@ -248,27 +248,52 @@ export function StatusGrid({ status, member, contextUsage, stats, models, dm }: 
 
 /** member.md — the single memory asset: Markdown body, file path, over-budget
  * nudge, and the one-line guidance that replaces the old write_memory note. */
+/** member.md — the single memory asset as a CLASSIC document card (fish
+ * 2026-09-02: "展开式我不太喜欢，改为更经典的设计" — no more click-to-expand;
+ * the persona body is simply visible, Markdown/Raw toggle rides the header).
+ * CoreCard keeps the accordion on purpose: the compiled core is a platform
+ * diagnostic, identical for every member — progressive disclosure is right
+ * there and wrong here. */
 export function MemberMdCard({ profile, memberName }: { profile: MemberProfileDoc | null; memberName: string }) {
+  const [view, setView] = useState<"markdown" | "raw">("markdown");
+  const failed = (profile as (MemberProfileDoc & { __failed?: boolean }) | null)?.__failed;
   return (
-    <AccordionCard
-      title="member.md"
-      tag={<AssetTag>persona · self-maintained</AssetTag>}
-      hint={<>
-        This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.
-        {profile?.path ? <span className="block mt-1 font-mono text-[10px] text-ink-4 truncate" title={profile.path}>{profile.path}</span> : null}
-      </>}
-      preview={profile ? (firstContentLine(profile.body) || "Blank slate — the persona grows from your first conversations.") : "Loading…"}
-      empty={profile === null ? <div className="text-xs text-ink-4 py-1">Loading…</div> : (profile as MemberProfileDoc & { __failed?: boolean }).__failed ? <EmptyAsset title="Unavailable" hint="member.md could not be loaded." /> : profile.body.trim() ? undefined : <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />}
-      renderContent={(view) => (
-        <>
-          <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
-            {view === "markdown" ? <Markdown content={profile!.body} /> : profile!.body}
-          </div>
-          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={profile!.path}>{profile!.path}</div>
-          {profile!.overBudget && <div className="mt-1.5 text-[11px] text-think">Persona is getting long (over 4,000 chars) — consider asking {memberName} to trim it.</div>}
-        </>
-      )}
-    />
+    <section className="rounded-xl border border-line-soft bg-surface-1">
+      <div className="flex items-center gap-2 min-w-0 px-4 py-2.5 border-b border-line-soft">
+        <FileText size={13} className="shrink-0 text-ink-4" />
+        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">member.md</h3>
+        <AssetTag>persona · self-maintained</AssetTag>
+        {profile && !failed && <span className="text-[10px] text-ink-4 shrink-0 tabular-nums">{profile.charCount.toLocaleString()} chars{profile.overBudget ? " · over budget" : ""}</span>}
+        <span className="ml-auto shrink-0 flex items-center gap-0.5 rounded-md border border-line-soft bg-surface-2 p-0.5 text-[11px] font-medium">
+          <button type="button" onClick={() => setView("markdown")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "markdown" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Markdown</button>
+          <button type="button" onClick={() => setView("raw")} className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${view === "raw" ? "bg-surface-3 text-ink-1" : "text-ink-4 hover:text-ink-2"}`}>Raw</button>
+        </span>
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-[11.5px] text-ink-4 leading-relaxed mb-2.5">
+          This file IS {memberName}'s persona — the member grows it from your feedback. Want them to remember something? Just say it in chat.
+        </p>
+        {profile === null ? (
+          <div className="text-xs text-ink-4 py-1">Loading…</div>
+        ) : failed ? (
+          <EmptyAsset title="Unavailable" hint="member.md could not be loaded." />
+        ) : !profile.body.trim() ? (
+          <EmptyAsset title="Blank slate" hint="No persona yet — the member writes here as your feedback teaches it something lasting." />
+        ) : (
+          <>
+            <div className="rounded-lg border border-line-soft bg-inset/50 px-3.5 py-3 max-h-[340px] overflow-y-auto">
+              <div className={`text-[13px] text-ink-2 leading-relaxed ${view === "raw" ? "whitespace-pre-wrap font-mono text-[12px]" : "preview-markdown"}`}>
+                {view === "markdown" ? <Markdown content={profile.body} /> : profile.body}
+              </div>
+            </div>
+            {profile.overBudget && <div className="mt-1.5 text-[11px] text-think">Persona is getting long (over 4,000 chars) — consider asking {memberName} to trim it.</div>}
+          </>
+        )}
+        {profile && profile.path ? (
+          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={profile.path}>{profile.path}</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
