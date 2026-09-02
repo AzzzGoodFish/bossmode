@@ -19,7 +19,7 @@ import { useDialog } from "../components/dialogs";
 import { useMemberFloat } from "../components/member-float";
 import {
   getMemberDetail, getDmMessages, getDmSession, sendDmMessage, postConversationRead,
-  getMemberEffectiveConfig, getConfiguredModels, patchGlobalMember, patchMemberScopeConfig,
+  getConfiguredModels, patchGlobalMember,
   type MemberDetail, type MemberInfo, type DmMessage, type DmSession,
   type AvailableModelOption,
 } from "../api/client";
@@ -52,23 +52,22 @@ export function DmPage({ memberId, onBack, onOpenMcpSettings, onOpenExtensionsSe
   const nearBottom = useRef(true);
   const dmScopeId = `dm:${memberId}`;
 
-  // MemberInfo the shared panel expects = member identity + effective config
-  // in this DM scope (model/thinking/mcp/extensions all scope-resolved).
+  // MemberInfo the shared panel expects = member identity + global config
+  // (batch 5b: config is globally unified, no scope resolution anymore).
   const refreshMemberInfo = useCallback(async (detail: MemberDetail) => {
-    const eff = await getMemberEffectiveConfig(detail.memberId, dmScopeId).catch(() => null);
     setMemberInfo({
       id: detail.memberId,
       name: detail.name,
       agent: detail.agentTemplate,
       title: detail.title ?? null,
-      model: eff?.model ?? detail.global?.model ?? null,
-      credentialId: eff?.credentialId ?? detail.global?.credentialId ?? null,
-      thinkingLevel: eff?.thinkingLevel ?? detail.global?.thinkingLevel ?? "",
-      mcpServers: eff?.mcpServers ?? detail.global?.mcpServers ?? [],
-      extensions: eff?.extensions ?? detail.global?.extensions ?? [],
+      model: detail.global?.model ?? null,
+      credentialId: detail.global?.credentialId ?? null,
+      thinkingLevel: detail.global?.thinkingLevel ?? "",
+      mcpServers: detail.global?.mcpServers ?? [],
+      extensions: detail.global?.extensions ?? [],
       createdAt: detail.createdAt,
     });
-  }, [dmScopeId]);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -172,7 +171,7 @@ export function DmPage({ memberId, onBack, onOpenMcpSettings, onOpenExtensionsSe
   const handlePickModel = useCallback(async (v: ModelPickerValue) => {
     if (!member) return;
     try {
-      const res = await patchMemberScopeConfig(member.memberId, dmScopeId, { model: v.model, credentialId: v.credentialId });
+      const res = await patchGlobalMember(member.memberId, { model: v.model, credentialId: v.credentialId });
       setMember(res.member);
       await refreshMemberInfo(res.member);
       toast(`${member.name} model updated. It applies on the next turn.`, "success");
@@ -180,7 +179,7 @@ export function DmPage({ memberId, onBack, onOpenMcpSettings, onOpenExtensionsSe
       console.error("Failed to save model", err);
       toast("Couldn’t update the model. Try again.", "error");
     }
-  }, [member, dmScopeId, refreshMemberInfo, toast]);
+  }, [member, refreshMemberInfo, toast]);
 
   if (error && !member) {
     return (

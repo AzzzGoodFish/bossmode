@@ -176,11 +176,6 @@ function MemberRow({ member: m, roomNames, last, onOpen }: { member: ContactEntr
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[13.5px] font-semibold text-ink-1">{m.name}</span>
           {m.title ? <span className="text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full bg-accent-dim text-accent-ink">{m.title}</span> : null}
-          {!m.unifiedModel && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-line-soft text-ink-4" title="Model config is per-scope (unified switch off)">
-              split config
-            </span>
-          )}
         </div>
         <div className="text-[11px] mt-1 flex items-center gap-2 flex-wrap">
           {m.status === "working" ? (

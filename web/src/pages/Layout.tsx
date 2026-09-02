@@ -261,7 +261,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })}>
+    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} onOpenSettings={(section) => setActivePage({ type: "settings", section })}>
     <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
