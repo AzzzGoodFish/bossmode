@@ -418,34 +418,6 @@ addRoute("GET", "/api/rooms/:id/members/:memberRef/tools", async (_req, res, par
   sendJson(res, 200, getMemberActiveTools(params.id, params.memberRef));
 });
 
-/** Real, compiled Communication segment for this member in this room —
- * read-only, sourced from compileMemberPrompt() (identity batch-1: three-segment). */
-addRoute("GET", "/api/rooms/:id/members/:memberRef/core-prompt", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const member = resolveRoomMember(params.id, params.memberRef);
-  if (!member) {
-    sendJson(res, 404, { error: "Member is not in this room" });
-    return;
-  }
-  const agentDef = loadAgentDefinition(member.agent);
-  if (!agentDef) {
-    sendJson(res, 404, { error: "Agent definition not found for this member" });
-    return;
-  }
-  const docsRoot = join(getBossmodeDir(), "memory", "projects");
-  const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot });
-  // Batch-1: Communication replaces the old bossmode-core card content.
-  const core = compiled.sections.find((s) => s.id === "communication");
-  sendJson(res, 200, {
-    content: core?.content || "",
-    charCount: core?.charCount ?? 0,
-  });
-});
-
 // ── Messages ──
 
 type ManualCompactCommand =

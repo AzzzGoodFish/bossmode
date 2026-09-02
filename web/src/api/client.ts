@@ -872,10 +872,6 @@ export async function getMemberMainline(roomId: string, memberRef: string): Prom
   return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/mainline`);
 }
 
-export async function getMemberCorePrompt(roomId: string, memberRef: string): Promise<{ content: string; charCount: number }> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/core-prompt`);
-}
-
 export interface MemberActiveTool {
   name: string;
   label?: string;
@@ -1778,13 +1774,6 @@ export async function getMemberScopedActivityEvents(
  * room members routes return (revision/hash/budget header + parsed mainline). */
 export async function getMemberMemoryAsset(id: string, layer: "principles" | "mainline", scope: string): Promise<Principles & { parsed?: ParsedMainline }> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}/memory?layer=${layer}&scope=${encodeURIComponent(scope)}`);
-}
-
-/** Scope-addressed compiled core prompt — maps the members-shaped route's
- * sections/fullPrompt payload onto the { content, charCount } the panel renders. */
-export async function getMemberCorePromptScoped(id: string, scope: string): Promise<{ content: string; charCount: number }> {
-  const res = await apiFetch<{ fullPrompt: string }>(`/api/members/${encodeURIComponent(id)}/core-prompt?scope=${encodeURIComponent(scope)}`);
-  return { content: res.fullPrompt || "", charCount: (res.fullPrompt || "").length };
 }
 
 export interface ConversationToolsInfo {
