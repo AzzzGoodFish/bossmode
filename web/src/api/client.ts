@@ -1549,8 +1549,6 @@ export interface ContactEntry {
   contextPct: number | null;
   tokensToday: number;
   tokensTotal: number;
-  unifiedModel: boolean;
-  unifiedExtensions: boolean;
 }
 
 export async function getContacts(): Promise<{ contacts: ContactEntry[] }> {
@@ -1570,13 +1568,9 @@ export interface MemberDetail {
   memberId: string;
   name: string;
   agentTemplate: string;
-  /** member.md frontmatter (batch-1 identity rework): card fields, editable in settings. */
+  /** member.md frontmatter (batch-1 identity rework): card field, editable in settings. */
   title?: string;
-  description?: string;
-  unifiedModel: boolean;
-  unifiedExtensions: boolean;
   global?: MemberGlobalConfig;
-  scopeOverrides?: Record<string, Record<string, unknown>>;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -1585,7 +1579,7 @@ export interface MemberDetail {
  * file is the panel's single memory asset. Write endpoints answer 410. */
 export interface MemberProfileDoc {
   path: string;
-  frontmatter: { name: string; title?: string; description?: string };
+  frontmatter: { name: string; title?: string };
   body: string;
   charCount: number;
   overBudget: boolean;
@@ -1695,8 +1689,6 @@ export interface CreateMemberInput {
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;
-  unifiedModel?: boolean;
-  unifiedExtensions?: boolean;
   importFromArchive?: string;
 }
 

@@ -48,10 +48,7 @@ function publicMember(m: MemberRecord) {
     title: profile.frontmatter.title ?? null,
     agentTemplate: m.agentTemplate,
     templateWarning: memberTemplateWarning(m.agentTemplate),
-    unifiedModel: m.unifiedModel,
-    unifiedExtensions: m.unifiedExtensions,
     global: m.global,
-    scopeOverrides: m.scopeOverrides,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   };
@@ -313,8 +310,6 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
         contextPct: null as number | null,
         tokensToday: 0,
         tokensTotal: 0,
-        unifiedModel: m.unifiedModel,
-        unifiedExtensions: m.unifiedExtensions,
       };
     });
     sendJson(res, 200, { contacts });
@@ -349,8 +344,6 @@ addRoute("POST", "/api/members", async (req, res) => {
       skills?: string[];
       extensions?: string[];
       mcpServers?: string[];
-      unifiedModel?: boolean;
-      unifiedExtensions?: boolean;
       importFromArchive?: string;
     };
     // Batch-1 one-click create: name optional → "New Member" (+ suffix).
@@ -366,9 +359,8 @@ addRoute("POST", "/api/members", async (req, res) => {
         agentTemplate: body.agentTemplate,
         credentialId: body.credentialId,
       });
-      if (body.model !== undefined || body.unifiedModel !== undefined) {
+      if (body.model !== undefined) {
         member = updateMember(member.id, {
-          unifiedModel: body.unifiedModel,
           global: {
             model: body.model,
             credentialId: body.credentialId,
@@ -386,8 +378,6 @@ addRoute("POST", "/api/members", async (req, res) => {
         skills: body.skills,
         extensions: body.extensions,
         mcpServers: body.mcpServers,
-        unifiedModel: body.unifiedModel,
-        unifiedExtensions: body.unifiedExtensions,
         title: (body as { title?: string }).title,
       });
     }
