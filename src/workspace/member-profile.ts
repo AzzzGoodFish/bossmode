@@ -1,5 +1,5 @@
 /**
- * member.md — frontmatter (name/title/description) + free body (persona).
+ * member.md — frontmatter (name/title) + free body (persona).
  * Spec: docs/bossmode/architecture/spec-member-identity-three-memory-impl-v1.md
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,7 +17,6 @@ export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 export interface MemberProfileFrontmatter {
   name: string;
   title?: string;
-  description?: string;
 }
 
 export interface MemberProfile {
@@ -66,7 +65,7 @@ export function ensureSharedMemoryDirs(): void {
  */
 export function writeMemberProfileSkeleton(
   memberId: string,
-  fields: { name: string; title?: string; description?: string },
+  fields: { name: string; title?: string },
 ): string {
   const dir = memberDir(memberId);
   mkdirSync(dir, { recursive: true });
@@ -74,7 +73,6 @@ export function writeMemberProfileSkeleton(
   ensureSharedMemoryDirs();
   const lines = ["---", `name: ${yamlEscape(fields.name)}`];
   if (fields.title?.trim()) lines.push(`title: ${yamlEscape(fields.title.trim())}`);
-  if (fields.description?.trim()) lines.push(`description: ${yamlEscape(fields.description.trim())}`);
   lines.push("---", "");
   const path = memberProfilePath(memberId);
   writeFileSync(path, lines.join("\n") + "\n", "utf-8");
@@ -132,7 +130,7 @@ export function readMemberProfile(memberId: string, fallbackName: string): Membe
   }
   const name = asString(meta.name, "").trim() || fallbackName;
   const title = asString(meta.title, "").trim() || undefined;
-  const description = asString(meta.description, "").trim() || undefined;
+  // description retired (batch 5): legacy lines in existing files are ignored.
   const overBudget = raw.length > MEMBER_PROFILE_BUDGET_CHARS;
   if (overBudget) {
     logger.warn("member-profile", "member.md over budget", {
@@ -142,7 +140,7 @@ export function readMemberProfile(memberId: string, fallbackName: string): Membe
     });
   }
   return {
-    frontmatter: { name, title, description },
+    frontmatter: { name, ...(title ? { title } : {}) },
     body: body.replace(/^\uFEFF/, "").replace(/^\n+/, ""),
     raw,
     path,
@@ -167,13 +165,9 @@ export function isBlankPersona(profile: MemberProfile): boolean {
   return !profile.body.trim();
 }
 
-function serializeProfile(
-  fields: { name: string; title?: string; description?: string },
-  body: string,
-): string {
+function serializeProfile(fields: { name: string; title?: string }, body: string): string {
   const lines = ["---", `name: ${yamlEscape(fields.name)}`];
   if (fields.title?.trim()) lines.push(`title: ${yamlEscape(fields.title.trim())}`);
-  if (fields.description?.trim()) lines.push(`description: ${yamlEscape(fields.description.trim())}`);
   lines.push("---", "");
   const trimmedBody = body.replace(/^\uFEFF/, "").replace(/^\n+/, "").replace(/\s+$/, "");
   if (trimmedBody) {
@@ -185,12 +179,13 @@ function serializeProfile(
 /**
  * Patch member.md frontmatter fields while preserving body.
  * - name always written when provided (sync with registry rename)
- * - title/description: undefined = leave; null/"" = clear from frontmatter
+ * - title: undefined = leave; null/"" = clear from frontmatter
+ * - description is retired (batch 5): any legacy line is dropped on next write.
  * Creates the file (skeleton + body) if missing.
  */
 export function updateMemberProfileFrontmatter(
   memberId: string,
-  patch: { name?: string; title?: string | null; description?: string | null },
+  patch: { name?: string; title?: string | null },
   fallbackName: string,
 ): MemberProfile {
   const current = readMemberProfile(memberId, fallbackName);
@@ -205,15 +200,9 @@ export function updateMemberProfileFrontmatter(
     title = t || undefined;
   }
 
-  let description = current.frontmatter.description;
-  if (patch.description !== undefined) {
-    const d = (patch.description ?? "").trim();
-    description = d || undefined;
-  }
-
   mkdirSync(memberDir(memberId), { recursive: true });
   const path = memberProfilePath(memberId);
-  const raw = serializeProfile({ name, title, description }, current.body);
+  const raw = serializeProfile({ name, title }, current.body);
   writeFileSync(path, raw, "utf-8");
   return readMemberProfile(memberId, fallbackName);
 }

@@ -53,8 +53,6 @@ export interface CreateMemberInput {
   unifiedExtensions?: boolean;
   /** Optional frontmatter seed (identity title). */
   title?: string;
-  /** Optional frontmatter seed (short description). */
-  description?: string;
 }
 
 export class MemberNameTakenError extends Error {
@@ -207,7 +205,6 @@ export function createMember(input: CreateMemberInput): MemberRecord {
   writeMemberProfileSkeleton(id, {
     name,
     title: (input as { title?: string }).title,
-    description: (input as { description?: string }).description,
   });
   return rec;
 }
