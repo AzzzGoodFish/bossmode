@@ -13,7 +13,7 @@ describe("production UI mock guard", () => {
       "pages/ContactsPage.tsx",
       "pages/DmPage.tsx",
       "pages/MemberCreatePage.tsx",
-      "pages/MemberPage.tsx",
+      "components/member-float.tsx",
       "components/CreateRoomDialog.tsx",
     ]) {
       const source = readWebSource(path);
