@@ -123,7 +123,10 @@ function writeRecord(rec: MemberRecord): void {
   const dir = memberDir(rec.id);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.member.json.${process.pid}.tmp`);
-  writeFileSync(tmp, JSON.stringify(rec, null, 2) + "\n", "utf-8");
+  // Batch-5b peel: legacy unified flags + scope overrides never reach disk
+  // again — any write strips them from an existing record.
+  const { unifiedModel: _um, unifiedExtensions: _ue, scopeOverrides: _so, ...onDisk } = rec;
+  writeFileSync(tmp, JSON.stringify(onDisk, null, 2) + "\n", "utf-8");
   renameSync(tmp, memberJsonPath(rec.id));
 }
 

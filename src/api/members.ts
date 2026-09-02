@@ -613,9 +613,12 @@ addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
       return;
     }
     const url = new URL(req.url || "", "http://localhost");
-    const scope = url.searchParams.get("scope");
-    if (!scope || !parseScopeId(scope)) {
-      sendJson(res, 400, { error: "scope_not_found", message: "scope query required" });
+    const scopeParam = url.searchParams.get("scope");
+    // Batch-5b: config writes are global — scope is compatibility-only and now
+    // optional (defaults to the member's DM scope for the effective echo).
+    const scope = scopeParam || scopeIdOf({ kind: "dm", memberId: m.id });
+    if (!parseScopeId(scope)) {
+      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
       return;
     }
     const body = (await parseBody(req)) as Record<string, unknown>;
