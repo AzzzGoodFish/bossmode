@@ -19,6 +19,7 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
     ...actual,
     getBossmodeDir: () => dir,
     ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
+    readConfig: () => ({ auth: { username: "fish" }, runtime: {}, defaults: {} }),
   };
 });
 
@@ -80,6 +81,32 @@ describe("query renderer (member view)", () => {
     expect(renderQueryRowsForMember([])).toBe("No messages found.");
   });
 
+  it("sender display-name mapping: user renders as the auth username, members untouched", async () => {
+    const { renderQueryRowForMember } = await import("../../src/engine/query-render.js");
+    const row = {
+      seq: 7,
+      sender: "user",
+      content: "from the human",
+      ts: 1780000000000,
+      replyTo: { seq: 6, messageId: "m6", sender: "user", excerpt: "earlier human line" },
+    };
+    const text = renderQueryRowForMember(row);
+    expect(text).toContain("[No.7 · fish · ");
+    expect(text).toContain('[In reply to msg:#6 from fish]: "earlier human line"');
+    expect(text).not.toContain("· user ·");
+    expect(text).not.toContain("from user]");
+
+    const member = renderQueryRowForMember({
+      seq: 8,
+      sender: "qa",
+      content: "member line",
+      ts: 1780000000001,
+      replyTo: { seq: 7, messageId: "m7", sender: "pm", excerpt: "pm line" },
+    });
+    expect(member).toContain("[No.8 · qa · ");
+    expect(member).toContain('[In reply to msg:#7 from pm]: "pm line"');
+  });
+
   it("inline query result rendered by the SDK carries seq/replyTo/attachment (through tool rows)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const creds = await import("../../src/engine/model-credentials.js");
@@ -118,7 +145,7 @@ describe("query renderer (member view)", () => {
     // SDK renderer consumes the same rows
     const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
     const text = renderQueryRowsForMember(rows);
-    expect(text).toContain(`[No.${row.seq} · user ·`);
+    expect(text).toContain(`[No.${row.seq} · fish ·`);
     expect(text).toContain(`[In reply to msg:#${base.seq} from pm]: "please run checks"`);
     expect(text).toContain("Attachment: [original filename: report.md]");
   });
@@ -151,7 +178,7 @@ describe("query renderer (member view)", () => {
       output: "file",
     })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
-    expect(md).toContain(`[No.${base.seq + 1} · user ·`);
+    expect(md).toContain(`[No.${base.seq + 1} · fish ·`);
     expect(md).toContain(`[In reply to msg:#${base.seq} from pm]: "origin note"`);
     expect(md).toContain("Attachment: [original filename: notes.md](" + join(attachDir, "rep2.md") + ")");
   });
