@@ -1567,6 +1567,19 @@ export async function getMemberProfile(id: string): Promise<MemberProfileDoc> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}/profile`);
 }
 
+/** The member's fully-assembled system prompt for a scope (fish 2026-09-02
+ * item 5). Byte-identical to the activation-time injection — same compiler. */
+export interface MemberSystemPromptDoc {
+  text: string;
+  charCount: number;
+  scopeId: string;
+  contractFingerprint: string;
+}
+
+export async function getMemberSystemPrompt(id: string, scope: string): Promise<MemberSystemPromptDoc> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/system-prompt?scope=${encodeURIComponent(scope)}`);
+}
+
 /** The member's own skills/ directory, read-only for the panel (batch-2 §2.2). */
 export interface MemberSkillEntry {
   name: string;

@@ -17,10 +17,11 @@
  *   absent (Contacts)     → global-only: Profile + Settings (no Activity tab)
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Info, Loader2, SendHorizonal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Info, Loader2, SendHorizonal, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ActivityTab } from "./ActivityTab";
 import { useDialog } from "./dialogs";
+import { copyText } from "../utils/clipboard";
 import {
   MemberSkillsCard, ContextSessionCard,
   ExtensionsAccordion, McpToolsAccordion, ActiveToolsSection, isAssignableMcpServer,
@@ -31,12 +32,12 @@ import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
   steerAgent, restartMember, resetAgentSession,
-  getMemberStats,
+  getMemberStats, getMemberSystemPrompt,
   getMemberScopedStats,
   getConversationSession, conversationMemberAction, getMcpSettings, getExtensions, sendDmMessage,
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
   type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
-  type ContextUsageData, type McpServerSummary, type ExtensionRecord,
+  type ContextUsageData, type McpServerSummary, type ExtensionRecord, type MemberSystemPromptDoc,
 } from "../api/client";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -436,7 +437,74 @@ function AssetsTab({ member, setMember, scope, onOpenSettings }: {
           </p>
         </div>
       </section>
+
+      <SystemPromptSection member={member} scope={scope} />
     </div>
+  );
+}
+
+/** The member's assembled system prompt for the current scope — same compiler
+ * as activation, byte-identical (fish 2026-09-02 item 5). Falls back to the
+ * member's DM scope when the float is opened globally (Contacts). */
+function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: MemberScopeInfo | null }) {
+  const [doc, setDoc] = useState<MemberSystemPromptDoc | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const effectiveScope = scope?.scopeId ?? `dm:${member.memberId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null); setFailed(false);
+    getMemberSystemPrompt(member.memberId, effectiveScope)
+      .then((d) => { if (!cancelled) setDoc(d); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [member.memberId, effectiveScope]);
+
+  const copy = async () => {
+    if (!doc) return;
+    const ok = await copyText(doc.text);
+    setCopied(ok);
+    window.setTimeout(() => setCopied(null), 1400);
+  };
+
+  return (
+    <section className="rounded-xl border border-line-soft bg-surface-1">
+      <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+        <h3 className="text-[13.5px] font-bold text-ink-1">System prompt</h3>
+        <span className="inline-flex cursor-help" title="The exact prompt this member runs with in this scope — assembled live, byte-identical to what activation injects.">
+          <Info size={11} className="text-ink-4" />
+        </span>
+        {doc && <span className="text-[10px] text-ink-4 tabular-nums">{doc.charCount.toLocaleString()} chars</span>}
+        {doc && (
+          <button
+            type="button"
+            onClick={() => void copy()}
+            title={copied === false ? "Copy failed — clipboard unavailable" : "Copy the full prompt"}
+            className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer"
+          >
+            {copied === true ? <Check size={11} className="text-onair" /> : copied === false ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
+            {copied === true ? "Copied" : copied === false ? "Failed" : "Copy"}
+          </button>
+        )}
+      </div>
+      <div className="px-4 py-3">
+        {failed ? (
+          <div className="text-[12px] text-ink-4 py-1">Couldn’t load the system prompt for this scope.</div>
+        ) : doc === null ? (
+          <div className="text-[12px] text-ink-4 py-1">Loading…</div>
+        ) : (
+          <div className="rounded-lg border border-line-soft bg-inset/50 px-3 py-2 max-h-[340px] overflow-y-auto">
+            <div className="whitespace-pre-wrap font-mono text-[11.5px] text-ink-3 leading-relaxed">{doc.text}</div>
+          </div>
+        )}
+        {doc && (
+          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={`scope ${doc.scopeId} · contract ${doc.contractFingerprint}`}>
+            {doc.scopeId} · {doc.contractFingerprint.slice(0, 8)}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

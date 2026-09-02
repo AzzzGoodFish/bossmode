@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
-  getMemberStats, getMemberCorePrompt, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
-  getMemberScopedStats, getMemberCorePromptScoped, getConversationTools, sendDmMessage, removeRoomMember,
+  getMemberStats, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
+  getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
 } from "../api/client";
 import { useMemberFloat } from "./member-float";
