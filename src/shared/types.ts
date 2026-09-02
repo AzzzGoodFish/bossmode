@@ -72,11 +72,6 @@ export interface BossmodeConfig {
     /** Auto-refresh interval in days for the built-in provider catalog. Default 7. 0 = off. */
     autoRefreshIntervalDays?: number;
   };
-  integrations?: {
-    linear?: {
-      apiKey?: string;
-    };
-  };
 }
 
 // -- Agent Definition --
@@ -394,18 +389,6 @@ export interface ParsedMainline {
 
 // -- Room --
 
-export interface RoomLinearIntegration {
-  teamId: string;
-  teamName: string;
-  teamKey?: string;
-  projectId?: string;
-  projectName?: string;
-  enabled: boolean;
-  lastSyncAt?: number;
-  lastSyncError?: string;
-  syncCount?: number;
-}
-
 export interface RoomMemberConfig {
   model?: string;
   credentialId?: string;
@@ -471,9 +454,6 @@ export interface Room {
   ruleDocs?: string[];
   /** Legacy room-scoped overrides keyed by member name. Read as migration source only. */
   memberOverrides?: Record<string, RoomMemberOverride>;
-  integrations?: {
-    linear?: RoomLinearIntegration;
-  };
 }
 
 // -- Message --
@@ -575,11 +555,6 @@ export interface Task {
   subscribers?: string[];  // passive watchers; never activates members
   subscriberMemberIds?: string[];
   comments?: TaskComment[];
-  linearIssueId?: string;
-  linearIssueUrl?: string;
-  linearIssueIdentifier?: string;
-  linearSyncedAt?: number;
-  linearSyncError?: string;
   createdBy: string;
   createdAt: number;
   updatedAt: number;

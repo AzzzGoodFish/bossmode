@@ -91,10 +91,6 @@ export function emitTaskEvent(
   }
 
   logger.info("task-api", "task event", { roomId, action, taskId: task.id, actor });
-
-  void import("../integrations/task-linear-sync.js")
-    .then(({ syncTaskEventToLinear }) => syncTaskEventToLinear({ roomId, action, task, actor, commentId: opts.commentId }))
-    .catch((err) => logger.error("task-api", "linear sync dispatch failed", { roomId, taskId: task.id, error: String(err) }));
 }
 
 // -- Global --

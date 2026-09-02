@@ -22,14 +22,6 @@ export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comme
 
 export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task / read_memory.`;
 
-export const QUERY_INTEGRATION_DESCRIPTION = `Query external integration status for the current room.
-
-Use this to check whether Linear is connected, see the current room's Linear team/project binding, inspect recent sync errors, and list available Linear teams/projects. API keys are never returned.`;
-
-export const CONFIGURE_INTEGRATION_DESCRIPTION = `Configure an external integration for the current room.
-
-For Linear v1, use this to bind the current room to a Linear team and optional project. Do not pass API keys; Linear API keys must be configured in Settings.`;
-
 export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, errors out of a turn, you are @-mentioned, or the timeout elapses.
 
 This is a synchronous wait — your turn stays open (status stays working) until one of those events. Returns the target's message body when they post, or a short status for idle/error/timeout/mention interrupt. Cursor is not advanced — @-mentions while waiting are delivered via the normal activation/steer path; wait only reports that it ended.
@@ -69,9 +61,4 @@ export const PARAM_DESCRIPTIONS = {
   taskAssigneeFilter: "Filter by assignee name",
   taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",
 
-  // integrations
-  integrationProvider: "Integration provider. v1 supports only 'linear'.",
-  integrationTeam: "Linear team name, key, or id. API key must already be configured in Settings.",
-  integrationProject: "Optional Linear project name or id within the selected team.",
-  integrationEnabled: "Enable or disable syncing for this room.",
 } as const;
