@@ -16,6 +16,7 @@ import { MessageInput } from "../components/MessageInput";
 import { ModelPicker, type ModelPickerValue } from "../components/ModelPicker";
 import { DateSeparator, isGroupedWithPrev, shouldShowDateSeparator, MessageArtifactChips } from "../components/ChatArea";
 import { useDialog } from "../components/dialogs";
+import { useMemberFloat } from "../components/member-float";
 import {
   getMemberDetail, getDmMessages, getDmSession, sendDmMessage, postConversationRead,
   getMemberEffectiveConfig, getConfiguredModels, patchGlobalMember, patchMemberScopeConfig,
@@ -28,13 +29,13 @@ import { getUsername } from "../api/client";
 const PAGE_SIZE = 50;
 const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
-export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, onOpenExtensionsSettings }: {
+export function DmPage({ memberId, onBack, onOpenMcpSettings, onOpenExtensionsSettings }: {
   memberId: string;
   onBack: () => void;
-  onOpenSettings?: (memberId: string) => void;
   onOpenMcpSettings?: () => void;
   onOpenExtensionsSettings?: () => void;
 }) {
+  const memberFloat = useMemberFloat();
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [memberInfo, setMemberInfo] = useState<MemberInfo | null>(null);
   const [session, setSession] = useState<DmSession | null>(null);
@@ -205,8 +206,8 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
         <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
           <button
             type="button"
-            onClick={() => onOpenSettings?.(member.memberId)}
-            title={`Open ${member.name}'s page`}
+            onClick={() => memberFloat.open(member.memberId, dmScopeId)}
+            title={`Open ${member.name}'s details`}
             className="flex items-center gap-2.5 min-w-0 rounded-lg px-2 py-1 -ml-2 hover:bg-surface-2 transition-colors cursor-pointer"
           >
             <StaffBadge name={member.name} status={statusFromAgent(status)} size="sm" />
@@ -226,13 +227,12 @@ export function DmPage({ memberId, onBack, onOpenSettings, onOpenMcpSettings, on
             <button onClick={() => { setSearchOpen(v => !v); setSearchQuery(""); }} className={toolBtn} title="Search messages">
               <Search size={13} />
             </button>
-            {/* onOpenSettings was a dead prop (nowhere invoked) — the settings
-             * page had no reachable entry. Birth flow lands in this DM, so the
-             * gear lives in the header (batch-1 identity rework, fish 2026-08-25). */}
+            {/* Header gear opens the member detail float scoped to this DM
+             * (member-page merge v2, fish 2026-09-02: float, not full page). */}
             <button
               type="button"
-              onClick={() => onOpenSettings?.(member.memberId)}
-              title="Member settings — name, title, description"
+              onClick={() => memberFloat.open(member.memberId, dmScopeId)}
+              title="Member details — identity, activity, settings"
               className={toolBtn}
             >
               <SlidersHorizontal size={13} />

@@ -18,9 +18,6 @@ export type ActivePage =
   | { type: "contacts" }
   | { type: "dm"; memberId: string }
   | { type: "member-create" }
-  /** Member-page merge v1: one member home; scopeId presets the scope view
-   * (`room:<id>` / `dm:<memberId>`), back = where Back returns to. */
-  | { type: "member"; memberId: string; scopeId?: string; back?: ActivePage }
   | { type: "room"; id: string }
   | { type: "topic"; roomId: string; topicId: string }
   /** Topic draft (topic-threads v3, fish): opened from a message's topic button; nothing persists until the first message sends. */
@@ -39,7 +36,6 @@ export function domainOf(page: ActivePage): Domain {
     case "contacts":
     case "dm":
     case "member-create":
-    case "member":
       return "chats";
     case "settings":
       return "system";
