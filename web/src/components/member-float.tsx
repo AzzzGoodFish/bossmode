@@ -49,13 +49,13 @@ type FloatTarget = { memberId: string; scopeId?: string; tab?: FloatTab };
 const MemberFloatCtx = createContext<{ open: (memberId: string, scopeId?: string, tab?: FloatTab) => void }>({ open: () => {} });
 export const useMemberFloat = () => useContext(MemberFloatCtx);
 
-export function MemberFloatProvider({ children, onFired, onOpenSettings }: { children: React.ReactNode; onFired?: () => void; onOpenSettings?: (section: "integrations" | "extensions") => void }) {
+export function MemberFloatProvider({ children, onFired, onOpenSettings, liveStatuses }: { children: React.ReactNode; onFired?: () => void; onOpenSettings?: (section: "integrations" | "extensions") => void; liveStatuses?: ReadonlyMap<string, string> }) {
   const [target, setTarget] = useState<FloatTarget | null>(null);
   const open = useCallback((memberId: string, scopeId?: string, tab?: FloatTab) => setTarget({ memberId, scopeId, tab }), []);
   return (
     <MemberFloatCtx.Provider value={{ open }}>
       {children}
-      {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} onOpenSettings={onOpenSettings} />}
+      {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} liveStatuses={liveStatuses} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} onOpenSettings={onOpenSettings} />}
     </MemberFloatCtx.Provider>
   );
 }
@@ -64,10 +64,11 @@ export function MemberFloatProvider({ children, onFired, onOpenSettings }: { chi
 
 // ── the float ───────────────────────────────────────────────────────────────
 
-function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, onOpenSettings }: {
+function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClose, onFired, onOpenSettings }: {
   memberId: string;
   scopeId?: string;
   initialTab?: FloatTab;
+  liveStatuses?: ReadonlyMap<string, string>;
   onClose: () => void;
   onFired: () => void;
   onOpenSettings?: (section: "integrations" | "extensions") => void;
@@ -115,6 +116,8 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
     }
   };
 
+  const liveStatus = scope && member ? liveStatuses?.get(`${scope.scopeId}:${member.name}`) : undefined;
+  const effectiveStatus = liveStatus ?? scope?.status;
   const hasActivityTab = !!scope;
 
   return (
@@ -128,17 +131,14 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
         {/* header — no banner strip (fish 2026-09-02: drop the gradient) */}
         <button onClick={onClose} title="Close" className="absolute top-3 right-3 w-7 h-7 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-surface-2 flex items-center justify-center cursor-pointer z-10 transition-colors"><X size={14} /></button>
         <div className="px-5 pt-4 flex items-center gap-3.5 shrink-0">
-          <StaffBadge name={member?.name ?? "?"} status={scope ? statusFromAgent(scope.status) : "offline"} size="lg" />
+          <StaffBadge name={member?.name ?? "?"} status={effectiveStatus ? statusFromAgent(effectiveStatus) : "offline"} size="lg" />
           <div className="min-w-0 pb-0.5">
             {member ? (
               <>
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-[17px] font-bold text-ink-1 truncate">{member.name}</span>
                 </div>
-                <div className="text-[11px] text-ink-3 mt-0.5 truncate">
-                  {member.title ? `${member.title} · ` : ""}<span className="font-mono">@{member.name}</span>
-                  {scope ? ` · ${scope.status}` : ""}
-                </div>
+                {member.title && <div className="text-[11px] text-ink-3 mt-0.5 truncate">{member.title}</div>}
               </>
             ) : (
               <div className="text-[13px] text-ink-4">{loadError ? `Couldn't load — ${loadError}` : "Loading…"}</div>
@@ -166,7 +166,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
         {member && (
           <div className="flex-1 overflow-y-auto min-h-[260px] px-5 py-4">
             {tab === "profile" && <ProfileTab member={member} setMember={setMember} scopes={scopes} />}
-            {tab === "assets" && <AssetsTab member={member} setMember={setMember} scope={scope} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
+            {tab === "assets" && <AssetsTab member={member} setMember={setMember} scope={scope} liveStatus={effectiveStatus} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
             {tab === "activity" && scope && (
               <div className="h-[420px] rounded-xl border border-line-soft overflow-hidden">
                 <ActivityTab
@@ -176,7 +176,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, onClose, onFired, on
                 />
               </div>
             )}
-            {tab === "settings" && <SettingsTab member={member} setMember={setMember} scope={scope} models={models} onFired={onFired} />}
+            {tab === "settings" && <SettingsTab member={member} setMember={setMember} scope={scope} models={models} liveStatus={effectiveStatus} onFired={onFired} />}
           </div>
         )}
 
@@ -331,10 +331,11 @@ function ProfileTab({ member, setMember, scopes }: {
 // global lists, never per-scope. Memory is shared platform directories,
 // shown as read-only pointers, never as a member-private asset (pm boundary).
 
-function AssetsTab({ member, setMember, scope, onOpenSettings }: {
+function AssetsTab({ member, setMember, scope, liveStatus, onOpenSettings }: {
   member: MemberDetail;
   setMember: (m: MemberDetail) => void;
   scope: MemberScopeInfo | null;
+  liveStatus?: string;
   onOpenSettings: (section: "integrations" | "extensions") => void;
 }) {
   const { toast } = useDialog();
@@ -384,18 +385,17 @@ function AssetsTab({ member, setMember, scope, onOpenSettings }: {
 
   return (
     <div className="space-y-4 pb-2">
-      <MemberSkillsCard skills={memberSkills} />
-      <ExtensionsAccordion
-        installedExtensions={installedExtensions}
-        extensionsLoadStatus={extensionsLoadStatus}
-        onRetryExtensions={() => {
-          setExtensionsLoadStatus("loading");
-          void getExtensions().then((e) => { setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => setExtensionsLoadStatus("error"));
-        }}
-        memberExtensions={member.global?.extensions ?? []}
-        onToggleExtension={handleToggleExtension}
-        onOpenExtensionsSettings={() => onOpenSettings("extensions")}
-      />
+      {/* fish 2026-09-03: Assets order = live first — Active tools, MCP
+       * Servers, Pi extensions, Skills, Memory, System prompt */}
+      {scope && (
+        <ActiveToolsSection
+          roomId={scope.kind === "dm" ? scope.scopeId : scope.scopeId.replace(/^room:/, "")}
+          memberRef={member.memberId || member.name}
+          status={liveStatus ?? scope.status}
+          reloadKey={0}
+          dmScope={scope.kind === "dm" ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined}
+        />
+      )}
       <McpToolsAccordion
         mcpEnabled={mcpEnabled}
         mcpServers={mcpServers}
@@ -408,18 +408,18 @@ function AssetsTab({ member, setMember, scope, onOpenSettings }: {
         onToggleMcp={handleToggleMcp}
         onOpenMcpSettings={() => onOpenSettings("integrations")}
       />
-
-      {/* active tools — this scope's live session (moved from Settings,
-       * fish 2026-09-02 item 3: Settings keeps config, Assets lists tools) */}
-      {scope && (
-        <ActiveToolsSection
-          roomId={scope.kind === "dm" ? scope.scopeId : scope.scopeId.replace(/^room:/, "")}
-          memberRef={member.memberId || member.name}
-          status={scope.status}
-          reloadKey={0}
-          dmScope={scope.kind === "dm" ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined}
-        />
-      )}
+      <ExtensionsAccordion
+        installedExtensions={installedExtensions}
+        extensionsLoadStatus={extensionsLoadStatus}
+        onRetryExtensions={() => {
+          setExtensionsLoadStatus("loading");
+          void getExtensions().then((e) => { setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => setExtensionsLoadStatus("error"));
+        }}
+        memberExtensions={member.global?.extensions ?? []}
+        onToggleExtension={handleToggleExtension}
+        onOpenExtensionsSettings={() => onOpenSettings("extensions")}
+      />
+      <MemberSkillsCard skills={memberSkills} />
 
       {/* memory — shared platform directories, pointers only */}
       <section className="rounded-xl border border-line-soft bg-surface-1">
@@ -509,10 +509,18 @@ function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: M
   );
 }
 
-function ModelRowSelect({ value, models, onChange }: {
-  value: { model: string | null; credentialId: string | null };
-  models: AvailableModelOption[];
-  onChange: (v: { model: string | null; credentialId: string | null }) => void;
+type RowOption = { id: string; label: string; quiet?: string; title?: string; unavailable?: boolean };
+
+/** Workstations-style row picker (fish 2026-09-02/03): one visual language for
+ * both model and think-level selects — trigger row shows label + quiet suffix,
+ * popover rows carry name + provider/level + a check on the current one;
+ * capability numbers live in row hover tooltips, never printed. */
+function RowSelect({ value, rows, onChange, emptyLabel, emptyHint }: {
+  value: string | null;
+  rows: RowOption[];
+  onChange: (id: string | null) => void;
+  emptyLabel?: string;
+  emptyHint?: string;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -526,32 +534,7 @@ function ModelRowSelect({ value, models, onChange }: {
     return () => { document.removeEventListener("pointerdown", onPointerDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  const current = value.model
-    ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
-    : undefined;
-  const rows = [...models].sort((a, b) =>
-    (a.providerDisplayName || a.providerSlug).localeCompare(b.providerDisplayName || b.providerSlug) || (a.displayName || a.modelId).localeCompare(b.displayName || b.modelId));
-  const pairCount = new Map<string, number>();
-  for (const m of rows) {
-    const k = `${m.displayName || m.modelId}::${m.providerDisplayName || m.providerSlug}`;
-    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
-  }
-  const quietLabel = (m: AvailableModelOption) => {
-    const provider = m.providerDisplayName || m.providerSlug;
-    const k = `${m.displayName || m.modelId}::${provider}`;
-    return pairCount.get(k)! > 1 ? `${provider} · ${m.profileName}` : provider;
-  };
-
-  const caps = (m: AvailableModelOption) => {
-    const parts = [m.provider || m.providerSlug];
-    if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} ctx`);
-    if (m.maxTokens) parts.push(`${formatTokens(m.maxTokens)} out`);
-    if (m.reasoning) parts.push("thinking");
-    if (m.images) parts.push("images");
-    return parts.join(" · ");
-  };
-
-  const rowLabel = (m: AvailableModelOption) => m.displayName || m.modelId;
+  const current = rows.find((r) => r.id === value);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -563,59 +546,112 @@ function ModelRowSelect({ value, models, onChange }: {
       >
         {current ? (
           <>
-            <span className="text-[13px] font-semibold text-ink-1 truncate">{rowLabel(current)}</span>
-            <span className="text-[11px] text-ink-4 truncate">{quietLabel(current)}</span>
-          </>
-        ) : value.model ? (
-          <>
-            <span className="text-[13px] font-semibold text-think truncate">{value.model}</span>
-            <span className="text-[11px] text-think truncate">unavailable</span>
+            <span className={`text-[13px] font-semibold truncate ${current.unavailable ? "text-think" : "text-ink-1"}`}>{current.label}</span>
+            {current.quiet && <span className={`text-[11px] truncate ${current.unavailable ? "text-think" : "text-ink-4"}`}>{current.quiet}</span>}
           </>
         ) : (
-          <span className="text-[13px] text-ink-4">Not configured</span>
+          <span className="text-[13px] text-ink-4">{emptyLabel ?? "Not configured"}</span>
         )}
         <ChevronDown size={12} className={`ml-auto shrink-0 text-ink-4 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-64 overflow-y-auto rounded-lg border border-line-strong bg-surface-3 p-1" style={{ boxShadow: "var(--shadow-pop)" }}>
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onChange({ model: null, credentialId: null }); }}
-            className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
-          >
-            <span className="text-[12.5px] text-ink-4">Not configured</span>
-            {!value.model && <Check size={12} className="ml-auto shrink-0 text-accent-ink" />}
-          </button>
-          {value.model && !current && (
-            <div className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 opacity-70">
-              <span className="text-[12.5px] font-medium text-think truncate">{value.model}</span>
-              <span className="text-[10.5px] text-think truncate">unavailable</span>
-              <Check size={12} className="ml-auto shrink-0 text-think" />
-            </div>
+          {emptyLabel !== undefined && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onChange(null); }}
+              className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+            >
+              <span className="text-[12.5px] text-ink-4">{emptyLabel}</span>
+              {value === null && <Check size={12} className="ml-auto shrink-0 text-accent-ink" />}
+            </button>
           )}
-          {rows.map((m) => {
-            const selected = current ? m.profileId === current.profileId && m.ref === current.ref : false;
-            return (
-              <button
-                key={`${m.profileId}::${m.ref}`}
-                type="button"
-                title={caps(m)}
-                onClick={() => { setOpen(false); onChange({ model: m.ref, credentialId: m.profileId }); }}
-                className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
-              >
-                <span className="text-[12.5px] font-medium text-ink-1 truncate">{rowLabel(m)}</span>
-                <span className="text-[10.5px] text-ink-4 truncate">{quietLabel(m)}</span>
-                {selected && <Check size={12} className="ml-auto shrink-0 text-accent-ink" />}
-              </button>
+          {rows.length === 0 && emptyHint && (
+            <div className="px-2.5 py-2 text-[11px] text-think">{emptyHint}</div>
+          )}
+          {rows.map((r) => {
+            const selected = r.id === value;
+            const cls = r.unavailable ? "opacity-70" : "cursor-pointer hover:bg-surface-2 transition-colors";
+            const inner = (
+              <>
+                <span className={`text-[12.5px] font-medium truncate ${r.unavailable ? "text-think" : "text-ink-1"}`}>{r.label}</span>
+                {r.quiet && <span className={`text-[10.5px] truncate ${r.unavailable ? "text-think" : "text-ink-4"}`}>{r.quiet}</span>}
+                {selected && <Check size={12} className={`ml-auto shrink-0 ${r.unavailable ? "text-think" : "text-accent-ink"}`} />}
+              </>
+            );
+            return r.unavailable ? (
+              <div key={r.id} title={r.title} className={`w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 ${cls}`}>{inner}</div>
+            ) : (
+              <button key={r.id} type="button" title={r.title} onClick={() => { setOpen(false); onChange(r.id); }} className={`w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left ${cls}`}>{inner}</button>
             );
           })}
-          {rows.length === 0 && (
-            <div className="px-2.5 py-2 text-[11px] text-think">No models available. Connect a provider in Settings → Models.</div>
-          )}
         </div>
       )}
     </div>
+  );
+}
+
+function ModelRowSelect({ value, models, onChange }: {
+  value: { model: string | null; credentialId: string | null };
+  models: AvailableModelOption[];
+  onChange: (v: { model: string | null; credentialId: string | null }) => void;
+}) {
+  const current = value.model
+    ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
+    : undefined;
+  const sorted = [...models].sort((a, b) =>
+    (a.providerDisplayName || a.providerSlug).localeCompare(b.providerDisplayName || b.providerSlug) || (a.displayName || a.modelId).localeCompare(b.displayName || b.modelId));
+  const pairCount = new Map<string, number>();
+  for (const m of sorted) {
+    const k = `${m.displayName || m.modelId}::${m.providerDisplayName || m.providerSlug}`;
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  const caps = (m: AvailableModelOption) => {
+    const parts = [m.provider || m.providerSlug];
+    if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} ctx`);
+    if (m.maxTokens) parts.push(`${formatTokens(m.maxTokens)} out`);
+    if (m.reasoning) parts.push("thinking");
+    if (m.images) parts.push("images");
+    return parts.join(" · ");
+  };
+  const byId = new Map<string, AvailableModelOption>();
+  const rows: RowOption[] = sorted.map((m) => {
+    const id = `${m.profileId}::${m.ref}`;
+    byId.set(id, m);
+    const provider = m.providerDisplayName || m.providerSlug;
+    const k = `${m.displayName || m.modelId}::${provider}`;
+    return { id, label: m.displayName || m.modelId, quiet: pairCount.get(k)! > 1 ? `${provider} · ${m.profileName}` : provider, title: caps(m) };
+  });
+  if (value.model && !current) rows.unshift({ id: "__current", label: value.model, quiet: "unavailable", unavailable: true });
+
+  return (
+    <RowSelect
+      value={current ? `${current.profileId}::${current.ref}` : value.model ? "__current" : null}
+      rows={rows}
+      emptyLabel="Not configured"
+      emptyHint="No models available. Connect a provider in Settings → Models."
+      onChange={(id) => {
+        if (id === null) { onChange({ model: null, credentialId: null }); return; }
+        if (id === "__current") return;
+        const m = byId.get(id);
+        if (m) onChange({ model: m.ref, credentialId: m.profileId });
+      }}
+    />
+  );
+}
+
+function ThinkRowSelect({ value, options, onChange }: {
+  value: string;
+  options: string[];
+  onChange: (level: string | null) => void;
+}) {
+  return (
+    <RowSelect
+      value={value}
+      rows={options.map((l) => ({ id: l, label: l }))}
+      onChange={(id) => onChange(id === null || id === "off" ? null : id)}
+    />
   );
 }
 
@@ -623,11 +659,12 @@ function ModelRowSelect({ value, models, onChange }: {
 // Batch 5b: config is globally unified — no per-scope model card, no unified
 // toggles, no "following global" banner. The model select IS the global one.
 
-function SettingsTab({ member, setMember, scope, models, onFired }: {
+function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: {
   member: MemberDetail;
   setMember: (m: MemberDetail) => void;
   scope: MemberScopeInfo | null;
   models: AvailableModelOption[];
+  liveStatus?: string;
   onFired: () => void;
 }) {
   const { toast, confirm } = useDialog();
@@ -642,12 +679,15 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
   const roomId = scope && !dm ? scope.scopeId.replace(/^room:/, "") : null;
   const [contextUsage, setContextUsage] = useState<ContextUsageData | undefined>();
 
+  // context usage refetches when the live status changes (fish 2026-09-03:
+  // the float used to show a snapshot — after a daemon restart or a fresh
+  // turn, the usage number stayed stale until reopen)
   useEffect(() => {
     if (!scope) return;
     let cancelled = false;
     getConversationSession(scope.scopeId, member.memberId).then((s) => { if (!cancelled) setContextUsage(s.contextUsage); }).catch(() => {});
     return () => { cancelled = true; if (savedTimer.current) clearTimeout(savedTimer.current); };
-  }, [dm, roomId, member.memberId, scope]);
+  }, [dm, roomId, member.memberId, scope, liveStatus]);
 
   const handleCompact = useCallback(async () => {
     if (!scope) return;
@@ -711,7 +751,6 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
       {/* the member's model — global, applies to every scope */}
       <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
         <div className="text-[13px] font-semibold text-ink-1">Model</div>
-        <div className="text-[11px] text-ink-4 mt-0.5">Applies on the next turn.</div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_170px] gap-2.5 items-start mt-3">
           <label className="block space-y-1.5 min-w-0">
             <span className="text-[11px] font-medium text-ink-3">Model</span>
@@ -723,20 +762,20 @@ function SettingsTab({ member, setMember, scope, models, onFired }: {
           </label>
           <label className="block space-y-1.5">
             <span className="text-[11px] font-medium text-ink-3">Think level</span>
-            <select
+            <ThinkRowSelect
               value={thinkingCurrent}
-              onChange={(e) => void saveConfig({ thinkingLevel: e.target.value === "off" ? null : e.target.value })}
-              className="w-full bg-surface-3 border border-line rounded px-2.5 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors"
-            >
-              {thinkingAll.map((level) => <option key={level} value={level}>{level}</option>)}
-            </select>
+              options={thinkingAll}
+              onChange={(level) => void saveConfig({ thinkingLevel: level })}
+            />
           </label>
         </div>
-        <div className="flex items-center gap-2 mt-2 min-h-4">
-          {cfgSave === "saving" && <span className="text-[11px] text-ink-4 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Saving…</span>}
-          {cfgSave === "saved" && <span className="text-[11px] text-onair inline-flex items-center gap-1"><Check size={11} />Saved</span>}
-          {cfgError && <span role="alert" className="text-[11px] text-blocked">{cfgError}</span>}
-        </div>
+        {(cfgSave !== "idle" || cfgError) && (
+          <div className="flex items-center gap-2 mt-2">
+            {cfgSave === "saving" && <span className="text-[11px] text-ink-4 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Saving…</span>}
+            {cfgSave === "saved" && <span className="text-[11px] text-onair inline-flex items-center gap-1"><Check size={11} />Saved</span>}
+            {cfgError && <span role="alert" className="text-[11px] text-blocked">{cfgError}</span>}
+          </div>
+        )}
       </section>
 
       {/* this scope's live session — operational actions stay scope-bound */}

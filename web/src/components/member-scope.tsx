@@ -188,7 +188,7 @@ export function ContextSessionCard({ contextUsage, onCompact, onResetSession, on
   onRestart: () => void;
   dm: boolean;
 }) {
-  const hasUsage = contextUsage?.supported && contextUsage.percentage !== undefined;
+  const hasUsage = contextUsage != null && contextUsage.supported !== false && typeof contextUsage.percentage === "number";
   const pct = hasUsage ? Math.round(contextUsage!.percentage!) : 0;
   return (
     <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
@@ -236,15 +236,19 @@ export function ContextSessionCard({ contextUsage, onCompact, onResetSession, on
       </div>
 
       {!dm && (
-        <details className="rounded-lg border border-line-soft bg-surface-1 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-ink-3 hover:text-ink-1">Troubleshooting</summary>
-          <div className="mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line-soft pt-2">
-            <div className="text-[11px] text-ink-4 leading-relaxed">
-              If the member is stuck, restart it.
-            </div>
-            <button onClick={onRestart} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Restart member</button>
+        <div className="rounded-xl border border-line-soft bg-surface-1 px-3 py-2.5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink-1 leading-5">Restart member</div>
+            <div className="text-[11px] text-ink-4 leading-relaxed">If the member is stuck, restart it.</div>
           </div>
-        </details>
+          <button
+            type="button"
+            onClick={onRestart}
+            className="shrink-0 min-w-20 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-sm cursor-pointer transition-colors hover:bg-surface-3 hover:text-ink-1 hover:border-line-strong active:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
+            Restart
+          </button>
+        </div>
       )}
     </section>
   );
@@ -338,7 +342,7 @@ export function ExtensionsAccordion({ installedExtensions, extensionsLoadStatus,
 }) {
   return (
     <SessionSectionAccordion
-      title="Extensions"
+      title="Pi extensions"
       summary={extensionsAccordionSummary(extensionsLoadStatus, installedExtensions, memberExtensions)}
       action={
         <button type="button" onClick={() => onOpenExtensionsSettings?.()} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Install…</button>

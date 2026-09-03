@@ -166,7 +166,7 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
           {hasMore && <button onClick={() => void loadOlder()} disabled={loadingOlder} className="w-full text-xs text-accent-ink py-2 hover:opacity-80 cursor-pointer disabled:opacity-50 disabled:cursor-default">{loadingOlder ? "Loading…" : "Load earlier activity"}</button>}
           {loading && <div className="text-center text-sm text-ink-4 py-8">Loading activity…</div>}
           {!loading && turns.length === 0 && <div className="text-center text-sm text-ink-4 py-8">No matching activity.</div>}
-          {turns.map((turn, idx) => <TurnBlock key={idx} index={idx + 1} events={turn.events} query={query} />)}
+          {turns.map((turn, idx) => <TurnBlock key={idx} events={turn.events} query={query} />)}
         </div>
       </div>
     </div>
@@ -248,11 +248,11 @@ export function groupTurns(events: AgentEvent[]): Array<{ events: AgentEvent[] }
   return turns;
 }
 
-function TurnBlock({ index, events, query }: { index: number; events: AgentEvent[]; query: string }) {
-  const firstTs = events.find((e) => typeof e.ts === "number")?.ts;
+/** fish 2026-09-03: no turn chrome — cards flow continuously, a wider gap
+ * still marks where one turn hands off to the next. */
+function TurnBlock({ events, query }: { events: AgentEvent[]; query: string }) {
   return (
     <section className="space-y-[7px]">
-      <div className="flex items-center gap-1.5"><span className="text-[10px] font-bold tracking-[0.08em] uppercase text-ink-4">Turn · #{index}</span><span className="font-mono text-[10px] font-normal text-ink-4">{formatEventTime(firstTs)}</span><span className="h-px bg-line-soft flex-1" /></div>
       <TurnEventList events={events} query={query} />
     </section>
   );
@@ -380,7 +380,7 @@ function EventRow({ event, toolEnd, elapsedSec, query }: { event: AgentEvent; to
   if (event.type === "user_prompt") return <UserPromptCard event={event} time={time} query={query} label="USER PROMPT" />;
   if (event.type === "user_steer") return <UserPromptCard event={event} time={time} query={query} label="STEER" />;
   if (event.type === "tool_end") return <ToolCard event={event} toolEnd={event} diff={diff} time={time} query={query} />;
-  if (event.type === "agent_start" || event.type === "agent_end") return <div className="text-[11px] text-ink-4 px-1 py-0.5">{summary.detail} · {time}</div>;
+  if (event.type === "agent_start" || event.type === "agent_end") return null; // fish 2026-09-03: turn chrome rows removed
   if (event.type === "tool_start") {
     return <ToolCard event={event} toolEnd={toolEnd} diff={diff} time={time} query={query} />;
   }
