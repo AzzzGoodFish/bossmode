@@ -1587,6 +1587,18 @@ export async function getMemberSkills(id: string): Promise<{ skills: MemberSkill
   return apiFetch(`/api/members/${encodeURIComponent(id)}/skills`);
 }
 
+/** Member-owned asset listing (batch 6: presence = enabled — the member's own
+ * mcp.json / extensions/ / skills/ directories, read-only for the panel). */
+export interface MemberAssets {
+  mcpServers: Array<{ name: string; toolCount?: number }>;
+  extensions: Array<{ name: string }>;
+  skills: MemberSkillEntry[];
+}
+
+export async function getMemberAssets(id: string): Promise<MemberAssets> {
+  return apiFetch(`/api/members/${encodeURIComponent(id)}/assets`);
+}
+
 export async function getMemberDetail(id: string): Promise<MemberDetail> {
   const res = await apiFetch<{ member: MemberDetail }>(`/api/members/${encodeURIComponent(id)}`);
   return res.member;

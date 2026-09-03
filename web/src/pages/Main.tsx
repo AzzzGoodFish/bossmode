@@ -51,9 +51,6 @@ interface MainProps {
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
   onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
-
-  onOpenMcpSettings?: () => void;
-  onOpenExtensionsSettings?: () => void;
   /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
   onOpenTopicPage?: (roomId: string, topicId: string) => void;
   /** Open an unsent topic draft on a message (topic-threads v3 — creates on first send, Feishu semantics). */
@@ -88,8 +85,6 @@ export function Main({
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
   onNavigateToTask,
-  onOpenMcpSettings,
-  onOpenExtensionsSettings,
   onOpenTopicPage,
   onOpenTopicDraft,
   pendingJump,
@@ -462,8 +457,6 @@ export function Main({
             contextUsage={displayContextUsage}
             roomId={room.id}
             onJumpToMessage={jumpToMessage}
-            onOpenMcpSettings={onOpenMcpSettings}
-            onOpenExtensionsSettings={onOpenExtensionsSettings}
             onMembersChanged={reloadRoom}
             unreadAgents={unreadTabs}
           />
@@ -478,8 +471,6 @@ export function Main({
                 contextUsage={displayContextUsage}
               roomId={room.id}
               onJumpToMessage={jumpToMessage}
-              onOpenMcpSettings={onOpenMcpSettings}
-            onOpenExtensionsSettings={onOpenExtensionsSettings}
               onMembersChanged={reloadRoom}
               unreadAgents={unreadTabs}
             />

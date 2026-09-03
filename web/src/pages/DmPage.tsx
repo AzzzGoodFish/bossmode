@@ -29,11 +29,9 @@ import { getUsername } from "../api/client";
 const PAGE_SIZE = 50;
 const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
-export function DmPage({ memberId, onBack, onOpenMcpSettings, onOpenExtensionsSettings }: {
+export function DmPage({ memberId, onBack }: {
   memberId: string;
   onBack: () => void;
-  onOpenMcpSettings?: () => void;
-  onOpenExtensionsSettings?: () => void;
 }) {
   const memberFloat = useMemberFloat();
   const [member, setMember] = useState<MemberDetail | null>(null);

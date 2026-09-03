@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Plus, KeyRound, Pencil, Trash2, PlugZap, RefreshCw } from "lucide-react";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { RuntimeSettings, PiTransportSetting, McpSettings, McpServerSummary, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
+import type { RuntimeSettings, PiTransportSetting, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, PublicModelProvider, ExtensionRecord, ExtensionsListResponse, ModelCatalogStatus, MemoryBudgets } from "../api/client";
 import {
   getRuntimeSettings,
   updateRuntimeSettings,
@@ -11,9 +11,6 @@ import {
   resetEnvironmentCommunication,
   getMemoryBudgets,
   updateMemoryBudgets,
-  getMcpSettings,
-  updateMcpSettings,
-  checkMcpServers,
   getModelCredentialProfiles,
   createModelCredentialProfile,
   updateModelCredentialProfile,
@@ -52,7 +49,6 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
   prompt: { title: "Prompt", desc: "Environment & Communication asset compiled into every member." },
   extensions: { title: "Extensions", desc: "Install pi agent extensions managed by Bossmode." },
-  integrations: { title: "Integrations", desc: "Connect external tools and services." },
   usage: { title: "Usage", desc: "Token consumption by identity, room and time" },
 };
 
@@ -106,7 +102,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showConnectProvider, setShowConnectProvider] = useState(false);
-  const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
   const [extensionsData, setExtensionsData] = useState<ExtensionsListResponse | null>(null);
   const [extPackage, setExtPackage] = useState("");
   const [extBusy, setExtBusy] = useState(false);
@@ -117,7 +112,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   useEffect(() => {
     getRuntimeSettings().then((v) => setRuntimeSettings(normalizeRuntimeSettings(v))).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
-    getMcpSettings().then(setMcpSettings).catch(console.error);
     refreshExtensions();
     getEnvironmentCommunication().then((a) => { setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source); }).catch(console.error);
     getMemoryBudgets().then(setMemBudgets).catch(console.error);
@@ -255,12 +249,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
       </div>
 
       {section === "usage" && <UsagePage />}
-
-      {section === "integrations" && (
-        <div className="space-y-6">
-          <McpIntegrationSection settings={mcpSettings} onSettings={setMcpSettings} />
-        </div>
-      )}
 
       {section === "models" && (
         <ModelCredentialsSection
@@ -648,137 +636,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   );
 }
 
-function McpIntegrationSection({ settings, onSettings }: { settings: McpSettings | null; onSettings: (settings: McpSettings) => void }) {
-  const { toast } = useDialog();
-  const [enabled, setEnabled] = useState(false);
-  const [configText, setConfigText] = useState("{\n  \"mcpServers\": {}\n}");
-  const [saving, setSaving] = useState(false);
-  const [checking, setChecking] = useState<string | null>(null);
-
-  const servers = settings?.servers || [];
-
-  useEffect(() => {
-    if (!settings) return;
-    setEnabled(settings.enabled);
-    setConfigText(settings.configText || "{\n  \"mcpServers\": {}\n}");
-  }, [settings?.enabled, settings?.configText]);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const next = await updateMcpSettings({ enabled, configText });
-      onSettings(next);
-      setEnabled(next.enabled);
-      setConfigText(next.configText);
-      toast("MCP settings saved", "success");
-    } catch (err) {
-      console.error("Failed to save MCP settings", err);
-      toast(userActionError("save MCP server settings", "Check the configuration, then try again."), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const check = async (server?: string) => {
-    setChecking(server || "__all__");
-    try {
-      const next = await checkMcpServers(server, 10000);
-      onSettings(next);
-      toast(server ? `Checked ${server}` : "Checked MCP servers", "success");
-    } catch (err) {
-      console.error("Failed to check MCP servers", err);
-      toast(userActionError("check MCP servers", "Check the server configuration, then try again."), "error");
-    } finally {
-      setChecking(null);
-    }
-  };
-
-  const statusClass = (status?: string) => {
-    if (status === "available") return "text-onair border-onair/30 bg-onair/10";
-    if (status === "auth-required") return "text-think border-think/30 bg-think/10";
-    if (status === "unavailable" || status === "invalid-config") return "text-blocked border-blocked/30 bg-blocked-dim/40";
-    return "text-ink-4 border-line bg-surface-2";
-  };
-
-  return (
-    <section>
-      <h2 className="text-sm font-semibold text-ink-3 uppercase tracking-wider mb-4">MCP servers</h2>
-      <div className="space-y-4">
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium text-ink-1">MCP servers</div>
-              <div className="text-xs text-ink-3 mt-0.5">Per-member toggle lives in the member card → Assets.</div>
-              {settings && <div className="text-[11px] text-ink-4 mt-1">{settings.serverCount} server{settings.serverCount === 1 ? "" : "s"} configured</div>}
-            </div>
-            <ToggleSwitch
-              on={enabled}
-              onToggle={(v) => setEnabled(v)}
-              label={enabled ? "Disable MCP servers" : "Enable MCP servers"}
-              disabled={!settings || saving}
-            />
-          </div>
-          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
-          <details className="rounded border border-line-soft bg-inset/50 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-ink-2">Advanced configuration</summary>
-            <div className="mt-3 space-y-3">
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-ink-2">Server configuration</span>
-                <textarea
-                  className="w-full min-h-56 font-mono bg-inset border border-line rounded px-3 py-2 text-xs text-ink-1 leading-5"
-                  value={configText}
-                  onChange={(e) => setConfigText(e.target.value)}
-                  spellCheck={false}
-                  placeholder={'{\n  "mcpServers": {}\n}'}
-                />
-              </label>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] text-ink-4">Secrets stay on this device and are hidden after saving.</p>
-                <button onClick={save} disabled={!settings || saving} className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">
-                  {saving ? "Saving..." : "Save changes"}
-                </button>
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Availability</div>
-              <div className="text-xs text-ink-3 mt-0.5">Check whether your configured servers can connect.</div>
-            </div>
-            <button onClick={() => check()} disabled={!settings || servers.length === 0 || checking !== null} className="px-3 py-1.5 border border-line rounded-lg text-sm text-ink-2 hover:bg-surface-2 disabled:opacity-50">
-              {checking === "__all__" ? "Checking..." : "Check all"}
-            </button>
-          </div>
-          {servers.length === 0 && <div className="text-xs text-ink-4 rounded bg-inset border border-line-soft p-3">No MCP servers configured.</div>}
-          {servers.map((server: McpServerSummary) => {
-            const availability = server.availability;
-            const status = availability?.status || "unchecked";
-            return (
-              <div key={server.name} className="rounded-md bg-inset/60 border border-line-soft p-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
-                    <span className={`text-[10px] border rounded px-1.5 py-0.5 uppercase ${statusClass(status)}`}>{status}</span>
-                  </div>
-                  <div className="text-[11px] text-ink-4 mt-1">
-                    {availability?.toolCount !== undefined ? `${availability.toolCount} tools · ` : ""}{server.assignedCount || 0} assignment{server.assignedCount === 1 ? "" : "s"}{availability?.checkedAt ? ` · ${new Date(availability.checkedAt).toLocaleTimeString()}` : ""}
-                  </div>
-                  {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server’s configuration.</div>}
-                </div>
-                <button onClick={() => check(server.name)} disabled={checking !== null} className="px-2 py-1 border border-line rounded text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50">
-                  {checking === server.name ? "Checking..." : "Check"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
 const PROTOCOLS: ModelProtocol[] = [
   "openai-completions", "openai-responses", "openai-codex-responses", "anthropic-messages",
   "azure-openai-responses", "google-generative-ai", "google-gemini-cli", "google-vertex",
