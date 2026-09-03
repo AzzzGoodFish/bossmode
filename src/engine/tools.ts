@@ -844,9 +844,9 @@ export async function handleToolCallback(
 
       const name = String(params?.name || "").trim();
       if (!name) return { ok: false, error: "name is required" };
-      const cwd = String(params?.cwd || "").trim() || process.cwd();
+      const cwd = String(params?.cwd || "").trim() || undefined; // Batch 7 P3: rooms no longer bind a cwd
       const { existsSync } = await import("node:fs");
-      if (!existsSync(cwd)) return { ok: false, error: `Directory does not exist: ${cwd}` };
+      if (cwd && !existsSync(cwd)) return { ok: false, error: `Directory does not exist: ${cwd}` };
 
       const inviteIds: string[] = Array.isArray(params?.memberIds)
         ? params.memberIds.map(String).filter(Boolean)

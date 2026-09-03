@@ -7,6 +7,8 @@ import type { CreateRoomMemberInput, Room, CursorMap, RoomMemberOverride, RoomMe
 import { getMemberByName } from "../workforce/member-store.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { getMember, renameMember } from "./member-registry.js";
+import { memberDir } from "./member-profile.js";
+import { readWorkspaces } from "./workspace-registry.js";
 
 function roomsDir(): string {
   return join(getBossmodeDir(), "rooms");
@@ -48,9 +50,16 @@ function readDirSafe(dir: string): string[] {
   }
 }
 
+/** Batch 7 P3: cwd is peeled on write — it exists on disk only until the
+ * attachment migration has consumed it. */
+function serializeRoom(room: Room): Room {
+  const { cwd: _legacyCwd, ...rest } = room;
+  return rest as Room;
+}
+
 function writeRoom(room: Room): void {
   room.members = getRoomMembersFromRoom(room).map((member) => member.name);
-  writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+  writeFileSync(roomJsonPath(room.id), JSON.stringify(serializeRoom(room), null, 2), "utf-8");
 }
 
 export function createRoomMemberId(): string {
@@ -111,7 +120,7 @@ function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: stri
   };
 }
 
-function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
+export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
   // 0.20 G3 cutover: globalMemberIds is membership authority. Synthesize records with id=mem_*.
   if (Array.isArray(room.globalMemberIds) && room.globalMemberIds.length > 0) {
     const out: RoomMemberRecord[] = [];
@@ -199,7 +208,26 @@ export function normalizeRoomDocsPath(input: string | null | undefined): string 
 
 // -- Room CRUD --
 
-export function createRoom(name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], opts?: {
+/** Batch 7 P3: rooms no longer bind a cwd — attachment/artifact path policy
+ * covers each room member's home directory and all their workspace roots. */
+export function roomMemberAssetRoots(roomId: string): string[] {
+  const room = getRoom(roomId);
+  if (!room) return [];
+  const ids = new Set<string>();
+  for (const m of getRoomMembersFromRoom(room)) ids.add(m.id);
+  for (const gid of room.globalMemberIds ?? []) ids.add(gid);
+  const roots: string[] = [];
+  for (const id of ids) {
+    roots.push(memberDir(id));
+    try {
+      const reg = readWorkspaces(id);
+      for (const w of reg.workspaces) roots.push(w.root);
+    } catch { /* synthesized on read — ignore */ }
+  }
+  return roots;
+}
+
+export function createRoom(name: string, cwd: string | undefined, members: CreateRoomMemberInput[], ruleDocs?: string[], opts?: {
   promptLeaderMemberName?: string;
   promptLeaderMemberId?: string;
   docsPath?: string | null;
@@ -231,7 +259,7 @@ export function createRoom(name: string, cwd: string, members: CreateRoomMemberI
   const room: Room = {
     id: roomId,
     name,
-    cwd,
+    // cwd ignored (batch 7 P3) — param kept for call-site compat
     members: roomMembers.map((member) => member.name),
     roomMembers,
     ...(promptLeaderMemberId ? { promptLeaderMemberId } : {}),
@@ -380,13 +408,6 @@ export function updateRoomName(roomId: string, name: string): Room | null {
   return room;
 }
 
-export function updateRoomCwd(roomId: string, cwd: string): Room | null {
-  const room = getRoom(roomId);
-  if (!room) return null;
-  room.cwd = cwd;
-  writeRoom(room);
-  return room;
-}
 
 export function updateRoomPromptLeader(roomId: string, promptLeaderMemberId: string | null): Room | null {
   const room = getRoom(roomId);
@@ -533,7 +554,7 @@ export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | n
   // Legacy field clean-up (0.7.0/0.8.0 migration leftovers)
   delete (room as any).ruleIds;
   delete (room as any).knowledgeBaseId;
-  writeFileSync(roomJsonPath(roomId), JSON.stringify(room, null, 2), "utf-8");
+  writeFileSync(roomJsonPath(roomId), JSON.stringify(serializeRoom(room), null, 2), "utf-8");
   return room;
 }
 
@@ -568,7 +589,7 @@ export function updateRuleDocPaths(oldPath: string, newPath?: string): number {
       delete room.ruleDocs;
     }
 
-    writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+    writeFileSync(roomJsonPath(room.id), JSON.stringify(serializeRoom(room), null, 2), "utf-8");
     affected += 1;
   }
 
@@ -601,7 +622,7 @@ export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string)
 
     if (!touched) continue;
     room.ruleDocs = Array.from(new Set(next));
-    writeFileSync(roomJsonPath(room.id), JSON.stringify(room, null, 2), "utf-8");
+    writeFileSync(roomJsonPath(room.id), JSON.stringify(serializeRoom(room), null, 2), "utf-8");
     affected += 1;
   }
 

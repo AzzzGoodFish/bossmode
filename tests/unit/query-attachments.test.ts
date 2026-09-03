@@ -65,8 +65,8 @@ describe("query_room_messages attachments", () => {
     const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }]);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    // Stored attachment in room attach dir
-    const attachDir = join(dir, ".bossmode-attachments");
+    // Stored attachment in room attach dir (batch 7 P3: room data dir)
+    const attachDir = join(dir, "rooms", room.id, "attachments");
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "abc123.md"), "# report", "utf-8");
 
@@ -160,7 +160,7 @@ describe("query_room_messages attachments", () => {
     const room = roomStore.createRoom("R3", dir, [{ agent: "pm", name: "pm" }]);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    const attachDir = join(dir, ".bossmode-attachments");
+    const attachDir = join(dir, "rooms", room.id, "attachments");
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "topicfile.md"), "t", "utf-8");
 

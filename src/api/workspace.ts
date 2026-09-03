@@ -102,12 +102,14 @@ addRoute("POST", "/api/rooms", async (req, res) => {
     docsPath?: string | null;
   };
 
-  if (!body.name || !body.cwd) {
-    sendJson(res, 400, { error: "name and cwd are required" });
+  if (!body.name) {
+    sendJson(res, 400, { error: "name is required" });
     return;
   }
 
-  if (!existsSync(body.cwd)) {
+  // Batch 7 P3: cwd optional and ignored for new rooms (member workspaces own
+  // the working directories now). Tolerated for older clients.
+  if (body.cwd && !existsSync(body.cwd)) {
     sendJson(res, 400, { error: `Directory does not exist: ${body.cwd}` });
     return;
   }
@@ -292,14 +294,6 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
     changed = true;
   }
 
-  if (typeof body.cwd === "string" && body.cwd.length > 0 && body.cwd !== room.cwd) {
-    if (!existsSync(body.cwd)) {
-      sendJson(res, 400, { error: "Directory does not exist" });
-      return;
-    }
-    updated = roomStore.updateRoomCwd(params.id, body.cwd) || updated;
-    changed = true;
-  }
 
   if (Array.isArray(body.ruleDocs)) {
     const current = room.ruleDocs || [];

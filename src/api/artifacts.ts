@@ -3,6 +3,7 @@ import { extname, join, resolve } from "node:path";
 import { addRoute, sendJson } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import * as roomStore from "../workspace/room-store.js";
+import { roomMemberAssetRoots } from "../workspace/room-store.js";
 import { checkPath } from "../shared/path-security.js";
 import type { Room } from "../shared/types.js";
 
@@ -81,16 +82,20 @@ function resolveArtifactFile(room: Room, originalPath: string): ArtifactResolveR
   // text type resolves MIME via fallback, not the static ARTIFACT_MIME map.
   if (!ARTIFACT_MIME[ext] && type !== "text") return { ok: false, status: 400, error: `Unsupported artifact type: ${originalPath}` };
 
+  // Batch 7 P3: rooms no longer bind a cwd — relative artifact paths resolve
+  // against each room member's home + workspace roots (first hit wins).
   const allowedPrefixes = [
     safeRealpath(knowledgeStore._internal.docsRoot()),
-    safeRealpath(resolve(room.cwd)),
+    ...roomMemberAssetRoots(room.id).map((r) => safeRealpath(r)),
   ].filter((p): p is string => !!p);
 
   const candidates: string[] = [];
   candidates.push(knowledgeStore._internal.absDocPath(normalized.path));
   if (!originalPath.startsWith("/")) {
-    candidates.push(resolve(room.cwd, originalPath));
-    if (normalized.path !== originalPath) candidates.push(resolve(room.cwd, normalized.path));
+    for (const root of roomMemberAssetRoots(room.id)) {
+      candidates.push(resolve(root, originalPath));
+      if (normalized.path !== originalPath) candidates.push(resolve(root, normalized.path));
+    }
   } else {
     candidates.push(originalPath);
   }

@@ -116,7 +116,7 @@ describe("query renderer (member view)", () => {
     const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }]);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    const attachDir = join(dir, ".bossmode-attachments");
+    const attachDir = join(dir, "rooms", room.id, "attachments");
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "rep1.md"), "# r", "utf-8");
 
@@ -159,7 +159,7 @@ describe("query renderer (member view)", () => {
     const room = roomStore.createRoom("R2", dir, [{ agent: "pm", name: "pm" }]);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    const attachDir = join(dir, ".bossmode-attachments");
+    const attachDir = join(dir, "rooms", room.id, "attachments");
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "rep2.md"), "# r2", "utf-8");
 

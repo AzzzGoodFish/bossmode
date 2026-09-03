@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { checkPath, type PathPolicy } from "../shared/path-security.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../workspace/attachment-store.js";
 import * as roomStore from "../workspace/room-store.js";
+import { memberDir } from "../workspace/member-profile.js";
+import { readWorkspaces } from "../workspace/workspace-registry.js";
+import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../workspace/room-store.js";
 import { resolveChatScopeRoomId } from "../workspace/topic-store.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
@@ -28,10 +31,11 @@ export type AttachmentOutcome = AttachmentSuccess | AttachmentError;
 /** Build path policy for a room — defines allowed attachment source directories. */
 function buildPolicy(roomId: string): PathPolicy {
   const parentId = resolveChatScopeRoomId(roomId) || roomId;
-  const room = roomStore.getRoom(parentId);
-  if (!room) throw new Error(`Room not found: ${roomId}`);
+  if (!roomStore.getRoom(parentId)) throw new Error(`Room not found: ${roomId}`);
   const allowedPrefixes: string[] = [];
-  try { allowedPrefixes.push(realpathSync(room.cwd)); } catch { /* skip if unresolvable */ }
+  for (const root of roomMemberAssetRoots(parentId)) {
+    try { allowedPrefixes.push(realpathSync(root)); } catch { /* skip if unresolvable */ }
+  }
   try { allowedPrefixes.push(realpathSync(tmpdir())); } catch { /* */ }
   try { allowedPrefixes.push(realpathSync(join(getBossmodeDir(), "knowledge"))); } catch { /* */ }
   return { allowedPrefixes, maxSizeBytes: MAX_UPLOAD_SIZE };
