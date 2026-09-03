@@ -24,6 +24,7 @@ import {
   disableDeferredMcpCapabilities,
 } from "../shared/mcp-settings.js";
 import { listMembers } from "./member-registry.js";
+import { ensureMemberSshKeyPair, memberSshKeyPath, memberSshPublicKeyPath } from "./ssh-keygen.js";
 import { memberDir } from "./member-profile.js";
 
 export interface MemberAssetsMigrationReport {
@@ -112,9 +113,40 @@ export function runMemberAssetsMigration(opts: { dryRun?: boolean } = {}): Membe
   return report;
 }
 
+/**
+ * Batch 7 spec §6 backfill (pm ruling 2026-09-03): members born before the
+ * ssh-key path existed (or while the ESM read bug bit) get their key pair
+ * generated at startup. Idempotent — existing pairs are skipped.
+ */
+export function backfillMemberSshKeys(): { generated: string[]; skipped: number } {
+  const generated: string[] = [];
+  let skipped = 0;
+  for (const m of listMembers()) {
+    if (existsSync(memberSshKeyPath(m.id)) && existsSync(memberSshPublicKeyPath(m.id))) {
+      skipped++;
+      continue;
+    }
+    const pub = ensureMemberSshKeyPair(m.id);
+    if (pub) generated.push(m.name);
+  }
+  return { generated, skipped };
+}
+
+function backfillMemberSshKeysOrLog(): void {
+  try {
+    const { generated } = backfillMemberSshKeys();
+    if (generated.length > 0) {
+      console.log(`[member-ssh-backfill] generated ssh key pair(s) for: ${generated.join(", ")}`);
+    }
+  } catch (err) {
+    console.error(`[member-ssh-backfill] failed (non-fatal):`, err);
+  }
+}
+
 /** Daemon startup hook: apply once, never blocking listen. */
 export function runMemberAssetsMigrationOnStartup(): void {
   try {
+    backfillMemberSshKeysOrLog();
     if (!needsMemberAssetsMigration()) {
       // qa rc.14 finding ②: make the skip visible when the archive exists
       // (fresh installs never had a platform config — stay silent there).
