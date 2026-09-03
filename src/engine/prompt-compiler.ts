@@ -20,6 +20,7 @@ import {
   sharedProjectsMemoryDir,
   sharedUserMemoryDir,
 } from "../workspace/member-profile.js";
+import { getActiveWorkspace } from "../workspace/workspace-registry.js";
 import { buildSkillCatalog } from "./skill-catalog.js";
 
 export type PromptSectionId = "member" | "communication" | "environment";
@@ -164,6 +165,14 @@ function buildEnvironmentSegment(args: {
   const projectsMem = sharedProjectsMemoryDir();
 
   const lines: string[] = ["## Environment", ""];
+
+  // Batch 7 P1: the member's active workspace (relative paths + sessions follow it).
+  try {
+    const ws = getActiveWorkspace(args.memberId);
+    lines.push(`- Current workspace: ${ws.id} (${ws.kind === "original" ? "this machine" : `ssh ${ws.user}@${ws.host}`}) — relative file paths resolve under ${ws.root}. Use workspace_list / workspace_use to switch.`);
+  } catch {
+    lines.push(`- Current workspace: original (this machine) — relative file paths resolve under your member directory.`);
+  }
 
   if (args.scopeKind === "dm") {
     lines.push(`- You are in a private chat with the user.`);

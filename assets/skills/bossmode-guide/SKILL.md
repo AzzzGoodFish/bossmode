@@ -51,6 +51,17 @@ Do not dump session noise here. Prefer short, durable notes.
 - Your lightweight extensions live in `…/members/<your-id>/extensions/` (directory entries are loaded).
 - **To configure:** edit these files directly with the file tools. Then call the `reload` tool to apply.
 
+## Workspaces (where relative paths resolve)
+
+- You always have the builtin workspace `original` — this whole machine, root = your member directory. It cannot be removed.
+- Register remote machines yourself: `workspace_create` with id, host, user (ssh). Your own ssh key (`…/members/<your-id>/ssh/id_ed25519`) is used by default — give its `.pub` line to the machine's authorized_keys to grant yourself access. Never paste the private key into chat or send it anywhere.
+- `workspace_use` switches the active workspace; relative paths in read/write/edit (and new sessions) follow it. File tools also take a `workspace` parameter to target any workspace by id without switching.
+- bash still works in P1; the persistent shell tools arrive in P2.
+
+## Your MCP servers and extensions — CJS note
+
+- If you write an extension as plain JavaScript (CommonJS), the factory export must be `module.exports = function (pi) { … }`. Writing `exports.default = fn` fails pi's factory validation ("does not export a valid factory function"). ESM files use `export default`.
+
 ## Reload (apply asset changes)
 
 - After editing `member.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.

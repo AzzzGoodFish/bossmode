@@ -31,6 +31,8 @@ import {
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
 import { memberExtensionsDir } from "../workspace/member-profile.js";
 import { listMemberSkills } from "../engine/skill-catalog.js";
+import { activeWorkspaceRoot, listWorkspaces } from "../workspace/workspace-registry.js";
+import { readMemberSshPublicKey } from "../workspace/ssh-keygen.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as topicStore from "../workspace/topic-store.js";
 import * as roomStore from "../workspace/room-store.js";
@@ -485,7 +487,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         activeScopes: buildDmScopeLabels(m.id, scopeParam),
       });
       respond(compiled, {
-        cwd: process.cwd(),
+        cwd: activeWorkspaceRoot(m.id),
         member,
         skillPaths: resolveMemberExtensionSkillPaths(member.extensions),
       });
@@ -523,7 +525,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         room,
         docsRoot: join(getBossmodeDir(), "memory", "projects"),
       });
-      respond(compiled, { cwd: room.cwd, member, skillPaths });
+      respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
       return;
     }
 
@@ -539,7 +541,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       docsRoot: join(getBossmodeDir(), "memory", "projects"),
       topicTitle: topicRec?.title ?? null,
     });
-    respond(compiled, { cwd: room.cwd || process.cwd(), member, skillPaths });
+    respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
@@ -700,7 +702,19 @@ addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
     .filter((s) => !s.platform)
     .map((s) => ({ name: s.name, path: s.path, description: s.description }));
 
-  sendJson(res, 200, { mcpServers, extensions, skills });
+  const wsRegistry = listWorkspaces(m.id);
+  const active = wsRegistry.active;
+  const workspaces = wsRegistry.workspaces.map((w) => ({
+    id: w.id,
+    kind: w.kind,
+    description: w.description,
+    root: w.root,
+    active: w.id === active,
+    ...(w.kind === "ssh" ? { host: w.host, user: w.user } : {}),
+  }));
+  const sshPublicKey = readMemberSshPublicKey(m.id);
+
+  sendJson(res, 200, { mcpServers, extensions, skills, workspaces, sshPublicKey });
 });
 
 /** Member skills/ directory list (reuses skill-catalog scan rules). */

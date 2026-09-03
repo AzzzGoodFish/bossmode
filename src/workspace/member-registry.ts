@@ -11,6 +11,8 @@ import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { writeMemberProfileSkeleton } from "./member-profile.js";
+import { ensureDefaultRegistry } from "./workspace-registry.js";
+import { ensureMemberSshKeyPair } from "./ssh-keygen.js";
 
 export interface MemberGlobalConfig {
   model?: string | null;
@@ -211,6 +213,9 @@ export function createMember(input: CreateMemberInput): MemberRecord {
     name,
     title: (input as { title?: string }).title,
   });
+  // Batch 7 P1: birth assets — default workspace registry + ssh key pair.
+  try { ensureDefaultRegistry(id); } catch { /* synthesized on read anyway */ }
+  try { ensureMemberSshKeyPair(id); } catch { /* surfaces at first ssh use */ }
   return rec;
 }
 

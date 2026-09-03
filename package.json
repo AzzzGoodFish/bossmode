@@ -24,7 +24,7 @@
     "assets/skills",
     "web/dist",
     "scripts/migrate-identity-memory-v1.mjs",
-      "scripts/migrate-member-assets-v6.mjs",
+    "scripts/migrate-member-assets-v6.mjs",
     "vendor/pi-mcp-adapter/*.ts",
     "!vendor/pi-mcp-adapter/*.test.ts",
     "!vendor/pi-mcp-adapter/vitest.config.ts",
@@ -52,6 +52,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "open": "^11.0.0",
     "recheck": "^4.5.0",
+    "ssh2": "^1.17.0",
     "typebox": "^1.1.39",
     "ws": "^8.18.0",
     "yaml": "^2.8.3",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/ssh2": "^1.15.6",
     "@types/ws": "^8.5.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
