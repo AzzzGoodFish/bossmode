@@ -199,3 +199,27 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
     await new Promise<void>((r) => ts.server.close(() => r()));
   });
 });
+
+describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
+  it("startup backfill generates pairs for legacy members, idempotently", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const { memberSshKeyPath, memberSshPublicKeyPath } = await import("../../src/workspace/ssh-keygen.js");
+    const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
+    const { existsSync } = await import("node:fs");
+    const legacy = reg.createMember({ name: "legacybot", agentTemplate: "pm" } as any);
+    // simulate a pre-batch-7 member: no key pair (remove whatever birth made)
+    const { rmSync } = await import("node:fs");
+    rmSync(memberSshKeyPath(legacy.id), { force: true });
+    rmSync(memberSshPublicKeyPath(legacy.id), { force: true });
+
+    const first = backfillMemberSshKeys();
+    expect(first.generated).toContain("legacybot");
+    expect(existsSync(memberSshKeyPath(legacy.id))).toBe(true);
+    const pub = (await import("node:fs")).readFileSync(memberSshPublicKeyPath(legacy.id), "utf-8");
+    expect(pub).toMatch(/^ssh-ed25519 /);
+
+    // idempotent: second run skips everyone
+    const second = backfillMemberSshKeys();
+    expect(second.generated).toHaveLength(0);
+  });
+});
