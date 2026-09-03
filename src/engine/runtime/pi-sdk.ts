@@ -1020,7 +1020,7 @@ export class PiSdkRuntime implements AgentRuntime {
       roomMembers: opts.roomMembers,
       scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
     });
-    const baseTools = ["read", "bash", "edit", "write", ...customTools.map((t) => t.name)];
+    const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
     // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
     // when tools is provided it becomes a lifetime allowlist and strips extension
     // tools like web_search/fetch_content). MCP is gated by whether its adapter
@@ -1035,6 +1035,8 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager,
       settingsManager,
       customTools,
+      // Batch 7 P2: one-shot bash is retired — persistent shells replace it.
+      excludeTools: ["bash"],
     });
 
     await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });

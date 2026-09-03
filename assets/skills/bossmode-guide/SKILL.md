@@ -58,6 +58,15 @@ Do not dump session noise here. Prefer short, durable notes.
 - `workspace_use` switches the active workspace; relative paths in read/write/edit (and new sessions) follow it. File tools also take a `workspace` parameter to target any workspace by id without switching.
 - bash still works in P1; the persistent shell tools arrive in P2.
 
+## Shells (persistent terminals)
+
+- `shell_create` opens a real terminal (workspace defaults to the active one). Your cwd, environment, and long-running processes (dev servers, watchers) persist between tool calls — no more one-shot bash.
+- `shell_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `shell_read` (by exec id or line numbers; line numbers are the stable reference).
+- `keys` sends control keys: `ctrl-c`, `ctrl-z`, `ctrl-d`.
+- Shells are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead shells report honestly — close them with `shell_close`.
+- Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell started inside a shell (running `bash` or `ssh` inside your shell) does not emit completion markers — the outer command shows as running until the inner shell exits.
+- The one-shot `bash` tool is gone; file tools and shells cover everything it did.
+
 ## Your MCP servers and extensions — CJS note
 
 - If you write an extension as plain JavaScript (CommonJS), the factory export must be `module.exports = function (pi) { … }`. Writing `exports.default = fn` fails pi's factory validation ("does not export a valid factory function"). ESM files use `export default`.
@@ -71,7 +80,7 @@ Do not dump session noise here. Prefer short, durable notes.
 ## Tools and chat
 
 - Room/DM replies only count when they go out via the **chat** tool (see Communication segment).
-- File tools (read/edit/write/bash) are how you maintain member.md, skills, and memory dirs.
+- File tools (read/edit/write) and persistent shells are how you maintain member.md, skills, memory dirs, and anything else.
 
 ## What not to do
 

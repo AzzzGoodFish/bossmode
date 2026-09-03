@@ -19,6 +19,11 @@ import {
   WORKSPACE_READ_DESCRIPTION,
   WORKSPACE_WRITE_DESCRIPTION,
   WORKSPACE_EDIT_DESCRIPTION,
+  SHELL_CREATE_DESCRIPTION,
+  SHELL_EXEC_DESCRIPTION,
+  SHELL_READ_DESCRIPTION,
+  SHELL_LIST_DESCRIPTION,
+  SHELL_CLOSE_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 function textResult(text: string) {
@@ -255,6 +260,56 @@ export function createBossmodeSdkTools(opts: {
         workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
       }),
       execute: async (_id, params) => (await call("edit", params as any)) as any,
+    }),
+    // ── Batch 7 P2: persistent shells (real PTYs; bash is retired).
+    defineTool({
+      name: "shell_create",
+      label: "Shell Create",
+      description: SHELL_CREATE_DESCRIPTION,
+      parameters: Type.Object({
+        name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.shellName })),
+        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+        cwd: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.shellCwd })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_create", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "shell_exec",
+      label: "Shell Exec",
+      description: SHELL_EXEC_DESCRIPTION,
+      parameters: Type.Object({
+        shell: Type.String({ description: "Shell id from shell_create / shell_list." }),
+        command: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.shellCommand })),
+        keys: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.shellKeys })),
+        blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.shellBlockUntilMs })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_exec", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "shell_read",
+      label: "Shell Read",
+      description: SHELL_READ_DESCRIPTION,
+      parameters: Type.Object({
+        shell: Type.String({ description: "Shell id." }),
+        exec: Type.Optional(Type.String({ description: "Exec id (e.g. e3) — returns that command's lines." })),
+        fromLine: Type.Optional(Type.Number({ description: "First absolute line number to read." })),
+        toLine: Type.Optional(Type.Number({ description: "Last absolute line number to read." })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_read", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "shell_list",
+      label: "Shell List",
+      description: SHELL_LIST_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_list", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "shell_close",
+      label: "Shell Close",
+      description: SHELL_CLOSE_DESCRIPTION,
+      parameters: Type.Object({ shell: Type.String({ description: "Shell id to close." }) }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_close", params as any), null, 2))),
     }),
     defineTool({
       name: "reload",

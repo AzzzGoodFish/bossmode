@@ -22,6 +22,16 @@ export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comme
 
 export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task / read_memory.`;
 
+export const SHELL_CREATE_DESCRIPTION = `Open a persistent shell session (a real terminal) in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
+
+export const SHELL_EXEC_DESCRIPTION = `Run a command in a persistent shell and get its exact output plus exit code. Commands longer than blockUntilMs (default 10000ms) return as running — collect the rest later with shell_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command.`;
+
+export const SHELL_READ_DESCRIPTION = `Read output from a persistent shell: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
+
+export const SHELL_LIST_DESCRIPTION = `List your shells with running exec, alive state, and buffered line counts.`;
+
+export const SHELL_CLOSE_DESCRIPTION = `Close a shell and kill its process. Running commands receive a close signal.`;
+
 export const WORKSPACE_LIST_DESCRIPTION = `List your workspaces with the active one marked.`;
 
 export const WORKSPACE_CREATE_DESCRIPTION = `Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`;
@@ -57,6 +67,11 @@ export const PARAM_DESCRIPTIONS = {
   sshUser: "Remote login user.",
   sshKeyPath: "Path to the private key file. Defaults to your member ssh key.",
   sshRoot: "Remote root directory for this workspace. Relative paths resolve against it. Default '.' (remote home).",
+  shellName: "Optional short name for the shell (shows in shell_list).",
+  shellCwd: "Starting directory. Defaults to the workspace root.",
+  shellCommand: "The command line to run.",
+  shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
+  shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block.",
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
