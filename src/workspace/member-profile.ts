@@ -8,7 +8,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import { asString, parseFrontmatter } from "../shared/frontmatter.js";
 import { logger } from "../foundation/logger.js";
 
-function memberDir(memberId: string): string {
+export function memberDir(memberId: string): string {
   return join(getBossmodeDir(), "members", memberId);
 }
 
@@ -36,6 +36,11 @@ export function memberProfilePath(memberId: string): string {
 
 export function memberSkillsDir(memberId: string): string {
   return join(memberDir(memberId), "skills");
+}
+
+/** Batch 6 §1.3: member-owned lightweight extensions. Directory present = loaded. */
+export function memberExtensionsDir(memberId: string): string {
+  return join(memberDir(memberId), "extensions");
 }
 
 export function memberArchiveDir(memberId: string): string {

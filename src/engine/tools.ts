@@ -669,6 +669,28 @@ export async function handleToolCallback(
       if (!report) return { ok: false, error: `Member not found: ${memberRef}` };
       return { ok: true, members: report };
     }
+    case "reload": {
+      // Batch 6 §3: rebuild own session in the current scope, history kept.
+      // roomId arrives scope-shaped ("dm:<id>" / "topic:<id>" / room id).
+      const { reloadMemberSession } = await import("./agent-manager.js");
+      let reloadMemberId = agentName;
+      if (roomId.startsWith("dm:")) {
+        reloadMemberId = roomId.slice("dm:".length);
+      } else {
+        const rosterRoomId = resolveChatScopeRoomId(roomId) || roomId;
+        const rosterMember = roomStore.resolveRoomMemberRef(rosterRoomId, agentName);
+        if (rosterMember) reloadMemberId = rosterMember.id;
+      }
+      const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
+      return {
+        ok: true,
+        queued: result.queued,
+        rebuilt: result.rebuilt,
+        message: result.queued
+          ? "You are mid-run — the session rebuilds when this turn finishes. Conversation history is preserved."
+          : "Session rebuilt in the current scope with fresh assets (persona, skills, MCP, extensions, model config). Conversation history is preserved.",
+      };
+    }
     case "wait": {
       // 0.20: wait available to all room members (no longer leader-only).
       // Roster from parent room; wait watches the current scope (topic instance if any).
