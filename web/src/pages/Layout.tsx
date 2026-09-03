@@ -503,8 +503,6 @@ function HomePage({ rooms, unreadRoomIds, onSelectRoom, onCreateRoom, onOpenMobi
                       )}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-ink-3">
-                      <span className="font-mono truncate">{room.cwd.split("/").slice(-2).join("/")}</span>
-                      <span className="text-ink-2">·</span>
                       <span>{room.members.length} member{room.members.length !== 1 ? "s" : ""}</span>
                     </div>
                   </div>
