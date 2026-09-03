@@ -313,6 +313,27 @@ describe("PiSdkRuntime", () => {
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
   });
 
+  it("member extensions dir expands into file entries in the loader paths (qa rc.14 ①)", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
+    const extDir = memberExtensionsDir("pm");
+    mkdirSync(extDir, { recursive: true });
+    writeFileSync(join(extDir, "my-tool.ts"), "export default () => {};\n", "utf-8");
+    mkdirSync(join(extDir, "pkg"));
+    writeFileSync(join(extDir, "pkg", "package.json"), JSON.stringify({ pi: { extensions: ["main.js"] } }));
+    writeFileSync(join(extDir, "pkg", "main.js"), "export default () => {};\n", "utf-8");
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts());
+
+    const paths = resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths;
+    // File entries, never the bare directory; adapter still last.
+    expect(paths).toContain(join(extDir, "my-tool.ts"));
+    expect(paths).toContain(join(extDir, "pkg", "main.js"));
+    expect(paths).not.toContain(extDir);
+    expect(paths.at(-1)).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
+  });
+
   it("no member mcp.json → adapter bound with empty scoped config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };

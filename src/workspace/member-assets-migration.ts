@@ -112,10 +112,17 @@ export function runMemberAssetsMigration(opts: { dryRun?: boolean } = {}): Membe
   return report;
 }
 
-/** Daemon startup hook: apply once, silently, never blocking listen. */
+/** Daemon startup hook: apply once, never blocking listen. */
 export function runMemberAssetsMigrationOnStartup(): void {
   try {
-    if (!needsMemberAssetsMigration()) return;
+    if (!needsMemberAssetsMigration()) {
+      // qa rc.14 finding ②: make the skip visible when the archive exists
+      // (fresh installs never had a platform config — stay silent there).
+      if (existsSync(`${getBossmodeMcpConfigPath()}.pre-batch6`)) {
+        console.log("[member-assets-migration] platform config already archived — nothing to do");
+      }
+      return;
+    }
     const report = runMemberAssetsMigration({ dryRun: false });
     console.log(`[member-assets-migration] applied: ${report.members.filter((e) => e.action === "created").length} member mcp.json written, platform archived=${report.platformArchived}`);
   } catch (err) {
