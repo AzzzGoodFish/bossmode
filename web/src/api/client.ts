@@ -1588,10 +1588,22 @@ export async function getMemberSkills(id: string): Promise<{ skills: MemberSkill
 
 /** Member-owned asset listing (batch 6: presence = enabled — the member's own
  * mcp.json / extensions/ / skills/ directories, read-only for the panel). */
+export interface MemberWorkspaceEntry {
+  id: string;
+  kind: string;
+  description?: string;
+  root: string;
+  active: boolean;
+  host?: string;
+  user?: string;
+}
+
 export interface MemberAssets {
   mcpServers: Array<{ name: string; toolCount?: number }>;
   extensions: Array<{ name: string }>;
   skills: MemberSkillEntry[];
+  workspaces: MemberWorkspaceEntry[];
+  sshPublicKey: string | null;
 }
 
 export async function getMemberAssets(id: string): Promise<MemberAssets> {

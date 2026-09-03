@@ -364,6 +364,8 @@ function AssetsTab({ member, scope, liveStatus }: {
         />
       )}
 
+      <WorkspacesSection member={member} assets={assets} assetsFailed={assetsFailed} />
+
       <section className="rounded-xl border border-line-soft bg-surface-1">
         <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
           <h3 className="text-[13.5px] font-bold text-ink-1">MCP Servers</h3>
@@ -436,6 +438,61 @@ function AssetsTab({ member, scope, liveStatus }: {
 
       <SystemPromptSection member={member} scope={scope} />
     </div>
+  );
+}
+
+/** The member's workspaces (batch 7): where it can work — original (its own
+ * home) plus ssh remotes. Active row carries the green dot; the member's ssh
+ * public key sits at the bottom with a copy button (fish pastes it into a
+ * remote machine's authorized_keys to authorize this member). */
+function WorkspacesSection({ member, assets, assetsFailed }: {
+  member: MemberDetail;
+  assets: MemberAssets | null;
+  assetsFailed: boolean;
+}) {
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const copyKey = async () => {
+    if (!assets?.sshPublicKey) return;
+    const ok = await copyText(assets.sshPublicKey);
+    setCopied(ok);
+    window.setTimeout(() => setCopied(null), 1400);
+  };
+
+  return (
+    <section className="rounded-xl border border-line-soft bg-surface-1">
+      <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+        <h3 className="text-[13.5px] font-bold text-ink-1">Workspaces</h3>
+        {assets && <span className="text-[10px] text-ink-4">{assets.workspaces.length}</span>}
+      </div>
+      <div className="px-4 py-3 space-y-1.5">
+        {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
+        {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s workspaces.</div>}
+        {assets?.workspaces.map((ws) => (
+          <div key={ws.id} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ws.active ? "bg-onair" : "bg-ink-4/40"}`} />
+            <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ws.id}</span>
+            <span className="text-[10px] text-ink-4 uppercase tracking-wide shrink-0">{ws.kind}</span>
+            {ws.kind === "ssh" && ws.host && <span className="text-[10.5px] text-ink-4 truncate">{ws.user ? `${ws.user}@` : ""}{ws.host}</span>}
+            <span className="ml-auto shrink-0 max-w-[45%] truncate font-mono text-[10.5px] text-ink-4" title={ws.root}>{ws.root}</span>
+          </div>
+        ))}
+        {assets?.sshPublicKey && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2">
+            <span className="text-[11px] text-ink-3 shrink-0">SSH public key</span>
+            <span className="font-mono text-[10.5px] text-ink-4 truncate min-w-0" title={assets.sshPublicKey}>{assets.sshPublicKey}</span>
+            <button
+              type="button"
+              onClick={() => void copyKey()}
+              title={copied === false ? "Copy failed — clipboard unavailable" : "Copy the public key"}
+              className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer"
+            >
+              {copied === true ? <Check size={11} className="text-onair" /> : copied === false ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
+              {copied === true ? "Copied" : copied === false ? "Failed" : "Copy"}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

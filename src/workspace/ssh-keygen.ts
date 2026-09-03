@@ -5,7 +5,7 @@
  * leaves the member folder (guide skill states the rule; mechanism does not
  * fence — the member owns the asset).
  */
-import { existsSync, mkdirSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, chmodSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { memberDir } from "./member-profile.js";
@@ -33,7 +33,6 @@ export function ensureMemberSshKeyPair(memberId: string): string | null {
   const pubPath = memberSshPublicKeyPath(memberId);
   if (existsSync(keyPath) && existsSync(pubPath)) {
     try {
-      const { readFileSync } = require("node:fs") as typeof import("node:fs");
       return readFileSync(pubPath, "utf-8").trim();
     } catch {
       return null;
@@ -43,7 +42,6 @@ export function ensureMemberSshKeyPair(memberId: string): string | null {
     mkdirSync(memberSshDir(memberId), { recursive: true });
     execFileSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `bossmode-member-${memberId}`, "-f", keyPath], { stdio: "ignore" });
     try { chmodSync(keyPath, 0o600); } catch { /* best effort */ }
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     return readFileSync(pubPath, "utf-8").trim();
   } catch {
     return null;
@@ -54,7 +52,6 @@ export function ensureMemberSshKeyPair(memberId: string): string | null {
 export function readMemberSshPublicKey(memberId: string): string | null {
   try {
     if (!existsSync(memberSshPublicKeyPath(memberId))) return null;
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     return readFileSync(memberSshPublicKeyPath(memberId), "utf-8").trim();
   } catch {
     return null;
