@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
+import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
 import { resolveMemberExtensionSkillPaths } from "../workspace/extension-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
@@ -867,7 +868,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
 
     let member: AgentMemberConfig;
     let room: Room | null;
-    let cwd = process.cwd();
+    let cwd = "";
     let roomMembers: string[];
     let keyRoomId: string;          // instance key room part + error-post target
     let logLabel: string;
@@ -920,7 +921,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       clearStaleMounts(dmScopeId, memberId);
       skills = resolveSkills(member, agentDef);
       skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
-      cwd = process.cwd();
+      cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
       keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
       logLabel = "dmAgentCreated";
@@ -1014,7 +1015,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       if (resumeSession) {
         logger.info("agent", "resumeSession", { member: member.name, runtime: member.runtime, sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile });
       }
-      cwd = r.cwd;
+      cwd = activeWorkspaceRoot(memberId);
       roomMembers = r.members;
       keyRoomId = ref.roomId;
       logLabel = "agentCreated";
@@ -1097,7 +1098,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       clearStaleMounts(scopeId, memberId);
       skills = resolveSkills(member, agentDef);
       skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
-      cwd = r.cwd || process.cwd();
+      cwd = activeWorkspaceRoot(memberId);
       roomMembers = r.members;
       keyRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
       logLabel = "topicAgentCreated";

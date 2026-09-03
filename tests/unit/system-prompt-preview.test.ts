@@ -56,7 +56,10 @@ describe("member system-prompt preview", () => {
     // Final text = compiled segments + pi's trailing cwd line (byte-exact;
     // contract test in system-prompt-final.test.ts locks the full assembly).
     expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);
-    expect(body.text.endsWith(`\nCurrent working directory: ${cwd.replace(/\\/g, "/")}`)).toBe(true);
+    // Batch 7 P1: session cwd = active workspace root (original → member dir).
+    const { activeWorkspaceRoot } = await import("../../src/workspace/workspace-registry.js");
+    const sessionCwd = activeWorkspaceRoot(memberId);
+    expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}`)).toBe(true);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });

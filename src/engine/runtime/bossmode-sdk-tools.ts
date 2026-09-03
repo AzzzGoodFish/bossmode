@@ -12,6 +12,13 @@ import {
   COMMENT_TASK_DESCRIPTION,
   WAIT_DESCRIPTION,
   RELOAD_DESCRIPTION,
+  WORKSPACE_LIST_DESCRIPTION,
+  WORKSPACE_CREATE_DESCRIPTION,
+  WORKSPACE_USE_DESCRIPTION,
+  WORKSPACE_REMOVE_DESCRIPTION,
+  WORKSPACE_READ_DESCRIPTION,
+  WORKSPACE_WRITE_DESCRIPTION,
+  WORKSPACE_EDIT_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 function textResult(text: string) {
@@ -171,6 +178,83 @@ export function createBossmodeSdkTools(opts: {
         const data = await call("comment_task", params as any) as any;
         return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
       },
+    }),
+    // ── Batch 7 P1: workspace tools + file tool overrides (read/write/edit
+    // shadow pi's built-ins by name; relative paths follow the active
+    // workspace root). File tool results pass through untouched so image
+    // content blocks survive.
+    defineTool({
+      name: "workspace_list",
+      label: "Workspace List",
+      description: WORKSPACE_LIST_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_list", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "workspace_create",
+      label: "Workspace Create",
+      description: WORKSPACE_CREATE_DESCRIPTION,
+      parameters: Type.Object({
+        id: Type.String({ description: "Workspace id — letters, digits, dot, dash, underscore." }),
+        host: Type.String({ description: PARAM_DESCRIPTIONS.sshHost }),
+        user: Type.String({ description: PARAM_DESCRIPTIONS.sshUser }),
+        port: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.sshPort })),
+        keyPath: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshKeyPath })),
+        root: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshRoot })),
+        description: Type.Optional(Type.String({ description: "Short human-readable description." })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_create", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "workspace_use",
+      label: "Workspace Use",
+      description: WORKSPACE_USE_DESCRIPTION,
+      parameters: Type.Object({ id: Type.String({ description: "Workspace id to activate." }) }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_use", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "workspace_remove",
+      label: "Workspace Remove",
+      description: WORKSPACE_REMOVE_DESCRIPTION,
+      parameters: Type.Object({ id: Type.String({ description: "Workspace id to remove." }) }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_remove", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "read",
+      label: "Read File",
+      description: WORKSPACE_READ_DESCRIPTION,
+      parameters: Type.Object({
+        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+        offset: Type.Optional(Type.Number({ description: "Line number to start from (1-indexed)." })),
+        limit: Type.Optional(Type.Number({ description: "Maximum lines to read (default 2000)." })),
+        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+      }),
+      execute: async (_id, params) => (await call("read", params as any)) as any,
+    }),
+    defineTool({
+      name: "write",
+      label: "Write File",
+      description: WORKSPACE_WRITE_DESCRIPTION,
+      parameters: Type.Object({
+        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+        content: Type.String({ description: "Full file content to write." }),
+        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+      }),
+      execute: async (_id, params) => (await call("write", params as any)) as any,
+    }),
+    defineTool({
+      name: "edit",
+      label: "Edit File",
+      description: WORKSPACE_EDIT_DESCRIPTION,
+      parameters: Type.Object({
+        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+        edits: Type.Array(Type.Object({
+          oldText: Type.String({ description: "Exact text to find — must match exactly once." }),
+          newText: Type.String({ description: "Replacement text." }),
+        })),
+        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+      }),
+      execute: async (_id, params) => (await call("edit", params as any)) as any,
     }),
     defineTool({
       name: "reload",

@@ -22,6 +22,20 @@ export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comme
 
 export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task / read_memory.`;
 
+export const WORKSPACE_LIST_DESCRIPTION = `List your workspaces with the active one marked.`;
+
+export const WORKSPACE_CREATE_DESCRIPTION = `Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`;
+
+export const WORKSPACE_USE_DESCRIPTION = `Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`;
+
+export const WORKSPACE_REMOVE_DESCRIPTION = `Remove a workspace by id. The builtin original workspace cannot be removed.`;
+
+export const WORKSPACE_READ_DESCRIPTION = `Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
+
+export const WORKSPACE_WRITE_DESCRIPTION = `Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
+
+export const WORKSPACE_EDIT_DESCRIPTION = `Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
+
 export const RELOAD_DESCRIPTION = `Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your member.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`;
 
 export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, errors out of a turn, you are @-mentioned, or the timeout elapses.
@@ -37,6 +51,12 @@ Only one wait at a time. If the target is already idle, returns immediately. Pre
 
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
+  workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
+  sshHost: "Remote host (hostname or IP).",
+  sshPort: "SSH port. Default 22.",
+  sshUser: "Remote login user.",
+  sshKeyPath: "Path to the private key file. Defaults to your member ssh key.",
+  sshRoot: "Remote root directory for this workspace. Relative paths resolve against it. Default '.' (remote home).",
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",

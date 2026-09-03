@@ -300,6 +300,15 @@ export function truncateToolResult(text: string): string {
 }
 
 /** Handle a tool callback from an agent runtime */
+/** Resolve the calling member's global id from a scope-shaped roomId + agent name. */
+function resolveCallerMemberId(roomId: string, agentName: string): string {
+  if (roomId.startsWith("dm:")) return roomId.slice("dm:".length);
+  const rosterRoomId = resolveChatScopeRoomId(roomId) || roomId;
+  const rosterMember = roomStore.resolveRoomMemberRef(rosterRoomId, agentName);
+  if (rosterMember) return rosterMember.id;
+  return agentName;
+}
+
 export async function handleToolCallback(
   tool: string,
   roomId: string,
@@ -669,18 +678,55 @@ export async function handleToolCallback(
       if (!report) return { ok: false, error: `Member not found: ${memberRef}` };
       return { ok: true, members: report };
     }
+    case "workspace_list":
+    case "workspace_create":
+    case "workspace_use":
+    case "workspace_remove": {
+      const wsMemberId = resolveCallerMemberId(roomId, agentName);
+      const reg = await import("../workspace/workspace-registry.js");
+      if (tool === "workspace_list") {
+        const list = reg.listWorkspaces(wsMemberId);
+        return {
+          ok: true,
+          active: list.active,
+          workspaces: list.workspaces.map((w) => ({ id: w.id, kind: w.kind, description: w.description, root: w.root, builtin: w.builtin === true })),
+        };
+      }
+      if (tool === "workspace_create") {
+        const result = reg.createWorkspace(wsMemberId, {
+          id: String(params?.id || ""),
+          kind: "ssh",
+          description: params?.description ? String(params.description) : undefined,
+          host: String(params?.host || ""),
+          port: params?.port !== undefined ? Number(params.port) : undefined,
+          user: String(params?.user || ""),
+          keyPath: params?.keyPath ? String(params.keyPath) : undefined,
+          root: params?.root ? String(params.root) : undefined,
+        });
+        return result.ok ? { ok: true, workspace: { id: result.workspace.id, kind: result.workspace.kind, description: result.workspace.description, root: result.workspace.root } } : { ok: false, error: result.error };
+      }
+      if (tool === "workspace_use") {
+        const result = reg.useWorkspace(wsMemberId, String(params?.id || ""));
+        return result.ok ? { ok: true, active: result.active, workspace: { id: result.workspace.id, kind: result.workspace.kind, root: result.workspace.root } } : { ok: false, error: result.error };
+      }
+      const removed = reg.removeWorkspace(wsMemberId, String(params?.id || ""));
+      return removed.ok ? { ok: true } : { ok: false, error: removed.error };
+    }
+    case "read":
+    case "write":
+    case "edit": {
+      // Batch 7 P1: workspace-aware file tools (shadow pi built-ins by name).
+      const fileMemberId = resolveCallerMemberId(roomId, agentName);
+      const fileTools = await import("./tools/file-tools.js");
+      if (tool === "read") return fileTools.workspaceReadTool(fileMemberId, params || {});
+      if (tool === "write") return fileTools.workspaceWriteTool(fileMemberId, params || {});
+      return fileTools.workspaceEditTool(fileMemberId, params || {});
+    }
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.
       // roomId arrives scope-shaped ("dm:<id>" / "topic:<id>" / room id).
       const { reloadMemberSession } = await import("./agent-manager.js");
-      let reloadMemberId = agentName;
-      if (roomId.startsWith("dm:")) {
-        reloadMemberId = roomId.slice("dm:".length);
-      } else {
-        const rosterRoomId = resolveChatScopeRoomId(roomId) || roomId;
-        const rosterMember = roomStore.resolveRoomMemberRef(rosterRoomId, agentName);
-        if (rosterMember) reloadMemberId = rosterMember.id;
-      }
+      const reloadMemberId = resolveCallerMemberId(roomId, agentName);
       const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
       return {
         ok: true,
