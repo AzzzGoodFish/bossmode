@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Check, Crown, FolderOpen, Info, Pencil, Plus, Trash2, UserRound, Users, X } from "lucide-react";
 import type { AgentInfo, CreateRoomMemberInput } from "../api/client";
 import { getAgents } from "../api/client";
-import { FolderPicker } from "./FolderPicker";
 import { MemberPickerDialog, type PickedMemberDraft } from "./MemberPickerDialog";
 import { Sheet } from "./Sheet";
 import { suggestMemberName } from "../utils/member-name-suggestion";
@@ -28,7 +27,7 @@ export function agentAuthorityDisplayState(status: AgentLoadStatus, agentCount: 
 
 interface CreateRoomDialogProps {
   onClose: () => void;
-  onSubmit: (name: string, cwd: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string) => Promise<void>;
+  onSubmit: (name: string, members: CreateRoomMemberInput[], ruleDocs?: string[], promptLeaderMemberName?: string) => Promise<void>;
 }
 
 function displayAgentName(agentName: string): string {
@@ -66,8 +65,6 @@ function memberInitials(name: string): string {
 
 export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
   const [name, setName] = useState("");
-  const [cwd, setCwd] = useState("");
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [agentLoadStatus, setAgentLoadStatus] = useState<AgentLoadStatus>("loading");
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null);
@@ -102,7 +99,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     }
   }, [drafts, leaderName]);
 
-  const canSubmit = Boolean(name.trim() && cwd.trim() && drafts.length > 0 && leaderName);
+  const canSubmit = Boolean(name.trim() && drafts.length > 0 && leaderName);
 
   const upsertDraft = (next: Omit<DraftRoomMember, "id">, draftId?: string) => {
     if (draftId) {
@@ -157,7 +154,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      await onSubmit(name.trim(), cwd.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName);
+      await onSubmit(name.trim(), drafts.map(({ agent, name: memberName }) => ({ agent, name: memberName })), undefined, leaderName);
       onClose();
     } catch (error: any) {
       setSubmitError(error?.message || "Couldn’t create the Room. Your draft is still here.");
@@ -196,28 +193,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                   placeholder="e.g., Product launch"
                 />
                 {submitAttempted && !name.trim() && <p className="text-[11px] text-blocked">Enter a Room name.</p>}
-              </label>
-
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-ink-3">Working directory</span>
-                <div className="flex gap-2">
-                  <input
-                    autoComplete="off"
-                    value={cwd}
-                    onChange={(event) => { setCwd(event.target.value); setSubmitError(null); }}
-                    className={`min-w-0 flex-1 rounded-lg border bg-inset px-3 py-2.5 font-mono text-sm text-ink-1 outline-none transition-colors ${submitAttempted && !cwd.trim() ? "border-blocked" : "border-line focus:border-line-strong"}`}
-                    placeholder="/path/to/your/project"
-                  />
-                  <button
-                    type="button"
-                    title="Browse folders"
-                    onClick={() => setShowFolderPicker(true)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-inset text-ink-4 hover:border-line-strong hover:text-ink-1"
-                  >
-                    <FolderOpen size={16} />
-                  </button>
-                </div>
-                {submitAttempted && !cwd.trim() && <p className="text-[11px] text-blocked">Choose a working directory.</p>}
               </label>
             </div>
           </section>
@@ -325,15 +300,6 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
           editing={drafts.find((draft) => draft.id === editor.draftId)}
           onSave={(draft) => upsertDraft(draft, editor.draftId)}
           onClose={() => setEditor(null)}
-        />
-      )}
-
-      {showFolderPicker && (
-        <FolderPicker
-          open
-          initialPath={cwd || undefined}
-          onConfirm={(path) => { setCwd(path); setShowFolderPicker(false); }}
-          onCancel={() => setShowFolderPicker(false)}
         />
       )}
     </Sheet>

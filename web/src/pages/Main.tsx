@@ -266,8 +266,8 @@ export function Main({
   }, [previewPct]);
 
   const handleCreateRoom = useCallback(
-    async (name: string, cwd: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string) => {
-      const newRoom = await apiCreateRoom(name, cwd, members, ruleDocs, promptLeaderMemberName);
+    async (name: string, members: Array<{ agent: string; name: string }>, ruleDocs?: string[], promptLeaderMemberName?: string) => {
+      const newRoom = await apiCreateRoom(name, members, ruleDocs, promptLeaderMemberName);
       onRoomCreated(newRoom);
       setShowCreateRoom(false);
     },
@@ -335,7 +335,7 @@ export function Main({
         />
       )}
 
-      {/* 台口：房间名 + cwd + segmented + 工具组 */}
+      {/* 台口：房间名 + segmented + 工具组 */}
       <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">
         <button
           onClick={() => setShowRoomSettings(true)}
@@ -343,7 +343,6 @@ export function Main({
           title="Open Room Settings"
         >
           <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{room.name}</h2>
-          <span className="font-mono text-[11px] text-ink-4 truncate hidden sm:block">{room.cwd}</span>
         </button>
 
         <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">

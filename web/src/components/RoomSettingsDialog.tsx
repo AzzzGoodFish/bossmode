@@ -54,7 +54,6 @@ function PromptPreview({ state, onRetry }: { state: PrinciplesPreviewState; onRe
 export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: RoomSettingsDialogProps) {
   const { toast, confirm } = useDialog();
   const [name, setName] = useState(room.name);
-  const [cwd, setCwd] = useState(room.cwd);
   const [leaderId, setLeaderId] = useState<string>(room.promptLeaderMemberId || "");
   const [docsPath, setDocsPath] = useState(room.docsPath || "");
   const [members, setMembers] = useState<MemberInfo[]>([]);
@@ -84,7 +83,6 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   useEffect(() => {
     if (!open) return;
     setName(room.name);
-    setCwd(room.cwd);
     setLeaderId(room.promptLeaderMemberId || "");
     setDocsPath(room.docsPath || "");
     setMembers([]);
@@ -145,12 +143,10 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
 
   const hasChanges = useMemo(() => {
     if (name.trim() !== room.name) return true;
-    if (cwd.trim() !== room.cwd) return true;
     if ((leaderId || "") !== (room.promptLeaderMemberId || "")) return true;
     return normalizeDocsPathInput(docsPath) !== (room.docsPath || "");
-  }, [name, cwd, leaderId, docsPath, room]);
+  }, [name, leaderId, docsPath, room]);
 
-  const cwdChanged = cwd.trim() !== room.cwd;
   const canSave = name.trim().length > 0 && hasChanges && !saving;
   const currentLeader = members.find((member) => member.id === leaderId);
   const missingLeader = room.promptLeaderMemberId && members.length > 0 && !members.some((member) => member.id === room.promptLeaderMemberId);
@@ -160,9 +156,8 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setSaving(true);
     setError(null);
     try {
-      const patch: { name?: string; cwd?: string; promptLeaderMemberId?: string | null; docsPath?: string | null } = {};
+      const patch: { name?: string; promptLeaderMemberId?: string | null; docsPath?: string | null } = {};
       if (name.trim() !== room.name) patch.name = name.trim();
-      if (cwd.trim() !== room.cwd) patch.cwd = cwd.trim();
       if ((leaderId || "") !== (room.promptLeaderMemberId || "")) patch.promptLeaderMemberId = leaderId || null;
       const nextDocsPath = normalizeDocsPathInput(docsPath);
       if (nextDocsPath !== (room.docsPath || "")) patch.docsPath = nextDocsPath || null;
@@ -170,12 +165,10 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
       const updated = await updateRoomSettings(room.id, patch);
       onSaved(updated);
       toast("Room settings saved", "success");
-      if (patch.cwd) toast("Running agents need restart to use new directory", "info");
       onClose();
     } catch (err: any) {
       console.error("Failed to save Room settings", err);
-      const directoryMissing = typeof err?.message === "string" && err.message.includes("Directory does not exist");
-      const message = directoryMissing ? "Directory does not exist" : "Couldn’t save Room settings. Check the fields, then try again.";
+      const message = "Couldn’t save Room settings. Check the fields, then try again.";
       setError(message);
       toast(message, "error");
     } finally {
@@ -218,12 +211,6 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
               <div>
                 <label className="block text-xs text-ink-3 mb-1.5">Room name</label>
                 <input autoFocus type="text" value={name} onChange={(e) => setName(e.target.value)} className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors ${name.trim().length === 0 ? "border-blocked" : "border-line"}`} />
-              </div>
-              <div>
-                <label className="block text-xs text-ink-3 mb-1.5">Working directory</label>
-                <input type="text" value={cwd} onChange={(e) => setCwd(e.target.value)} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong transition-colors font-mono" />
-                {cwdChanged && <p className="text-xs text-think mt-1 flex items-center gap-1"><AlertCircle size={12} />Running agents need restart to use new directory</p>}
-                {error === "Directory does not exist" && <p className="text-xs text-blocked mt-1">Directory does not exist</p>}
               </div>
               <div>
                 <label className="block text-xs text-ink-3 mb-1.5">Library folder</label>

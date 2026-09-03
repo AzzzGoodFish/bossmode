@@ -814,14 +814,13 @@ export async function getRooms(): Promise<Room[]> {
 
 export async function createRoom(
   name: string,
-  cwd: string,
   members: CreateRoomMemberInput[],
   ruleDocs?: string[],
   promptLeaderMemberName?: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, cwd, members, ruleDocs, promptLeaderMemberName }),
+    body: JSON.stringify({ name, members, ruleDocs, promptLeaderMemberName }),
   });
 }
 
@@ -837,7 +836,7 @@ export async function updateRoomBindings(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; cwd?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
+  patch: { name?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",
