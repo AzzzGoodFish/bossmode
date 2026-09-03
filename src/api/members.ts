@@ -28,6 +28,9 @@ import {
   addDmMessage,
   getLatestDmSeq,
 } from "../workspace/dm-message-store.js";
+import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
+import { memberExtensionsDir } from "../workspace/member-profile.js";
+import { listMemberSkills } from "../engine/skill-catalog.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as topicStore from "../workspace/topic-store.js";
 import * as roomStore from "../workspace/room-store.js";
@@ -662,6 +665,42 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
   }
+});
+
+/** Batch 6 §4 read outlet: member-owned asset inventory (designer's Assets tab).
+ * mcpServers come from the member's own mcp.json (toolCount only when the
+ * availability cache has one — counting tools requires a live connection);
+ * extensions/skills are directory entries under the member's folder. */
+addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
+  const m = resolveMemberRef(params.id);
+  if (!m) {
+    sendJson(res, 404, { error: "not_found", message: "Member not found" });
+    return;
+  }
+  const config = readMemberMcpConfig(m.id);
+  const names = config ? getMcpServerNames(config) : [];
+  let cache: Record<string, { toolCount?: number }> = {};
+  try {
+    cache = readMcpStatusCache() as Record<string, { toolCount?: number }>;
+  } catch {
+    cache = {};
+  }
+  const mcpServers = names.map((name) => ({
+    name,
+    toolCount: typeof cache[name]?.toolCount === "number" ? cache[name].toolCount : null,
+  }));
+
+  const { readdirSync, existsSync } = await import("node:fs");
+  const extDir = memberExtensionsDir(m.id);
+  const extensions = existsSync(extDir)
+    ? readdirSync(extDir).filter((e) => !e.startsWith(".")).sort()
+    : [];
+
+  const skills = listMemberSkills(m.id)
+    .filter((s) => !s.platform)
+    .map((s) => ({ name: s.name, path: s.path, description: s.description }));
+
+  sendJson(res, 200, { mcpServers, extensions, skills });
 });
 
 /** Member skills/ directory list (reuses skill-catalog scan rules). */

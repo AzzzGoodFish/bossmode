@@ -19,6 +19,7 @@ import { runMemberGlobalMigration } from "../workspace/member-global-migration.j
 import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
 import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
 import { runIdentityMigrationOnStartup } from "../workspace/identity-migration.js";
+import { runMemberAssetsMigrationOnStartup } from "../workspace/member-assets-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
@@ -175,6 +176,7 @@ export function startServer(opts: ServerOptions): Promise<void> {
   // Data-driven (F1); failure never blocks startup — archive prompt lines remain visible.
   try {
     runIdentityMigrationOnStartup();
+    runMemberAssetsMigrationOnStartup();
   } catch (err) {
     logger.error("server", "identity-memory-v1 startup migration failed", { error: String(err) });
   }

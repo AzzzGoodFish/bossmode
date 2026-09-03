@@ -11,6 +11,7 @@ import {
   GET_TASK_DESCRIPTION,
   COMMENT_TASK_DESCRIPTION,
   WAIT_DESCRIPTION,
+  RELOAD_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 function textResult(text: string) {
@@ -170,6 +171,13 @@ export function createBossmodeSdkTools(opts: {
         const data = await call("comment_task", params as any) as any;
         return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
       },
+    }),
+    defineTool({
+      name: "reload",
+      label: "Reload",
+      description: RELOAD_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("reload", params as any), null, 2))),
     }),
   ];
 

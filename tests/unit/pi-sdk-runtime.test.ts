@@ -296,7 +296,7 @@ describe("PiSdkRuntime", () => {
     });
   });
 
-  it("does not load MCP adapter or expose mcp tool when MCP is disabled", async () => {
+  it("always loads the MCP adapter (platform infrastructure) even with MCP flag off and no member config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
@@ -304,28 +304,34 @@ describe("PiSdkRuntime", () => {
 
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
-    expect(loaderOptions.additionalExtensionPaths).toEqual([]);
-    // No tools allowlist — extension tools stay enabled (pi SDK default when tools omitted).
+    // Batch 6 §1.4: adapter is unconditionally bound; empty config is harmless.
+    expect(loaderOptions.additionalExtensionPaths).toHaveLength(1);
+    expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
-    expect(sessionBindExtensions).not.toHaveBeenCalled();
+    const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
+    expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
+    expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
   });
 
-  it("does not load MCP adapter when MCP is globally enabled but member has no assigned servers", async () => {
+  it("no member mcp.json → adapter bound with empty scoped config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
-    expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toEqual([]);
+    expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toHaveLength(1);
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
+    const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
+    expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
   });
 
-  it("loads only the pinned MCP adapter when MCP is enabled for an assigned server", async () => {
+  it("member mcp.json is the sole source — every server in the file is enabled", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
-    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } }, null, 2));
+    // Batch 6 §1.2: member-owned mcp.json; the registry enable list is retired.
+    mkdirSync(join(dir, ".bossmode", "members", "pm"), { recursive: true });
+    writeFileSync(join(dir, ".bossmode", "members", "pm", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } }, null, 2));
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
@@ -338,8 +344,8 @@ describe("PiSdkRuntime", () => {
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(scopedPath).toMatch(/\.bossmode\/mcp\/runtime\/scopes\/room-a\/pm\/mcp\.json$/);
     const scoped = JSON.parse(readFileSync(scopedPath, "utf-8"));
-    expect(Object.keys(scoped.mcpServers)).toEqual(["playwright"]);
-    expect(scoped.mcpServers.github).toBeUndefined();
+    // File present = enabled: BOTH servers pass; the mcpServers list is ignored.
+    expect(Object.keys(scoped.mcpServers).sort()).toEqual(["github", "playwright"]);
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
     expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
     expect(process.env.BOSSMODE_MCP_CONFIG_STRICT).toBe("1");
@@ -372,13 +378,11 @@ describe("PiSdkRuntime", () => {
     expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
   });
 
-  it("removes MCP from active tools when its assignment is removed", async () => {
+  it("keeps the mcp tool after a reload even with no member mcp.json (adapter is platform infrastructure)", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
-    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
-    const handle = await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
     activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
 
     await handle.reloadResources!({
@@ -390,7 +394,10 @@ describe("PiSdkRuntime", () => {
       skillNames: [],
     });
 
-    expect(activeToolNames).not.toContain("mcp");
+    // Batch 6 §1.4: no member mcp.json → empty scoped config, adapter still bound.
+    expect(activeToolNames).toContain("mcp");
+    const scopedPath = sessionExtensionSetFlagValue.mock.calls.at(-1)?.[1];
+    expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
   });
 
   it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
@@ -430,6 +437,8 @@ describe("PiSdkRuntime", () => {
         compact: vi.fn(),
         setModel,
         setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",
@@ -613,6 +622,8 @@ describe("PiSdkRuntime", () => {
         compact: vi.fn(),
         setModel,
         setThinkingLevel: vi.fn(),
+        bindExtensions: sessionBindExtensions,
+        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
         sessionId: "session-a",
         sessionFile: join(dir, "session.json"),
         thinkingLevel: "off",

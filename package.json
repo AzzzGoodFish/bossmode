@@ -24,6 +24,7 @@
     "assets/skills",
     "web/dist",
     "scripts/migrate-identity-memory-v1.mjs",
+      "scripts/migrate-member-assets-v6.mjs",
     "vendor/pi-mcp-adapter/*.ts",
     "!vendor/pi-mcp-adapter/*.test.ts",
     "!vendor/pi-mcp-adapter/vitest.config.ts",

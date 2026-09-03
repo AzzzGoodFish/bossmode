@@ -202,7 +202,7 @@ function safeSegment(value: string): string {
 
 const DEFERRED_MCP_CAPABILITY_KEYS = new Set(["sampling", "samplingautoapprove", "elicitation", "directtools"]);
 
-function disableDeferredMcpCapabilities(value: unknown, key?: string): unknown {
+export function disableDeferredMcpCapabilities(value: unknown, key?: string): unknown {
   if (key && DEFERRED_MCP_CAPABILITY_KEYS.has(key.toLowerCase())) return false;
   if (Array.isArray(value)) return value.map((item) => disableDeferredMcpCapabilities(item));
   if (!isRecord(value)) return value;
@@ -211,6 +211,40 @@ function disableDeferredMcpCapabilities(value: unknown, key?: string): unknown {
     out[childKey] = disableDeferredMcpCapabilities(childValue, childKey);
   }
   return out;
+}
+
+/** Batch 6 §1.2: members/<id>/mcp.json is the sole MCP source (file present = enabled). */
+export function getMemberMcpConfigPath(memberId: string): string {
+  return join(getBossmodeDir(), "members", safeSegment(memberId), "mcp.json");
+}
+
+export function readMemberMcpConfig(memberId: string): Record<string, unknown> | null {
+  const path = getMemberMcpConfigPath(memberId);
+  if (!existsSync(path)) return null;
+  return parseMcpConfigText(readFileSync(path, "utf-8"));
+}
+
+/** Scoped runtime config derived from the member's own mcp.json (all servers in
+ * the file; no enable list). No member file = empty config. */
+export function writeMemberScopedMcpConfig(args: { roomId: string; memberId: string }): { configPath: string; serverNames: string[] } {
+  const config = readMemberMcpConfig(args.memberId);
+  if (!config) {
+    const serverNames: string[] = [];
+    const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId));
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "mcp.json");
+    writeFileSync(configPath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+    try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
+    return { configPath, serverNames };
+  }
+  const validNames = getAssignableMcpServerNames(config);
+  const scoped = filterMcpConfigForServers(config, validNames);
+  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId));
+  mkdirSync(dir, { recursive: true });
+  const configPath = join(dir, "mcp.json");
+  writeFileSync(configPath, `${JSON.stringify(scoped, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
+  return { configPath, serverNames: validNames };
 }
 
 export function filterMcpConfigForServers(config: unknown, serverNames: string[]): Record<string, unknown> {

@@ -44,11 +44,22 @@ Do not dump session noise here. Prefer short, durable notes.
 - When relevant: read → fold what is still true into `member.md` or shared memory → **delete the archive file** once folded.
 - Empty archive → the legacy line disappears from Environment.
 
+## Your MCP servers and extensions
+
+- Your MCP servers live in `…/members/<your-id>/mcp.json` (file present = enabled, all servers in it).
+- Your lightweight extensions live in `…/members/<your-id>/extensions/` (directory entries are loaded).
+- **To configure:** edit these files directly with the file tools. Then call the `reload` tool to apply.
+
+## Reload (apply asset changes)
+
+- After editing `member.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.
+- Conversation history is preserved — reload is not a reset. Reset (staff action) wipes the conversation; reload keeps it.
+- Mid-run: reload queues and applies when your current turn finishes.
+
 ## Tools and chat
 
 - Room/DM replies only count when they go out via the **chat** tool (see Communication segment).
 - File tools (read/edit/write/bash) are how you maintain member.md, skills, and memory dirs.
-- Reload is gone: the next activation recompiles your prompt from disk. After editing member.md or skills, you do not need a special reload action.
 
 ## What not to do
 

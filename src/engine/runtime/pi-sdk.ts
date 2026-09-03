@@ -14,7 +14,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
-import { ensureBossmodeMcpDirs, getBossmodeMcpConfigPath, getBossmodeMcpRuntimeDir, writeScopedMcpConfig } from "../../shared/mcp-settings.js";
+import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
+import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore, resolvePiAgentDir } from "../model-credentials.js";
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
@@ -170,37 +171,40 @@ interface McpRuntimeSettings {
   serverNames: string[];
 }
 
+
+/** Batch 6 §1: member-dir assets that join the loader paths (create + reload
+ * both call this — skills dir §1.1, extensions dir §1.3, present = included). */
+export function memberDirLoaderAssetPaths(memberId: string): { skills: string[]; extensions: string[] } {
+  const skillsDir = memberSkillsDir(memberId);
+  const extDir = memberExtensionsDir(memberId);
+  return {
+    skills: existsSync(skillsDir) ? [skillsDir] : [],
+    extensions: existsSync(extDir) ? [extDir] : [],
+  };
+}
+
 function resolveVendorMcpAdapterPath(): string {
   return fileURLToPath(new URL("../../../vendor/pi-mcp-adapter/index.ts", import.meta.url));
 }
 
 function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
-  const globalConfigPath = getBossmodeMcpConfigPath();
+  // Batch 6 §1.2+§1.4: members/<id>/mcp.json is the sole source (file present
+  // = enabled); the adapter is platform infrastructure, always bound — an
+  // empty config is harmless.
   const runtimeDir = getBossmodeMcpRuntimeDir();
-  let enabled = false;
-  try {
-    enabled = readConfig().mcp?.enabled === true;
-  } catch {
-    enabled = false;
-  }
-  const assignedServers = Array.isArray(args.member.mcpServers) ? args.member.mcpServers : [];
-  if (!enabled || assignedServers.length === 0) return { enabled: false, configPath: globalConfigPath, runtimeDir, serverNames: [] };
-
   const adapterPath = resolveVendorMcpAdapterPath();
   if (!existsSync(adapterPath)) {
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }
   ensureBossmodeMcpDirs();
   const mcpRoomId = args.roomId.startsWith("topic:") ? resolveOwningRoomId(args.roomId) : args.roomId;
-  const scoped = writeScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id, serverNames: assignedServers });
-  if (scoped.serverNames.length === 0) {
-    logger.warn("runtime:pi-sdk", "mcp scoped config has no valid assigned servers", { roomId: args.roomId, member: args.member.name, assignedServers });
-    return { enabled: false, configPath: scoped.configPath, runtimeDir, serverNames: [] };
+  const scoped = writeMemberScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id });
+  if (scoped.serverNames.length > 0) {
+    process.env.MCP_DIRECT_TOOLS = "__none__";
+    process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
+    process.env.PI_CODING_AGENT_DIR = runtimeDir;
+    process.env.MCP_OAUTH_DIR = join(runtimeDir, "oauth");
   }
-  process.env.MCP_DIRECT_TOOLS = "__none__";
-  process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
-  process.env.PI_CODING_AGENT_DIR = runtimeDir;
-  process.env.MCP_OAUTH_DIR = join(runtimeDir, "oauth");
   return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames };
 }
 
@@ -712,11 +716,14 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     await this.waitForIdle();
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    // Re-resolve member-enabled extensions on every reload (install/uninstall + toggles).
-    const managedExtensions = resolveMemberExtensionPaths(opts.member.extensions);
-    const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
-      ? [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)), mcpSettings.adapterPath]
-      : [...managedExtensions, ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p))];
+    // Batch 6 §1: member dir assets re-resolved on every reload.
+    const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
+    const managedExtensions = [...memberAssets.extensions, ...resolveMemberExtensionPaths(opts.member.extensions)];
+    const activeExtensionPaths = [
+      ...managedExtensions,
+      ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)),
+      mcpSettings.adapterPath!,
+    ];
     const loader = this.resourceLoader as any;
     const appendBase = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
     const promptSources = resolvePiSystemPromptSources({
@@ -727,12 +734,12 @@ class PiSdkAgentHandle implements AgentHandle {
     });
     loader.systemPromptSource = promptSources.systemPrompt;
     loader.appendSystemPromptSource = promptSources.appendSystemPrompt;
-    loader.additionalSkillPaths = opts.skillPaths;
+    loader.additionalSkillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
     loader.additionalExtensionPaths = activeExtensionPaths;
 
     if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
     else await this.resourceLoader.reload();
-    if (mcpSettings.enabled) await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
+    await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
     // Refresh bossmode tool name set from the same factory that builds customTools (leader gate, new tools).
     this.toolAssembly = {
       roomId: opts.roomId,
@@ -928,14 +935,16 @@ export class PiSdkRuntime implements AgentRuntime {
       piBuiltinPrompt: readPiBuiltinPromptFlag(),
     });
     const appendSystemPrompt = promptSources.appendSystemPrompt;
-    const skillPaths = opts.skillPaths.filter((p) => existsSync(p));
+    // Batch 6 §1: member-owned assets join the loader paths — skills dir
+    // (§1.1) and extensions dir (§1.3, directory present = loaded).
+    const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
+    const skillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    // Only extensions explicitly enabled on this member (default empty = none).
-    const managedExtensions = resolveMemberExtensionPaths(opts.member.extensions);
+    // Managed extensions = member dir (unconditional) + platform packages on
+    // the member's enable list (§1.3: list serves the two platform packs only).
+    const managedExtensions = [...memberAssets.extensions, ...resolveMemberExtensionPaths(opts.member.extensions)];
     const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
-    const activeExtensionPaths = mcpSettings.enabled && mcpSettings.adapterPath
-      ? [...extensionPaths, mcpSettings.adapterPath]
-      : extensionPaths;
+    const activeExtensionPaths = [...extensionPaths, mcpSettings.adapterPath!];
     const resourceLoader = new DefaultResourceLoader({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -972,9 +981,7 @@ export class PiSdkRuntime implements AgentRuntime {
       customTools,
     });
 
-    if (mcpSettings.enabled) {
-      await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
-    }
+    await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
 
     if (appendConfiguredModelChange) {
       await session.setModel(model);
