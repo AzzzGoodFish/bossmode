@@ -123,12 +123,15 @@ describe("member dir asset paths (pi loader join)", () => {
     const { memberSkillsDir, memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
     // absent → empty
     expect(memberDirLoaderAssetPaths("mem_none")).toEqual({ skills: [], extensions: [] });
-    // present → exact dirs
+    // present → skills dir as-is; extensions dir expanded into file entries
+    // (qa rc.14 ①: pi's loader takes module files, not directories).
     mkdirSync(memberSkillsDir("mem_has"), { recursive: true });
-    mkdirSync(memberExtensionsDir("mem_has"), { recursive: true });
+    const extDir = memberExtensionsDir("mem_has");
+    mkdirSync(extDir, { recursive: true });
+    writeFileSync(join(extDir, "a-tool.ts"), "export default () => {};\n", "utf-8");
     const got = memberDirLoaderAssetPaths("mem_has");
     expect(got.skills).toEqual([memberSkillsDir("mem_has")]);
-    expect(got.extensions).toEqual([memberExtensionsDir("mem_has")]);
+    expect(got.extensions).toEqual([join(extDir, "a-tool.ts")]);
   });
 });
 
