@@ -58,6 +58,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
   /** Cross-page jump target: topic anchor block → room stream message (topic-threads v2). */
   const [pendingJump, setPendingJump] = useState<{ roomId: string; messageId: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Live member status keyed `scopeId:memberName` — feeds the member float's
+  // header so it shows the same live state as the peek card (fish 2026-09-03:
+  // the float used to show a snapshot from open time).
+  const [liveStatuses, setLiveStatuses] = useState<ReadonlyMap<string, string>>(new Map());
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
@@ -138,6 +142,16 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
     if (event.type === "agent:status") {
       setRooms((prev) => patchRoomAgentStatus(prev, event.roomId, event.agent, event.status));
+      setLiveStatuses((prev) => {
+        // WS events carry the bare room id; float scopes are `room:<id>` /
+        // `dm:<memberId>` — normalize so both scopes hit the same key.
+        const scopeId = event.roomId.includes(":") ? event.roomId : `room:${event.roomId}`;
+        const key = `${scopeId}:${event.agent}`;
+        if (prev.get(key) === event.status) return prev;
+        const next = new Map(prev);
+        next.set(key, event.status);
+        return next;
+      });
     }
 
     if (event.type === "room:message") {
@@ -261,7 +275,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} onOpenSettings={(section) => setActivePage({ type: "settings", section })}>
+    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} onOpenSettings={(section) => setActivePage({ type: "settings", section })} liveStatuses={liveStatuses}>
     <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
