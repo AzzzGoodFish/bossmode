@@ -722,6 +722,50 @@ export async function handleToolCallback(
       if (tool === "write") return fileTools.workspaceWriteTool(fileMemberId, params || {});
       return fileTools.workspaceEditTool(fileMemberId, params || {});
     }
+    case "shell_create":
+    case "shell_exec":
+    case "shell_read":
+    case "shell_list":
+    case "shell_close": {
+      // Batch 7 P2: persistent shells — member-owned, cross-scope.
+      const shell = await import("./shell-manager.js");
+      const shellMemberId = resolveCallerMemberId(roomId, agentName);
+      if (tool === "shell_create") {
+        const result = await shell.createShell({
+          memberId: shellMemberId,
+          name: params?.name ? String(params.name) : undefined,
+          workspace: params?.workspace ? String(params.workspace) : undefined,
+          cwd: params?.cwd ? String(params.cwd) : undefined,
+        });
+        return result.ok ? { ...result } : result;
+      }
+      if (tool === "shell_exec") {
+        const result = await shell.execInShell({
+          memberId: shellMemberId,
+          shell: String(params?.shell || ""),
+          command: params?.command !== undefined ? String(params.command) : undefined,
+          keys: params?.keys !== undefined ? String(params.keys) : undefined,
+          blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
+        });
+        return result.ok ? { ...result } : result;
+      }
+      if (tool === "shell_read") {
+        const result = shell.readShell({
+          memberId: shellMemberId,
+          shell: String(params?.shell || ""),
+          exec: params?.exec ? String(params.exec) : undefined,
+          fromLine: params?.fromLine !== undefined ? Number(params.fromLine) : undefined,
+          toLine: params?.toLine !== undefined ? Number(params.toLine) : undefined,
+        });
+        return result.ok
+          ? { ok: true, status: result.status, exitCode: result.exitCode, lineStart: result.lineStart, lineEnd: result.lineEnd, truncated: result.truncated, lines: result.lines.map((l: { n: number; text: string }) => `${l.n}: ${l.text}`) }
+          : result;
+      }
+      if (tool === "shell_list") {
+        return { ok: true, shells: shell.listShells(shellMemberId) };
+      }
+      return shell.closeShell(shellMemberId, String(params?.shell || ""));
+    }
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.
       // roomId arrives scope-shaped ("dm:<id>" / "topic:<id>" / room id).
