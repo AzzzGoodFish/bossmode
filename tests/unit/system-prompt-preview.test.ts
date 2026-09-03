@@ -53,7 +53,10 @@ describe("member system-prompt preview", () => {
       room: getRoom(roomId),
       docsRoot: join(getTestBossmodeDir(), "memory", "projects"),
     });
-    expect(body.text).toBe(compiled.fullPrompt);
+    // Final text = compiled segments + pi's trailing cwd line (byte-exact;
+    // contract test in system-prompt-final.test.ts locks the full assembly).
+    expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);
+    expect(body.text.endsWith(`\nCurrent working directory: ${cwd.replace(/\\/g, "/")}`)).toBe(true);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });

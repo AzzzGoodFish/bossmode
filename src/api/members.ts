@@ -420,87 +420,123 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     const { getRoom, resolveRoomMemberRef } = await import("../workspace/room-store.js");
     const { getBossmodeDir } = await import("../shared/config.js");
     const { join } = await import("node:path");
+    const { buildFinalMemberSystemPrompt } = await import("../engine/system-prompt-final.js");
+    const { memberRecordToConfig, resolveSkills, buildDmScopeLabels } = await import("../engine/agent-manager.js");
+    const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
+    const { resolveGlobalSkillPaths } = await import("../workforce/skill-store.js");
+    const { resolveMemberExtensionSkillPaths } = await import("../workspace/extension-store.js");
 
-    const agentDef = loadAgentDefinition(m.agentTemplate) || {
-      name: m.agentTemplate,
-      description: m.agentTemplate,
-      systemPrompt: `You are ${m.name}.`,
-      tags: [],
-      skills: [],
+    const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
+      cwd: string;
+      member: { id: string; agent: string; model?: string; credentialId?: string; skills?: string[]; extensions?: string[] };
+      skillPaths: string[];
+    }) => {
+      const text = buildFinalMemberSystemPrompt({
+        scopeId: scopeParam,
+        cwd: finalArgs.cwd,
+        member: finalArgs.member as any,
+        skillPaths: finalArgs.skillPaths,
+        agentPrompt: compiled.agentPrompt,
+        appendSystemPrompt: compiled.appendSystemPrompt,
+      });
+      if (text === null) {
+        sendJson(res, 501, {
+          error: "pi_builtin_prompt_mode",
+          message: "Member runs with pi's built-in system prompt (experimental flag); byte-identical preview is not available.",
+        });
+        return;
+      }
+      sendJson(res, 200, {
+        text,
+        charCount: text.length,
+        scopeId: scopeParam,
+        contractFingerprint: compiled.contractFingerprint,
+      });
     };
-    const docsRoot = join(getBossmodeDir(), "memory", "projects");
 
     if (ref.kind === "dm") {
-      // DM activation passes room=null + roster-labeled activeScopes.
+      // DM activation passes room=null + roster-labeled activeScopes, cwd=process.cwd().
       if (ref.memberId !== m.id) {
         sendJson(res, 404, { error: "not_found", message: "scope belongs to another member" });
         return;
       }
-      const { buildDmScopeLabels } = await import("../engine/agent-manager.js");
-      const compiled = compileMemberPromptForScope({
-        scopeId: scopeParam,
-        memberId: m.id,
-        memberName: m.name,
-        agentDef,
-        room: null,
-        docsRoot,
-        activeScopes: buildDmScopeLabels(m.id, scopeParam),
-      });
-      sendJson(res, 200, {
-        text: compiled.fullPrompt,
-        charCount: compiled.fullPrompt.length,
-        scopeId: scopeParam,
-        contractFingerprint: compiled.contractFingerprint,
-      });
-      return;
-    }
-
-    if (ref.kind === "room") {
-      const room = getRoom(ref.roomId);
-      if (!room || !resolveRoomMemberRef(ref.roomId, m.name)) {
-        sendJson(res, 404, { error: "not_found", message: "member not in this room" });
+      const member = memberRecordToConfig(m.id);
+      if (!member) {
+        sendJson(res, 404, { error: "not_found", message: "Member not found" });
         return;
       }
+      const agentDef = loadAgentDefinition(member.agent) || {
+        name: member.agent,
+        description: member.agent,
+        systemPrompt: `You are ${member.name}.`,
+        tags: [],
+        skills: [],
+      };
       const compiled = compileMemberPromptForScope({
         scopeId: scopeParam,
         memberId: m.id,
-        memberName: m.name,
+        memberName: member.name,
         agentDef,
-        room,
-        docsRoot,
+        room: null,
+        docsRoot: join(getBossmodeDir(), "memory", "projects"),
+        activeScopes: buildDmScopeLabels(m.id, scopeParam),
       });
-      sendJson(res, 200, {
-        text: compiled.fullPrompt,
-        charCount: compiled.fullPrompt.length,
-        scopeId: scopeParam,
-        contractFingerprint: compiled.contractFingerprint,
+      respond(compiled, {
+        cwd: process.cwd(),
+        member,
+        skillPaths: resolveMemberExtensionSkillPaths(member.extensions),
       });
       return;
     }
 
-    // topic: parent-room roster + topic title, mirroring topic activation.
+    // room + topic: roster member config, room cwd (topic mirrors room with a
+    // cwd fallback), global-skill + extension skill paths.
     const room = getRoom(ref.roomId);
-    if (!room || !resolveRoomMemberRef(ref.roomId, m.name)) {
+    const rosterMember = resolveRoomMember(ref.roomId, m.name);
+    if (!room || !rosterMember || !resolveRoomMemberRef(ref.roomId, m.name)) {
       sendJson(res, 404, { error: "not_found", message: "member not in this room" });
       return;
     }
+    const member = rosterMember;
+    const agentDef = loadAgentDefinition(member.agent) || {
+      name: member.agent,
+      description: member.agent,
+      systemPrompt: `You are ${member.name}.`,
+      tags: [],
+      skills: [],
+    };
+    const skills = resolveSkills(member, agentDef);
+    const skillPaths = [
+      ...resolveGlobalSkillPaths(skills),
+      ...resolveMemberExtensionSkillPaths(member.extensions ?? []),
+    ];
+
+    if (ref.kind === "room") {
+      const compiled = compileMemberPromptForScope({
+        scopeId: scopeParam,
+        memberId: member.id,
+        memberName: member.name,
+        agentDef,
+        room,
+        docsRoot: join(getBossmodeDir(), "memory", "projects"),
+      });
+      respond(compiled, { cwd: room.cwd, member, skillPaths });
+      return;
+    }
+
+    // topic: parent-room roster + topic title, cwd mirrors topic activation.
     const { getTopic } = await import("../workspace/topic-store.js");
     const topicRec = getTopic(ref.roomId, ref.topicId);
     const compiled = compileMemberPromptForScope({
       scopeId: scopeParam,
-      memberId: m.id,
-      memberName: m.name,
+      memberId: member.id,
+      memberName: member.name,
       agentDef,
       room,
-      docsRoot,
+      docsRoot: join(getBossmodeDir(), "memory", "projects"),
       topicTitle: topicRec?.title ?? null,
     });
-    sendJson(res, 200, {
-      text: compiled.fullPrompt,
-      charCount: compiled.fullPrompt.length,
-      scopeId: scopeParam,
-      contractFingerprint: compiled.contractFingerprint,
-    });
+    respond(compiled, { cwd: room.cwd || process.cwd(), member, skillPaths });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
