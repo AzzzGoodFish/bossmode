@@ -275,7 +275,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} onOpenSettings={(section) => setActivePage({ type: "settings", section })} liveStatuses={liveStatuses}>
+    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} liveStatuses={liveStatuses}>
     <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
@@ -307,8 +307,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
             onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
-            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
-            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
             onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
             onOpenTopicDraft={(roomId, anchor) => handleNavigate({ type: "topic-draft", roomId, anchorMessageId: anchor.anchorMessageId, anchorSeq: anchor.anchorSeq, anchorTitle: anchor.title, anchorExcerpt: anchor.excerpt })}
             pendingJump={pendingJump}
@@ -327,8 +325,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
               setPendingJump({ roomId: activePage.roomId, messageId });
               handleNavigate({ type: "room", id: activePage.roomId });
             }}
-            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
-            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
 
@@ -362,8 +358,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
               setPendingJump({ roomId: activePage.roomId, messageId });
               handleNavigate({ type: "room", id: activePage.roomId });
             }}
-            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
-            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
 
@@ -406,8 +400,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <DmPage
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "contacts" })}
-            onOpenMcpSettings={() => setActivePage({ type: "settings", section: "integrations" })}
-            onOpenExtensionsSettings={() => setActivePage({ type: "settings", section: "extensions" })}
           />
         )}
         {/* Settings */}

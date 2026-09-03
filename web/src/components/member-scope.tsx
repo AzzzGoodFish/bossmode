@@ -5,21 +5,20 @@
  * Everything here moved VERBATIM from StationPanel.tsx's MemberConfigPanel
  * family (fusion, not repaint — fish 2026-08-26: blend into the existing UI) plus four
  * extractions that turn panel JSX into reusable sections:
- *   ExtensionsAccordion / McpToolsAccordion / ContextSessionCard.
+ *   ContextSessionCard (and the SessionSectionAccordion shell for Active tools).
  * StationPanel imports the shared utils back from here; nothing here imports
  * StationPanel (no cycle).
  *
- * Batch 5b (config globally unified): ScopeModelCard retired — there is no
- * per-scope model override anymore, the member's model lives in the float's
- * Settings tab as the single global select.
+ * Batch 5b (config globally unified): ScopeModelCard retired. Batch 6
+ * (member-owned assets): the toggle accordions retired — Assets shows
+ * read-only listings of the member's own files (presence = enabled).
  */
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { ToggleSwitch } from "./ToggleSwitch";
 import {
   getMemberActiveTools, getConversationTools,
-  type AvailableModelOption, type ContextUsageData, type ExtensionRecord,
-  type McpServerSummary, type MemberActiveTool, type MemberInfo,
+  type AvailableModelOption, type ContextUsageData,
+  type MemberActiveTool,
   type MemberSkillEntry, type MemberStats,
 } from "../api/client";
 
@@ -62,38 +61,6 @@ export function statusLabel(status: string): string {
   }
 }
 
-export function isAssignableMcpServer(server: McpServerSummary): boolean {
-  return server.transport !== "invalid" && server.availability?.status !== "invalid-config";
-}
-
-export function memberMcpDisplayState(
-  loadStatus: "loading" | "ready" | "error",
-  enabled: boolean,
-  serverCount: number,
-): "loading" | "error" | "disabled" | "empty" | "items" {
-  if (loadStatus !== "ready") return loadStatus;
-  if (!enabled) return "disabled";
-  return serverCount === 0 ? "empty" : "items";
-}
-
-export function memberMcpStatusLabel(status?: string): string {
-  switch (status) {
-    case "available": return "Available";
-    case "auth-required": return "Sign-in required";
-    case "unavailable":
-    case "invalid-config":
-    case "invalid": return "Needs attention";
-    default: return "Not checked";
-  }
-}
-
-function availabilityTone(status?: string): string {
-  if (status === "available") return "text-onair border-onair/30 bg-onair/10";
-  if (status === "auth-required") return "text-think border-think/30 bg-think/10";
-  if (status === "unavailable" || status === "invalid-config") return "text-blocked border-blocked/30 bg-blocked-dim/40";
-  return "text-ink-4 border-line bg-surface-2";
-}
-
 // ── card primitives (verbatim from StationPanel) ────────────────────────────
 
 export function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }) {
@@ -102,15 +69,6 @@ export function AssetTag({ children, tone }: { children: string; tone?: "room" |
       {children}
     </span>
   );
-}
-
-/** First non-empty content line of an asset — skips markdown headings and
- * separator lines so the collapsed preview shows real content. */
-function firstContentLine(content: string): string {
-  const line = content.split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0 && !/^#{1,6}\s/.test(l) && !/^[-=]{3,}$/.test(l));
-  return line ?? "";
 }
 
 export function PanelCard({ title, tag, aside, hint, children }: {
@@ -130,15 +88,6 @@ export function PanelCard({ title, tag, aside, hint, children }: {
       {hint ? <div className="text-[11.5px] text-ink-4 mt-0.5 leading-relaxed">{hint}</div> : null}
       {children}
     </section>
-  );
-}
-
-function EmptyAsset({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="mt-2.5 rounded-lg border border-dashed border-line px-4 py-4 text-center">
-      <div className="text-[12.5px] font-semibold text-ink-3">{title}</div>
-      <div className="text-xs text-ink-4 mt-0.5 leading-relaxed">{hint}</div>
-    </div>
   );
 }
 
@@ -169,15 +118,6 @@ export function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null
     </PanelCard>
   );
 }
-
-/** Real, compiled Bossmode Core prompt — sourced from the same compiler the
- * runtime uses; never a static/hardcoded preview. Compiled per scope, so this
- * card lives in scope views (a Global-defaults view has no session). */
-// ── scope model card (extracted; adds the merge payoff: unified⇄scope link) ─
-
-/** Model card for one scope. When the member's global config has Unified model
- * ON, the pickers lock and a banner says so — the relationship used to span
- * two pages and stayed invisible (member-page merge v1). */
 
 // ── context & session (extracted verbatim layout from MemberConfigPanel) ────
 
@@ -294,171 +234,6 @@ export function SessionSectionAccordion({
       </div>
       {open && <div className="px-4 pb-4 space-y-2.5">{children}</div>}
     </section>
-  );
-}
-
-function isExtensionEnabledForMember(ext: ExtensionRecord, enabledIds: string[]): boolean {
-  return enabledIds.some((id) => id === ext.name || id === ext.id || id === `npm:${ext.name}` || ext.id.endsWith(id));
-}
-
-function extensionsAccordionSummary(
-  status: "loading" | "ready" | "error",
-  installed: ExtensionRecord[],
-  enabledIds: string[],
-): string {
-  if (status === "loading") return "Loading…";
-  if (status === "error") return "Couldn’t load";
-  if (installed.length === 0) return "None installed";
-  const enabled = installed.filter((ext) => isExtensionEnabledForMember(ext, enabledIds));
-  const names = enabled.map((e) => e.name).slice(0, 3).join(", ");
-  const base = `${enabled.length} of ${installed.length} enabled`;
-  return names ? `${base} · ${names}` : base;
-}
-
-function mcpAccordionSummary(
-  displayState: ReturnType<typeof memberMcpDisplayState>,
-  servers: McpServerSummary[],
-  enabledNames: string[],
-): string {
-  if (displayState === "loading") return "Loading…";
-  if (displayState === "error") return "Couldn’t load";
-  if (displayState === "disabled") return "MCP turned off";
-  if (displayState === "empty") return "None configured";
-  const on = servers.filter((s) => enabledNames.includes(s.name));
-  const names = on.map((s) => s.name).slice(0, 3).join(", ");
-  const base = `${on.length} of ${servers.length} MCP servers on`;
-  return names ? `${base} · ${names}` : base;
-}
-
-/** Extensions accordion (per-scope enablement) — content verbatim from the
- * old MemberConfigPanel. */
-export function ExtensionsAccordion({ installedExtensions, extensionsLoadStatus, onRetryExtensions, memberExtensions, onToggleExtension, onOpenExtensionsSettings }: {
-  installedExtensions: ExtensionRecord[];
-  extensionsLoadStatus: "loading" | "ready" | "error";
-  onRetryExtensions: () => void;
-  memberExtensions: string[];
-  onToggleExtension: (extName: string) => void;
-  onOpenExtensionsSettings?: () => void;
-}) {
-  return (
-    <SessionSectionAccordion
-      title="Pi extensions"
-      summary={extensionsAccordionSummary(extensionsLoadStatus, installedExtensions, memberExtensions)}
-      action={
-        <button type="button" onClick={() => onOpenExtensionsSettings?.()} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Install…</button>
-      }
-    >
-      {extensionsLoadStatus === "loading" ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading extensions…</div>
-      ) : extensionsLoadStatus === "error" ? (
-        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
-          <span>Couldn’t load extensions.</span>
-          <button type="button" onClick={onRetryExtensions} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
-        </div>
-      ) : installedExtensions.length === 0 ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">
-          No extensions installed yet. Install one in Settings → Extensions, then enable it here.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {installedExtensions.map((ext) => {
-            const checked = isExtensionEnabledForMember(ext, memberExtensions);
-            return (
-              <div key={ext.id} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
-                <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink shrink-0">⧉</div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-ink-1 truncate font-mono">{ext.name}</span>
-                    <span className={`text-[10px] border rounded px-1.5 py-0.5 ${checked ? "border-accent/40 text-accent-ink bg-accent-dim" : "border-line-soft text-ink-4"}`}>
-                      {checked ? "ENABLED" : "OFF"}
-                    </span>
-                    {ext.version && <span className="text-[10px] text-ink-4 font-mono">{ext.version}</span>}
-                  </div>
-                  <div className="text-[11px] text-ink-4 mt-1 truncate">
-                    {ext.description || `${ext.extensionPaths.length} tools entry · ${ext.skillPaths.length} skills`}
-                    {checked ? " · enabled for this member" : " · off for this member"}
-                  </div>
-                  {ext.error && <div className="text-[11px] text-blocked mt-1">{ext.error}</div>}
-                </div>
-                <ToggleSwitch
-                  on={checked}
-                  onToggle={() => onToggleExtension(ext.name)}
-                  label={`${ext.name} for this member`}
-                  title={checked ? "Disable for this member" : "Enable for this member"}
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </SessionSectionAccordion>
-  );
-}
-
-/** MCP tools accordion (per-scope server access) — content verbatim from the
- * old MemberConfigPanel. */
-export function McpToolsAccordion({ mcpEnabled, mcpServers, mcpLoadStatus, onRetryMcp, memberMcpServers, onToggleMcp, onOpenMcpSettings }: {
-  mcpEnabled: boolean;
-  mcpServers: McpServerSummary[];
-  mcpLoadStatus: "loading" | "ready" | "error";
-  onRetryMcp: () => void;
-  memberMcpServers: string[];
-  onToggleMcp: (serverName: string) => void;
-  onOpenMcpSettings: () => void;
-}) {
-  const mcpDisplayState = memberMcpDisplayState(mcpLoadStatus, mcpEnabled, mcpServers.length);
-  return (
-    <SessionSectionAccordion
-      title="MCP Servers"
-      summary={mcpAccordionSummary(mcpDisplayState, mcpServers, memberMcpServers)}
-      action={
-        <button type="button" onClick={onOpenMcpSettings} className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer">Manage servers</button>
-      }
-    >
-      {mcpDisplayState === "loading" ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">Loading MCP servers…</div>
-      ) : mcpDisplayState === "error" ? (
-        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
-          <span>Couldn’t load MCP servers.</span>
-          <button type="button" onClick={onRetryMcp} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
-        </div>
-      ) : mcpDisplayState === "disabled" ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">MCP servers are turned off. Turn them on in Settings → Integrations.</div>
-      ) : mcpDisplayState === "empty" ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No MCP servers configured. Add one in Settings → Integrations.</div>
-      ) : <div className="space-y-2">
-        {mcpServers.map((server) => {
-          const checked = memberMcpServers.includes(server.name);
-          const availability = server.availability;
-          const statusValue = availability?.status || "unchecked";
-          const invalid = server.transport === "invalid" || statusValue === "invalid-config";
-          const unavailable = statusValue === "unavailable" || statusValue === "auth-required";
-          const disabled = !mcpEnabled || (!checked && (invalid || unavailable));
-          return (
-            <div key={server.name} className={`rounded-lg border p-3 flex items-center gap-3 ${checked ? "border-accent/40 bg-accent-dim/40" : "border-line-soft bg-surface-1"}`}>
-              <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center text-xs font-bold text-accent-ink uppercase shrink-0">{server.name.slice(0, 2)}</div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm font-medium text-ink-1 truncate">{server.name}</span>
-                  <span className={`text-[10px] border rounded px-1.5 py-0.5 ${availabilityTone(statusValue)}`}>{memberMcpStatusLabel(statusValue)}</span>
-                </div>
-                <div className="text-[11px] text-ink-4 mt-1 truncate">
-                  {availability?.toolCount !== undefined ? `${availability.toolCount} tools` : "Tool count unknown"}{checked ? " · enabled for this member" : " · off for this member"}
-                </div>
-                {availability?.error && <div className="text-[11px] text-blocked mt-1">Connection unavailable. Check this server in Settings → Integrations.</div>}
-              </div>
-              <ToggleSwitch
-                on={checked}
-                onToggle={() => onToggleMcp(server.name)}
-                label={`${server.name} for this member`}
-                disabled={disabled}
-                title={invalid ? "This server needs attention in Settings" : unavailable ? "This server is not currently available" : checked ? "Disable for this member" : "Enable for this member"}
-              />
-            </div>
-          );
-        })}
-      </div>}
-    </SessionSectionAccordion>
   );
 }
 

@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, getMcpSettings, restartMember, resetAgentSession, steerAgent,
-  getMemberStats, getMemberActiveTools, getExtensions, getMemberProfile, getMemberSkills,
+  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession, steerAgent,
+  getMemberStats, getMemberActiveTools,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
-  type MemberInfo, type AvailableModelOption, type ContextUsageData, type McpServerSummary, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type ExtensionRecord, type MemberActiveTool,
+  type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
 } from "../api/client";
 import { useMemberFloat } from "./member-float";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
@@ -27,8 +27,6 @@ interface StationPanelProps {
   roomId: string;
   /** Topic page: activity reads/watches this scope; member config still uses roomId. */
   activityScope?: string;
-  onOpenMcpSettings?: () => void;
-  onOpenExtensionsSettings?: () => void;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
@@ -66,7 +64,7 @@ export function thinkLevelTextClass(level?: string | null): string {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onOpenMcpSettings, onOpenExtensionsSettings, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const float = useMemberFloat();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
@@ -98,11 +96,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   const [rosterDragging, setRosterDragging] = useState(false);
   const rosterRef = useRef<HTMLDivElement>(null);
   const rosterDragRef = useRef({ y: 0, h: 160 });
-  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [installedExtensions, setInstalledExtensions] = useState<ExtensionRecord[]>([]);
-  const [extensionsLoadStatus, setExtensionsLoadStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     getRoomMembers(roomId)
@@ -118,34 +111,6 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
     getConfiguredModels().then(setModels).catch(console.error);
   }, []);
 
-  const refreshMcpSettings = useCallback(async () => {
-    setMcpLoadStatus("loading");
-    try {
-      const settings = await getMcpSettings();
-      setMcpEnabled(settings.enabled);
-      setMcpServers(settings.servers || []);
-      setMcpLoadStatus("ready");
-    } catch (err) {
-      console.error("Failed to load MCP settings:", err);
-      setMcpLoadStatus("error");
-    }
-  }, []);
-
-  useEffect(() => { void refreshMcpSettings(); }, [refreshMcpSettings]);
-
-  const refreshExtensions = useCallback(async () => {
-    setExtensionsLoadStatus("loading");
-    try {
-      const data = await getExtensions();
-      setInstalledExtensions(data.extensions || []);
-      setExtensionsLoadStatus("ready");
-    } catch (err) {
-      console.error("Failed to load extensions:", err);
-      setExtensionsLoadStatus("error");
-    }
-  }, []);
-
-  useEffect(() => { void refreshExtensions(); }, [refreshExtensions]);
 
 
 
@@ -382,7 +347,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
           const modelChipTitle = !isConfigured
             ? "Choose a model and credential for this member"
             : modelAvailable
-              ? `${modelRef} · This room only`
+              ? `${modelRef}`
               : (models.length === 0 ? "Connect a provider in Settings → Models" : `${modelRef} is unavailable`);
 
           return (

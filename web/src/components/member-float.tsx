@@ -23,8 +23,7 @@ import { ActivityTab } from "./ActivityTab";
 import { useDialog } from "./dialogs";
 import { copyText } from "../utils/clipboard";
 import {
-  MemberSkillsCard, ContextSessionCard,
-  ExtensionsAccordion, McpToolsAccordion, ActiveToolsSection, isAssignableMcpServer,
+  MemberSkillsCard, ContextSessionCard, ActiveToolsSection,
   formatTokens,
 } from "./member-scope";
 import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
@@ -32,12 +31,12 @@ import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
   steerAgent, restartMember, resetAgentSession,
-  getMemberStats, getMemberSystemPrompt,
+  getMemberStats, getMemberSystemPrompt, getMemberAssets,
   getMemberScopedStats,
-  getConversationSession, conversationMemberAction, getMcpSettings, getExtensions, sendDmMessage,
+  getConversationSession, conversationMemberAction, sendDmMessage,
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
   type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
-  type ContextUsageData, type McpServerSummary, type ExtensionRecord, type MemberSystemPromptDoc,
+  type ContextUsageData, type MemberSystemPromptDoc, type MemberAssets,
 } from "../api/client";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -49,13 +48,13 @@ type FloatTarget = { memberId: string; scopeId?: string; tab?: FloatTab };
 const MemberFloatCtx = createContext<{ open: (memberId: string, scopeId?: string, tab?: FloatTab) => void }>({ open: () => {} });
 export const useMemberFloat = () => useContext(MemberFloatCtx);
 
-export function MemberFloatProvider({ children, onFired, onOpenSettings, liveStatuses }: { children: React.ReactNode; onFired?: () => void; onOpenSettings?: (section: "integrations" | "extensions") => void; liveStatuses?: ReadonlyMap<string, string> }) {
+export function MemberFloatProvider({ children, onFired, liveStatuses }: { children: React.ReactNode; onFired?: () => void; liveStatuses?: ReadonlyMap<string, string> }) {
   const [target, setTarget] = useState<FloatTarget | null>(null);
   const open = useCallback((memberId: string, scopeId?: string, tab?: FloatTab) => setTarget({ memberId, scopeId, tab }), []);
   return (
     <MemberFloatCtx.Provider value={{ open }}>
       {children}
-      {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} liveStatuses={liveStatuses} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} onOpenSettings={onOpenSettings} />}
+      {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} liveStatuses={liveStatuses} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} />}
     </MemberFloatCtx.Provider>
   );
 }
@@ -64,14 +63,13 @@ export function MemberFloatProvider({ children, onFired, onOpenSettings, liveSta
 
 // ── the float ───────────────────────────────────────────────────────────────
 
-function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClose, onFired, onOpenSettings }: {
+function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClose, onFired }: {
   memberId: string;
   scopeId?: string;
   initialTab?: FloatTab;
   liveStatuses?: ReadonlyMap<string, string>;
   onClose: () => void;
   onFired: () => void;
-  onOpenSettings?: (section: "integrations" | "extensions") => void;
 }) {
   const { toast } = useDialog();
   const [member, setMember] = useState<MemberDetail | null>(null);
@@ -166,7 +164,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
         {member && (
           <div className="flex-1 overflow-y-auto min-h-[260px] px-5 py-4">
             {tab === "profile" && <ProfileTab member={member} setMember={setMember} scopes={scopes} />}
-            {tab === "assets" && <AssetsTab member={member} setMember={setMember} scope={scope} liveStatus={effectiveStatus} onOpenSettings={(sec) => { onClose(); onOpenSettings?.(sec); }} />}
+            {tab === "assets" && <AssetsTab member={member} scope={scope} liveStatus={effectiveStatus} />}
             {tab === "activity" && scope && (
               <div className="h-[420px] rounded-xl border border-line-soft overflow-hidden">
                 <ActivityTab
@@ -331,62 +329,32 @@ function ProfileTab({ member, setMember, scopes }: {
 // global lists, never per-scope. Memory is shared platform directories,
 // shown as read-only pointers, never as a member-private asset (pm boundary).
 
-function AssetsTab({ member, setMember, scope, liveStatus, onOpenSettings }: {
+function AssetsTab({ member, scope, liveStatus }: {
   member: MemberDetail;
-  setMember: (m: MemberDetail) => void;
   scope: MemberScopeInfo | null;
   liveStatus?: string;
-  onOpenSettings: (section: "integrations" | "extensions") => void;
 }) {
-  const { toast } = useDialog();
-  const [memberSkills, setMemberSkills] = useState<MemberSkillEntry[] | null>(null);
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
-  const [mcpLoadStatus, setMcpLoadStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [installedExtensions, setInstalledExtensions] = useState<ExtensionRecord[]>([]);
-  const [extensionsLoadStatus, setExtensionsLoadStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [assets, setAssets] = useState<MemberAssets | null>(null);
+  const [assetsFailed, setAssetsFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getMemberSkills(member.memberId).then((r) => { if (!cancelled) setMemberSkills(r.skills); }).catch(() => { if (!cancelled) setMemberSkills([]); });
-    setMcpLoadStatus("loading");
-    getMcpSettings().then((s) => { if (cancelled) return; setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => { if (!cancelled) setMcpLoadStatus("error"); });
-    setExtensionsLoadStatus("loading");
-    getExtensions().then((e) => { if (cancelled) return; setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => { if (!cancelled) setExtensionsLoadStatus("error"); });
+    setAssets(null); setAssetsFailed(false);
+    getMemberAssets(member.memberId)
+      .then((a) => { if (!cancelled) setAssets(a); })
+      .catch(() => { if (!cancelled) setAssetsFailed(true); });
     return () => { cancelled = true; };
   }, [member.memberId]);
 
-  const saveGlobal = useCallback(async (patch: Record<string, unknown>, successMsg: string, errorMsg: string) => {
-    try {
-      const res = await patchGlobalMember(member.memberId, patch);
-      setMember(res.member);
-      toast(successMsg, "success");
-    } catch (err) {
-      console.error("Failed to update member assets", err);
-      const detail = err instanceof Error && err.message ? ` ${err.message}` : "";
-      toast(`${errorMsg}${detail}`, "error");
-    }
-  }, [member.memberId, setMember, toast]);
-
-  const handleToggleMcp = useCallback(async (server: string) => {
-    const current = new Set(member.global?.mcpServers ?? []);
-    if (current.has(server)) current.delete(server); else current.add(server);
-    const assignableNames = new Set(mcpServers.filter(isAssignableMcpServer).map((s) => s.name));
-    const nextServers = mcpServers.map((s) => s.name).filter((name) => current.has(name) && assignableNames.has(name));
-    await saveGlobal({ mcpServers: nextServers }, `${member.name} tool access saved. Restart the member to apply it.`, "Couldn’t save tool access.");
-  }, [member, mcpServers, saveGlobal]);
-
-  const handleToggleExtension = useCallback(async (extId: string) => {
-    const current = new Set(member.global?.extensions ?? []);
-    const hit = [...current].find((c) => c === extId || c === `npm:${extId}` || extId.endsWith(c) || c.endsWith(extId));
-    if (hit) current.delete(hit); else current.add(extId);
-    await saveGlobal({ extensions: Array.from(current) }, "Saved.", "Couldn’t save extension access.");
-  }, [member, saveGlobal]);
+  const home = `~/.bossmode/members/${member.memberId}`;
 
   return (
     <div className="space-y-4 pb-2">
       {/* fish 2026-09-03: Assets order = live first — Active tools, MCP
-       * Servers, Pi extensions, Skills, Memory, System prompt */}
+       * Servers, Pi extensions, Skills, Memory, System prompt.
+       * Batch 6: member assets are the member's own files (presence =
+       * enabled) — read-only listings here, the member edits them in chat. */}
+      <p className="text-[11px] text-ink-4">The member manages these itself — ask in chat.</p>
       {scope && (
         <ActiveToolsSection
           roomId={scope.kind === "dm" ? scope.scopeId : scope.scopeId.replace(/^room:/, "")}
@@ -396,30 +364,58 @@ function AssetsTab({ member, setMember, scope, liveStatus, onOpenSettings }: {
           dmScope={scope.kind === "dm" ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined}
         />
       )}
-      <McpToolsAccordion
-        mcpEnabled={mcpEnabled}
-        mcpServers={mcpServers}
-        mcpLoadStatus={mcpLoadStatus}
-        onRetryMcp={() => {
-          setMcpLoadStatus("loading");
-          void getMcpSettings().then((s) => { setMcpEnabled(s.enabled); setMcpServers(s.servers || []); setMcpLoadStatus("ready"); }).catch(() => setMcpLoadStatus("error"));
-        }}
-        memberMcpServers={member.global?.mcpServers ?? []}
-        onToggleMcp={handleToggleMcp}
-        onOpenMcpSettings={() => onOpenSettings("integrations")}
-      />
-      <ExtensionsAccordion
-        installedExtensions={installedExtensions}
-        extensionsLoadStatus={extensionsLoadStatus}
-        onRetryExtensions={() => {
-          setExtensionsLoadStatus("loading");
-          void getExtensions().then((e) => { setInstalledExtensions(e.extensions || []); setExtensionsLoadStatus("ready"); }).catch(() => setExtensionsLoadStatus("error"));
-        }}
-        memberExtensions={member.global?.extensions ?? []}
-        onToggleExtension={handleToggleExtension}
-        onOpenExtensionsSettings={() => onOpenSettings("extensions")}
-      />
-      <MemberSkillsCard skills={memberSkills} />
+
+      <section className="rounded-xl border border-line-soft bg-surface-1">
+        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+          <h3 className="text-[13.5px] font-bold text-ink-1">MCP Servers</h3>
+          {assets && <span className="text-[10px] text-ink-4">{assets.mcpServers.length === 0 ? "none" : `${assets.mcpServers.length} on file`}</span>}
+        </div>
+        <div className="px-4 py-3 space-y-1.5">
+          {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
+          {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s MCP servers.</div>}
+          {assets?.mcpServers.map((srv) => (
+            <div key={srv.name} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+              <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{srv.name}</span>
+              {srv.toolCount !== undefined && <span className="ml-auto shrink-0 text-[10px] text-ink-4 tabular-nums">{srv.toolCount} tools</span>}
+            </div>
+          ))}
+          {assets && assets.mcpServers.length === 0 && (
+            <div className="text-[12px] text-ink-4 py-1">No MCP servers yet.</div>
+          )}
+          <div className="font-mono text-[10.5px] text-ink-4 truncate pt-0.5" title={`${home}/mcp.json`}>{home}/mcp.json</div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line-soft bg-surface-1">
+        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+          <h3 className="text-[13.5px] font-bold text-ink-1">Pi extensions</h3>
+          {assets && <span className="text-[10px] text-ink-4">{assets.extensions.length === 0 ? "none" : `${assets.extensions.length} on file`}</span>}
+        </div>
+        <div className="px-4 py-3 space-y-1.5">
+          {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
+          {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s extensions.</div>}
+          {assets?.extensions.map((ext) => (
+            <div key={ext.name} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+              <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ext.name}</span>
+            </div>
+          ))}
+          {assets && assets.extensions.length === 0 && (
+            <div className="text-[12px] text-ink-4 py-1">No extensions yet.</div>
+          )}
+          <div className="font-mono text-[10.5px] text-ink-4 truncate pt-0.5" title={`${home}/extensions/`}>{home}/extensions/</div>
+        </div>
+      </section>
+
+      {assetsFailed ? (
+        <section className="rounded-xl border border-line-soft bg-surface-1">
+          <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+            <h3 className="text-[13.5px] font-bold text-ink-1">Skills</h3>
+          </div>
+          <div className="px-4 py-3 text-[12px] text-ink-4">Couldn’t load this member’s skills.</div>
+        </section>
+      ) : (
+        <MemberSkillsCard skills={assets?.skills ?? null} />
+      )}
 
       {/* memory — shared platform directories, pointers only */}
       <section className="rounded-xl border border-line-soft bg-surface-1">

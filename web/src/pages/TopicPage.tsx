@@ -140,8 +140,6 @@ export function TopicPage({
   onBack,
   onOpenTopic,
   onJumpToRoomMessage,
-  onOpenMcpSettings,
-  onOpenExtensionsSettings,
 }: {
   roomId: string;
   /** Real topic id; null in draft mode. */
@@ -154,8 +152,6 @@ export function TopicPage({
   /** Direct topic⇄topic switch from the embedded rail (fish pick: direction A). */
   onOpenTopic?: (topicId: string) => void;
   onJumpToRoomMessage?: (messageId: string) => void;
-  onOpenMcpSettings?: () => void;
-  onOpenExtensionsSettings?: () => void;
 }) {
   const isDraft = !topicId;
   const { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage } = useTopicStream(roomId, topicId);
@@ -368,8 +364,6 @@ export function TopicPage({
               contextUsage={contextUsage}
               roomId={roomId}
               activityScope={isDraft || !topicId ? undefined : `topic:${topicId}`}
-              onOpenMcpSettings={onOpenMcpSettings}
-              onOpenExtensionsSettings={onOpenExtensionsSettings}
             />
           </ResizableRail>
         )}
