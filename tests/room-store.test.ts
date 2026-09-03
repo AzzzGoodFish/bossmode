@@ -38,7 +38,7 @@ describe("room-store", () => {
 
       expect(room.id).toBeTruthy();
       expect(room.name).toBe("test room");
-      expect(room.cwd).toBe("/tmp/project");
+      expect(room.cwd).toBeUndefined(); // batch 7 P3: rooms no longer bind a cwd
       expect(room.members).toEqual(["pm", "dev"]);
       expect(room.docsPath).toBe("test-room/");
       expect(room.createdAt).toBeGreaterThan(0);

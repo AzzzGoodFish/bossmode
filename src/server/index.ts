@@ -20,6 +20,7 @@ import { runSummaryRemovalMigration } from "../workspace/summary-removal-migrati
 import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
 import { runIdentityMigrationOnStartup } from "../workspace/identity-migration.js";
 import { runMemberAssetsMigrationOnStartup } from "../workspace/member-assets-migration.js";
+import { runRoomAttachmentsMigrationOnStartup } from "../workspace/room-attachments-migration.js";
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
@@ -177,6 +178,7 @@ export function startServer(opts: ServerOptions): Promise<void> {
   try {
     runIdentityMigrationOnStartup();
     runMemberAssetsMigrationOnStartup();
+    runRoomAttachmentsMigrationOnStartup();
   } catch (err) {
     logger.error("server", "identity-memory-v1 startup migration failed", { error: String(err) });
   }

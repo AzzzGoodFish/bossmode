@@ -74,7 +74,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       const room: Room = JSON.parse(res.body);
       expect(room.id).toBeTruthy();
       expect(room.name).toBe("test-room");
-      expect(room.cwd).toBe("/tmp");
+      expect(room.cwd).toBeUndefined(); // batch 7 P3
       expect(room.members).toContain("pm");
       expect(room.members).toContain("architect");
       expect(room.createdAt).toBeGreaterThan(0);
@@ -202,10 +202,10 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   // ── Room settings patch ──
 
   describe("Room settings PATCH", () => {
-    it("PATCH /api/rooms/:id updates name, cwd, and ruleDocs", async () => {
+    it("PATCH /api/rooms/:id updates name and ruleDocs (cwd ignored — batch 7 P3)", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: "settings-room", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
+        body: { name: "settings-room", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
       });
       if (createRes.status === 501) return;
       const room: Room = JSON.parse(createRes.body);
@@ -214,7 +214,6 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
         token,
         body: {
           name: "settings-room-renamed",
-          cwd: "/",
           ruleDocs: ["bossmode/rules/dev-team-protocol.md"],
         },
       });
@@ -222,7 +221,6 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(patchRes.status).toBe(200);
       const updated: Room = JSON.parse(patchRes.body);
       expect(updated.name).toBe("settings-room-renamed");
-      expect(updated.cwd).toBe("/");
       expect(updated.ruleDocs).toEqual(["bossmode/rules/dev-team-protocol.md"]);
     });
 
@@ -242,7 +240,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       expect(JSON.parse(patchRes.body).docsPath).toBe("bossmode/");
     });
 
-    it("PATCH /api/rooms/:id rejects nonexistent cwd", async () => {
+    it("PATCH /api/rooms/:id ignores cwd entirely (batch 7 P3)", async () => {
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
         body: { name: "settings-room-2", cwd: "/tmp", members: roomMembers("pm"), promptLeaderMemberName: "pm" },
@@ -255,8 +253,9 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
         body: { cwd: "/definitely-not-a-real-dir" },
       });
 
+      // cwd is no longer a PATCHable field — the request lands as "nothing to update".
       expect(patchRes.status).toBe(400);
-      expect(JSON.parse(patchRes.body).error).toContain("Directory does not exist");
+      expect(JSON.parse(patchRes.body).error).toContain("Nothing to update");
     });
   });
 

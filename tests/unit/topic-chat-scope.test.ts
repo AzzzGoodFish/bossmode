@@ -78,7 +78,7 @@ describe("topic chat scope: mentions / need_response / attachments", () => {
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0].ok).toBe(true);
     if (outcomes[0].ok) {
-      expect(outcomes[0].absolutePath).toContain(".bossmode-attachments");
+      expect(outcomes[0].absolutePath).toContain(join("rooms", "roomA", "attachments")); // batch 7 P3 location
       expect(outcomes[0].absolutePath).not.toContain("topic:");
     }
   });

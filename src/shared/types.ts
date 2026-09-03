@@ -430,7 +430,11 @@ export interface RoomMemberOverride extends RoomMemberConfig {}
 export interface Room {
   id: string;
   name: string;
-  cwd: string;
+  /** Batch 7 P3 legacy: rooms no longer bind a cwd (sessions run in member
+   * workspaces). Kept as a read-tolerated field — it is only consumed by the
+   * attachment migration to find the legacy .bossmode-attachments dir, and it
+   * is peeled on the next room write. */
+  cwd?: string;
   /** Compatibility/derived member names. v0.14 identity lives in roomMembers. */
   members: string[];
   /** Room leader room-member id. Rename-stable; may be absent for legacy rooms. */

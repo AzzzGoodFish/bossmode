@@ -9,6 +9,7 @@ import {
 import { extname, basename, join } from "node:path";
 import type { Readable } from "node:stream";
 import * as roomStore from "./room-store.js";
+import { roomDir } from "./room-store.js";
 import { memberDir } from "./member-registry.js";
 import { logger } from "../foundation/logger.js";
 
@@ -23,9 +24,10 @@ export interface StoredAttachment {
 }
 
 function getAttachDir(roomId: string): string {
-  const room = roomStore.getRoom(roomId);
-  if (!room) throw new Error(`Room not found: ${roomId}`);
-  const dir = join(room.cwd, ATTACHMENT_DIR_NAME);
+  // Batch 7 P3: rooms no longer bind a cwd — attachments live in the room's
+  // own data directory. (The legacy room.cwd/.bossmode-attachments dir is
+  // moved wholesale by the startup migration.)
+  const dir = join(roomDir(roomId), "attachments");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }

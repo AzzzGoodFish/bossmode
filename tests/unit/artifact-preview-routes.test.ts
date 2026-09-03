@@ -29,13 +29,21 @@ describe("artifact preview API", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const knowledgeStore = await import("../../src/knowledge/store.js");
 
-    const cwd = mkdtempSync(join(tmpdir(), "bossmode-artifact-preview-"));
-    mkdirSync(join(cwd, "design-prototype"), { recursive: true });
-    writeFileSync(join(cwd, "design-prototype/demo.html"), "<h1>Demo</h1>", "utf8");
+    // Batch 7 P3: rooms no longer bind a cwd — artifacts resolve against room
+    // members' asset roots (home + workspaces). Seed under the pm member's dir.
+    const { getTestBossmodeDir } = await import("../helpers/test-server.js");
+    const pmDir = join(getTestBossmodeDir(), "members", "mem_pm");
+    mkdirSync(join(pmDir, "design-prototype"), { recursive: true });
+    writeFileSync(join(pmDir, "design-prototype/demo.html"), "<h1>Demo</h1>", "utf8");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-    writeFileSync(join(cwd, "design-prototype/demo.png"), png);
+    writeFileSync(join(pmDir, "design-prototype/demo.png"), png);
 
-    const room = roomStore.createRoom("Preview", cwd, drafts(["pm"]));
+    const room = roomStore.createRoom("Preview", undefined, drafts(["pm"]));
+    // Stamp the global id link so pm's asset roots are in policy.
+    const roomJson = join(getTestBossmodeDir(), "rooms", room.id, "room.json");
+    const persisted = JSON.parse((await import("node:fs")).readFileSync(roomJson, "utf-8"));
+    persisted.globalMemberIds = ["mem_pm"];
+    writeFileSync(roomJson, JSON.stringify(persisted));
     knowledgeStore.addEntry("Plan", "# Plan\n\nBody", "test", "vulnhunt-srv/plan.md");
 
     const md = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/vulnhunt-srv/plan.md")}`, { token });
