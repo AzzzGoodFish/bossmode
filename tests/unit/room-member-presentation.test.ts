@@ -13,7 +13,7 @@ beforeAll(async () => {
     configurable: true,
   });
   ({ mentionTextParts } = await import("../../web/src/components/MessageBubble.tsx"));
-  ({ compactModelId, memberModelAvailabilityLabel, memberMcpStatusLabel, memberMcpDisplayState } = await import("../../web/src/components/member-scope.tsx"));
+  ({ compactModelId, memberModelAvailabilityLabel } = await import("../../web/src/components/member-scope.tsx"));
 });
 
 describe("room member presentation", () => {
@@ -53,18 +53,4 @@ describe("room member presentation", () => {
     expect(memberModelAvailabilityLabel("openai/gpt-5.6-luna", "profile-2", models)).toBe("gpt-5.6-luna · unavailable");
   });
 
-  it("keeps MCP loading, error, disabled, empty, and item states mutually exclusive", () => {
-    expect(memberMcpDisplayState("loading", false, 0)).toBe("loading");
-    expect(memberMcpDisplayState("error", false, 0)).toBe("error");
-    expect(memberMcpDisplayState("ready", false, 0)).toBe("disabled");
-    expect(memberMcpDisplayState("ready", true, 0)).toBe("empty");
-    expect(memberMcpDisplayState("ready", true, 1)).toBe("items");
-  });
-
-  it("maps MCP implementation statuses to member-facing labels", () => {
-    expect(memberMcpStatusLabel("available")).toBe("Available");
-    expect(memberMcpStatusLabel("auth-required")).toBe("Sign-in required");
-    expect(memberMcpStatusLabel("invalid-config")).toBe("Needs attention");
-    expect(memberMcpStatusLabel("unchecked")).toBe("Not checked");
-  });
 });

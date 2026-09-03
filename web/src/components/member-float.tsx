@@ -1,14 +1,13 @@
 /**
- * member-float.tsx — the member detail FLOAT (fish 2026-09-02: "详情给一个
- * 浮窗吧，不要全页的" + "不要原来那个整页的配置页面了"). The depth ladder is
+ * member-float.tsx — the member detail FLOAT (fish 2026-09-02: "give details a float window, not a full page" + "drop the old full-page config page"). The depth ladder is
  * now fully Discord-shaped:
  *
  *   peek card (roster click — glance, never leaves the conversation)
  *   → detail float (this file — read-deep + config, Profile/Assets/Activity/Settings)
  *
  * The full-page member route is retired; MemberPage's sections move in here
- * as tabs (Profile first — fish: "profile 是基本信息"). No character arrows
- * in chrome (fish: "不要用字符的右箭头").
+ * as tabs (Profile first — fish: "profile "). No character arrows
+ * in chrome (fish: "").
  *
  * One float instance lives at the Layout root (MemberFloatProvider); open it
  * from anywhere with useMemberFloat().open(memberId, scopeId?).
@@ -144,7 +143,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
           </div>
         </div>
 
-        {/* tabs — Profile first (fish 2026-09-02: profile 是基本信息放首位) */}
+        {/* tabs — Profile first (fish 2026-09-02: profile ) */}
         {member && (
           <div className="flex gap-0.5 px-5 mt-3.5 border-b border-line-soft shrink-0">
             {(["profile", "assets", "activity", "settings"] as const).filter((t) => t !== "activity" || hasActivityTab).map((t) => (

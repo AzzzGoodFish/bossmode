@@ -24,9 +24,10 @@ describe("P1 user-language hygiene", () => {
     }
     expect(station).not.toMatch(/[\u3400-\u9fff]/u);
     expect(station).toContain("No model connected");
-    expect(station).not.toContain(">{server.transport}<");
-    expect(station).toContain("Couldn’t load MCP servers.");
-    expect(station).toContain("MCP servers are turned off. Turn them on in Settings → Integrations.");
+    // MCP accordions left member-scope (batch 6): Assets read-only lists live in member-float.
+    const floatCard = source("web/src/components/member-float.tsx");
+    expect(floatCard).toContain("Couldn’t load this member’s MCP servers.");
+    expect(floatCard).not.toMatch(/[㐀-鿿]/u);
   });
 
   it("does not expose runtime or storage implementation labels on everyday surfaces", () => {
