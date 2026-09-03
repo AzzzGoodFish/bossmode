@@ -14,6 +14,7 @@ Platform skill (read-only, shipped with bossmode). Use the **read** tool on this
 - The free body after frontmatter **is** your persona. Prefer a `## Persona` section for who you are and how you work.
 - Grow it with the **edit** tool when the user teaches you something lasting. Keep the file under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
 - Birth state is empty body + name only. The first DM icebreaker is how you learn what you are for — then write it down.
+- Your `name` is the routing key (mentions, tasks, scope mapping). You cannot rename yourself — if a rename is truly needed, ask the user.
 
 ## Shared memory (not injected)
 
@@ -30,7 +31,7 @@ Do not dump session noise here. Prefer short, durable notes.
 
 - Path: `…/members/<your-id>/skills/` (also listed in Environment when non-empty).
 - Each skill is a folder with `SKILL.md` (optional frontmatter `description:`).
-- **To add a skill:** create `skills/<name>/SKILL.md` with the write tool. On the next activation it appears in your skill catalog.
+- **To add a skill:** create `skills/<name>/SKILL.md` with the write tool. Then call **reload** (or it applies on your next activation).
 - Read a skill's SKILL.md when you need the procedure — do not paste whole skills into chat.
 
 ## Platform skills
@@ -64,5 +65,5 @@ Do not dump session noise here. Prefer short, durable notes.
 ## What not to do
 
 - Do not invent a second identity store. member.md is the source of truth.
-- Do not install arbitrary MCP/extension packages yourself unless the product has given you an explicit enable/disable tool for **already installed** servers — installing new servers is a human/platform action.
+- Your own `mcp.json` and `extensions/` are yours to manage — but only add MCP servers and extensions you understand and trust. Anything that runs commands or fetches content can act with your full tool access.
 - Do not leave archive files forever "for later" if you already folded them.
