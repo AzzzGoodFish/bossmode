@@ -8,7 +8,6 @@ import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
-import { resolveMemberExtensionSkillPaths } from "../workspace/extension-store.js";
 import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
@@ -875,7 +874,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     let errLabel: string;
     let compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string };
     let skills: string[];
-    let skillPaths: string[];
+    let skillPaths: string[] = [];
     let resumeSession: { sessionId?: string; sessionFile?: string } | undefined;
     let onSessionChanged: ((session: { sessionId?: string; sessionFile?: string }) => void) | undefined;
     let callbacks: Parameters<typeof runtime.createAgent>[0]["callbacks"];
@@ -920,7 +919,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       setContractFingerprint(dmScopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(dmScopeId, memberId);
       skills = resolveSkills(member, agentDef);
-      skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
       keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
@@ -968,7 +966,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
             credentialId: eff.credentialId || m.credentialId,
             thinkingLevel: (eff.thinkingLevel as string) || m.thinkingLevel,
             skills: eff.skills?.length ? eff.skills : m.skills,
-            extensions: eff.extensions?.length ? eff.extensions : m.extensions,
             mcpServers: eff.mcpServers?.length ? eff.mcpServers : m.mcpServers,
           };
         }
@@ -997,7 +994,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       skills = resolveSkills(member, agentDef);
       skillPaths = [
         ...resolveGlobalSkillPaths(skills),
-        ...resolveMemberExtensionSkillPaths(member.extensions),
       ];
       // Session resume (global toggle; default true)
       let sessionResumeEnabled = true;
@@ -1097,7 +1093,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(scopeId, memberId);
       skills = resolveSkills(member, agentDef);
-      skillPaths = resolveMemberExtensionSkillPaths(member.extensions);
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = r.members;
       keyRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
@@ -1490,7 +1485,6 @@ export interface RoomMemberConfigPatch {
   credentialId?: string | null;
   thinkingLevel?: string | null;
   mcpServers?: string[] | null;
-  extensions?: string[] | null;
   skills?: string[] | null;
 }
 
@@ -2108,7 +2102,6 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   const skills = resolveSkills(member, agentDef);
   const skillPaths = [
     ...resolveGlobalSkillPaths(skills),
-    ...resolveMemberExtensionSkillPaths(member.extensions),
   ];
 
   await instance.handle.reloadResources({
@@ -2212,7 +2205,6 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
     credentialId: eff.credentialId || undefined,
     thinkingLevel: (eff.thinkingLevel as string) || "off",
     skills: eff.skills || [],
-    extensions: eff.extensions || [],
     mcpServers: eff.mcpServers || [],
   };
 }

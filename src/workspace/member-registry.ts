@@ -19,7 +19,6 @@ export interface MemberGlobalConfig {
   credentialId?: string | null;
   thinkingLevel?: string | null;
   skills?: string[];
-  extensions?: string[];
   mcpServers?: string[];
 }
 
@@ -49,7 +48,6 @@ export interface CreateMemberInput {
   credentialId?: string | null;
   thinkingLevel?: string | null;
   skills?: string[];
-  extensions?: string[];
   mcpServers?: string[];
   unifiedModel?: boolean;
   unifiedExtensions?: boolean;
@@ -127,7 +125,13 @@ function writeRecord(rec: MemberRecord): void {
   const tmp = join(dir, `.member.json.${process.pid}.tmp`);
   // Batch-5b peel: legacy unified flags + scope overrides never reach disk
   // again — any write strips them from an existing record.
+  // Batch 7 closeout (fish 2026-09-04): the platform extension enable list
+  // (global.extensions) is retired with the platform extension store.
   const { unifiedModel: _um, unifiedExtensions: _ue, scopeOverrides: _so, ...onDisk } = rec;
+  if (onDisk.global && "extensions" in onDisk.global) {
+    const { extensions: _ex, ...restGlobal } = onDisk.global;
+    onDisk.global = restGlobal as typeof onDisk.global;
+  }
   writeFileSync(tmp, JSON.stringify(onDisk, null, 2) + "\n", "utf-8");
   renameSync(tmp, memberJsonPath(rec.id));
 }
@@ -198,7 +202,6 @@ export function createMember(input: CreateMemberInput): MemberRecord {
       credentialId: input.credentialId ?? null,
       thinkingLevel: input.thinkingLevel ?? null,
       skills: input.skills ?? [],
-      extensions: input.extensions ?? [],
       mcpServers: input.mcpServers ?? [],
     },
     scopeOverrides: {},
@@ -278,10 +281,10 @@ export function applyMemberConfigPatch(
   if (!rec) throw new MemberNotFoundError(id);
   const globalPatch: Record<string, unknown> = {};
   const mountFieldsChanged: string[] = [];
-  for (const key of ["model", "credentialId", "thinkingLevel", "mcpServers", "extensions"] as const) {
+  for (const key of ["model", "credentialId", "thinkingLevel", "mcpServers"] as const) {
     if (key in patch) globalPatch[key] = patch[key];
   }
-  for (const key of ["mcpServers", "extensions"] as const) {
+  for (const key of ["mcpServers"] as const) {
     if (key in patch) mountFieldsChanged.push(key);
   }
   if (Object.keys(globalPatch).length > 0) updateMember(id, { global: globalPatch as Partial<MemberGlobalConfig> });
@@ -299,7 +302,6 @@ export interface EffectiveConfig extends MemberGlobalConfig {
     credentialId: "global" | "scope";
     thinkingLevel: "global" | "scope";
     skills: "global" | "scope";
-    extensions: "global" | "scope";
     mcpServers: "global" | "scope";
   };
 }
@@ -318,7 +320,6 @@ export function getEffectiveConfig(id: string, _scopeId: ScopeId): EffectiveConf
   const credentialId = { value: g.credentialId, source: all };
   const thinkingLevel = { value: g.thinkingLevel, source: all };
   const skills = { value: g.skills, source: all };
-  const extensions = { value: g.extensions, source: all };
   const mcpServers = { value: g.mcpServers, source: all };
 
   return {
@@ -326,14 +327,12 @@ export function getEffectiveConfig(id: string, _scopeId: ScopeId): EffectiveConf
     credentialId: credentialId.value ?? null,
     thinkingLevel: thinkingLevel.value ?? null,
     skills: skills.value ?? [],
-    extensions: extensions.value ?? [],
     mcpServers: mcpServers.value ?? [],
     sources: {
       model: model.source,
       credentialId: credentialId.source,
       thinkingLevel: thinkingLevel.source,
       skills: skills.source,
-      extensions: extensions.source,
       mcpServers: mcpServers.source,
     },
   };

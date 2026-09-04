@@ -133,34 +133,6 @@ export interface TeamSkillSummary {
   usedBy: string[];
 }
 
-// -- Extensions (bossmode-managed pi packages) --
-
-export interface ExtensionRecord {
-  id: string;
-  name: string;
-  version?: string;
-  description?: string;
-  extensionPaths: string[];
-  skillPaths: string[];
-  error?: string;
-}
-
-export interface ExtensionsListResponse {
-  extensions: ExtensionRecord[];
-  webSearchConfig: { path: string; exists: boolean };
-}
-
-export async function getExtensions(): Promise<ExtensionsListResponse> {
-  return apiFetch("/api/extensions");
-}
-
-export async function installExtension(pkg: string): Promise<ExtensionRecord> {
-  return apiFetch("/api/extensions/install", { method: "POST", body: JSON.stringify({ package: pkg }) });
-}
-
-export async function uninstallExtension(name: string): Promise<{ ok: true; id: string }> {
-  return apiFetch(`/api/extensions/${encodeURIComponent(name)}`, { method: "DELETE" });
-}
 
 
 // -- Skills --
@@ -217,7 +189,6 @@ export interface MemberInfo {
   credentialId?: string | null;
   mcpServers?: string[];
   /** Enabled extension package names (default empty = none). */
-  extensions?: string[];
   createdAt?: number;
 }
 
@@ -244,7 +215,7 @@ export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
 export async function updateRoomMember(
   roomId: string,
   memberName: string,
-  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null },
+  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
 ): Promise<MemberInfo> {
   const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
   return result.member;
@@ -277,7 +248,6 @@ export interface AgentRuntimeParams {
   thinkingLevel?: string;
   systemPrompt?: string;
   skills?: string[];
-  extensions?: string[];
 }
 
 export interface MemberInstanceInfo {
@@ -1753,7 +1723,6 @@ export interface MemberEffectiveConfig {
   credentialId?: string | null;
   thinkingLevel?: string | null;
   skills?: string[];
-  extensions?: string[];
   mcpServers?: string[];
 }
 

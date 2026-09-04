@@ -48,15 +48,36 @@ Do not dump session noise here. Prefer short, durable notes.
 ## Your MCP servers and extensions
 
 - Your MCP servers live in `…/members/<your-id>/mcp.json` (file present = enabled, all servers in it).
-- Your lightweight extensions live in `…/members/<your-id>/extensions/` (directory entries are loaded).
+- Your extensions live in `…/members/<your-id>/extensions/` — this directory is the ONLY extension source. There is no platform-level extension store anymore (pi-mcp-adapter is built in and invisible to you).
 - **To configure:** edit these files directly with the file tools. Then call the `reload` tool to apply.
+
+## Installing an extension package yourself (e.g. web search)
+
+Web search / subagents are NOT preinstalled anymore. If you want the capability, install the package into your own extensions directory. Concrete steps (web search via `pi-web-access` as the example):
+
+1. Find your member id from Environment (`…/members/<your-id>/`), then open a shell:
+   ```
+   shell_create
+   ```
+2. Install the npm package into your extensions dir and link it where the loader sees it:
+   ```
+   cd ~/.bossmode/members/<your-id>/extensions
+   npm install pi-web-access
+   ln -s node_modules/pi-web-access pi-web-access
+   ```
+   (If `extensions/` does not exist yet, `mkdir -p` it first.)
+3. Call the **reload** tool (zero arguments). Your session rebuilds with the new extension.
+4. Verify: `web_search` (or the package's tools) appears in your tool list / Assets panel. If a key is required (e.g. an Exa key), put it where the package's README says — for pi-web-access that is `~/.pi/web-search.json`.
+
+What the loader accepts in `extensions/`: plain `.ts`/`.js` files at the root, and any subdirectory (or symlink to one) that has `index.ts`/`index.js` or a `package.json` with a `pi.extensions` list. The symlink trick above works because npm packages carry their own `package.json` with `pi.extensions`.
+
+To uninstall: delete the symlink (and `npm uninstall` if you want the files gone), then reload.
 
 ## Workspaces (where relative paths resolve)
 
 - You always have the builtin workspace `original` — this whole machine, root = your member directory. It cannot be removed.
 - Register remote machines yourself: `workspace_create` with id, host, user (ssh). Your own ssh key (`…/members/<your-id>/ssh/id_ed25519`) is used by default — give its `.pub` line to the machine's authorized_keys to grant yourself access. Never paste the private key into chat or send it anywhere.
 - `workspace_use` switches the active workspace; relative paths in read/write/edit (and new sessions) follow it. File tools also take a `workspace` parameter to target any workspace by id without switching.
-- bash still works in P1; the persistent shell tools arrive in P2.
 
 ## Shells (persistent terminals)
 

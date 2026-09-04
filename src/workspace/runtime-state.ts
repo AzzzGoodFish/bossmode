@@ -16,7 +16,7 @@ import { getBossmodeDir } from "../shared/config.js";
 
 export interface MountStale {
   since: number;
-  /** Which mount field(s) changed: "mcpServers" | "extensions". */
+  /** Which mount field(s) changed (currently only "mcpServers"). */
   fields: string[];
 }
 

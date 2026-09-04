@@ -347,7 +347,6 @@ addRoute("POST", "/api/members", async (req, res) => {
       credentialId?: string | null;
       thinkingLevel?: string | null;
       skills?: string[];
-      extensions?: string[];
       mcpServers?: string[];
       importFromArchive?: string;
     };
@@ -381,7 +380,6 @@ addRoute("POST", "/api/members", async (req, res) => {
         credentialId: body.credentialId,
         thinkingLevel: body.thinkingLevel,
         skills: body.skills,
-        extensions: body.extensions,
         mcpServers: body.mcpServers,
         title: (body as { title?: string }).title,
       });
@@ -429,11 +427,10 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     const { memberRecordToConfig, resolveSkills, buildDmScopeLabels } = await import("../engine/agent-manager.js");
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const { resolveGlobalSkillPaths } = await import("../workforce/skill-store.js");
-    const { resolveMemberExtensionSkillPaths } = await import("../workspace/extension-store.js");
 
     const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
       cwd: string;
-      member: { id: string; agent: string; model?: string; credentialId?: string; skills?: string[]; extensions?: string[] };
+      member: { id: string; agent: string; model?: string; credentialId?: string; skills?: string[] };
       skillPaths: string[];
     }) => {
       const text = buildFinalMemberSystemPrompt({
@@ -489,7 +486,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       respond(compiled, {
         cwd: activeWorkspaceRoot(m.id),
         member,
-        skillPaths: resolveMemberExtensionSkillPaths(member.extensions),
+        skillPaths: [],
       });
       return;
     }
@@ -513,7 +510,6 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     const skills = resolveSkills(member, agentDef);
     const skillPaths = [
       ...resolveGlobalSkillPaths(skills),
-      ...resolveMemberExtensionSkillPaths(member.extensions ?? []),
     ];
 
     if (ref.kind === "room") {
@@ -561,7 +557,6 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       credentialId?: string | null;
       thinkingLevel?: string | null;
       skills?: string[];
-      extensions?: string[];
       mcpServers?: string[];
     };
     let m = resolveMemberRef(params.id);
@@ -583,7 +578,6 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         ...(body.credentialId !== undefined ? { credentialId: body.credentialId } : {}),
         ...(body.thinkingLevel !== undefined ? { thinkingLevel: body.thinkingLevel } : {}),
         ...(body.skills !== undefined ? { skills: body.skills } : {}),
-        ...(body.extensions !== undefined ? { extensions: body.extensions } : {}),
         ...(body.mcpServers !== undefined ? { mcpServers: body.mcpServers } : {}),
       },
     });

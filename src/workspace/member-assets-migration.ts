@@ -14,7 +14,7 @@
  * Dry-run is the default; pass dryRun: false (or --apply on the CLI) to write.
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import {
   getBossmodeMcpConfigPath,
@@ -144,8 +144,26 @@ function backfillMemberSshKeysOrLog(): void {
 }
 
 /** Daemon startup hook: apply once, never blocking listen. */
+/**
+ * Batch 7 closeout (fish 2026-09-04): the platform extension store is retired.
+ * Archive ~/.bossmode/extensions.json (the platform enable list) next to
+ * itself; the ~/.bossmode/extensions/ npm project stays on disk untouched and
+ * inert. Idempotent — silent when there is nothing to archive.
+ */
+export function retirePlatformExtensionsManifest(): { archived: boolean } {
+  const manifest = join(getBossmodeDir(), "extensions.json");
+  const archive = `${manifest}.pre-batch7c`;
+  if (!existsSync(manifest)) return { archived: false };
+  renameSync(manifest, archive);
+  console.log(`[platform-extensions-retire] archived extensions.json -> ${basename(archive)} — platform extension loading is retired (member-owned extensions/ dirs are the only source)`);
+  return { archived: true };
+}
+
 export function runMemberAssetsMigrationOnStartup(): void {
   try {
+    try { retirePlatformExtensionsManifest(); } catch (err) {
+      console.error("[platform-extensions-retire] failed (non-fatal):", err);
+    }
     backfillMemberSshKeysOrLog();
     if (!needsMemberAssetsMigration()) {
       // qa rc.14 finding ②: make the skip visible when the archive exists

@@ -11,7 +11,7 @@ import { createGlobalMember, getRooms, getChats, type ChatEntry } from "../api/c
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { HelpMenu } from "./HelpMenu";
 
-export type SettingsSection = "models" | "runtime" | "prompt" | "extensions" | "usage";
+export type SettingsSection = "models" | "runtime" | "prompt" | "usage";
 
 export type ActivePage =
   | { type: "chats" }
@@ -63,7 +63,6 @@ const SYSTEM_SECTIONS: Array<{ id: SettingsSection; title: string; desc: string 
   { id: "models", title: "Models", desc: "Connect providers and choose available models." },
   { id: "runtime", title: "Runtime", desc: "Session continuity and connection recovery." },
   { id: "prompt", title: "Prompt", desc: "Environment & Communication asset every member sees." },
-  { id: "extensions", title: "Extensions", desc: "Install pi agent extensions (e.g. web search)." },
   { id: "usage", title: "Usage", desc: "Token consumption by identity, room and time" },
 ];
 

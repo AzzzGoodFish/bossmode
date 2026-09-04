@@ -51,8 +51,8 @@ describe("runtime-state persistence", () => {
     markStaleMounts(scopeId, memberId, ["mcpServers"]);
     expect(getRuntimeStateEntry(scopeId, memberId).staleMounts?.fields).toEqual(["mcpServers"]);
 
-    markStaleMounts(scopeId, memberId, ["extensions"]);
-    expect(getRuntimeStateEntry(scopeId, memberId).staleMounts?.fields).toEqual(expect.arrayContaining(["mcpServers", "extensions"]));
+    markStaleMounts(scopeId, memberId, ["mcpServers", "legacy-marker"]);
+    expect(getRuntimeStateEntry(scopeId, memberId).staleMounts?.fields).toEqual(expect.arrayContaining(["mcpServers", "legacy-marker"]));
 
     clearStaleMounts(scopeId, memberId);
     expect(getRuntimeStateEntry(scopeId, memberId).staleMounts).toBeUndefined();

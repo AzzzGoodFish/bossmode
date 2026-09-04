@@ -23,7 +23,6 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
   let effCred = config.credentialId ?? sourceMember?.credentialId;
   let effThink = config.thinkingLevel || sourceMember?.thinkingLevel || "off";
   let effSkills = config.skills ?? sourceMember?.skills;
-  let effExt = Array.isArray(config.extensions) ? config.extensions : [];
   let effMcp = Array.isArray(config.mcpServers) ? config.mcpServers : [];
   const globalId = roomMember.id.startsWith("mem_") ? roomMember.id : roomMember.sourceMemberId;
   if (globalId && globalId.startsWith("mem_") && roomMember.roomId) {
@@ -33,7 +32,6 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
       effCred = eff.credentialId ?? effCred;
       effThink = (eff.thinkingLevel as string) || effThink;
       if (eff.skills?.length) effSkills = eff.skills;
-      if (eff.extensions?.length) effExt = eff.extensions;
       if (eff.mcpServers?.length) effMcp = eff.mcpServers;
     } catch { /* registry cold / member missing */ }
   }
@@ -59,7 +57,6 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     contextLimit: config.contextLimit ?? sourceMember?.contextLimit,
     skills: effSkills,
     mcpServers: effMcp,
-    extensions: effExt,
     createdAt: roomMember.createdAt,
     ...(title ? { title } : {}),
   };
