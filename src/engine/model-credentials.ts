@@ -943,6 +943,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     if (job.status === "cancelled") return;
     job.status = "failed";
     job.error = mapOAuthError(err);
+    logger.warn("model-credentials", "oauth login job failed", { job: job.id, provider: job.providerId, error: job.error });
     job.selectPrompt = undefined;
     job.prompt = "OAuth login failed. Retry from Start login.";
     job.updatedAt = now();
@@ -1023,6 +1024,54 @@ export function cancelOAuthLoginJob(id: string): OAuthLoginJobPublic | null {
   return sanitizeOAuthJob(job);
 }
 
+
+/**
+ * Pre-parse the pasted OAuth response before pi sees it (fish 2026-09-04:
+ * both bare codes and full redirect URLs must work, and mistakes must say
+ * WHY). Accepted shapes mirror pi's parser: bare code, full redirect URL,
+ * code#state, or a bare query string. A URL carrying a state that belongs to
+ * a different login attempt is rejected with a pointed message instead of
+ * pi's opaque "State mismatch". The raw input is passed through unchanged.
+ */
+export function validateOAuthSubmitInput(job: { authUrl?: string }, raw: string): void {
+  const text = String(raw || "").trim();
+  if (!text) return; // blank-input prompts (select options etc.) pass through
+  if (!job.authUrl) return; // no reference state to check against
+
+  let query = "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    const qIdx = text.indexOf("?");
+    if (qIdx >= 0) query = text.slice(qIdx + 1);
+  } else if (/^[?#]/.test(text)) {
+    query = text.slice(1);
+  } else if (/^[^=&\s]+=[^&]*(&[^=&\s]+=[^&]*)*$/.test(text)) {
+    query = text;
+  } else {
+    return; // bare code (or code#state) — pi parses it; nothing to check here
+  }
+  if (!query) {
+    throw new Error("No authorization code found in the pasted URL. Paste the bare code, or the full redirect URL (the localhost:... address after signing in).");
+  }
+  const params = new URLSearchParams(query.replace(/^[^?#]*[#?]/, ""));
+  const code = params.get("code");
+  if (!code) {
+    throw new Error("No authorization code found in the pasted input. Paste the bare code, or the full redirect URL (the localhost:... address after signing in).");
+  }
+  const submittedState = params.get("state");
+  if (submittedState) {
+    let expectedState: string | null = null;
+    try {
+      const authQuery = job.authUrl.slice(job.authUrl.indexOf("?") + 1);
+      expectedState = new URLSearchParams(authQuery).get("state");
+    } catch { /* unparseable authUrl — skip the pre-check */ }
+    if (expectedState && submittedState !== expectedState) {
+      throw new Error(
+        "This redirect URL is from a DIFFERENT login attempt (state mismatch). Click \"Open login page\" for THIS login, sign in, and paste the localhost:... URL the browser lands on.",
+      );
+    }
+  }
+}
+
 export async function submitOAuthLoginJobInput(id: string, input: { code?: string }): Promise<OAuthLoginJobPublic | null> {
   const job = oauthJobs.get(id);
   if (!job) return null;
@@ -1030,6 +1079,7 @@ export async function submitOAuthLoginJobInput(id: string, input: { code?: strin
   if (job.status === "completed") return sanitizeOAuthJob(job);
   if (job.status === "failed") throw new Error(job.error || "OAuth login job failed");
   if (input.code === undefined || (!job.prompt.includes("blank") && !input.code.trim())) throw new Error("OAuth input is required");
+  validateOAuthSubmitInput(job, input.code);
   const waiter = job.inputWaiter;
   if (!waiter) throw new Error("OAuth login job is not waiting for input");
   job.inputWaiter = undefined;

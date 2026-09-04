@@ -861,7 +861,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
                             </div>
                           </div>
                         ) : oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">Submit</button></div>}
-                        {oauthJob.error && <div className="text-blocked">Sign-in failed. Try again or choose another connection method.</div>}
+                        {oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}
                         {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-ink-3 hover:text-ink-1">Cancel login</button>}
                       </div>}
                     </div>
@@ -945,6 +945,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [oauthJob, setOauthJob] = useState<OAuthLoginJob | null>(null);
   const [oauthCode, setOauthCode] = useState("");
+  const [oauthInputError, setOauthInputError] = useState("");
   const [oauthBusy, setOauthBusy] = useState(false);
   const inputCls = "w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong";
   const builtinProvider = form.profileKind === "builtin_provider";
@@ -1014,6 +1015,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const submitOAuth = async () => {
     if (!oauthJob) return;
     setOauthBusy(true);
+    setOauthInputError("");
     try {
       const job = await submitOAuthLoginJobInput(oauthJob.id, oauthCode);
       setOauthJob(job);
@@ -1021,7 +1023,13 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
         toast("OAuth connected.", "success");
         onSaved();
       } else if (job.error) toast("Sign-in failed. Check the response and try again.", "error");
-    } catch (err) { console.error("Failed to submit OAuth input", err); toast(userActionError("submit the sign-in response", "Check the response, then try again."), "error"); }
+    } catch (err) {
+      console.error("Failed to submit OAuth input", err);
+      // Authored validation messages (pre-parse / state mismatch) show inline
+      // under the paste box; the toast stays generic (copy hygiene rule).
+      setOauthInputError(err instanceof Error && err.message ? err.message : "");
+      toast(userActionError("submit the sign-in response", "Check the response, then try again."), "error");
+    }
     finally { setOauthBusy(false); }
   };
   const cancelOAuth = async () => {
@@ -1056,7 +1064,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
             {form.authType === "oauth" && <div className="rounded border border-line-soft p-3 space-y-2">
               <Field label="OAuth provider"><select className={inputCls} value={form.oauthProviderId || ""} onChange={(e) => setForm({ ...form, oauthProviderId: e.target.value })}><option value="">Select provider...</option>{["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"].map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
               <div className="flex items-center gap-2 text-xs"><span className={profile?.hasSecret ? "text-onair" : "text-ink-3"}>{profile?.hasSecret ? "OAuth connected" : "OAuth not connected"}</span><button type="button" disabled={oauthBusy || !form.oauthProviderId} onClick={startOAuth} className="text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">Start login</button>{oauthJob && oauthJob.status === "awaiting_input" && <button type="button" disabled={oauthBusy} onClick={cancelOAuth} className="text-ink-3 hover:text-ink-4">Cancel</button>}</div>
-              {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthStatusLabel(oauthJob.status)}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked">Sign-in failed. Try again or choose another connection method.</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}</div>}
+              {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthStatusLabel(oauthJob.status)}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}{oauthJob.status === "awaiting_input" && oauthInputError && <div className="text-blocked break-all">{oauthInputError}</div>}</div>}
               <p className="text-xs text-ink-3">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
             <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-3">Keys are stored unencrypted on this device and hidden after saving. Use a scoped key.</div>
