@@ -80,6 +80,36 @@ describe("chat attachment artifacts", () => {
     expect(unsafe.status).not.toBe(200);
   });
 
+  it("agent chat rejects an empty message (designer incident 2026-09-04)", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const messageStore = await import("../../src/workspace/message-store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const room = roomStore.createRoom("Empty Chat", undefined, drafts(["developer"]));
+
+    const rejected = await handleToolCallback("chat", room.id, "developer", {
+      message: "",
+    }) as any;
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toContain("non-empty");
+
+    const whitespace = await handleToolCallback("chat", room.id, "developer", {
+      message: "   \n\t  ",
+    }) as any;
+    expect(whitespace.ok).toBe(false);
+
+    // Nothing was posted for either attempt.
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
+
+    // Non-empty text still works.
+    const ok = await handleToolCallback("chat", room.id, "developer", {
+      message: "real message",
+    }) as any;
+    expect(ok.ok).toBe(true);
+    expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(1);
+  });
+
   it("agent chat fails atomically when any attachment path is missing", async () => {
     const ts = await createTestServer();
     servers.push(ts);
