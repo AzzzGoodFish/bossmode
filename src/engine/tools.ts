@@ -319,7 +319,14 @@ export async function handleToolCallback(
 
   switch (tool) {
     case "chat": {
-      const message = params?.message || "";
+      // 2026-09-04 pm order / designer incident: a model deep in a full context
+      // sent chat with an empty string twice and the tool happily posted both.
+      // Reject empty text (attachment-only posts still carry content).
+      const message = String(params?.message ?? "");
+      const hasAttachments = Array.isArray(params?.attachments) && params.attachments.length > 0;
+      if (!message.trim() && !hasAttachments) {
+        return { ok: false, error: "message must be a non-empty string — re-send your chat message with the text included" };
+      }
 
       const attachments: RoomMessageAttachment[] = [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
