@@ -43,6 +43,7 @@ import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
+import { settleMemberShellWaits } from "./shell-manager.js";
 import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
 
@@ -1444,7 +1445,7 @@ async function activateAgentInternalContinue(
     // shell_exec tool result is synthesized with its exec id at agent_end.
     emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
     interruptWorkingInstance(roomId, instance, payload,
-      "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+      "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
       "message_interrupt");
     return;
   }
@@ -2448,7 +2449,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
     if (instance.status === "working") {
       // Interrupt-on-message (design v1.1): DM messages interrupt a working run.
       interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+        "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
         "dm-message-interrupt");
       return;
     }
@@ -2479,6 +2480,9 @@ export async function activateDmMember(memberId: string): Promise<void> {
  * the abort settles. */
 function interruptWorkingInstance(scopeId: string, instance: AgentInstance, prompt: string, banner: string, trigger: string): void {
   try { settleWaitOnAbort(scopeId, instance.memberId); } catch { /* ignore */ }
+  // Blocking shell_exec waits end now (running + exec id) so the gentle abort
+  // is not held hostage by a blockUntilMs wait (qa rc.22 note ①).
+  try { settleMemberShellWaits(instance.memberId); } catch { /* ignore */ }
   if (typeof (instance.handle as any).abortForInterrupt === "function") {
     (instance.handle as any).abortForInterrupt();
   } else {
@@ -2569,7 +2573,7 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
     if (instance.status === "working") {
       // Interrupt-on-message (design v1.1): topic mentions interrupt a working run.
       interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+        "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
         "topic-message-interrupt");
       return;
     }
