@@ -59,6 +59,37 @@ describe("persistent shell (real PTY)", () => {
     expect(where.ok && where.status === "done" && where.output.trim()).toBe(dir);
   }, 15000);
 
+  it("shell_wait: timeout returns running with progress; 0 waits to completion (design v1.1)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.5; echo WAIT-DONE", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+    const execId = started.ok ? started.exec : "e1";
+
+    // Short budget runs out while the command is still going → running + note.
+    const early = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: execId, blockUntilMs: 200 });
+    expect(early.ok && early.status).toBe("running");
+
+    // 0 = wait until completion → done + exit code + output.
+    const done = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: execId, blockUntilMs: 0 });
+    expect(done.ok && done.status).toBe("done");
+    if (done.ok && done.status === "done") {
+      expect(done.exitCode).toBe(0);
+      expect(done.output).toContain("WAIT-DONE");
+    }
+
+    // A finished exec answers immediately (history lookup path).
+    const again = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: execId, blockUntilMs: 50 });
+    expect(again.ok && again.status).toBe("done");
+
+    // Unknown exec → honest error.
+    const missing = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: "e999" });
+    expect(missing.ok).toBe(false);
+  }, 15000);
+
   it("cwd receipt: cd prints one receipt line; no cd, no receipt (fish 2026-09-04)", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });

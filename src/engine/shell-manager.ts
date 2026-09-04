@@ -31,6 +31,9 @@ interface ShellExec {
   output: string;
   status: "running" | "done";
   resolve?: () => void;
+  /** Settles when the exec reaches done — shell_wait blocks on this. */
+  done: Promise<void>;
+  doneResolve: () => void;
 }
 
 interface PendingWrite {
@@ -153,6 +156,7 @@ function pushData(shell: LiveShell, raw: string): void {
       shell.currentExec = null;
       exec.resolve?.();
       exec.resolve = undefined;
+      exec.doneResolve?.();
       archiveExec(shell, exec);
     }
     shell.pendingMarker = false;
@@ -229,6 +233,7 @@ async function spawnLocalShell(memberId: string, workspaceId: string, cwd: strin
       shell.currentExec = null;
       exec.resolve?.();
       exec.resolve = undefined;
+      exec.doneResolve?.();
       archiveExec(shell, exec);
     }
     drainQueue(shell);
@@ -287,6 +292,7 @@ async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: str
       shell.currentExec = null;
       exec.resolve?.();
       exec.resolve = undefined;
+      exec.doneResolve?.();
     }
     drainQueue(shell);
   });
@@ -369,15 +375,16 @@ export async function execInShell(args: {
     return { ok: false, error: "command is required (or use keys to send a control key)." };
   }
 
-  const exec: ShellExec = {
+  const exec = {
     id: `e${++shell.execCounter}`,
     lineStart: shell.lineCount,
     lineEnd: null,
     exitCode: null,
     output: "",
     status: "running",
-  };
+  } as ShellExec;
   const done = new Promise<void>((resolve) => { exec.resolve = resolve; });
+  exec.done = new Promise<void>((resolve) => { exec.doneResolve = resolve; });
   shell.writeQueue.push({ command: args.command, exec });
   drainQueue(shell);
 
@@ -471,6 +478,56 @@ function sliceLines(shell: LiveShell, from: number, to: number): Array<{ n: numb
     out.push({ n, text: shell.lines[idx] });
   }
   return out;
+}
+
+/** Interrupt synthesis support (design-interrupt-on-message-v1): the shell's
+ * still-running exec, if any — used to tell the member which exec id to
+ * collect with shell_read after being interrupted. */
+export function getShellPendingExec(memberId: string, shellId: string): { exec: string } | null {
+  const shell = shells.get(shellKey(memberId, shellId));
+  if (!shell) return null;
+  if (shell.currentExec) return { exec: shell.currentExec.id };
+  const queued = shell.writeQueue.find((w) => w.exec)?.exec;
+  if (queued) return { exec: queued.id };
+  return null;
+}
+
+/** Design-interrupt-on-message-v1.1: shell_wait — block until an exec is done
+ * (or the wait budget runs out). Default 30s; blockUntilMs 0 waits forever.
+ * Done returns exit code + line range + output; a timeout returns running with
+ * the progress so far. shell_read stays an instant snapshot. */
+export async function waitShell(args: {
+  memberId: string;
+  shell: string;
+  exec: string;
+  blockUntilMs?: number;
+}): Promise<
+  | { ok: true; exec: string; status: "done"; exitCode: number | null; lineStart: number; lineEnd: number; output: string }
+  | { ok: true; exec: string; status: "running"; outputSoFar: string; note: string }
+  | { ok: false; error: string }
+> {
+  const shell = shells.get(shellKey(args.memberId, args.shell));
+  if (!shell) {
+    return { ok: false, error: `Shell not found: ${args.shell}. It may have been closed, or the daemon restarted (shells are memory-only — create a new one).` };
+  }
+  const queued = shell.writeQueue.find((w) => w.exec?.id === args.exec)?.exec;
+  const exec = (shell.currentExec?.id === args.exec ? shell.currentExec : undefined)
+    ?? queued
+    ?? shell.execHistory.find((e) => e.id === args.exec);
+  if (!exec) {
+    return { ok: false, error: `Exec not found: ${args.exec} on shell ${args.shell}. Use shell_list to see the shell's execs.` };
+  }
+  const respond = () => exec.status === "done"
+    ? { ok: true as const, exec: exec.id, status: "done" as const, exitCode: exec.exitCode, lineStart: exec.lineStart, lineEnd: exec.lineEnd ?? exec.lineStart, output: exec.output }
+    : { ok: true as const, exec: exec.id, status: "running" as const, outputSoFar: exec.output, note: `Still running — wait again with shell_wait, or snapshot with shell_read.` };
+  if (exec.status === "done") return respond();
+  const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : 30_000;
+  if (blockMs === 0) {
+    await exec.done;
+  } else {
+    await Promise.race([exec.done, new Promise<void>((resolve) => setTimeout(resolve, blockMs))]);
+  }
+  return respond();
 }
 
 export function listShells(memberId: string): Array<{ id: string; name?: string; workspace: string; running: string | null; alive: boolean; lines: number }> {

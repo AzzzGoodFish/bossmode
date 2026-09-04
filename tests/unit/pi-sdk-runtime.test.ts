@@ -828,6 +828,59 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "compaction watchdog: mid-run crossing, aborting for compaction", expect.any(Object));
   });
 
+  it("message interrupt: dangling shell_exec gets a result naming the live exec id (design v1.1)", async () => {
+    // Real shell + a genuinely running command, so the synthesized result can
+    // name the exec the member should shell_wait for.
+    const shells = await import("../../src/engine/shell-manager.js");
+    const created = await shells.createShell({ memberId: "pm" });
+    expect(created.ok).toBe(true);
+    const shellId = created.ok ? created.shell : "s0";
+    const started = await shells.execInShell({ memberId: "pm", shell: shellId, command: "sleep 2", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+    const execId = started.ok ? started.exec : "e0";
+
+    // Hold the run open: session.prompt resolves only after the interrupt
+    // landed and agent_end was observed (run still alive in the watchdog).
+    let releasePrompt: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    const mock = makeWatchdogSession({
+      contextWindow: 50000,
+      reserveTokens: 1000,
+      onPrompt: async (m) => {
+        const assistant = assistantMsg(1000, [
+          { type: "toolCall", id: "tc1", name: "shell_exec", arguments: JSON.stringify({ shell: shellId, command: "sleep 2" }) },
+          { type: "toolCall", id: "tc2", name: "read", arguments: { path: "x" } },
+        ]);
+        m.messages.push(assistant);
+        m.emit({ type: "message_end", message: assistant });
+        // Turn stays open until the interrupt lands.
+        await held;
+      },
+    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const promptPromise = handle.prompt("do work");
+    await new Promise((r) => setTimeout(r, 50));
+
+    (handle as any).abortForInterrupt();
+    // agent_end must be observed while the watchdog run is still open —
+    // emit it BEFORE releasing the held prompt.
+    mock.emit({ type: "agent_end", messages: [] });
+    releasePrompt?.();
+    await promptPromise;
+
+    expect(mock.session.abort).toHaveBeenCalledTimes(1);
+    expect(mock.appended).toHaveLength(2);
+    const shellResult = mock.appended.find((m: any) => m.toolCallId === "tc1");
+    expect(shellResult?.content?.[0]?.text).toContain(`still running as exec ${execId} on shell ${shellId}`);
+    expect(shellResult?.content?.[0]?.text).toContain("shell_wait");
+    const genericResult = mock.appended.find((m: any) => m.toolCallId === "tc2");
+    expect(genericResult?.content?.[0]?.text).toContain("Interrupted by a new message");
+
+    await shells.closeShell("pm", shellId);
+  }, 15000);
+
   it("crossing at a natural run end (no tool calls): watchdog does not act (SDK boundary check owns it)", async () => {
     const mock = makeWatchdogSession({
       contextWindow: 50000,

@@ -732,6 +732,7 @@ export async function handleToolCallback(
     case "shell_create":
     case "shell_exec":
     case "shell_read":
+    case "shell_wait":
     case "shell_list":
     case "shell_close": {
       // Batch 7 P2: persistent shells — member-owned, cross-scope.
@@ -767,6 +768,15 @@ export async function handleToolCallback(
         return result.ok
           ? { ok: true, status: result.status, exitCode: result.exitCode, lineStart: result.lineStart, lineEnd: result.lineEnd, truncated: result.truncated, lines: result.lines.map((l: { n: number; text: string }) => `${l.n}: ${l.text}`) }
           : result;
+      }
+      if (tool === "shell_wait") {
+        const result = await shell.waitShell({
+          memberId: shellMemberId,
+          shell: String(params?.shell || ""),
+          exec: String(params?.exec || ""),
+          blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
+        });
+        return result;
       }
       if (tool === "shell_list") {
         return { ok: true, shells: shell.listShells(shellMemberId) };

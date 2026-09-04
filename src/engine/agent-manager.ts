@@ -1437,9 +1437,15 @@ async function activateAgentInternalContinue(
   }
 
   if (instance.status === "working") {
-    // Mid-turn @ — record as user_steer so Activity shows the injection (architect 2026-08-09).
+    // Interrupt-on-message (design-interrupt-on-message-v1, fish 2026-09-04):
+    // a mid-turn mention now aborts the run and processes immediately —
+    // steer (queue-behind-the-turn) is retired for message delivery. Shell
+    // commands keep running (the shell is daemon-owned); the dangling
+    // shell_exec tool result is synthesized with its exec id at agent_end.
     emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
-    instance.handle.steer(payload);
+    interruptWorkingInstance(roomId, instance, payload,
+      "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+      "message_interrupt");
     return;
   }
 
@@ -2439,6 +2445,13 @@ export async function activateDmMember(memberId: string): Promise<void> {
       prompt = `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     }
 
+    if (instance.status === "working") {
+      // Interrupt-on-message (design v1.1): DM messages interrupt a working run.
+      interruptWorkingInstance(scopeId, instance, prompt,
+        "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+        "dm-message-interrupt");
+      return;
+    }
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "dm-activate");
       return;
@@ -2457,6 +2470,24 @@ export async function activateDmMember(memberId: string): Promise<void> {
 }
 
 // -- Topic activation (plan-topic-threads-v1 batch 1, fresh seed) -------------
+
+/** Interrupt a working member so a new message is processed immediately
+ * (design-interrupt-on-message-v1). Shared by room, DM and topic activation:
+ * abort the run (shell commands keep running — the shell is daemon-owned;
+ * the dangling shell_exec result is synthesized with its exec id), then park
+ * the banner-wrapped prompt at the FRONT of the queue so it runs the moment
+ * the abort settles. */
+function interruptWorkingInstance(scopeId: string, instance: AgentInstance, prompt: string, banner: string, trigger: string): void {
+  try { settleWaitOnAbort(scopeId, instance.memberId); } catch { /* ignore */ }
+  if (typeof (instance.handle as any).abortForInterrupt === "function") {
+    (instance.handle as any).abortForInterrupt();
+  } else {
+    instance.handle.abort();
+  }
+  updateDispatchState(instance, "aborting", trigger);
+  instance.queuedInputs.unshift(`${banner}\n\n${prompt}`);
+  logger.info("agent", "messageInterrupt", { member: instance.agentName, memberId: instance.memberId, roomId: scopeId, trigger, queueDepth: instance.queuedInputs.length });
+}
 
 function topicInstanceKey(topicId: string, memberId: string): string {
   return scopeInstanceKey(scopeIdOf({ kind: "topic", topicId, roomId: "" }), memberId);
@@ -2535,6 +2566,13 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
       `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`,
     ].filter(Boolean).join("\n\n");
 
+    if (instance.status === "working") {
+      // Interrupt-on-message (design v1.1): topic mentions interrupt a working run.
+      interruptWorkingInstance(scopeId, instance, prompt,
+        "Your previous turn was interrupted by this message. It may have left partial work — a synthesized tool result notes what was still running.",
+        "topic-message-interrupt");
+      return;
+    }
     if (instance.dispatchState !== "idle" || instance.promptInFlight) {
       queueInput(instance, prompt, "topic-activate");
       return;

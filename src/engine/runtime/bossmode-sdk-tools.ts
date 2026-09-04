@@ -22,6 +22,7 @@ import {
   SHELL_CREATE_DESCRIPTION,
   SHELL_EXEC_DESCRIPTION,
   SHELL_READ_DESCRIPTION,
+  SHELL_WAIT_DESCRIPTION,
   SHELL_LIST_DESCRIPTION,
   SHELL_CLOSE_DESCRIPTION,
   PARAM_DESCRIPTIONS,
@@ -296,6 +297,17 @@ export function createBossmodeSdkTools(opts: {
         toLine: Type.Optional(Type.Number({ description: "Last absolute line number to read." })),
       }),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_read", params as any), null, 2))),
+    }),
+    defineTool({
+      name: "shell_wait",
+      label: "Shell Wait",
+      description: SHELL_WAIT_DESCRIPTION,
+      parameters: Type.Object({
+        shell: Type.String({ description: "Shell id." }),
+        exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
+        blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.shellWaitBlockUntilMs })),
+      }),
+      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_wait", params as any), null, 2))),
     }),
     defineTool({
       name: "shell_list",

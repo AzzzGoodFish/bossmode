@@ -87,8 +87,10 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - `shell_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `shell_read` (by exec id or line numbers; line numbers are the stable reference). For servers or long builds, pass `blockUntilMs: 0` to background immediately instead of waiting out the 10s.
 - `keys` sends control keys: `ctrl-c`, `ctrl-z`, `ctrl-d`.
 - When a command changes the working directory, its result ends with a receipt line like `cwd: /old → /new` — that is your confirmation the cd took effect and will persist. No receipt line means the cwd is unchanged.
+- `shell_wait({shell, exec, blockUntilMs?})` blocks until that command finishes (default 30s; `blockUntilMs: 0` waits until completion). Done returns exit code + line range + output; a timeout returns running with the progress so far. Use it after an interruption: the synthesized tool result tells you the exec id — finish your new task, then `shell_wait` for the original command.
 - Shells are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead shells report honestly — close them with `shell_close`.
 - Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell started inside a shell (running `bash` or `ssh` inside your shell) does not emit completion markers — the outer command shows as running until the inner shell exits.
+- If a new message interrupts you mid-turn, your run is aborted and the message is processed immediately (the envelope says so). Shell commands are NOT killed: the interrupted `shell_exec` gets a tool result like "still running as exec e5 — wait for it with shell_wait". Finish handling the new message, then `shell_wait` for the original command and read its output.
 - The one-shot `bash` tool is gone; file tools and shells cover everything it did.
 
 ## Your MCP servers and extensions — CJS note
