@@ -688,7 +688,10 @@ export function ToolCard({ event, toolEnd, diff, time, query, member, compact }:
         <div className="flex items-center">
           <ChevronRight size={11} className={`text-ink-4 shrink-0 transition-transform mr-[4px] ${expanded ? "rotate-90" : ""}`} />
           <MemberHead member={member} />
-          <span className="text-[9.5px] font-extrabold leading-none tracking-[0.08em] uppercase text-ink-3 truncate min-w-0 shrink max-w-[96px] ml-[7px] mr-[7px]">TOOL·{tool.label}</span>
+          {/* fish 2026-09-04: no hard width cap on the tool tag — it sizes to
+           * the row's actually available space (a 96px cap truncated long
+           * names while the detail span sat empty). */}
+          <span className="text-[9.5px] font-extrabold leading-none tracking-[0.08em] uppercase text-ink-3 truncate min-w-0 shrink ml-[7px] mr-[7px]">TOOL·{tool.label}</span>
           <span className="font-mono text-[11px] leading-none text-ink-3 truncate flex-1 min-w-0 mr-[6px]">{highlight(tool.detail || toolTarget(event.args), query)}</span>
           {/* diff chips ride the tab face only — the compact river header has no budget for them */}
           {!compact && diff && <span className="font-mono text-[10px] leading-none text-ink-4 shrink-0 whitespace-nowrap mr-[6px]">+{diff.added} −{diff.removed}</span>}
