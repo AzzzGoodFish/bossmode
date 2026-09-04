@@ -203,7 +203,7 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     expect(systemFails).toHaveLength(1);
   });
 
-  it("emits user_steer when mid-turn activate steers", async () => {
+  it("mid-turn mention interrupts the run (design-interrupt-on-message-v1): abort, no steer", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     state.promptImpl = vi.fn(async () => {
@@ -217,9 +217,12 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(getAgentStatus("room1", "rm_dev")).toBe("working");
 
-    // Second @ while working → steer path
+    // Second @ while working → interrupt path: abort (never steer), the
+    // message is queued at the front banner-wrapped, Activity still records
+    // the delivery as a user_steer event.
     await activateAgent("room1", "developer");
-    expect(handle.steer).toHaveBeenCalled();
+    expect(handle.steer).not.toHaveBeenCalled();
+    expect(handle.abort).toHaveBeenCalled();
     const steers = state.appendEventToDisk.mock.calls
       .map((c: any[]) => c[2])
       .filter((e: any) => e?.type === "user_steer");

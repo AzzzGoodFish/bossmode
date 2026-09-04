@@ -28,6 +28,8 @@ export const SHELL_EXEC_DESCRIPTION = `Run a command in a persistent shell and g
 
 export const SHELL_READ_DESCRIPTION = `Read output from a persistent shell: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
 
+export const SHELL_WAIT_DESCRIPTION = `Wait for a command (exec) on a persistent shell to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with shell_read. Default wait 30000ms; blockUntilMs 0 waits until completion.`;
+
 export const SHELL_LIST_DESCRIPTION = `List your shells with running exec, alive state, and buffered line counts.`;
 
 export const SHELL_CLOSE_DESCRIPTION = `Close a shell and kill its process. Running commands receive a close signal.`;
@@ -72,6 +74,7 @@ export const PARAM_DESCRIPTIONS = {
   shellCommand: "The command line to run.",
   shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
   shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with shell_read.",
+  shellWaitBlockUntilMs: "Max milliseconds to wait for the exec to finish. Default 30000; 0 waits until completion.",
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
