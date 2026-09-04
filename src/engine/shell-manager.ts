@@ -21,7 +21,7 @@ export const SHELL_COLS = 160;
 export const SHELL_ROWS = 1000;
 export const BLOCK_UNTIL_MS_DEFAULT = 10_000;
 const RING_MAX_LINES = 10_000;
-const OSC_133_D = /\x1b\]133;D;(\d*)\x07|\x1b\]133;D;(\d*)\x1b\\/g;
+const OSC_133_D = /\x1b\]133;D;(\d*)(?:;([^\x07\x1b]*))?\x07|\x1b\]133;D;(\d*)(?:;([^\x07\x1b]*))?\x1b\\/g;
 
 interface ShellExec {
   id: string;
@@ -52,6 +52,7 @@ interface LiveShell {
   lineCount: number; // absolute next line number
   pendingMarker: boolean;
   carry: string; // partial OSC/escape sequence split across data chunks
+  lastCwd?: string; // last cwd reported by the completion marker (receipt base)
   currentExec: ShellExec | null;
   execHistory: ShellExec[]; // finished execs (capped) so shell_read can close them out
   writeQueue: Array<PendingWrite & { exec?: ShellExec }>;
@@ -74,18 +75,23 @@ function initSequence(): string {
   // -echo: the command we write must not be echoed back as "output".
   // Empty PS1: no prompt text between commands. The marker printf is APPENDED
   // (not replacing) so prompt frameworks keep working until they replace it.
-  return `stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s\\\\007' \\"\\$?\\"; \${PROMPT_COMMAND:-}"\n`;
+  return `stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s;%s\\\\007' \\"\\$?\\" \\"\\$PWD\\"; \${PROMPT_COMMAND:-}"\n`;
 }
 
-function stripOsc(text: string): { text: string; markers: Array<{ exitCode: number | null; index: number }> } {
-  const markers: Array<{ exitCode: number | null; index: number }> = [];
+function stripOsc(text: string): { text: string; markers: Array<{ exitCode: number | null; cwd: string | null; index: number }> } {
+  const markers: Array<{ exitCode: number | null; cwd: string | null; index: number }> = [];
   OSC_133_D.lastIndex = 0;
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = OSC_133_D.exec(text)) !== null) {
-    const code = m[1] ?? m[2];
-    markers.push({ exitCode: code !== undefined && code !== "" ? Number(code) : null, index: m.index });
+    const code = m[1] ?? m[3];
+    const cwdField = m[2] ?? m[4];
+    markers.push({
+      exitCode: code !== undefined && code !== "" ? Number(code) : null,
+      cwd: cwdField !== undefined && cwdField !== "" ? cwdField : null,
+      index: m.index,
+    });
     out += text.slice(last, m.index);
     last = m.index + m[0].length;
   }
@@ -124,6 +130,21 @@ function pushData(shell: LiveShell, raw: string): void {
   shell.lineCount = shell.firstLine + shell.lines.length;
   if (shell.currentExec && clean.length > 0) shell.currentExec.output += clean;
   for (const marker of markers) {
+    // cwd receipt (fish 2026-09-04): every completion marker carries $PWD; when
+    // it changes the exec result (and the line stream) gets one receipt line.
+    // The first marker after shell birth just records the baseline silently.
+    if (marker.cwd) {
+      if (shell.lastCwd && shell.lastCwd !== marker.cwd) {
+        const receipt = `cwd: ${shell.lastCwd} → ${marker.cwd}`;
+        shell.lines.push(receipt);
+        shell.lineCount = shell.firstLine + shell.lines.length;
+        if (shell.currentExec) {
+          shell.currentExec.output += `${shell.currentExec.output.endsWith("\n") || shell.currentExec.output === "" ? "" : "\n"}${receipt}\n`;
+        }
+      }
+      shell.lastCwd = marker.cwd;
+      if (shell.cwd !== marker.cwd) shell.cwd = marker.cwd;
+    }
     if (shell.currentExec) {
       const exec = shell.currentExec;
       exec.status = "done";
