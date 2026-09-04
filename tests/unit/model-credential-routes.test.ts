@@ -137,6 +137,71 @@ describe("model credential profile API routes", () => {
     setPiCatalogModelsForTests(null);
   });
 
+  // fish 2026-09-04: Codex login opens with a select prompt (browser vs device
+  // code). The job must expose it as structured options (the UI renders them
+  // as buttons and submits the option ID), and the selectPrompt must be
+  // cleared once the flow moves on — otherwise stale buttons linger over the
+  // next stage.
+  it("exposes select prompts and clears them when the flow advances", async () => {
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    setPiCatalogModelsForTests([
+      { provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", api: "openai-responses", baseUrl: "https://api.openai.com", contextWindow: 128000, input: ["text"] },
+    ]);
+    let releaseDeviceStage!: () => void;
+    const deviceGate = new Promise<void>((r) => { releaseDeviceStage = r; });
+    setOAuthLoginAdapterForTests({
+      async login(_providerId, callbacks) {
+        const choice = await callbacks.onSelect({
+          message: "How do you want to sign in?",
+          options: [
+            { id: "browser", label: "Sign in with browser" },
+            { id: "device_code", label: "Sign in with device code" },
+          ],
+        });
+        expect(choice).toBe("device_code"); // the option id, never the label
+        callbacks.onDeviceCode?.({ userCode: "WXYZ-9876", verificationUri: "https://auth.openai.com/codex/device", expiresInSeconds: 900, intervalSeconds: 5 });
+        await deviceGate; // hold the device stage so we can inspect the job mid-flow
+        return { access: "codex-access", refresh: "codex-refresh", expires: Date.now() + 3600_000 };
+      },
+    });
+    const ts = await createTestServer();
+    const token = await login(ts.port);
+
+    const start = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles/oauth/start", { token, body: { providerId: "openai-codex" } });
+    expect(start.status).toBe(200);
+    const job = JSON.parse(start.body);
+    expect(job.status).toBe("awaiting_input");
+    expect(job.selectPrompt).toEqual({
+      message: "How do you want to sign in?",
+      options: [
+        { id: "browser", label: "Sign in with browser" },
+        { id: "device_code", label: "Sign in with device code" },
+      ],
+    });
+
+    // the input route responds only when the whole login settles (it races
+    // job.loginPromise) — so inspect the mid-flow state with a GET while the
+    // POST is still in flight.
+    const submitPromise = jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "device_code" } });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const mid = JSON.parse((await jsonRequest(ts.port, "GET", `/api/model-credential-profiles/oauth/${job.id}`, { token })).body);
+    expect(mid.status).toBe("awaiting_device");
+    expect(mid.selectPrompt).toBeUndefined();
+    expect(mid.deviceCode).toEqual(expect.objectContaining({ userCode: "WXYZ-9876" }));
+
+    releaseDeviceStage();
+    const submit = await submitPromise;
+    expect(submit.status).toBe(200);
+    const done = JSON.parse(submit.body);
+    expect(done.status).toBe("completed");
+    expect(done.selectPrompt).toBeUndefined();
+
+    await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${done.profileId}`, { token });
+    await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+    setOAuthLoginAdapterForTests(null);
+    setPiCatalogModelsForTests(null);
+  });
+
   it("connects a built-in provider API key through native Connect Provider endpoints", async () => {
     const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
     setPiCatalogModelsForTests([
