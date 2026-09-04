@@ -120,7 +120,7 @@ export function buildModelRows(models: AvailableModelOption[], value: { model: s
 // every section: header = title + quiet count + right-side action; content
 // always visible (long lists scroll inside, same as persona/system prompt).
 
-export const assetRowClass = "flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2";
+export const assetRowClass = "flex items-center gap-2.5 px-0.5 py-2 border-b border-line-soft last:border-b-0";
 export const assetActionClass = "inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer";
 export const assetEmptyClass = "text-[12px] text-ink-4 py-1";
 export const assetFooterClass = "font-mono text-[10.5px] text-ink-4 truncate pt-2";
@@ -145,7 +145,7 @@ export function AssetSection({ title, count, info, action, children }: {
         {count !== undefined && <span className="text-[10px] text-ink-4 tabular-nums">{count}</span>}
         {action && <span className="ml-auto shrink-0">{action}</span>}
       </div>
-      <div className="px-4 py-3">{children}</div>
+      <div className="px-4 pt-1 pb-2.5">{children}</div>
     </section>
   );
 }
@@ -153,23 +153,30 @@ export function AssetSection({ title, count, info, action, children }: {
 // ── profile & skills ────────────────────────────────────────────────────────
 
 /** The member's skills/ directory, read-only: skills are the member's private,
- * self-maintained assets. */
-export function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null }) {
+ * self-maintained assets. List-body IA (fish 2026-09-04): one row per skill,
+ * description right-aligned quiet; the source path is the section footer. */
+export function MemberSkillsCard({ skills, home }: { skills: MemberSkillEntry[] | null; home: string }) {
   return (
     <AssetSection title="Skills" count={skills === null ? undefined : String(skills.length)}>
       {skills === null ? (
         <div className={assetEmptyClass}>Loading…</div>
       ) : skills.length === 0 ? (
-        <div className={assetEmptyClass}>None yet.</div>
-      ) : (
-        <div className="space-y-1.5">
-          {skills.map((sk) => (
-            <div key={sk.path} className="rounded-lg border border-line-soft px-3 py-2">
-              <div className="text-[12px] font-semibold text-ink-1">{sk.name}</div>
-              {sk.description ? <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{sk.description}</div> : null}
-            </div>
-          ))}
+        <div className="flex items-baseline gap-2 px-0.5 py-2 text-[12px] text-ink-4">
+          None yet.
+          <span className={`ml-auto ${assetFooterClass} pt-0`} title={`${home}/skills/`}>{home}/skills/</span>
         </div>
+      ) : (
+        <>
+          <div>
+            {skills.map((sk) => (
+              <div key={sk.path} className={assetRowClass}>
+                <span className="font-mono text-[12px] font-medium text-ink-1 shrink-0">{sk.name}</span>
+                {sk.description && <span className="ml-auto text-[10.5px] text-ink-4 truncate min-w-0 text-right" title={sk.description}>{sk.description}</span>}
+              </div>
+            ))}
+          </div>
+          <div className={assetFooterClass} title={`${home}/skills/`}>{home}/skills/</div>
+        </>
       )}
     </AssetSection>
   );
@@ -453,12 +460,12 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
                     <span className="font-semibold normal-case tracking-normal">· {groupTools.length}</span>
                     <span className="flex-1 h-px bg-line-soft" />
                   </div>
-                  <div className="space-y-1.5">
+                  <div>
                     {groupTools.map((tool) => {
                       const open = openNames.has(tool.name);
                       const params = paramEntries(tool.parameters);
                       return (
-                        <div key={tool.name} className={`rounded-[10px] border bg-surface-1 overflow-hidden ${open ? "border-line-strong" : "border-line-soft"}`}>
+                        <div key={tool.name}>
                           <button
                             type="button"
                             onClick={() => setOpenNames((prev) => {
@@ -467,23 +474,19 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
                               else next.add(tool.name);
                               return next;
                             })}
-                            className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left cursor-pointer hover:bg-surface-2 border-0 bg-transparent text-inherit"
+                            className={`w-full flex items-center gap-2 px-0.5 py-2 text-left cursor-pointer hover:bg-surface-2/60 border-0 border-b border-line-soft bg-transparent text-inherit`}
                           >
-                            <span className={`text-[10px] text-ink-4 mt-1 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-[12.5px] font-bold text-ink-1">{tool.name}</span>
-                                <span className={`text-[9px] font-bold uppercase tracking-wide border rounded-full px-1.5 py-px ${toolBadgeClass(tool.source)}`}>
-                                  {toolSourceKind(tool.source)}
-                                </span>
-                              </div>
-                              {tool.description && (
-                                <div className="text-[11px] text-ink-3 mt-0.5 line-clamp-2 leading-snug">{tool.description}</div>
-                              )}
-                            </div>
+                            <span className={`text-[10px] text-ink-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+                            <span className="font-mono text-[12.5px] font-bold text-ink-1 shrink-0">{tool.name}</span>
+                            <span className={`text-[9px] font-bold uppercase tracking-wide border rounded-full px-1.5 py-px shrink-0 ${toolBadgeClass(tool.source)}`}>
+                              {toolSourceKind(tool.source)}
+                            </span>
+                            {tool.description && (
+                              <span className="text-[11px] text-ink-4 truncate min-w-0 flex-1">{tool.description}</span>
+                            )}
                           </button>
                           {open && (
-                            <div className="border-t border-line-soft px-3 py-2.5 bg-inset space-y-2">
+                            <div className="mb-2 rounded-lg border border-line-soft px-3 py-2.5 bg-inset space-y-2">
                               {tool.description && (
                                 <p className="text-[11.5px] text-ink-2 leading-relaxed m-0">{tool.description}</p>
                               )}
