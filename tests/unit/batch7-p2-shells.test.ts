@@ -90,6 +90,37 @@ describe("persistent shell (real PTY)", () => {
     expect(missing.ok).toBe(false);
   }, 15000);
 
+  it("settleMemberShellWaits ends a blocking wait immediately — running + exec id (qa rc.22 note ①)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+
+    // A blocking exec (10s budget) on a 3s command: normally the tool call
+    // holds until the command ends. The interrupt settle must end the wait
+    // in milliseconds and return running + the exec id.
+    const waitPromise = sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 3; echo SETTLE-DONE", blockUntilMs: 10000 });
+    await new Promise((r) => setTimeout(r, 150));
+    sm.settleMemberShellWaits("mem_sh");
+    const startedAt = Date.now();
+    const result = await waitPromise;
+    const elapsed = Date.now() - startedAt;
+    expect(result.ok && result.status).toBe("running");
+    expect(elapsed).toBeLessThan(1000);
+    if (result.ok && result.status === "running") {
+      expect(result.note).toContain("shell_wait");
+    }
+
+    // The command itself kept running: wait for it and get the full record.
+    const execId = result.ok ? result.exec : "e1";
+    const done = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: execId, blockUntilMs: 0 });
+    expect(done.ok && done.status).toBe("done");
+    if (done.ok && done.status === "done") {
+      expect(done.exitCode).toBe(0);
+      expect(done.output).toContain("SETTLE-DONE");
+    }
+  }, 15000);
+
   it("cwd receipt: cd prints one receipt line; no cd, no receipt (fish 2026-09-04)", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });

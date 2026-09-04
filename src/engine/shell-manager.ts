@@ -65,6 +65,35 @@ interface LiveShell {
 
 const shells = new Map<string, LiveShell>(); // key: memberId::shellId
 
+// Per-member blocking shell_exec waits — settled by interrupt so the tool
+// returns running (with its exec id) immediately instead of holding the
+// member's abort until the command/timeout ends (qa rc.22 note ①).
+const memberShellWaits = new Map<string, Set<() => void>>();
+
+function registerMemberShellWait(memberId: string, settle: () => void): () => void {
+  let set = memberShellWaits.get(memberId);
+  if (!set) {
+    set = new Set();
+    memberShellWaits.set(memberId, set);
+  }
+  set.add(settle);
+  return () => {
+    set!.delete(settle);
+    if (set!.size === 0) memberShellWaits.delete(memberId);
+  };
+}
+
+/** Interrupt support: end every blocking shell_exec wait for this member now.
+ * Each race resolves as running — the command itself keeps going in the PTY. */
+export function settleMemberShellWaits(memberId: string): void {
+  const set = memberShellWaits.get(memberId);
+  if (!set) return;
+  const fns = [...set];
+  set.clear();
+  memberShellWaits.delete(memberId);
+  for (const fn of fns) fn();
+}
+
 function shellKey(memberId: string, shellId: string): string {
   return `${memberId}::${shellId}`;
 }
@@ -391,10 +420,24 @@ export async function execInShell(args: {
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : BLOCK_UNTIL_MS_DEFAULT;
   const timer = blockMs > 0 ? setTimeout(() => {}, blockMs) : null; // keep the event loop honest in tests
   let settled = false;
+  // Abort settle (qa rc.22 note ①): a blocking wait must end the moment the
+  // member is interrupted — settleMemberShellWaits resolves this race as
+  // running instead of holding the abort hostage until the command/timeout
+  // finishes.
+  const waitReg: { unregister?: () => void } = {};
   const raced = await Promise.race([
     done.then(() => true),
-    blockMs > 0 ? new Promise<boolean>((resolve) => setTimeout(() => resolve(false), blockMs)) : Promise.resolve(false), // 0 = never block (qa rc.20 Major: a never-resolving promise here turned "background immediately" into a hang)
+    blockMs > 0
+      ? new Promise<boolean>((resolve) => {
+          const t = setTimeout(() => resolve(false), blockMs);
+          waitReg.unregister = registerMemberShellWait(args.memberId, () => {
+            clearTimeout(t);
+            resolve(false);
+          });
+        })
+      : Promise.resolve(false), // 0 = never block (qa rc.20 Major: a never-resolving promise here turned "background immediately" into a hang)
   ]);
+  waitReg.unregister?.();
   settled = raced;
   if (timer) clearTimeout(timer);
 
@@ -407,7 +450,7 @@ export async function execInShell(args: {
     status: "running",
     lineStart: exec.lineStart,
     outputSoFar: exec.output,
-    note: `Still running after ${blockMs}ms — read more later with shell_read (shell ${args.shell}, exec ${exec.id}). Nested shells do not emit completion markers.`,
+    note: `Still running after ${blockMs}ms — collect output later with shell_read, or wait for completion with shell_wait (shell ${args.shell}, exec ${exec.id}). Nested shells do not emit completion markers.`,
   };
 }
 
