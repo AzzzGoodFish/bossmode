@@ -370,34 +370,46 @@ function AssetsTab({ member, scope, liveStatus }: {
       <AssetSection title="MCP Servers" count={assets ? String(assets.mcpServers.length) : undefined}>
         {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
         {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s MCP servers.</div>}
-        <div className="space-y-1.5">
-          {assets?.mcpServers.map((srv) => (
-            <div key={srv.name} className={assetRowClass}>
-              <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{srv.name}</span>
-              {typeof srv.toolCount === "number" && <span className="ml-auto shrink-0 text-[10px] text-ink-4 tabular-nums">{srv.toolCount} tools</span>}
+        {assets && assets.mcpServers.length === 0 ? (
+          <div className="flex items-baseline gap-2 px-0.5 py-2 text-[12px] text-ink-4">
+            None yet.
+            <span className={`ml-auto ${assetFooterClass} pt-0`} title={`${home}/mcp.json`}>{home}/mcp.json</span>
+          </div>
+        ) : (
+          <>
+            <div>
+              {assets?.mcpServers.map((srv) => (
+                <div key={srv.name} className={assetRowClass}>
+                  <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{srv.name}</span>
+                  {typeof srv.toolCount === "number" && <span className="ml-auto shrink-0 text-[10px] text-ink-4 tabular-nums">{srv.toolCount} tools</span>}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        {assets && assets.mcpServers.length === 0 && (
-          <div className={assetEmptyClass}>None yet.</div>
+            <div className={assetFooterClass} title={`${home}/mcp.json`}>{home}/mcp.json</div>
+          </>
         )}
-        <div className={assetFooterClass} title={`${home}/mcp.json`}>{home}/mcp.json</div>
       </AssetSection>
 
       <AssetSection title="Pi extensions" count={assets ? String(assets.extensions.length) : undefined}>
         {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
         {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s extensions.</div>}
-        <div className="space-y-1.5">
-          {assets?.extensions.map((ext) => (
-            <div key={ext.name} className={assetRowClass}>
-              <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ext.name}</span>
+        {assets && assets.extensions.length === 0 ? (
+          <div className="flex items-baseline gap-2 px-0.5 py-2 text-[12px] text-ink-4">
+            None yet.
+            <span className={`ml-auto ${assetFooterClass} pt-0`} title={`${home}/extensions/`}>{home}/extensions/</span>
+          </div>
+        ) : (
+          <>
+            <div>
+              {assets?.extensions.map((ext) => (
+                <div key={ext.name} className={assetRowClass}>
+                  <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ext.name}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        {assets && assets.extensions.length === 0 && (
-          <div className={assetEmptyClass}>None yet.</div>
+            <div className={assetFooterClass} title={`${home}/extensions/`}>{home}/extensions/</div>
+          </>
         )}
-        <div className={assetFooterClass} title={`${home}/extensions/`}>{home}/extensions/</div>
       </AssetSection>
 
       {assetsFailed ? (
@@ -405,21 +417,19 @@ function AssetsTab({ member, scope, liveStatus }: {
           <div className={assetEmptyClass}>Couldn’t load this member’s skills.</div>
         </AssetSection>
       ) : (
-        <MemberSkillsCard skills={assets?.skills ?? null} />
+        <MemberSkillsCard skills={assets?.skills ?? null} home={home} />
       )}
 
-      {/* memory — shared platform directories, pointers only */}
+      {/* memory — shared platform directories, the same for every member:
+       * static knowledge, not an asset — one quiet line, not two rows. */}
       <AssetSection
         title="Memory"
         info="Shared across all members — the same directories everyone reads."
         count="2"
       >
-        <div className="space-y-1.5">
-          {["~/.bossmode/memory/user/", "~/.bossmode/memory/projects/"].map((path) => (
-            <div key={path} className={assetRowClass}>
-              <span className="font-mono text-[11.5px] text-ink-3 truncate">{path}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-2.5 px-0.5 py-2">
+          <span className="font-mono text-[11.5px] text-ink-3 truncate">~/.bossmode/memory/</span>
+          <span className="ml-auto shrink-0 font-mono text-[10.5px] text-ink-4">user/ · projects/</span>
         </div>
       </AssetSection>
 
@@ -449,7 +459,7 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
     <AssetSection title="Workspaces" count={assets ? String(assets.workspaces.length) : undefined}>
       {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
       {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s workspaces.</div>}
-      <div className="space-y-1.5">
+      <div>
         {assets?.workspaces.map((ws) => (
           <div key={ws.id} className={assetRowClass}>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ws.active ? "bg-onair" : "bg-ink-4/40"}`} />
