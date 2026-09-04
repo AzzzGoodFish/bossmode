@@ -71,7 +71,7 @@ export const PARAM_DESCRIPTIONS = {
   shellCwd: "Starting directory. Defaults to the workspace root.",
   shellCommand: "The command line to run.",
   shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
-  shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block.",
+  shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with shell_read.",
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
