@@ -23,7 +23,7 @@ import { useDialog } from "./dialogs";
 import { copyText } from "../utils/clipboard";
 import {
   MemberSkillsCard, ContextSessionCard, ActiveToolsSection,
-  formatTokens,
+  buildModelRows, type RowOption,
 } from "./member-scope";
 import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 import {
@@ -561,12 +561,8 @@ function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: M
   );
 }
 
-type RowOption = { id: string; label: string; quiet?: string; title?: string; unavailable?: boolean };
-
-/** Workstations-style row picker (fish 2026-09-02/03): one visual language for
- * both model and think-level selects — trigger row shows label + quiet suffix,
- * popover rows carry name + provider/level + a check on the current one;
- * capability numbers live in row hover tooltips, never printed. */
+/** Row visuals for both selects — row building for models lives in
+ * member-scope.buildModelRows (shared with the roster chip pop). */
 function RowSelect({ value, rows, onChange, emptyLabel, emptyHint }: {
   value: string | null;
   rows: RowOption[];
@@ -649,37 +645,11 @@ function ModelRowSelect({ value, models, onChange }: {
   models: AvailableModelOption[];
   onChange: (v: { model: string | null; credentialId: string | null }) => void;
 }) {
-  const current = value.model
-    ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
-    : undefined;
-  const sorted = [...models].sort((a, b) =>
-    (a.providerDisplayName || a.providerSlug).localeCompare(b.providerDisplayName || b.providerSlug) || (a.displayName || a.modelId).localeCompare(b.displayName || b.modelId));
-  const pairCount = new Map<string, number>();
-  for (const m of sorted) {
-    const k = `${m.displayName || m.modelId}::${m.providerDisplayName || m.providerSlug}`;
-    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
-  }
-  const caps = (m: AvailableModelOption) => {
-    const parts = [m.provider || m.providerSlug];
-    if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} ctx`);
-    if (m.maxTokens) parts.push(`${formatTokens(m.maxTokens)} out`);
-    if (m.reasoning) parts.push("thinking");
-    if (m.images) parts.push("images");
-    return parts.join(" · ");
-  };
-  const byId = new Map<string, AvailableModelOption>();
-  const rows: RowOption[] = sorted.map((m) => {
-    const id = `${m.profileId}::${m.ref}`;
-    byId.set(id, m);
-    const provider = m.providerDisplayName || m.providerSlug;
-    const k = `${m.displayName || m.modelId}::${provider}`;
-    return { id, label: m.displayName || m.modelId, quiet: pairCount.get(k)! > 1 ? `${provider} · ${m.profileName}` : provider, title: caps(m) };
-  });
-  if (value.model && !current) rows.unshift({ id: "__current", label: value.model, quiet: "unavailable", unavailable: true });
+  const { rows, byId, currentId } = buildModelRows(models, value);
 
   return (
     <RowSelect
-      value={current ? `${current.profileId}::${current.ref}` : value.model ? "__current" : null}
+      value={currentId}
       rows={rows}
       emptyLabel="Not configured"
       emptyHint="No models available. Connect a provider in Settings → Models."
