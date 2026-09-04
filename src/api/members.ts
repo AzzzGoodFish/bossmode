@@ -441,13 +441,6 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         agentPrompt: compiled.agentPrompt,
         appendSystemPrompt: compiled.appendSystemPrompt,
       });
-      if (text === null) {
-        sendJson(res, 501, {
-          error: "pi_builtin_prompt_mode",
-          message: "Member runs with pi's built-in system prompt (experimental flag); byte-identical preview is not available.",
-        });
-        return;
-      }
       sendJson(res, 200, {
         text,
         charCount: text.length,

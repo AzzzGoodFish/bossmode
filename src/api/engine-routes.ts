@@ -258,7 +258,6 @@ function normalizeRuntimeSettings(runtime: any = {}) {
     : undefined;
   return {
     sessionResume: runtime.sessionResume !== false,
-    piBuiltinPrompt: runtime.piBuiltinPrompt === true,
     topicSeedMode: runtime.topicSeedMode === "fresh" ? "fresh" : "fork",
     codexTransport: transport,
     websocketConnectTimeoutMs,
@@ -280,7 +279,6 @@ addRoute("GET", "/api/settings/runtime", async (_req, res) => {
 addRoute("PUT", "/api/settings/runtime", async (req, res) => {
   const body = (await parseBody(req)) as {
     sessionResume?: boolean;
-    piBuiltinPrompt?: boolean;
     topicSeedMode?: "fork" | "fresh";
     codexTransport?: PiTransportSetting;
     websocketConnectTimeoutMs?: number | null;
@@ -291,9 +289,6 @@ addRoute("PUT", "/api/settings/runtime", async (req, res) => {
     const runtime = {
       ...(config.runtime || {}),
       sessionResume: body.sessionResume === undefined ? config.runtime?.sessionResume !== false : body.sessionResume !== false,
-      piBuiltinPrompt: body.piBuiltinPrompt === undefined
-        ? config.runtime?.piBuiltinPrompt === true
-        : body.piBuiltinPrompt === true,
       topicSeedMode: (body.topicSeedMode === undefined
         ? config.runtime?.topicSeedMode === "fresh"
         : body.topicSeedMode === "fresh") ? "fresh" as const : "fork" as const,

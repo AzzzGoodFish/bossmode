@@ -1181,8 +1181,7 @@ export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "ss
 
 export interface RuntimeSettings {
   sessionResume: boolean;
-  /** Keep pi built-in system prompt; bossmode role goes to append (non-general only). */
-  piBuiltinPrompt?: boolean;
+
   /** Default topic seed: fork inherits room session; fresh starts empty. */
   topicSeedMode?: "fork" | "fresh";
   codexTransport?: PiTransportSetting;

@@ -14,13 +14,6 @@ export interface BossmodeRuntimeConfig {
   websocketConnectTimeoutMs?: number;
   /** HTTP idle timeout passed to pi SDK when set. */
   httpIdleTimeoutMs?: number;
-  /**
-   * When true, non-general agents keep pi's built-in system prompt and place
-   * the bossmode role prompt first in appendSystemPrompt. Default false =
-   * replace pi's built-in with the bossmode role prompt (historical behavior).
-   * Reload member / new instance required. general agent template never uses this.
-   */
-  piBuiltinPrompt?: boolean;
   /** Default topic session seed. fork = inherit room session prefix. Default fork. */
   topicSeedMode?: "fork" | "fresh";
 }
