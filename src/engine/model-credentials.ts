@@ -868,6 +868,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     signal: job.abortController.signal,
     onAuth: (info) => {
       job.authUrl = info.url;
+      job.selectPrompt = undefined; // the choice was made — never leave stale buttons behind
       const deviceCode = parseDeviceCodeFromAuth(info);
       if (deviceCode) {
         job.status = "awaiting_device";
@@ -882,6 +883,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     },
     onPrompt: async (prompt) => {
       job.status = "awaiting_input";
+      job.selectPrompt = undefined;
       job.prompt = prompt.message;
       job.updatedAt = now();
       job.resolveReady();
@@ -890,6 +892,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     },
     onManualCodeInput: async () => {
       job.status = "awaiting_input";
+      job.selectPrompt = undefined;
       job.prompt = "Paste the authorization code or full redirect URL.";
       job.updatedAt = now();
       job.resolveReady();
@@ -897,6 +900,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     },
     onDeviceCode: (deviceCode) => {
       job.status = "awaiting_device";
+      job.selectPrompt = undefined;
       job.deviceCode = deviceCode;
       job.userCode = deviceCode.userCode;
       job.authUrl = deviceCode.verificationUri;
@@ -930,6 +934,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     job.profileId = saved.id;
     job.authUrl = undefined;
     job.userCode = undefined;
+    job.selectPrompt = undefined;
     job.prompt = "OAuth connected.";
     job.error = undefined;
     job.updatedAt = now();
@@ -938,6 +943,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     if (job.status === "cancelled") return;
     job.status = "failed";
     job.error = mapOAuthError(err);
+    job.selectPrompt = undefined;
     job.prompt = "OAuth login failed. Retry from Start login.";
     job.updatedAt = now();
     job.resolveReady();

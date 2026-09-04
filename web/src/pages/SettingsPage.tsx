@@ -746,6 +746,23 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     finally { setBusy(false); }
   };
 
+  /** Select-type prompt (e.g. Codex browser-vs-device-code): render options as
+   * buttons, submit the option ID — never make the user type an internal id
+   * into the paste box (fish 2026-09-04 hit exactly that dead end). */
+  const submitOAuthOption = async (optionId: string) => {
+    if (!oauthJob) return;
+    setBusy(true);
+    try {
+      const next = await submitOAuthConnectionInput(oauthJob.id, optionId);
+      setOauthJob(next);
+      if (next.status === "completed") {
+        toast("Provider connected", "success");
+        onSaved();
+      }
+    } catch (err) { console.error("Failed to submit provider sign-in option", err); toast(userActionError("submit the sign-in choice", "Try again."), "error"); }
+    finally { setBusy(false); }
+  };
+
   const cancelOAuth = async () => {
     if (!oauthJob) { onClose(); return; }
     setBusy(true);
@@ -821,12 +838,29 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
                     <div className="space-y-3">
                       {!oauthJob && <button type="button" onClick={startOAuth} disabled={busy} className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Starting..." : "Start login"}</button>}
                       {oauthJob && <div className="rounded border border-line-soft bg-inset p-3 space-y-2 text-xs text-ink-3">
-                        <div>Status: <span className="font-medium">{oauthStatusLabel(oauthJob.status)}</span></div>
-                        {oauthJob.prompt && <div>{oauthJob.prompt}</div>}
+                        <div>Status: <span className="font-medium">{oauthJob.status === "awaiting_input" && oauthJob.selectPrompt ? "Waiting for your choice" : oauthStatusLabel(oauthJob.status)}</span></div>
+                        {oauthJob.prompt && !(oauthJob.status === "awaiting_input" && oauthJob.selectPrompt) && <div>{oauthJob.prompt}</div>}
                         {oauthJob.authUrl && <a className="text-accent-ink hover:underline break-all" href={oauthJob.authUrl} target="_blank" rel="noreferrer">Open login page</a>}
                         {oauthJob.deviceCode && <div className="space-y-1"><div>Code: <code>{oauthJob.deviceCode.userCode}</code></div><a className="text-accent-ink hover:underline break-all" href={oauthJob.deviceCode.verificationUri} target="_blank" rel="noreferrer">{oauthJob.deviceCode.verificationUri}</a></div>}
-                        {oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}
-                        {oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">Submit</button></div>}
+                        {oauthJob.userCode && !oauthJob.deviceCode && <div>Code: <code>{oauthJob.userCode}</code></div>}
+                        {oauthJob.status === "awaiting_input" && oauthJob.selectPrompt ? (
+                          <div className="space-y-2">
+                            <div className="text-ink-2">{oauthJob.selectPrompt.message}</div>
+                            <div className="flex flex-col gap-1.5">
+                              {oauthJob.selectPrompt.options.map((o) => (
+                                <button
+                                  key={o.id}
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void submitOAuthOption(o.id)}
+                                  className="w-full text-left rounded border border-line bg-surface-1 px-3 py-2 text-xs text-ink-1 hover:border-accent hover:bg-accent-dim disabled:opacity-40 cursor-pointer"
+                                >
+                                  {o.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">Submit</button></div>}
                         {oauthJob.error && <div className="text-blocked">Sign-in failed. Try again or choose another connection method.</div>}
                         {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-ink-3 hover:text-ink-1">Cancel login</button>}
                       </div>}
