@@ -61,6 +61,59 @@ export function statusLabel(status: string): string {
   }
 }
 
+// ── model picker rows (shared: float Settings ModelRowSelect + roster chip
+// pop, fish 2026-09-04 — one builder so every surface lists models the same
+// way: provider-sorted, quiet provider/profile suffix, capability numbers in
+// hover tooltips only, never printed) ───────────────────────────────────────
+
+export type RowOption = { id: string; label: string; quiet?: string; title?: string; unavailable?: boolean };
+
+export function buildModelRows(models: AvailableModelOption[], value: { model: string | null; credentialId: string | null }): {
+  rows: RowOption[];
+  byId: Map<string, AvailableModelOption>;
+  currentId: string | null;
+} {
+  const current = value.model
+    ? models.find((m) => (value.credentialId ? m.profileId === value.credentialId && m.ref === value.model : m.ref === value.model))
+    : undefined;
+  // Legacy bindings can store a bare model id (no provider prefix) — fall back
+  // to credential + modelId matching so the current row still gets its check
+  // instead of a phantom "unavailable" row.
+  const matched = current ?? (value.model
+    ? models.find((m) => {
+        if (value.credentialId && m.profileId !== value.credentialId) return false;
+        const id = m.ref.includes("/") ? m.ref.slice(m.ref.indexOf("/") + 1) : m.ref;
+        const vid = value.model!.includes("/") ? value.model!.slice(value.model!.indexOf("/") + 1) : value.model!;
+        return id === vid;
+      })
+    : undefined);
+  const sorted = [...models].sort((a, b) =>
+    (a.providerDisplayName || a.providerSlug).localeCompare(b.providerDisplayName || b.providerSlug) || (a.displayName || a.modelId).localeCompare(b.displayName || b.modelId));
+  const pairCount = new Map<string, number>();
+  for (const m of sorted) {
+    const k = `${m.displayName || m.modelId}::${m.providerDisplayName || m.providerSlug}`;
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  const caps = (m: AvailableModelOption) => {
+    const parts = [m.provider || m.providerSlug];
+    if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} ctx`);
+    if (m.maxTokens) parts.push(`${formatTokens(m.maxTokens)} out`);
+    if (m.reasoning) parts.push("thinking");
+    if (m.images) parts.push("images");
+    return parts.join(" · ");
+  };
+  const byId = new Map<string, AvailableModelOption>();
+  const rows: RowOption[] = sorted.map((m) => {
+    const id = `${m.profileId}::${m.ref}`;
+    byId.set(id, m);
+    const provider = m.providerDisplayName || m.providerSlug;
+    const k = `${m.displayName || m.modelId}::${provider}`;
+    return { id, label: m.displayName || m.modelId, quiet: pairCount.get(k)! > 1 ? `${provider} · ${m.profileName}` : provider, title: caps(m) };
+  });
+  if (value.model && !matched) rows.unshift({ id: "__current", label: value.model, quiet: "unavailable", unavailable: true });
+  return { rows, byId, currentId: matched ? `${matched.profileId}::${matched.ref}` : value.model ? "__current" : null };
+}
+
 // ── card primitives (verbatim from StationPanel) ────────────────────────────
 
 export function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }) {

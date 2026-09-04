@@ -3,13 +3,14 @@ import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession, steerAgent,
-  getMemberStats, getMemberActiveTools,
+  getMemberStats, getMemberActiveTools, patchGlobalMember,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
 } from "../api/client";
 import { useMemberFloat } from "./member-float";
 import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
-import { formatTokens, compactModelId, memberModelAvailabilityLabel, statusLabel } from "./member-scope";
+import { formatTokens, compactModelId, memberModelAvailabilityLabel, statusLabel, buildModelRows, type RowOption } from "./member-scope";
+import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 
 import { ToggleSwitch } from "./ToggleSwitch";
 import { Markdown } from "./Markdown";
@@ -217,12 +218,50 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   // Member peek (Discord-style popout, fish 2026-09-02): roster row click
   // opens the card — glancing never leaves the conversation.
   const [peek, setPeek] = useState<{ name: string; rect: DOMRect } | null>(null);
+  // Roster chip quick-config (fish 2026-09-04: "改回去吧" — the model/think
+  // chips get their quick popover back). One click switches the member's
+  // GLOBAL config (same write target as the float Settings tab); the deep
+  // path stays available as a "Member settings…" footer row.
+  const [chipPop, setChipPop] = useState<{ name: string; kind: "model" | "think"; rect: DOMRect } | null>(null);
+  const [chipSaving, setChipSaving] = useState(false);
   const closePops = useCallback(() => {
     setPeek(null);
+    setChipPop(null);
   }, []);
   const openPeek = (name: string, el: HTMLElement) => {
     closePops();
     setPeek((prev) => prev?.name === name ? null : { name, rect: el.getBoundingClientRect() });
+  };
+  const openChipPop = (name: string, kind: "model" | "think", el: HTMLElement) => {
+    setPeek(null);
+    setChipPop((prev) => prev && prev.name === name && prev.kind === kind ? null : { name, kind, rect: el.getBoundingClientRect() });
+  };
+
+  /** Chip pop selection → write the member's global config (identical patch
+   * to the float Settings tab), then reflect it back into the roster row. */
+  const saveChipConfig = async (name: string, patch: Record<string, unknown>) => {
+    const info = memberInfos[name];
+    if (!info || chipSaving) return;
+    setChipSaving(true);
+    try {
+      const res = await patchGlobalMember(info.id || name, patch);
+      const g = res.member.global;
+      setMemberInfos((prev) => ({
+        ...prev,
+        [name]: {
+          ...prev[name],
+          model: g?.model ?? null,
+          credentialId: g?.credentialId ?? null,
+          thinkingLevel: g?.thinkingLevel ?? "",
+        },
+      }));
+      setChipPop(null);
+    } catch (err) {
+      console.error(err);
+      toast(`Couldn't update ${name}. Try again from member settings.`, "error");
+    } finally {
+      setChipSaving(false);
+    }
   };
 
   /** Card river (fish 2026-08-21): flat one-line cards, each self-tagged with
@@ -384,12 +423,13 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                     </button>
                     {info && (
                       <>
-                        {/* batch 5b: model/think are global per member — chips
-                         * display the value and open the float Settings tab
-                         * (the one place to change it). No per-scope pops. */}
+                        {/* fish 2026-09-04: quick-config pops are BACK on the
+                         * chips — one click switches the global config (same
+                         * write target as the float Settings tab); "Member
+                         * settings…" in the pop is the deep path. */}
                         <button
-                          onClick={(e) => { e.stopPropagation(); float.open(info.id || name, `room:${roomId}`, "settings"); }}
-                          title={`${modelChipTitle} · global — opens member settings`}
+                          onClick={(e) => { e.stopPropagation(); openChipPop(name, "model", e.currentTarget); }}
+                          title={`${modelChipTitle} · global — click to switch`}
                           className={`font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors truncate min-w-0 max-w-[104px] hover:bg-accent-dim ${
                             !isConfigured || !modelAvailable ? "text-think" : "text-ink-4 hover:text-accent-ink"
                           }`}
@@ -397,8 +437,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
                           {modelChipLabel}
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); float.open(info.id || name, `room:${roomId}`, "settings"); }}
-                          title={`think · ${info.thinkingLevel || "off"} · global — opens member settings`}
+                          onClick={(e) => { e.stopPropagation(); openChipPop(name, "think", e.currentTarget); }}
+                          title={`think · ${info.thinkingLevel || "off"} · global — click to switch`}
                           className="font-mono text-[10px] leading-none rounded px-1 py-px cursor-pointer transition-colors shrink-0 text-ink-4 hover:text-accent-ink hover:bg-accent-dim"
                         >
                           think <span className={`font-semibold ${thinkLevelTextClass(info.thinkingLevel || "default")}`}>{info.thinkingLevel || "default"}</span>
@@ -550,6 +590,30 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
           models={models}
           onClose={() => setPeek(null)}
           onRemoved={() => { setPeek(null); void onMembersChanged?.(); }}
+        />
+      )}
+      {chipPop && memberInfos[chipPop.name] && (
+        <ChipConfigPop
+          kind={chipPop.kind}
+          name={chipPop.name}
+          info={memberInfos[chipPop.name]}
+          models={models}
+          anchorRect={chipPop.rect}
+          saving={chipSaving}
+          onPick={(id, byId) => {
+            if (chipPop.kind === "model") {
+              const m = id ? byId?.get(id) : undefined;
+              if (m) void saveChipConfig(chipPop.name, { model: m.ref, credentialId: m.profileId });
+            } else {
+              void saveChipConfig(chipPop.name, { thinkingLevel: id === null || id === "off" ? null : id });
+            }
+          }}
+          onOpenSettings={() => {
+            const info = memberInfos[chipPop.name];
+            setChipPop(null);
+            if (info) float.open(info.id || chipPop.name, `room:${roomId}`, "settings");
+          }}
+          onClose={() => setChipPop(null)}
         />
       )}
     </div>
@@ -847,6 +911,107 @@ function FilterPop({ members, current, anchorRect, onSelect, onClose }: {
   return createPortal(
     <div ref={ref} onClick={(e) => e.stopPropagation()} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5" style={{ left, width, ...vertical, boxShadow: "var(--shadow-pop)" }}>
       {content}
+    </div>,
+    document.body,
+  );
+}
+
+
+
+/** Roster chip quick-config pop (fish 2026-09-04: quick switching is back on
+ * the model/think chips). Rows speak the float Settings row language
+ * (buildModelRows is the shared builder); the write target is the member's
+ * GLOBAL config — the same place the float Settings tab writes. */
+function ChipConfigPop({ kind, name, info, models, anchorRect, saving, onPick, onOpenSettings, onClose }: {
+  kind: "model" | "think";
+  name: string;
+  info: MemberInfo;
+  models: AvailableModelOption[];
+  anchorRect: DOMRect;
+  saving: boolean;
+  onPick: (id: string | null, byId?: Map<string, AvailableModelOption>) => void;
+  onOpenSettings: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const width = kind === "model" ? 232 : 160;
+  const gap = 6;
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const onResize = () => onClose();
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [onClose]);
+
+  // Same option math as the float Settings tab (thinking levels depend on the
+  // bound model's thinkingLevelMap; "off" writes null = no override).
+  const modelData = kind === "model"
+    ? buildModelRows(models, { model: info.model ?? null, credentialId: info.credentialId ?? null })
+    : null;
+  let thinkRows: RowOption[] = [];
+  let thinkCurrent = "";
+  if (kind === "think") {
+    const boundModel = findModelOptionForBinding(info.model, info.credentialId, models);
+    const options = availableThinkingLevels(boundModel).filter((l) => l.value !== null).map((l) => l.value as string);
+    thinkCurrent = info.thinkingLevel || "off";
+    const all = options.includes(thinkCurrent) ? options : [thinkCurrent, ...options];
+    thinkRows = all.map((l) => ({ id: l, label: l }));
+  }
+  const rows = kind === "model" ? modelData!.rows : thinkRows;
+  const currentId = kind === "model" ? modelData!.currentId : thinkCurrent;
+
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, anchorRect.left));
+  const opensUp = window.innerHeight - anchorRect.bottom < 300 && anchorRect.top > 300;
+  const vertical = opensUp ? { bottom: window.innerHeight - anchorRect.top + gap } : { top: anchorRect.bottom + gap };
+
+  return createPortal(
+    <div ref={ref} onClick={(e) => e.stopPropagation()} className="fixed z-50 bg-surface-3 border border-line-strong rounded-lg p-1.5" style={{ left, width, ...vertical, boxShadow: "var(--shadow-pop)" }}>
+      <div className="px-2 pt-1.5 pb-1 text-[9px] font-semibold tracking-[0.05em] text-ink-4 uppercase truncate">
+        {kind === "model" ? "Model" : "Think level"} · {name}
+        <span className="normal-case tracking-normal font-normal"> · global</span>
+      </div>
+      <div className="flex flex-col gap-px px-1 pb-1 max-h-64 overflow-y-auto">
+        {rows.length === 0 && (
+          <div className="px-2 py-2 text-[11px] text-think leading-snug">No models available. Connect a provider in Settings → Models.</div>
+        )}
+        {rows.map((r) => {
+          const selected = r.id === currentId;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              disabled={saving || r.unavailable}
+              title={r.title}
+              onClick={() => onPick(r.id, modelData?.byId)}
+              className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${r.unavailable ? "opacity-70 cursor-default" : "cursor-pointer hover:bg-surface-2"} ${saving ? "opacity-60" : ""}`}
+            >
+              <span className={`text-[12px] font-medium truncate ${r.unavailable ? "text-think" : kind === "think" ? thinkLevelTextClass(r.id) : "text-ink-1"}`}>{r.label}</span>
+              {r.quiet && <span className="text-[10px] text-ink-4 truncate">{r.quiet}</span>}
+              {selected && <span className={`ml-auto shrink-0 text-[10px] ${r.unavailable ? "text-think" : "text-accent-ink"}`}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t border-line-soft mx-1" />
+      <div className="px-1 pt-1">
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left cursor-pointer hover:bg-surface-2 transition-colors"
+        >
+          <span className="text-[11.5px] text-ink-3">Member settings…</span>
+        </button>
+      </div>
     </div>,
     document.body,
   );
