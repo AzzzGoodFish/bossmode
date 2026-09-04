@@ -14,7 +14,7 @@
  * read-only listings of the member's own files (presence = enabled).
  */
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { Info } from "lucide-react";
 import {
   getMemberActiveTools, getConversationTools,
   type AvailableModelOption, type ContextUsageData,
@@ -114,61 +114,64 @@ export function buildModelRows(models: AvailableModelOption[], value: { model: s
   return { rows, byId, currentId: matched ? `${matched.profileId}::${matched.ref}` : value.model ? "__current" : null };
 }
 
-// ── card primitives (verbatim from StationPanel) ────────────────────────────
+// ── unified Assets section shell (fish 2026-09-04: the Assets tab spoke
+// several visual languages at once — accordion vs card shells, five count
+// styles, dashed/solid rows, three empty-state phrasings). One shell for
+// every section: header = title + quiet count + right-side action; content
+// always visible (long lists scroll inside, same as persona/system prompt).
 
-export function AssetTag({ children, tone }: { children: string; tone?: "room" | "dm" }) {
-  return (
-    <span className={`text-[9.5px] font-bold uppercase tracking-wide border rounded-full px-2 py-0.5 shrink-0 ${tone === "dm" ? "border-line-soft bg-think-dim text-think" : "border-line-soft bg-surface-2 text-ink-4"}`}>
-      {children}
-    </span>
-  );
-}
+export const assetRowClass = "flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2";
+export const assetActionClass = "inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer";
+export const assetEmptyClass = "text-[12px] text-ink-4 py-1";
+export const assetFooterClass = "font-mono text-[10.5px] text-ink-4 truncate pt-2";
 
-export function PanelCard({ title, tag, aside, hint, children }: {
+export function AssetSection({ title, count, info, action, children }: {
   title: string;
-  tag?: React.ReactNode;
-  aside?: React.ReactNode;
-  hint?: React.ReactNode;
+  count?: string;
+  /** Hover tooltip explaining the section (renders a quiet info glyph). */
+  info?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-line-soft bg-surface-1 p-4">
-      <div className="flex items-center gap-2 min-w-0">
-        <h3 className="text-[13.5px] font-bold text-ink-1 truncate">{title}</h3>
-        {tag}
-        {aside}
+    <section className="rounded-xl border border-line-soft bg-surface-1">
+      <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
+        <h3 className="text-[13.5px] font-bold text-ink-1">{title}</h3>
+        {info && (
+          <span className="inline-flex cursor-help" title={info}>
+            <Info size={11} className="text-ink-4" />
+          </span>
+        )}
+        {count !== undefined && <span className="text-[10px] text-ink-4 tabular-nums">{count}</span>}
+        {action && <span className="ml-auto shrink-0">{action}</span>}
       </div>
-      {hint ? <div className="text-[11.5px] text-ink-4 mt-0.5 leading-relaxed">{hint}</div> : null}
-      {children}
+      <div className="px-4 py-3">{children}</div>
     </section>
   );
 }
 
-// ── profile & skills (verbatim from StationPanel) ───────────────────────────
+// ── profile & skills ────────────────────────────────────────────────────────
 
 /** The member's skills/ directory, read-only: skills are the member's private,
  * self-maintained assets. */
 export function MemberSkillsCard({ skills }: { skills: MemberSkillEntry[] | null }) {
   return (
-    <PanelCard
-      title="Skills"
-      tag={<AssetTag>{skills === null ? "…" : `${skills.length} on file`}</AssetTag>}
-    >
+    <AssetSection title="Skills" count={skills === null ? undefined : String(skills.length)}>
       {skills === null ? (
-        <div className="text-xs text-ink-4 py-1">Loading…</div>
+        <div className={assetEmptyClass}>Loading…</div>
       ) : skills.length === 0 ? (
-        <div className="text-[12px] text-ink-4 py-1">No skills yet — the member writes its own as recurring work settles into routine.</div>
+        <div className={assetEmptyClass}>None yet.</div>
       ) : (
-        <div className="mt-2 space-y-1.5">
+        <div className="space-y-1.5">
           {skills.map((sk) => (
-            <div key={sk.path} className="rounded-lg border border-line-soft bg-surface-2 px-3 py-2">
+            <div key={sk.path} className="rounded-lg border border-line-soft px-3 py-2">
               <div className="text-[12px] font-semibold text-ink-1">{sk.name}</div>
               {sk.description ? <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{sk.description}</div> : null}
             </div>
           ))}
         </div>
       )}
-    </PanelCard>
+    </AssetSection>
   );
 }
 
@@ -247,60 +250,9 @@ export function ContextSessionCard({ contextUsage, onCompact, onResetSession, on
   );
 }
 
-// ── session accordions (SessionSectionAccordion verbatim; ext/mcp contents
-// extracted from MemberConfigPanel JSX) ──────────────────────────────────────
+// ── Active tools ────────────────────────────────────────────────────────────
 
-export function SessionSectionAccordion({
-  title,
-  summary,
-  action,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  summary: string;
-  action?: React.ReactNode;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="rounded-xl border border-line bg-inset/50">
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
-      >
-        <ChevronRight size={14} className={`shrink-0 text-ink-4 transition-transform ${open ? "rotate-90" : ""}`} />
-        <div className="min-w-0 flex-1">
-          <div className={`text-sm font-semibold ${open ? "text-ink-1" : "text-ink-2"}`}>{title}</div>
-          <div className="text-xs text-ink-4 mt-0.5 truncate">{summary}</div>
-        </div>
-        {action && (
-          <div className="shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-            {action}
-          </div>
-        )}
-      </div>
-      {open && <div className="px-4 pb-4 space-y-2.5">{children}</div>}
-    </section>
-  );
-}
-
-// ── Active tools (verbatim from StationPanel) ───────────────────────────────
-
-function activeToolsAccordionSummary(
-  loading: boolean,
-  error: boolean,
-  sessionActive: boolean,
-  tools: MemberActiveTool[],
-): string {
-  if (loading) return "Loading…";
-  if (error) return "Couldn’t load";
-  if (!sessionActive) return "No active session";
+function activeToolsCountSummary(tools: MemberActiveTool[]): string {
   if (tools.length === 0) return "0 live";
   let builtin = 0;
   let bossmode = 0;
@@ -436,35 +388,35 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
     return t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
   });
   const groups = groupToolsBySource(filtered);
-  const summary = activeToolsAccordionSummary(loading, error, sessionActive, tools);
+  const count = loading || error || !sessionActive ? undefined : activeToolsCountSummary(tools);
 
   return (
-    <SessionSectionAccordion
+    <AssetSection
       title="Active tools"
-      summary={summary}
+      count={count}
       action={
         <button
           type="button"
           onClick={() => void load()}
-          className="px-3 py-1.5 border border-line rounded-lg text-xs text-ink-2 hover:bg-surface-2 shrink-0 cursor-pointer"
+          className={assetActionClass}
         >
           Refresh
         </button>
       }
     >
       {loading ? (
-        <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-3">Loading tools…</div>
+        <div className={assetEmptyClass}>Loading tools…</div>
       ) : error ? (
-        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded border border-blocked/30 bg-blocked-dim/25 p-2">
+        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked rounded-lg border border-blocked/30 bg-blocked-dim/25 px-3 py-2">
           <span>Couldn’t load active tools.</span>
           <button type="button" onClick={() => void load()} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10 cursor-pointer">Retry</button>
         </div>
       ) : !sessionActive ? (
-        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">No active session.</div>
+        <div className={assetEmptyClass}>No active session.</div>
       ) : tools.length === 0 ? (
-        <div className="rounded-lg border border-line-soft bg-surface-1 p-3 text-xs text-ink-4">Session is active but no tools are enabled.</div>
+        <div className={assetEmptyClass}>Session is active but no tools are enabled.</div>
       ) : (
-        <>
+        <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">
             {([
               ["all", "All"],
@@ -491,9 +443,9 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
             className="w-full rounded-lg border border-line bg-inset px-3 py-2 text-xs font-mono text-ink-1 outline-none focus:border-accent placeholder:text-ink-4 placeholder:font-sans"
           />
           {groups.length === 0 ? (
-            <div className="text-xs text-ink-4 rounded border border-line-soft bg-surface-1 p-2">No tools match this filter.</div>
+            <div className={assetEmptyClass}>No tools match this filter.</div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
               {groups.map(({ source, tools: groupTools }) => (
                 <div key={source}>
                   <div className="flex items-center gap-2 text-[10px] font-bold tracking-wide uppercase text-ink-4 mb-1.5">
@@ -563,8 +515,8 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
               ))}
             </div>
           )}
-        </>
+        </div>
       )}
-    </SessionSectionAccordion>
+    </AssetSection>
   );
 }

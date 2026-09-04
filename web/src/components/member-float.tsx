@@ -24,6 +24,7 @@ import { copyText } from "../utils/clipboard";
 import {
   MemberSkillsCard, ContextSessionCard, ActiveToolsSection,
   buildModelRows, type RowOption,
+  AssetSection, assetRowClass, assetActionClass, assetEmptyClass, assetFooterClass,
 } from "./member-scope";
 import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 import {
@@ -366,75 +367,61 @@ function AssetsTab({ member, scope, liveStatus }: {
 
       <WorkspacesSection member={member} assets={assets} assetsFailed={assetsFailed} />
 
-      <section className="rounded-xl border border-line-soft bg-surface-1">
-        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-          <h3 className="text-[13.5px] font-bold text-ink-1">MCP Servers</h3>
-          {assets && <span className="text-[10px] text-ink-4">{assets.mcpServers.length === 0 ? "none" : `${assets.mcpServers.length} on file`}</span>}
-        </div>
-        <div className="px-4 py-3 space-y-1.5">
-          {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
-          {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s MCP servers.</div>}
+      <AssetSection title="MCP Servers" count={assets ? String(assets.mcpServers.length) : undefined}>
+        {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
+        {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s MCP servers.</div>}
+        <div className="space-y-1.5">
           {assets?.mcpServers.map((srv) => (
-            <div key={srv.name} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+            <div key={srv.name} className={assetRowClass}>
               <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{srv.name}</span>
-              {srv.toolCount !== undefined && <span className="ml-auto shrink-0 text-[10px] text-ink-4 tabular-nums">{srv.toolCount} tools</span>}
+              {typeof srv.toolCount === "number" && <span className="ml-auto shrink-0 text-[10px] text-ink-4 tabular-nums">{srv.toolCount} tools</span>}
             </div>
           ))}
-          {assets && assets.mcpServers.length === 0 && (
-            <div className="text-[12px] text-ink-4 py-1">No MCP servers yet.</div>
-          )}
-          <div className="font-mono text-[10.5px] text-ink-4 truncate pt-0.5" title={`${home}/mcp.json`}>{home}/mcp.json</div>
         </div>
-      </section>
+        {assets && assets.mcpServers.length === 0 && (
+          <div className={assetEmptyClass}>None yet.</div>
+        )}
+        <div className={assetFooterClass} title={`${home}/mcp.json`}>{home}/mcp.json</div>
+      </AssetSection>
 
-      <section className="rounded-xl border border-line-soft bg-surface-1">
-        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-          <h3 className="text-[13.5px] font-bold text-ink-1">Pi extensions</h3>
-          {assets && <span className="text-[10px] text-ink-4">{assets.extensions.length === 0 ? "none" : `${assets.extensions.length} on file`}</span>}
-        </div>
-        <div className="px-4 py-3 space-y-1.5">
-          {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
-          {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s extensions.</div>}
+      <AssetSection title="Pi extensions" count={assets ? String(assets.extensions.length) : undefined}>
+        {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
+        {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s extensions.</div>}
+        <div className="space-y-1.5">
           {assets?.extensions.map((ext) => (
-            <div key={ext.name} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+            <div key={ext.name} className={assetRowClass}>
               <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ext.name}</span>
             </div>
           ))}
-          {assets && assets.extensions.length === 0 && (
-            <div className="text-[12px] text-ink-4 py-1">No extensions yet.</div>
-          )}
-          <div className="font-mono text-[10.5px] text-ink-4 truncate pt-0.5" title={`${home}/extensions/`}>{home}/extensions/</div>
         </div>
-      </section>
+        {assets && assets.extensions.length === 0 && (
+          <div className={assetEmptyClass}>None yet.</div>
+        )}
+        <div className={assetFooterClass} title={`${home}/extensions/`}>{home}/extensions/</div>
+      </AssetSection>
 
       {assetsFailed ? (
-        <section className="rounded-xl border border-line-soft bg-surface-1">
-          <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-            <h3 className="text-[13.5px] font-bold text-ink-1">Skills</h3>
-          </div>
-          <div className="px-4 py-3 text-[12px] text-ink-4">Couldn’t load this member’s skills.</div>
-        </section>
+        <AssetSection title="Skills">
+          <div className={assetEmptyClass}>Couldn’t load this member’s skills.</div>
+        </AssetSection>
       ) : (
         <MemberSkillsCard skills={assets?.skills ?? null} />
       )}
 
       {/* memory — shared platform directories, pointers only */}
-      <section className="rounded-xl border border-line-soft bg-surface-1">
-        <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-          <h3 className="text-[13.5px] font-bold text-ink-1">Memory</h3>
-          <span className="inline-flex cursor-help" title="Shared across all members — the same directories everyone reads.">
-            <Info size={11} className="text-ink-4" />
-          </span>
-          <span className="text-[10px] text-ink-4">2 directories</span>
-        </div>
-        <div className="px-4 py-3 space-y-2">
+      <AssetSection
+        title="Memory"
+        info="Shared across all members — the same directories everyone reads."
+        count="2"
+      >
+        <div className="space-y-1.5">
           {["~/.bossmode/memory/user/", "~/.bossmode/memory/projects/"].map((path) => (
-            <div key={path} className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2">
+            <div key={path} className={assetRowClass}>
               <span className="font-mono text-[11.5px] text-ink-3 truncate">{path}</span>
             </div>
           ))}
         </div>
-      </section>
+      </AssetSection>
 
       <SystemPromptSection member={member} scope={scope} />
     </div>
@@ -459,16 +446,12 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
   };
 
   return (
-    <section className="rounded-xl border border-line-soft bg-surface-1">
-      <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-        <h3 className="text-[13.5px] font-bold text-ink-1">Workspaces</h3>
-        {assets && <span className="text-[10px] text-ink-4">{assets.workspaces.length}</span>}
-      </div>
-      <div className="px-4 py-3 space-y-1.5">
-        {assets === null && !assetsFailed && <div className="text-[12px] text-ink-4 py-1">Loading…</div>}
-        {assetsFailed && <div className="text-[12px] text-ink-4 py-1">Couldn’t load this member’s workspaces.</div>}
+    <AssetSection title="Workspaces" count={assets ? String(assets.workspaces.length) : undefined}>
+      {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
+      {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s workspaces.</div>}
+      <div className="space-y-1.5">
         {assets?.workspaces.map((ws) => (
-          <div key={ws.id} className="flex items-center gap-2.5 rounded-lg border border-line-soft px-3 py-2">
+          <div key={ws.id} className={assetRowClass}>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ws.active ? "bg-onair" : "bg-ink-4/40"}`} />
             <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ws.id}</span>
             <span className="text-[10px] text-ink-4 uppercase tracking-wide shrink-0">{ws.kind}</span>
@@ -477,14 +460,14 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
           </div>
         ))}
         {assets?.sshPublicKey && (
-          <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2">
+          <div className={assetRowClass}>
             <span className="text-[11px] text-ink-3 shrink-0">SSH public key</span>
             <span className="font-mono text-[10.5px] text-ink-4 truncate min-w-0" title={assets.sshPublicKey}>{assets.sshPublicKey}</span>
             <button
               type="button"
               onClick={() => void copyKey()}
               title={copied === false ? "Copy failed — clipboard unavailable" : "Copy the public key"}
-              className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer"
+              className={`ml-auto shrink-0 ${assetActionClass}`}
             >
               {copied === true ? <Check size={11} className="text-onair" /> : copied === false ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
               {copied === true ? "Copied" : copied === false ? "Failed" : "Copy"}
@@ -492,7 +475,7 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
           </div>
         )}
       </div>
-    </section>
+    </AssetSection>
   );
 }
 
@@ -522,42 +505,37 @@ function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: M
   };
 
   return (
-    <section className="rounded-xl border border-line-soft bg-surface-1">
-      <div className="px-4 py-2.5 border-b border-line-soft flex items-center gap-2">
-        <h3 className="text-[13.5px] font-bold text-ink-1">System prompt</h3>
-        <span className="inline-flex cursor-help" title="The exact prompt this member runs with in this scope — assembled live, byte-identical to what activation injects.">
-          <Info size={11} className="text-ink-4" />
-        </span>
-        {doc && <span className="text-[10px] text-ink-4 tabular-nums">{doc.charCount.toLocaleString()} chars</span>}
-        {doc && (
-          <button
-            type="button"
-            onClick={() => void copy()}
-            title={copied === false ? "Copy failed — clipboard unavailable" : "Copy the full prompt"}
-            className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-md border border-line-soft px-2 py-1 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer"
-          >
-            {copied === true ? <Check size={11} className="text-onair" /> : copied === false ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
-            {copied === true ? "Copied" : copied === false ? "Failed" : "Copy"}
-          </button>
-        )}
-      </div>
-      <div className="px-4 py-3">
-        {failed ? (
-          <div className="text-[12px] text-ink-4 py-1">Couldn’t load the system prompt for this scope.</div>
-        ) : doc === null ? (
-          <div className="text-[12px] text-ink-4 py-1">Loading…</div>
-        ) : (
-          <div className="rounded-lg border border-line-soft bg-inset/50 px-3 py-2 max-h-[340px] overflow-y-auto">
-            <div className="whitespace-pre-wrap font-mono text-[11.5px] text-ink-3 leading-relaxed">{doc.text}</div>
-          </div>
-        )}
-        {doc && (
-          <div className="mt-2 font-mono text-[10.5px] text-ink-4 truncate" title={`scope ${doc.scopeId} · contract ${doc.contractFingerprint}`}>
-            {doc.scopeId} · {doc.contractFingerprint.slice(0, 8)}
-          </div>
-        )}
-      </div>
-    </section>
+    <AssetSection
+      title="System prompt"
+      info="The exact prompt this member runs with in this scope — assembled live, byte-identical to what activation injects."
+      count={doc ? `${doc.charCount.toLocaleString()} chars` : undefined}
+      action={doc ? (
+        <button
+          type="button"
+          onClick={() => void copy()}
+          title={copied === false ? "Copy failed — clipboard unavailable" : "Copy the full prompt"}
+          className={assetActionClass}
+        >
+          {copied === true ? <Check size={11} className="text-onair" /> : copied === false ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
+          {copied === true ? "Copied" : copied === false ? "Failed" : "Copy"}
+        </button>
+      ) : undefined}
+    >
+      {failed ? (
+        <div className={assetEmptyClass}>Couldn’t load the system prompt for this scope.</div>
+      ) : doc === null ? (
+        <div className={assetEmptyClass}>Loading…</div>
+      ) : (
+        <div className="rounded-lg border border-line-soft bg-inset/50 px-3 py-2 max-h-[340px] overflow-y-auto">
+          <div className="whitespace-pre-wrap font-mono text-[11.5px] text-ink-3 leading-relaxed">{doc.text}</div>
+        </div>
+      )}
+      {doc && (
+        <div className={assetFooterClass} title={`scope ${doc.scopeId} · contract ${doc.contractFingerprint}`}>
+          {doc.scopeId} · {doc.contractFingerprint.slice(0, 8)}
+        </div>
+      )}
+    </AssetSection>
   );
 }
 
