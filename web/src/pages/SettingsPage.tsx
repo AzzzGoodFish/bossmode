@@ -51,7 +51,6 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     sessionResume: settings.sessionResume !== false,
-    piBuiltinPrompt: settings.piBuiltinPrompt === true,
     topicSeedMode: settings.topicSeedMode === "fresh" ? "fresh" : "fork",
     codexTransport: settings.codexTransport || "auto",
     websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
@@ -79,7 +78,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const { toast, confirm } = useDialog();
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
-    piBuiltinPrompt: false,
     topicSeedMode: "fork",
     codexTransport: "auto",
     websocketConnectTimeoutMs: 15000,
@@ -182,10 +180,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     await handleRuntimeChange({ sessionResume: !runtimeSettings.sessionResume });
   };
 
-  const handlePiBuiltinPromptToggle = async () => {
-    await handleRuntimeChange({ piBuiltinPrompt: !runtimeSettings.piBuiltinPrompt });
-  };
-
   const handleTopicSeedModeToggle = async () => {
     await handleRuntimeChange({ topicSeedMode: runtimeSettings.topicSeedMode === "fresh" ? "fork" : "fresh" });
   };
@@ -265,24 +259,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               on={!!runtimeSettings.sessionResume}
               onToggle={() => handleSessionResumeToggle()}
               label="Continue previous sessions"
-              disabled={runtimeSaving}
-            />
-          </div>
-        </div>
-
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Use pi built-in system prompt</div>
-              <div className="text-xs text-ink-3 mt-0.5">
-                When on, non-general agents keep pi&apos;s built-in system prompt and Bossmode role text is appended.
-                General agents are unchanged. Reload member after changing.
-              </div>
-            </div>
-            <ToggleSwitch
-              on={!!runtimeSettings.piBuiltinPrompt}
-              onToggle={() => handlePiBuiltinPromptToggle()}
-              label="Built-in prompt"
               disabled={runtimeSaving}
             />
           </div>

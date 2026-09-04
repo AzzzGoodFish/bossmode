@@ -28,38 +28,20 @@ const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
 /**
  * Resolve systemPrompt vs appendSystemPrompt for pi DefaultResourceLoader.
- * piBuiltinPrompt ON + non-general: keep pi built-in system prompt, put role
- * prompt first in append. Otherwise replace system prompt with role (status quo).
+ * The bossmode-compiled prompt is the only source (fish 2026-09-04: the
+ * piBuiltinPrompt flag is retired) — pi's built-in system prompt never loads.
  * Exported for unit tests.
  */
 export function resolvePiSystemPromptSources(args: {
   agentPrompt: string;
   appendSystemPrompt: string[];
-  agentTemplate: string;
-  piBuiltinPrompt: boolean;
 }): { systemPrompt: string | undefined; appendSystemPrompt: string[] } {
   const rolePrompt = args.agentPrompt.trim();
   const appends = args.appendSystemPrompt.filter((v) => !!v && v.trim().length > 0);
-  const useBuiltin = args.piBuiltinPrompt === true && args.agentTemplate !== "general";
-  if (useBuiltin) {
-    // undefined systemPrompt → pi keeps its built-in; role rides append head.
-    return {
-      systemPrompt: undefined,
-      appendSystemPrompt: rolePrompt ? [rolePrompt, ...appends] : appends,
-    };
-  }
   return {
     systemPrompt: rolePrompt || undefined,
     appendSystemPrompt: appends,
   };
-}
-
-export function readPiBuiltinPromptFlag(): boolean {
-  try {
-    return readConfig().runtime?.piBuiltinPrompt === true;
-  } catch {
-    return false;
-  }
 }
 
 
@@ -778,8 +760,6 @@ class PiSdkAgentHandle implements AgentHandle {
     const promptSources = resolvePiSystemPromptSources({
       agentPrompt: opts.agentPrompt,
       appendSystemPrompt: appendBase,
-      agentTemplate: opts.member.agent || "",
-      piBuiltinPrompt: readPiBuiltinPromptFlag(),
     });
     loader.systemPromptSource = promptSources.systemPrompt;
     loader.appendSystemPromptSource = promptSources.appendSystemPrompt;
@@ -980,8 +960,6 @@ export class PiSdkRuntime implements AgentRuntime {
     const promptSources = resolvePiSystemPromptSources({
       agentPrompt: opts.agentPrompt,
       appendSystemPrompt: appendBase,
-      agentTemplate: opts.member.agent || "",
-      piBuiltinPrompt: readPiBuiltinPromptFlag(),
     });
     const appendSystemPrompt = promptSources.appendSystemPrompt;
     // Batch 6 §1: member-owned assets join the loader paths — skills dir

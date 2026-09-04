@@ -102,19 +102,4 @@ describe("buildFinalMemberSystemPrompt vs pi buildSystemPrompt", () => {
     expect(buildFinalMemberSystemPrompt(args)!).toBe(piAssemble(args, [], contextFiles));
   });
 
-  it("refuses (null) in piBuiltinPrompt mode for non-general templates", async () => {
-    vi.doMock("../../src/engine/runtime/pi-sdk.js", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("../../src/engine/runtime/pi-sdk.js")>();
-      return { ...actual, readPiBuiltinPromptFlag: () => true };
-    });
-    try {
-      const { buildFinalMemberSystemPrompt: rebuilt } = await import("../../src/engine/system-prompt-final.js");
-      expect(rebuilt({ ...baseArgs, member: fakeMember({ agent: "pm" }) })).toBeNull();
-      // general template still builds even with the flag on
-      expect(rebuilt(baseArgs)).toBe(piAssemble(baseArgs));
-    } finally {
-      vi.doUnmock("../../src/engine/runtime/pi-sdk.js");
-      vi.resetModules();
-    }
-  });
 });

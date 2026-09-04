@@ -19,7 +19,7 @@ import {
   loadSkills,
 } from "@earendil-works/pi-coding-agent";
 import { exportPiConfigForMember, resolvePiAgentDir } from "./model-credentials.js";
-import { readPiBuiltinPromptFlag, resolvePiSystemPromptSources } from "./runtime/pi-sdk.js";
+import { resolvePiSystemPromptSources } from "./runtime/pi-sdk.js";
 import type { AgentMemberConfig } from "../shared/types.js";
 
 export interface FinalMemberSystemPromptArgs {
@@ -35,20 +35,13 @@ export interface FinalMemberSystemPromptArgs {
 }
 
 /**
- * Returns the final system prompt text, or null when the member runs with
- * pi's built-in system prompt base (experimental piBuiltinPrompt flag +
- * non-general template) — that base has no public source to mirror, and a
- * non-byte-exact preview would lie.
+ * Returns the final system prompt text. The bossmode-compiled prompt is the
+ * only source (piBuiltinPrompt flag retired 2026-09-04) — no null mode.
  */
-export function buildFinalMemberSystemPrompt(args: FinalMemberSystemPromptArgs): string | null {
-  const piBuiltin = readPiBuiltinPromptFlag();
-  if (piBuiltin && args.member.agent !== "general") return null;
-
+export function buildFinalMemberSystemPrompt(args: FinalMemberSystemPromptArgs): string {
   const sources = resolvePiSystemPromptSources({
     agentPrompt: args.agentPrompt,
     appendSystemPrompt: args.appendSystemPrompt,
-    agentTemplate: args.member.agent,
-    piBuiltinPrompt: piBuiltin,
   });
   const customPrompt = sources.systemPrompt ?? "";
   const appendSection = sources.appendSystemPrompt.length > 0
