@@ -82,6 +82,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 ## Shells (persistent terminals)
 
 - `shell_create` opens a real terminal (workspace defaults to the active one). Your cwd, environment, and long-running processes (dev servers, watchers) persist between tool calls — no more one-shot bash.
+- **Set things once, they stay.** Do not re-`cd` or re-`export` on every command — the shell remembers. `cd` only when you actually want to work somewhere else. New shells start with a clean environment (your dotfiles are NOT loaded): set up what you need (nvm, PATH additions, credentials) once per new shell, then it persists for the shell's whole life.
 - `shell_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `shell_read` (by exec id or line numbers; line numbers are the stable reference).
 - `keys` sends control keys: `ctrl-c`, `ctrl-z`, `ctrl-d`.
 - Shells are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead shells report honestly — close them with `shell_close`.
