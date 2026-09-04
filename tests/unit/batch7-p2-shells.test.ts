@@ -59,6 +59,34 @@ describe("persistent shell (real PTY)", () => {
     expect(where.ok && where.status === "done" && where.output.trim()).toBe(dir);
   }, 15000);
 
+  it("cwd receipt: cd prints one receipt line; no cd, no receipt (fish 2026-09-04)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+    const sub = join(dir, "receipt-sub");
+    mkdirSync(sub, { recursive: true });
+
+    // A plain command in the startup cwd: baseline was recorded silently, no receipt.
+    const idle = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo idle-ok", blockUntilMs: 8000 });
+    expect(idle.ok && idle.output).not.toContain("cwd:");
+    const home = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "pwd", blockUntilMs: 8000 });
+    const startCwd = home.ok && home.status === "done" ? home.output.trim() : "";
+
+    // cd away: the exec that moved gets exactly one receipt line naming old → new.
+    const moved = await sm.execInShell({ memberId: "mem_sh", shell: s, command: `cd ${sub}`, blockUntilMs: 8000 });
+    expect(moved.ok && moved.output).toContain(`cwd: ${startCwd} → ${sub}`);
+
+    // Staying put: no new receipt.
+    const stay = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "pwd", blockUntilMs: 8000 });
+    expect(stay.ok && stay.output.trim()).toBe(sub);
+    expect(stay.ok && stay.output).not.toContain("cwd:");
+
+    // cd back: receipt again, reversed.
+    const back = await sm.execInShell({ memberId: "mem_sh", shell: s, command: `cd ${dir}`, blockUntilMs: 8000 });
+    expect(back.ok && back.output).toContain(`cwd: ${sub} → ${dir}`);
+  }, 15000);
+
   it("long commands go to background at blockUntilMs and finish later", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });

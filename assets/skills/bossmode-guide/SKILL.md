@@ -62,10 +62,11 @@ Web search / subagents are NOT preinstalled anymore. If you want the capability,
 2. Install the npm package into your extensions dir and link it where the loader sees it:
    ```
    cd ~/.bossmode/members/<your-id>/extensions
+   npm init -y
    npm install pi-web-access
    ln -s node_modules/pi-web-access pi-web-access
    ```
-   (If `extensions/` does not exist yet, `mkdir -p` it first.)
+   (`npm init -y` first is required: without a local package.json, npm walks up the directory tree looking for an install root and can fail (EACCES) or silently install somewhere else. If `extensions/` does not exist yet, `mkdir -p` it before these steps.)
 3. Call the **reload** tool (zero arguments). Your session rebuilds with the new extension.
 4. Verify: `web_search` (or the package's tools) appears in your tool list / Assets panel. If a key is required (e.g. an Exa key), put it where the package's README says — for pi-web-access that is `~/.pi/web-search.json`.
 
@@ -85,6 +86,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - **Set things once, they stay.** Do not re-`cd` or re-`export` on every command — the shell remembers. `cd` only when you actually want to work somewhere else. New shells start with a clean environment (your dotfiles are NOT loaded): set up what you need (nvm, PATH additions, credentials) once per new shell, then it persists for the shell's whole life.
 - `shell_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `shell_read` (by exec id or line numbers; line numbers are the stable reference).
 - `keys` sends control keys: `ctrl-c`, `ctrl-z`, `ctrl-d`.
+- When a command changes the working directory, its result ends with a receipt line like `cwd: /old → /new` — that is your confirmation the cd took effect and will persist. No receipt line means the cwd is unchanged.
 - Shells are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead shells report honestly — close them with `shell_close`.
 - Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell started inside a shell (running `bash` or `ssh` inside your shell) does not emit completion markers — the outer command shows as running until the inner shell exits.
 - The one-shot `bash` tool is gone; file tools and shells cover everything it did.
