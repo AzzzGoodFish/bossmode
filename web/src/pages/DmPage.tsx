@@ -62,7 +62,6 @@ export function DmPage({ memberId, onBack }: {
       credentialId: detail.global?.credentialId ?? null,
       thinkingLevel: detail.global?.thinkingLevel ?? "",
       mcpServers: detail.global?.mcpServers ?? [],
-      extensions: detail.global?.extensions ?? [],
       createdAt: detail.createdAt,
     });
   }, []);

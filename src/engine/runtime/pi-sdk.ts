@@ -19,7 +19,6 @@ import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-pro
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore, resolvePiAgentDir } from "../model-credentials.js";
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
-import { listInstalledExtensions, resolveMemberExtensionPaths } from "../../workspace/extension-store.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
@@ -75,17 +74,9 @@ function classifyToolSource(
   if (name === "mcp") return "mcp";
   const haystack = [sourceInfo?.path, sourceInfo?.baseDir, sourceInfo?.source].filter(Boolean).join(" ");
   if (haystack) {
-    try {
-      for (const ext of listInstalledExtensions()) {
-        const markers = [ext.name, ...ext.extensionPaths, ...(ext.id ? [ext.id] : [])];
-        if (markers.some((m) => m && haystack.includes(m))) {
-          return `extension:${ext.name}`;
-        }
-      }
-    } catch {
-      /* ignore catalog errors — fall through */
-    }
-    // Path still looks like an extension even if not in catalog
+    // Platform extension store is retired (fish 2026-09-04) — classify by
+    // sourceInfo shape only: member-owned extension files classify as
+    // extension:<leaf>, the MCP adapter stays "mcp".
     if (/extensions|node_modules|\.ts$|\.js$/i.test(haystack) && !/pi-mcp-adapter/.test(haystack)) {
       const leaf = haystack.split(/[/\\]/).filter(Boolean).find((p) => p.startsWith("pi-") || p.includes("web-access"));
       if (leaf) return `extension:${leaf.replace(/@.*$/, "")}`;
@@ -774,7 +765,9 @@ class PiSdkAgentHandle implements AgentHandle {
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     // Batch 6 §1: member dir assets re-resolved on every reload.
     const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
-    const managedExtensions = [...memberAssets.extensions, ...resolveMemberExtensionPaths(opts.member.extensions)];
+    // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
+    // member-owned extensions/ dir entries are the only managed extensions.
+    const managedExtensions = [...memberAssets.extensions];
     const activeExtensionPaths = [
       ...managedExtensions,
       ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)),
@@ -998,7 +991,9 @@ export class PiSdkRuntime implements AgentRuntime {
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     // Managed extensions = member dir (unconditional) + platform packages on
     // the member's enable list (§1.3: list serves the two platform packs only).
-    const managedExtensions = [...memberAssets.extensions, ...resolveMemberExtensionPaths(opts.member.extensions)];
+    // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
+    // member-owned extensions/ dir entries are the only managed extensions.
+    const managedExtensions = [...memberAssets.extensions];
     const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
     const activeExtensionPaths = [...extensionPaths, mcpSettings.adapterPath!];
     const resourceLoader = new DefaultResourceLoader({

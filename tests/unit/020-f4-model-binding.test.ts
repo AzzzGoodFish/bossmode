@@ -126,7 +126,7 @@ describe("F4 model binding persists to the registry", () => {
     expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-b");
   });
 
-  it("non-model patch (thinking/mcp/extensions) routes by the same unified flags", async () => {
+  it("non-model patch (thinking/mcp) routes by the same unified flags", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
     const roomStore = await import("../../src/workspace/room-store.js");
@@ -135,7 +135,7 @@ describe("F4 model binding persists to the registry", () => {
     const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room1 = await makeStampedRoom(unified.id);
     const manager = await import("../../src/engine/agent-manager.js");
-    manager.persistRoomMemberConfigPatch(room1.id, unified.id, { thinkingLevel: "high", mcpServers: ["playwright"], extensions: ["ext-x"] });
+    manager.persistRoomMemberConfigPatch(room1.id, unified.id, { thinkingLevel: "high", mcpServers: ["playwright"] });
     let rec = reg.getMember(unified.id)!;
     expect(rec.global.thinkingLevel).toBe("high");
     expect(rec.global.mcpServers).toEqual(["playwright"]);

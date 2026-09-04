@@ -30,7 +30,7 @@ const MIGRATION_ID = "cleanup-member-overrides-v1";
 
 /** Fields compared against the new authority. contextLimit has no registry
  * equivalent — its presence makes an entry suspicious (kept + warned). */
-const COMPARED_FIELDS = ["model", "credentialId", "thinkingLevel", "skills", "extensions", "mcpServers"] as const;
+const COMPARED_FIELDS = ["model", "credentialId", "thinkingLevel", "skills", "mcpServers"] as const;
 
 export interface OverrideCleanupResult {
   roomsScanned: number;
