@@ -87,6 +87,29 @@ describe("persistent shell (real PTY)", () => {
     expect(back.ok && back.output).toContain(`cwd: ${sub} → ${dir}`);
   }, 15000);
 
+  it("blockUntilMs: 0 returns running immediately — the command keeps running (qa rc.20 Major)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+
+    const startedAt = Date.now();
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 2; echo ZERO-BG-DONE", blockUntilMs: 0 });
+    const elapsed = Date.now() - startedAt;
+    expect(started.ok && started.status).toBe("running");
+    // "never block" means immediate return, not a hang until the command ends.
+    expect(elapsed).toBeLessThan(1000);
+
+    // The command keeps running in the background and shell_read collects it.
+    await new Promise((r) => setTimeout(r, 2600));
+    const read = sm.readShell({ memberId: "mem_sh", shell: s, exec: started.ok ? started.exec : "e1" });
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      const text = read.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("ZERO-BG-DONE");
+    }
+  }, 15000);
+
   it("long commands go to background at blockUntilMs and finish later", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });

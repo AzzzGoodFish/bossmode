@@ -386,7 +386,7 @@ export async function execInShell(args: {
   let settled = false;
   const raced = await Promise.race([
     done.then(() => true),
-    blockMs > 0 ? new Promise<boolean>((resolve) => setTimeout(() => resolve(false), blockMs)) : new Promise<boolean>(() => {}),
+    blockMs > 0 ? new Promise<boolean>((resolve) => setTimeout(() => resolve(false), blockMs)) : Promise.resolve(false), // 0 = never block (qa rc.20 Major: a never-resolving promise here turned "background immediately" into a hang)
   ]);
   settled = raced;
   if (timer) clearTimeout(timer);
