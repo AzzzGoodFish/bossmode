@@ -24,7 +24,7 @@ export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your room
 
 export const SHELL_CREATE_DESCRIPTION = `Open a persistent shell session (a real terminal) in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
 
-export const SHELL_EXEC_DESCRIPTION = `Run a command in a persistent shell and get its exact output plus exit code. Commands longer than blockUntilMs (default 10000ms) return as running — collect the rest later with shell_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command.`;
+export const SHELL_EXEC_DESCRIPTION = `Run a command in a persistent shell and get its exact output plus exit code. Commands longer than blockUntilMs (default 10000ms) return as running — collect the rest later with shell_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per shell: while an exec is running, a new command is rejected with the current exec id — wait (shell_wait), read (shell_read), send ctrl-c, or use another shell for independent work.`;
 
 export const SHELL_READ_DESCRIPTION = `Read output from a persistent shell: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
 

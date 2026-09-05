@@ -10,13 +10,14 @@
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { execSync, fork } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 
 // Use a test-specific bossmode dir/port to avoid interfering with real config
-const TEST_DIR = "/tmp/bossmode-cli-test";
+const TEST_DIR = mkdtempSync(join(tmpdir(), "bossmode-cli-test-"));
 let TEST_PORT = 19876;
 
 async function getFreePort(): Promise<number> {

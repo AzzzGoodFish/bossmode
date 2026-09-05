@@ -107,7 +107,7 @@ function initSequence(): string {
   // -echo: the command we write must not be echoed back as "output".
   // Empty PS1: no prompt text between commands. The marker printf is APPENDED
   // (not replacing) so prompt frameworks keep working until they replace it.
-  return `stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s;%s\\\\007' \\"\\$?\\" \\"\\$PWD\\"; \${PROMPT_COMMAND:-}"\n`;
+  return `bind 'set enable-bracketed-paste on'; stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s;%s\\\\007' \\"\\$?\\" \\"\\$PWD\\"; \${PROMPT_COMMAND:-}"\n`;
 }
 
 function stripOsc(text: string): { text: string; markers: Array<{ exitCode: number | null; cwd: string | null; index: number }> } {
@@ -211,7 +211,9 @@ function drainQueue(shell: LiveShell): void {
     if (next.exec) {
       shell.currentExec = next.exec;
       shell.pendingMarker = true;
-      shell.proc.write(`${next.command}\n`);
+      // Readline accepts one complete paste, including embedded newlines.
+      // No command wrapper: the original input is what enters shell history.
+      shell.proc.write(`\x1b[200~${next.command}\x1b[201~\n`);
     } else if (next.keys !== undefined) {
       shell.proc.write(next.keys);
     } else if (next.command !== undefined) {
@@ -404,6 +406,19 @@ export async function execInShell(args: {
     return { ok: false, error: "command is required (or use keys to send a control key)." };
   }
 
+  // One command at a time per shell (fish 2026-09-05, task-b557b2cf): while an
+  // exec is running (or accepted and still waiting for the shell to free up),
+  // a new command is REJECTED — no new exec id is allocated and nothing is
+  // queued for later. The model decides: shell_wait, shell_read, ctrl-c, or
+  // another shell. Keys/read/wait stay available while busy.
+  const busy = shell.currentExec ?? shell.writeQueue.find((w) => w.exec)?.exec;
+  if (busy) {
+    return {
+      ok: false,
+      error: `Shell ${args.shell} is busy: exec ${busy.id} is still running. This command was NOT submitted and NOT executed. Wait for it with shell_wait (shell ${args.shell}, exec ${busy.id}), read current output with shell_read, send keys:"ctrl-c" to stop it, or create another shell for independent work.`,
+    };
+  }
+
   const exec = {
     id: `e${++shell.execCounter}`,
     lineStart: shell.lineCount,
@@ -493,7 +508,7 @@ export function readShell(args: {
         truncated: false,
       };
     } else {
-      return { ok: false, error: `Exec ${args.exec} not found on shell ${args.shell}. Use shell_read with a line range, or the exec may still be queued.` };
+      return { ok: false, error: `Exec ${args.exec} not found on shell ${args.shell}. It may be from an earlier session — read by absolute line range instead.` };
     }
   } else {
     from = args.fromLine && args.fromLine > 0 ? args.fromLine : shell.firstLine;

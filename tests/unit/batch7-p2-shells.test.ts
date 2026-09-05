@@ -28,6 +28,37 @@ async function fresh() {
 }
 
 describe("persistent shell (real PTY)", () => {
+  it("one multiline submission stays busy through its last command and preserves shell state", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error("Shell creation failed");
+    const s = created.shell;
+    const command = `cd '${dir}'
+export BOSS_TEST_VALUE="a single quote: ' and literal value"
+cat <<'END'
+FIRST-LINE
+END
+sleep 0.8
+printf 'LAST-LINE\\n'
+false`;
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command, blockUntilMs: 150 });
+    expect(started.ok && started.status).toBe("running");
+    const rejected = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo NOT-SUBMITTED", blockUntilMs: 0 });
+    expect(rejected.ok).toBe(false);
+    const done = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: "e1", blockUntilMs: 3000 });
+    expect(done.ok && done.status).toBe("done");
+    if (!done.ok || done.status !== "done") throw new Error("Command did not finish");
+    expect(done.exitCode).toBe(1);
+    expect(done.output).toContain("FIRST-LINE");
+    expect(done.output).toContain("LAST-LINE");
+    expect(done.output).not.toContain("NOT-SUBMITTED");
+    const state = await sm.execInShell({ memberId: "mem_sh", shell: s, command: 'pwd; printf "%s" "$BOSS_TEST_VALUE"', blockUntilMs: 3000 });
+    expect(state.ok && state.exec).toBe("e2");
+    expect(state.ok && state.status === "done" && state.output).toContain(dir);
+    expect(state.ok && state.status === "done" && state.output).toContain("a single quote: ' and literal value");
+  }, 15000);
+
   it("create → exec with marker exit code and line numbers → read by line range", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
@@ -189,6 +220,65 @@ describe("persistent shell (real PTY)", () => {
     }
   }, 15000);
 
+  it("busy shell rejects a new command: no exec allocated, nothing queued, read/wait still work (fish 2026-09-05)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.2; echo BUSY-DONE", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+    const busyExec = started.ok ? started.exec : "e1";
+    expect(busyExec).toBe("e1");
+
+    // A second command on the SAME shell is explicitly rejected — not queued.
+    const rejected = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo REJECTED-MARKER", blockUntilMs: 0 });
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) {
+      expect(rejected.error).toContain("busy");
+      expect(rejected.error).toContain(busyExec);
+      expect(rejected.error).toContain("NOT submitted");
+      expect(rejected.error).not.toContain("e2");
+    }
+
+    // read and wait stay available while busy.
+    const peek = sm.readShell({ memberId: "mem_sh", shell: s, fromLine: 1 });
+    expect(peek.ok).toBe(true);
+    const waited = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: busyExec, blockUntilMs: 8000 });
+    expect(waited.ok && waited.status).toBe("done");
+
+    // After settling, the NEXT command gets e2 — the rejected one never
+    // consumed an id and never ran.
+    const after = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo AFTER-CLEAR", blockUntilMs: 8000 });
+    expect(after.ok && after.exec).toBe("e2");
+    const all = sm.readShell({ memberId: "mem_sh", shell: s, fromLine: 1, toLine: 999 });
+    expect(all.ok).toBe(true);
+    if (all.ok) {
+      const text = all.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("AFTER-CLEAR");
+      expect(text).not.toContain("REJECTED-MARKER");
+    }
+  }, 20000);
+
+  it("busy rejection is per shell — another shell runs in parallel", async () => {
+    const sm = await fresh();
+    const a = await sm.createShell({ memberId: "mem_sh" });
+    const b = await sm.createShell({ memberId: "mem_sh" });
+    if (!a.ok || !b.ok) return;
+
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: a.shell, command: "sleep 1.2; echo A-DONE", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+
+    const parallel = await sm.execInShell({ memberId: "mem_sh", shell: b.shell, command: "echo B-DONE", blockUntilMs: 8000 });
+    expect(parallel.ok && parallel.status).toBe("done");
+    if (parallel.ok && parallel.status === "done") {
+      expect(parallel.output).toContain("B-DONE");
+    }
+
+    const settled = await sm.waitShell({ memberId: "mem_sh", shell: a.shell, exec: started.ok ? started.exec : "e1", blockUntilMs: 8000 });
+    expect(settled.ok && settled.status).toBe("done");
+  }, 20000);
+
   it("ctrl-c interrupts a running command; history stays clean of wrappers", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
@@ -198,15 +288,19 @@ describe("persistent shell (real PTY)", () => {
     expect(started.ok && started.status).toBe("running");
     const interrupted = await sm.execInShell({ memberId: "mem_sh", shell: s, keys: "ctrl-c", blockUntilMs: 0 });
     expect(interrupted.ok).toBe(true);
-    await new Promise((r) => setTimeout(r, 400));
+    const done = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: "e1", blockUntilMs: 3000 });
+    expect(done.ok && done.status).toBe("done");
+    if (!done.ok || done.status !== "done") throw new Error("Interrupted exec did not settle");
+    expect(done.exitCode).toBe(130);
+    expect(done.output).not.toContain("NEVER");
 
-    // fish's rule: no wrapper ever appended to a command — the sleep line
-    // enters history exactly as sent (the one-time init line is the only
-    // shell-machinery entry, and it is a plain command, not an injection).
-    const hist = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "history 6 | grep -c 'BM_EXE[C]'", blockUntilMs: 8000 });
-    if (hist.ok && hist.status === "done") {
-      expect(hist.output.trim()).toBe("0");
-    }
+    // The original command, not an eval/marker wrapper, enters history.
+    const hist = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "history 6", blockUntilMs: 8000 });
+    expect(hist.ok && hist.status).toBe("done");
+    if (!hist.ok || hist.status !== "done") throw new Error("History read failed");
+    expect(hist.output).toMatch(/\d+\s+sleep 30/);
+    expect(hist.output).not.toContain("eval '");
+    expect(hist.output).not.toContain("BM_EXEC");
   }, 15000);
 
   it("close kills the shell; dead references fail honestly; shells are member-scoped", async () => {
