@@ -404,6 +404,19 @@ export async function execInShell(args: {
     return { ok: false, error: "command is required (or use keys to send a control key)." };
   }
 
+  // One command at a time per shell (fish 2026-09-05, task-b557b2cf): while an
+  // exec is running (or accepted and still waiting for the shell to free up),
+  // a new command is REJECTED — no new exec id is allocated and nothing is
+  // queued for later. The model decides: shell_wait, shell_read, ctrl-c, or
+  // another shell. Keys/read/wait stay available while busy.
+  const busy = shell.currentExec ?? shell.writeQueue.find((w) => w.exec)?.exec;
+  if (busy) {
+    return {
+      ok: false,
+      error: `Shell ${args.shell} is busy: exec ${busy.id} is still running. This command was NOT submitted and NOT executed. Wait for it with shell_wait (shell ${args.shell}, exec ${busy.id}), read current output with shell_read, send keys:"ctrl-c" to stop it, or create another shell for independent work.`,
+    };
+  }
+
   const exec = {
     id: `e${++shell.execCounter}`,
     lineStart: shell.lineCount,
@@ -493,7 +506,7 @@ export function readShell(args: {
         truncated: false,
       };
     } else {
-      return { ok: false, error: `Exec ${args.exec} not found on shell ${args.shell}. Use shell_read with a line range, or the exec may still be queued.` };
+      return { ok: false, error: `Exec ${args.exec} not found on shell ${args.shell}. It may be from an earlier session — read by absolute line range instead.` };
     }
   } else {
     from = args.fromLine && args.fromLine > 0 ? args.fromLine : shell.firstLine;

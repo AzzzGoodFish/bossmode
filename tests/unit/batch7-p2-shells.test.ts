@@ -189,6 +189,65 @@ describe("persistent shell (real PTY)", () => {
     }
   }, 15000);
 
+  it("busy shell rejects a new command: no exec allocated, nothing queued, read/wait still work (fish 2026-09-05)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.shell;
+
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.2; echo BUSY-DONE", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+    const busyExec = started.ok ? started.exec : "e1";
+    expect(busyExec).toBe("e1");
+
+    // A second command on the SAME shell is explicitly rejected — not queued.
+    const rejected = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo REJECTED-MARKER", blockUntilMs: 0 });
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) {
+      expect(rejected.error).toContain("busy");
+      expect(rejected.error).toContain(busyExec);
+      expect(rejected.error).toContain("NOT submitted");
+      expect(rejected.error).not.toContain("e2");
+    }
+
+    // read and wait stay available while busy.
+    const peek = sm.readShell({ memberId: "mem_sh", shell: s, fromLine: 1 });
+    expect(peek.ok).toBe(true);
+    const waited = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: busyExec, blockUntilMs: 8000 });
+    expect(waited.ok && waited.status).toBe("done");
+
+    // After settling, the NEXT command gets e2 — the rejected one never
+    // consumed an id and never ran.
+    const after = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo AFTER-CLEAR", blockUntilMs: 8000 });
+    expect(after.ok && after.exec).toBe("e2");
+    const all = sm.readShell({ memberId: "mem_sh", shell: s, fromLine: 1, toLine: 999 });
+    expect(all.ok).toBe(true);
+    if (all.ok) {
+      const text = all.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("AFTER-CLEAR");
+      expect(text).not.toContain("REJECTED-MARKER");
+    }
+  }, 20000);
+
+  it("busy rejection is per shell — another shell runs in parallel", async () => {
+    const sm = await fresh();
+    const a = await sm.createShell({ memberId: "mem_sh" });
+    const b = await sm.createShell({ memberId: "mem_sh" });
+    if (!a.ok || !b.ok) return;
+
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: a.shell, command: "sleep 1.2; echo A-DONE", blockUntilMs: 0 });
+    expect(started.ok && started.status).toBe("running");
+
+    const parallel = await sm.execInShell({ memberId: "mem_sh", shell: b.shell, command: "echo B-DONE", blockUntilMs: 8000 });
+    expect(parallel.ok && parallel.status).toBe("done");
+    if (parallel.ok && parallel.status === "done") {
+      expect(parallel.output).toContain("B-DONE");
+    }
+
+    const settled = await sm.waitShell({ memberId: "mem_sh", shell: a.shell, exec: started.ok ? started.exec : "e1", blockUntilMs: 8000 });
+    expect(settled.ok && settled.status).toBe("done");
+  }, 20000);
+
   it("ctrl-c interrupts a running command; history stays clean of wrappers", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
