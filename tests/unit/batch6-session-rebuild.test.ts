@@ -16,9 +16,25 @@ async function setupRoomWithActivatedMember(name: string): Promise<{ ts: TestSer
     token, body: { name, agentTemplate: "pm" },
   });
   const memberId = JSON.parse(created.body).member.memberId as string;
-  // configure model+credential so the member is activation-ready
-  const patched = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}/config`, {
-    token, body: { model: "prov/m1", credentialId: "cred-1" },
+  // configure model+credential so the member is activation-ready (single path)
+  const profileRes = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles", {
+    token,
+    body: {
+      name: "batch6 provider",
+      providerSlug: `prov-${Date.now()}`,
+      protocol: "openai-completions",
+      baseUrl: "https://api.example.invalid/v1",
+      authType: "api_key",
+      apiKey: "sk-batch6",
+      requestProfile: "standard",
+      enabled: true,
+      isDefault: false,
+      models: [{ id: "m1", contextWindow: 1024 }],
+    },
+  });
+  const profile = JSON.parse(profileRes.body);
+  const patched = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
+    token, body: { model: `${profile.providerSlug}/m1`, credentialId: profile.id },
   });
   expect(patched.status).toBe(200);
   const room = await jsonRequest(ts.port, "POST", "/api/rooms", {

@@ -204,22 +204,11 @@ export async function createMember(data: Omit<MemberInfo, "id">): Promise<Member
   return apiFetch("/api/members", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function updateMember(id: string, data: Partial<MemberInfo>): Promise<MemberInfo> {
-  return apiFetch(`/api/members/${id}`, { method: "PUT", body: JSON.stringify(data) });
-}
 
 export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
   return apiFetch(`/api/rooms/${roomId}/members`);
 }
 
-export async function updateRoomMember(
-  roomId: string,
-  memberName: string,
-  data: { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null },
-): Promise<MemberInfo> {
-  const result = await apiFetch<{ member: MemberInfo }>(`/api/rooms/${roomId}/members/${encodeURIComponent(memberName)}`, { method: "PATCH", body: JSON.stringify(data) });
-  return result.member;
-}
 
 export async function deleteMemberApi(id: string): Promise<void> {
   await apiFetch(`/api/members/${id}`, { method: "DELETE" });
@@ -1710,12 +1699,6 @@ export async function deleteGlobalMember(id: string): Promise<void> {
   });
 }
 
-export async function patchMemberScopeConfig(id: string, scope: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
-  return apiFetch(`/api/members/${encodeURIComponent(id)}/config?scope=${encodeURIComponent(scope)}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
-}
 
 export interface MemberEffectiveConfig {
   model?: string | null;

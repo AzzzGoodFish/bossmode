@@ -35,6 +35,10 @@ describe("MemberCredentialStore topic: scope", () => {
       models: [{ id: "cust-model-a", contextWindow: 8000, input: ["text"] }],
     });
 
+    const { createMember, updateMember } = await import("../../src/workspace/member-registry.js");
+    const alice = createMember({ name: "alice", agentTemplate: "pm" });
+    updateMember(alice.id, { global: { credentialId: profile.id } });
+
     mkdirSync(join(dir, "rooms", "roomA"), { recursive: true });
     writeFileSync(join(dir, "rooms", "roomA", "room.json"), JSON.stringify({
       id: "roomA",
@@ -42,13 +46,10 @@ describe("MemberCredentialStore topic: scope", () => {
       cwd: "/tmp",
       members: ["alice"],
       roomMembers: [{
-        id: "mem_alice",
+        id: alice.id,
         name: "alice",
         sourceAgent: "pm",
         roomId: "roomA",
-        credentialId: profile.id,
-        model: "qa-custom/cust-model-a",
-        config: { credentialId: profile.id, model: "qa-custom/cust-model-a" },
         createdAt: 1,
         updatedAt: 1,
       }],
@@ -62,12 +63,11 @@ describe("MemberCredentialStore topic: scope", () => {
       seedMode: "fork",
     });
 
-    const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
-    const bound = resolveRoomMember("roomA", "mem_alice");
-    expect(bound?.credentialId).toBe(profile.id);
-    expect(creds.getModelCredentialProfile(profile.id)?.providerSlug).toBe(profile.providerSlug);
-
-    const store = creds.createMemberCredentialStore(`topic:${topic.id}`, "mem_alice");
+    // Single-path credentials (design-model-switch-single-path-v1 §4): scope
+    // shape no longer matters — the store resolves the member's GLOBAL config
+    // binding (or the live instance's applied binding), never the parent-room
+    // legacy binding.
+    const store = creds.createMemberCredentialStore(`topic:${topic.id}`, alice.id);
     expect(await store.read(profile.providerSlug)).toEqual({ type: "api_key", key: "sk-topic-test" });
     expect(await store.read("anthropic")).toBeUndefined();
   });

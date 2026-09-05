@@ -14,7 +14,6 @@ import {
   fireMember,
   resolveMemberRef,
   getEffectiveConfig,
-  applyMemberConfigPatch,
   MemberNameTakenError,
   MemberNotFoundError,
   type MemberRecord,
@@ -34,6 +33,7 @@ import { listMemberSkills } from "../engine/skill-catalog.js";
 import { activeWorkspaceRoot, listWorkspaces } from "../workspace/workspace-registry.js";
 import { readMemberSshPublicKey } from "../workspace/ssh-keygen.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import { switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
 import * as topicStore from "../workspace/topic-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
@@ -543,8 +543,6 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       name?: string;
       /** member.md frontmatter card field (description retired batch-5 — ignored) */
       title?: string | null;
-      unifiedModel?: boolean;
-      unifiedExtensions?: boolean;
       agentTemplate?: string;
       model?: string | null;
       credentialId?: string | null;
@@ -552,24 +550,53 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       skills?: string[];
       mcpServers?: string[];
     };
+    // Single-path model switch (design-model-switch-single-path-v1 §6): the
+    // field is either omitted (no change) or a real model ref — null/empty is
+    // a parameter error, clearing is not a supported product action.
+    if (body.model !== undefined && (body.model === null || !String(body.model).trim())) {
+      sendJson(res, 400, { error: "invalid_model", message: "model must be a non-empty model reference; omit the field to leave it unchanged" });
+      return;
+    }
     let m = resolveMemberRef(params.id);
     if (!m) {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
+    const beforeModel = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id })).model;
+
+    // Model/credential: the one public switch method — validates, applies to
+    // every live instance (room+DM+topic) via the SDK, saves config once.
+    let modelSwitch: Awaited<ReturnType<typeof switchMemberModel>> | undefined;
+    if (body.model !== undefined || body.credentialId !== undefined) {
+      const eff = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id }));
+      const targetModel = body.model !== undefined ? String(body.model) : eff.model;
+      const targetCred = body.credentialId !== undefined ? (body.credentialId as string | null) : eff.credentialId;
+      if (!targetModel || !targetCred) {
+        sendJson(res, 400, { error: "invalid_binding", message: "A complete model + credentialId pair is required (model cannot be paired with an empty credential)." });
+        return;
+      }
+      try {
+        modelSwitch = await switchMemberModel(m.id, { model: targetModel, credentialId: targetCred });
+      } catch (err: any) {
+        sendJson(res, 400, { error: "model_switch_failed", message: err.message || String(err) });
+        return;
+      }
+    }
+
+    let thinkingSwitch: Awaited<ReturnType<typeof switchMemberThinkingLevel>> | undefined;
+    if (body.thinkingLevel !== undefined && body.thinkingLevel !== null) {
+      thinkingSwitch = await switchMemberThinkingLevel(m.id, String(body.thinkingLevel));
+    }
+
     if (body.name && body.name.trim() !== m.name) {
       m = renameMember(m.id, body.name);
       // Keep frontmatter name in sync with registry rename.
       updateMemberProfileFrontmatter(m.id, { name: m.name }, m.name);
     }
     m = updateMember(m.id, {
-      unifiedModel: body.unifiedModel,
-      unifiedExtensions: body.unifiedExtensions,
       agentTemplate: body.agentTemplate,
       global: {
-        ...(body.model !== undefined ? { model: body.model } : {}),
-        ...(body.credentialId !== undefined ? { credentialId: body.credentialId } : {}),
-        ...(body.thinkingLevel !== undefined ? { thinkingLevel: body.thinkingLevel } : {}),
+        ...(body.thinkingLevel !== undefined && body.thinkingLevel !== null ? { thinkingLevel: body.thinkingLevel } : {}),
         ...(body.skills !== undefined ? { skills: body.skills } : {}),
         ...(body.mcpServers !== undefined ? { mcpServers: body.mcpServers } : {}),
       },
@@ -581,7 +608,27 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         m.name,
       );
     }
-    sendJson(res, 200, { member: publicMember(m) });
+    sendJson(res, 200, { member: publicMember(m), ...(modelSwitch ? { modelSwitch } : {}), ...(thinkingSwitch ? { thinkingSwitch } : {}) });
+
+    // Birth wake (identity batch-1): model none→some starts the DM instance so
+    // the icebreaker can run. Migrated from the retired /config route.
+    const afterModel = modelSwitch?.model || beforeModel;
+    if (!beforeModel && afterModel) {
+      try {
+        const { activateDmMember } = await import("../engine/agent-manager.js");
+        void activateDmMember(m.id).catch((err) => {
+          logger.error("members", "post-config DM activate failed", {
+            memberId: m.id,
+            error: String((err as Error)?.message || err),
+          });
+        });
+      } catch (err) {
+        logger.error("members", "post-config DM activate import failed", {
+          memberId: m.id,
+          error: String((err as Error)?.message || err),
+        });
+      }
+    }
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
@@ -785,64 +832,6 @@ addRoute("GET", "/api/members/:id/effective-config", async (req, res, params) =>
       return;
     }
     sendJson(res, 200, getEffectiveConfig(m.id, scope));
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
-});
-
-addRoute("PATCH", "/api/members/:id/config", async (req, res, params) => {
-  try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const url = new URL(req.url || "", "http://localhost");
-    const scopeParam = url.searchParams.get("scope");
-    // Batch-5b: config writes are global — scope is compatibility-only and now
-    // optional (defaults to the member's DM scope for the effective echo).
-    const scope = scopeParam || scopeIdOf({ kind: "dm", memberId: m.id });
-    if (!parseScopeId(scope)) {
-      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
-      return;
-    }
-    const body = (await parseBody(req)) as Record<string, unknown>;
-    // null clears the field. Write goes through the single authority-routing
-    // rule (F4 persistConfigPatch generalized, architect 2026-08-05): unified
-    // flags decide global vs this-scope override — previously this route
-    // always wrote the scope override even for unified members.
-    const diff: Record<string, unknown> = {};
-    for (const key of ["model", "credentialId", "thinkingLevel", "skills", "extensions", "mcpServers"]) {
-      if (Object.prototype.hasOwnProperty.call(body, key)) diff[key] = body[key];
-    }
-    // Birth wake (identity batch-1 / rc.1 gap): model none→some must start the
-    // DM instance so icebreaker can run. Config-only write never activated.
-    const beforeModel = getEffectiveConfig(m.id, scope).model;
-    // Batch-5b: config writes are always global (unified flags + scope
-    // overrides retired); scopeId is compatibility-only.
-    const updated = applyMemberConfigPatch(m.id, scope as ScopeId, diff);
-    const afterEff = getEffectiveConfig(m.id, scope);
-    sendJson(res, 200, {
-      member: publicMember(updated),
-      effective: afterEff,
-    });
-    if (!beforeModel && afterEff.model) {
-      try {
-        const { activateDmMember } = await import("../engine/agent-manager.js");
-        void activateDmMember(m.id).catch((err) => {
-          logger.error("members", "post-config DM activate failed", {
-            memberId: m.id,
-            error: String((err as Error)?.message || err),
-          });
-        });
-      } catch (err) {
-        logger.error("members", "post-config DM activate import failed", {
-          memberId: m.id,
-          error: String((err as Error)?.message || err),
-        });
-      }
-    }
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });

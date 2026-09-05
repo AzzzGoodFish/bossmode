@@ -390,157 +390,120 @@ class ProfileCredentialStore implements CredentialStore {
 }
 
 /**
- * Instance-level active credential override for a room member.
- * Used during live model switches: setModel's auth check runs BEFORE room.json
- * is updated, so the store must temporarily serve the *target* credential or
- * cross-provider switches fail with "No API key for <new-provider>".
- * Keyed by roomId + memberId; cleared on instance destroy / switch rollback.
- */
-const memberActiveCredentialOverrides = new Map<string, string>();
-
-function memberCredentialKey(roomId: string, memberId: string): string {
-  return `${roomId}\0${memberId}`;
-}
-
-/** Set (or clear with null/undefined) the live credential override for a member instance. */
-export function setMemberActiveCredentialOverride(
-  roomId: string,
-  memberId: string,
-  credentialId: string | null | undefined,
-): void {
-  const key = memberCredentialKey(roomId, memberId);
-  if (credentialId) memberActiveCredentialOverrides.set(key, credentialId);
-  else memberActiveCredentialOverrides.delete(key);
-}
-
-export function getMemberActiveCredentialOverride(roomId: string, memberId: string): string | undefined {
-  return memberActiveCredentialOverrides.get(memberCredentialKey(roomId, memberId));
-}
-
-/**
- * Member-scoped store — live-reads the member's current credential binding
- * per request, with an optional instance-level override (see setMemberActiveCredentialOverride).
+ * Member-scoped store (design-model-switch-single-path-v1 §4) — the member's
+ * APPLIED binding is the credential authority for its live sessions:
  *
- * Scope-aware (0.20 G2 + 0.21 topic):
- * - roomId starting with `dm:` → resolve via member-registry getEffectiveConfig
- * - roomId starting with `topic:` → parent-room member + effective config `room:<parent>`
- * - otherwise → room member binding (resolveRoomMember), as before
+ * 1. switch target — during a live switch, setModel's auth check for the new
+ *    provider must resolve the TARGET credential before the applied binding
+ *    flips (instance.switchTargetCredentialId, set by applyModelSwitchToInstance).
+ * 2. applied binding — the instance's current model+credentialId. A plain
+ *    config save does NOT change what an existing session authenticates with;
+ *    only a completed switch flips this.
+ * 3. global config — sessions created before any switch, or no live instance
+ *    (read at creation time).
  *
- * Override is **augment** semantics (2026-07-30 fish self-test): for a requested
- * providerId, try the override profile first if its provider matches; otherwise
- * fall back to the scope binding. Mid-switch, the old session can still auth
- * against the old provider while setModel auth-checks the new one.
+ * Request-lifetime pinning: pi resolves auth (and OAuth-refreshes) per request
+ * via read(); the profile resolved at read time is remembered so the refresh
+ * write-back in modify() lands on the SAME profile the request started with —
+ * a mid-request account switch cannot steal the rotation.
  */
 class MemberCredentialStore implements CredentialStore {
   constructor(private readonly roomId: string, private readonly memberId: string) {}
 
-  private isDmScope(): boolean {
-    return typeof this.roomId === "string" && this.roomId.startsWith("dm:");
-  }
+  /** providerId → profileId pinned at the read that started the request. */
+  private readonly pinned = new Map<string, string>();
 
-  private isTopicScope(): boolean {
-    return typeof this.roomId === "string" && this.roomId.startsWith("topic:");
-  }
-
-  /** Lazy import keeps model-credentials free of hard edges into resolvers. */
-  private async resolveBoundProfile(): Promise<ModelCredentialProfile | null> {
-    if (this.isDmScope()) {
-      // DM: credential lives on global member (effective-config), not a room binding.
-      const scopeId = this.roomId; // "dm:<memberId>"
-      const memberId = this.memberId || scopeId.slice("dm:".length);
-      try {
-        const { getEffectiveConfig } = await import("../workspace/member-registry.js");
-        const eff = getEffectiveConfig(memberId, scopeId);
-        if (!eff.credentialId) return null;
-        const profile = getModelCredentialProfile(eff.credentialId);
-        if (!profile || !profile.enabled) return null;
-        return profile;
-      } catch {
-        return null;
-      }
+  private async resolveAppliedInstance(): Promise<{ appliedCredentialId?: string; switchTargetCredentialId?: string } | null> {
+    try {
+      const { getAgentInstanceForScope } = await import("../engine/agent-manager.js");
+      const instance = getAgentInstanceForScope(this.roomId, this.memberId);
+      if (!instance) return null;
+      return {
+        appliedCredentialId: instance.appliedCredentialId,
+        switchTargetCredentialId: (instance as { switchTargetCredentialId?: string }).switchTargetCredentialId,
+      };
+    } catch {
+      return null;
     }
-    const lookupRoomId = this.isTopicScope()
-      ? (await import("../workspace/topic-store.js")).resolveOwningRoomId(this.roomId)
-      : this.roomId;
-    const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
-    const member = resolveRoomMember(lookupRoomId, this.memberId);
-    // G3: when ID-linked to a global member, effective-config is authority (global over room shadow).
-    // Room-local credentialId only used when no global link exists (legacy rooms).
-    let credentialId: string | null = null;
-    if (member) {
-      try {
-        const roomStore = await import("../workspace/room-store.js");
-        const room = roomStore.getRoom(lookupRoomId);
-        const globalId = room ? roomStore.resolveGlobalMemberId(room, member) : null;
-        if (globalId) {
-          const { getEffectiveConfig } = await import("../workspace/member-registry.js");
-          const scopeId = `room:${lookupRoomId}`;
-          const eff = getEffectiveConfig(globalId, scopeId);
-          credentialId = eff.credentialId || null;
-        }
-      } catch {
-        /* fall through */
-      }
-      if (!credentialId) credentialId = member.credentialId || null;
+  }
+
+  private async resolveGlobalProfile(): Promise<ModelCredentialProfile | null> {
+    try {
+      const { getMember } = await import("../workspace/member-registry.js");
+      const member = getMember(this.memberId);
+      const credentialId = member?.global?.credentialId;
+      if (!credentialId) return null;
+      const profile = getModelCredentialProfile(credentialId);
+      if (!profile || !profile.enabled) return null;
+      return profile;
+    } catch {
+      return null;
     }
-    if (!credentialId) return null;
-    const profile = getModelCredentialProfile(credentialId);
-    if (!profile || !profile.enabled) return null;
-    return profile;
   }
 
-  private resolveOverrideProfile(): ModelCredentialProfile | null {
-    const overrideId = memberActiveCredentialOverrides.get(memberCredentialKey(this.roomId, this.memberId));
-    if (!overrideId) return null;
-    const profile = getModelCredentialProfile(overrideId);
-    if (!profile || !profile.enabled) return null;
-    return profile;
-  }
-
-  /** Resolve the profile that should answer for `providerId` (override-if-match, else scope binding). */
+  /** Resolution order: switch target → applied → global config. */
   private async resolveProfileForProvider(providerId: string): Promise<ModelCredentialProfile | null> {
-    const override = this.resolveOverrideProfile();
-    if (override && override.providerSlug === providerId) return override;
-    const bound = await this.resolveBoundProfile();
-    if (bound && bound.providerSlug === providerId) return bound;
-    return null;
+    const check = async (profileId: string | undefined): Promise<ModelCredentialProfile | null> => {
+      if (!profileId) return null;
+      const profile = getModelCredentialProfile(profileId);
+      if (!profile || !profile.enabled || profile.providerSlug !== providerId) return null;
+      return profile;
+    };
+    const instance = await this.resolveAppliedInstance();
+    return (await check(instance?.switchTargetCredentialId))
+      ?? (await check(instance?.appliedCredentialId))
+      ?? this.resolveGlobalProfile().then((p) => (p && p.providerSlug === providerId ? p : null));
   }
 
   async read(providerId: string): Promise<Credential | undefined> {
     const profile = await this.resolveProfileForProvider(providerId);
     if (!profile) return undefined;
+    this.pinned.set(providerId, profile.id);
     return authEntry(profile) as Credential | undefined;
   }
 
   async list(): Promise<readonly CredentialInfo[]> {
+    const instance = await this.resolveAppliedInstance();
+    const ids = [instance?.switchTargetCredentialId, instance?.appliedCredentialId];
     const out: CredentialInfo[] = [];
     const seen = new Set<string>();
-    const override = this.resolveOverrideProfile();
-    if (override) {
-      const credential = await this.read(override.providerSlug);
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue;
+      const profile = getModelCredentialProfile(id);
+      if (!profile || !profile.enabled) continue;
+      const credential = authEntry(profile) as Credential | undefined;
       if (credential) {
-        out.push({ providerId: override.providerSlug, type: credential.type });
-        seen.add(override.providerSlug);
+        out.push({ providerId: profile.providerSlug, type: credential.type });
+        seen.add(id);
       }
     }
-    const bound = await this.resolveBoundProfile();
-    if (bound && !seen.has(bound.providerSlug)) {
-      const credential = authEntry(bound) as Credential | undefined;
-      if (credential) out.push({ providerId: bound.providerSlug, type: credential.type });
+    if (out.length === 0) {
+      const global = await this.resolveGlobalProfile();
+      if (global) {
+        const credential = authEntry(global) as Credential | undefined;
+        if (credential) out.push({ providerId: global.providerSlug, type: credential.type });
+      }
     }
     return out;
   }
 
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
-    const profile = await this.resolveProfileForProvider(providerId);
+    // Pin: the refresh rotation writes back to the profile this request
+    // started with (pinned by read), never to whatever is bound "now".
+    let profileId = this.pinned.get(providerId);
+    let profile = profileId ? getModelCredentialProfile(profileId) : null;
+    if (!profile || !profile.enabled) {
+      profile = await this.resolveProfileForProvider(providerId);
+      profileId = profile?.id;
+    }
     if (!profile) return fn(undefined);
-    const current = await this.read(providerId);
+    const current = authEntry(profile) as Credential | undefined;
     const next = await fn(current);
     if (next?.type === "oauth") {
       const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
-      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(profile.id, profile.providerSlug, oauth);
+      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(profileId!, profile.providerSlug, oauth);
     } else if (next?.type === "api_key" && typeof (next as any).key === "string" && (next as any).key.length > 0) {
-      persistApiKeyForProfile(profile.id, profile.providerSlug, (next as any).key);
+      persistApiKeyForProfile(profileId!, profile.providerSlug, (next as any).key);
     }
     return next;
   }

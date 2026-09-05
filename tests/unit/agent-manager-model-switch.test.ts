@@ -61,6 +61,11 @@ class TestHandle implements AgentHandle {
     this.setModelCalls.push(model);
     this.runtimeParams.model = model;
   }
+  thinkingCalls: string[] = [];
+  async setThinkingLevel(level: string): Promise<void> {
+    this.thinkingCalls.push(level);
+    this.runtimeParams.thinkingLevel = level;
+  }
   async refreshModelRegistry(): Promise<void> {
     if (this.failRefresh) throw new Error("refresh failed");
     this.refreshCalls += 1;
@@ -140,12 +145,28 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
     exportedCalls.push(args);
     return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [], profile: { id: args.credentialId || "cred-a", name: "test" } };
   }),
-  setMemberActiveCredentialOverride: vi.fn(),
-  getMemberActiveCredentialOverride: vi.fn(() => undefined),
+  getModelCredentialProfile: vi.fn((id: string) => ({
+    id,
+    name: `profile ${id}`,
+    enabled: true,
+    providerSlug: "anthropic",
+  })),
+}));
+
+// Member registry (single-path commit target): switchMemberModel commits the
+// global binding here, once, after every live instance accepted.
+let registryRecord: any;
+vi.mock("../../src/workspace/member-registry.js", () => ({
+  getMember: vi.fn(() => registryRecord),
+  updateMember: vi.fn((id: string, patch: any) => {
+    registryRecord = { ...registryRecord, id, global: { ...(registryRecord?.global || {}), ...patch.global } };
+    return registryRecord;
+  }),
 }));
 
 vi.mock("../../src/shared/config.js", () => ({
   getBossmodeDir: vi.fn(() => "/tmp/bossmode-test"),
+  ensureBossmodeDir: vi.fn(),
   readConfig: vi.fn(() => ({ runtime: { sessionResume: true } })),
 }));
 
@@ -172,6 +193,7 @@ const registry = {
 describe("agent-manager model hot switch", () => {
   beforeEach(async () => {
     member = { id: "pm", name: "pm", type: "agent", agent: "pm", runtime: "test", model: "anthropic/claude-a", credentialId: "cred-a", skills: [], thinkingLevel: "off" };
+    registryRecord = { id: "pm", name: "pm", agentTemplate: "pm", global: { model: "anthropic/claude-a", credentialId: "cred-a" } };
     messages = [{ id: "m1", type: "chat", sender: "user", content: "@pm hi", mentions: ["pm"], createdAt: Date.now() }];
     availableModels = [{ ref: "anthropic/claude-b" }, { ref: "anthropic-proxy/claude-fable-5" }];
     exportedCalls = [];
@@ -188,13 +210,15 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     expect(handles).toHaveLength(1);
 
-    const result = await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a");
+    const result = await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
-    expect(result.applied).toBe(true);
+    expect(result.model).toBe("anthropic/claude-b");
+    expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(handles[0].destroyed).toBe(false);
     expect(handles[0].refreshCalls).toBe(1);
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
+    expect(registryRecord.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
   });
 
   it("applies cross-credential/provider switches via setModel without recreating the handle", async () => {
@@ -202,15 +226,16 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    const result = await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
+    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
 
-    expect(result.applied).toBe(true);
-    expect(result.pending).toBe(false);
+    expect(result.model).toBe("anthropic-proxy/claude-fable-5");
+    expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
     expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
     expect(first.runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
     expect(exportedCalls.at(-1)).toMatchObject({ modelRef: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    expect(registryRecord.global).toEqual({ model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
   });
 
   it("applies same-provider credential changes via setModel without recreating (live credential store)", async () => {
@@ -218,7 +243,7 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-b");
+    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-b" });
 
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
@@ -232,7 +257,7 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a");
+    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
@@ -370,9 +395,8 @@ describe("agent-manager model hot switch", () => {
     const first = handles[0];
     first.emit({ type: "agent_start" });
 
-    const result = await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
-    expect(result.applied).toBe(true);
-    expect(result.pending).toBe(false);
+    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
     expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
@@ -473,67 +497,122 @@ describe("agent-manager model hot switch", () => {
     );
   });
 
-  it("does not commit the room binding when setModel fails", async () => {
+  it("does not commit the global config when setModel fails — instance is restored", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const registry = await import("../../src/workspace/member-registry.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failSetModel = true;
-    const overridesBefore = (roomStore.updateRoomMemberOverride as any).mock.calls.length;
 
-    await expect(manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a")).rejects.toThrow(/setModel failed/);
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" })).rejects.toThrow(/setModel failed/);
 
-    // Binding write happens only after a successful apply — no new override call.
-    expect((roomStore.updateRoomMemberOverride as any).mock.calls.length).toBe(overridesBefore);
-    expect(member.model).toBe("anthropic/claude-a"); // unchanged
+    // Commit happens only after a successful apply — the registry was never written.
+    expect(registry.updateMember).not.toHaveBeenCalled();
+    expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
+    // The failed setModel threw before mutating anything — the handle still runs
+    // the original model and stays alive.
+    expect(first.setModelCalls).toEqual([]);
+    expect(first.runtimeParams.model).toBe("anthropic/claude-a");
+    expect(first.destroyed).toBe(false);
   });
 
-  it("commits the room binding only after a successful live apply", async () => {
+  it("commits the global config exactly once, only after a successful live apply", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const registry = await import("../../src/workspace/member-registry.js");
     await manager.activateAgent("room", "pm");
 
-    await manager.switchMemberModel("room", "pm", "anthropic/claude-b", "cred-a");
+    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
-    expect(roomStore.updateRoomMemberOverride).toHaveBeenCalledWith(
-      "room",
-      "pm",
-      expect.objectContaining({ model: "anthropic/claude-b", credentialId: "cred-a" }),
-    );
-    // setModel was called before the override write (apply-then-commit).
-    const setModelOrder = handles[0].setModelCalls.length; // already 1
-    expect(setModelOrder).toBe(1);
-    expect(member.model).toBe("anthropic/claude-b");
+    expect(registry.updateMember).toHaveBeenCalledTimes(1);
+    expect(registry.updateMember).toHaveBeenCalledWith("pm", { global: { model: "anthropic/claude-b", credentialId: "cred-a" } });
+    expect(registryRecord.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
   });
 
-  it("pins the target credential override before setModel so cross-provider auth can resolve", async () => {
+  it("applies the switch to EVERY live instance of the member across scopes", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const registry = await import("../../src/workspace/member-registry.js");
+    await manager.activateAgent("room", "pm");
+    await manager.activateAgent("room2", "pm");
+    expect(handles).toHaveLength(2);
+
+    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+
+    // Instances keyed by scope, both applied, one commit.
+    const scopes = result.instances.map((r: any) => r.scopeId).sort();
+    expect(scopes).toEqual(["room:room", "room:room2"]);
+    for (const h of handles) {
+      expect(h.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
+      expect(h.destroyed).toBe(false);
+    }
+    expect(registry.updateMember).toHaveBeenCalledTimes(1);
+  });
+
+  it("multi-instance partial failure rolls back every switched instance and commits nothing", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const registry = await import("../../src/workspace/member-registry.js");
+    await manager.activateAgent("room", "pm");
+    await manager.activateAgent("room2", "pm");
+    handles[1].failSetModel = true;
+
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" })).rejects.toThrow(/setModel failed/);
+
+    // room applied first then was rolled back to the original; room2 failed
+    // outright (never mutated). Neither commits.
+    expect(registry.updateMember).not.toHaveBeenCalled();
+    expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
+    const roomHandle = handles.find((h) => h.setModelCalls.includes("anthropic/claude-b"))!;
+    const failedHandle = handles.find((h) => !h.setModelCalls.includes("anthropic/claude-b"))!;
+    expect(roomHandle.setModelCalls).toEqual(["anthropic/claude-b", "anthropic/claude-a"]); // switch then rollback
+    expect(roomHandle.runtimeParams.model).toBe("anthropic/claude-a");
+    expect(failedHandle.setModelCalls).toEqual([]); // setModel threw before any change
+    for (const h of handles) expect(h.destroyed).toBe(false);
+  });
+
+  it("rejects a second concurrent switch for the same member", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    first.failSetModel = true;
+    // Hold setModel so the switch stays in flight.
+    first.setModel = async (model: string) => { await new Promise((r) => setTimeout(r, 50)); first.setModelCalls.push(model); first.runtimeParams.model = model; };
+
+    const inFlight = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    // Let the first switch reach the held setModel (lock acquired).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" })).rejects.toThrow(/already in progress/);
+    await inFlight;
+    expect(first.setModelCalls).toEqual(["anthropic/claude-b"]);
+  });
+
+  it("thinking level applies member-globally: every idle instance of the member", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    await manager.activateAgent("room2", "pm");
+    handles[1].emit({ type: "agent_start" }); // second instance busy
+
+    const result = await manager.switchMemberThinkingLevel("pm", "high");
+
+    expect(result.applied.sort()).toEqual(["room:room"]);
+    expect(result.pending.sort()).toEqual(["room:room2"]);
+    expect(handles[0].thinkingCalls).toEqual(["high"]);
+    expect(handles[1].thinkingCalls).toEqual([]); // queued, applied on settlement
+    expect(handles[0].runtimeParams.thinkingLevel).toBe("high");
+  });
+
+  it("validates the credential before touching any instance", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const creds = await import("../../src/engine/model-credentials.js");
     await manager.activateAgent("room", "pm");
 
-    await manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy");
+    // Unknown profile → fail upfront, no setModel, no commit.
+    (creds.getModelCredentialProfile as any).mockReturnValueOnce(undefined);
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-missing" })).rejects.toThrow(/Credential profile not found/);
+    expect(handles[0].setModelCalls).toEqual([]);
 
-    // Override must be installed with the *target* credential before setModel runs.
-    expect(creds.setMemberActiveCredentialOverride).toHaveBeenCalledWith("room", "pm", "cred-proxy");
-    const setOverrideOrder = (creds.setMemberActiveCredentialOverride as any).mock.invocationCallOrder[0];
-    // setModel is on the handle; we only assert override was called (apply path).
-    expect(handles[0].setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
-    expect(setOverrideOrder).toBeTypeOf("number");
-  });
-
-  it("rolls back the credential override when setModel fails", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
-    const creds = await import("../../src/engine/model-credentials.js");
-    await manager.activateAgent("room", "pm");
-    handles[0].failSetModel = true;
-    (creds.getMemberActiveCredentialOverride as any).mockReturnValueOnce(undefined);
-
-    await expect(manager.switchMemberModel("room", "pm", "anthropic-proxy/claude-fable-5", "cred-proxy")).rejects.toThrow(/setModel failed/);
-
-    // First call pins target; second call rolls back (null clears).
-    expect(creds.setMemberActiveCredentialOverride).toHaveBeenCalledWith("room", "pm", "cred-proxy");
-    expect(creds.setMemberActiveCredentialOverride).toHaveBeenLastCalledWith("room", "pm", null);
+    // Model not in the catalog → fail upfront.
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-z", credentialId: "cred-a" })).rejects.toThrow(/not available/);
+    expect(handles[0].setModelCalls).toEqual([]);
   });
 
   it("filters all member runtime failure system messages from activation prompts", async () => {

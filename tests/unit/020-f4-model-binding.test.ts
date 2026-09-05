@@ -92,7 +92,7 @@ describe("F4 model binding persists to the registry", () => {
     const room = await makeStampedRoom(member.id);
 
     const manager = await import("../../src/engine/agent-manager.js");
-    await manager.switchMemberModel(room.id, member.id, "testprov/claude-b", cred.id);
+    await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
 
     // New authority updated.
     expect(reg.getMember(member.id)!.global.model).toBe("testprov/claude-b");
@@ -117,7 +117,7 @@ describe("F4 model binding persists to the registry", () => {
     const room = await makeStampedRoom(member.id);
 
     const manager = await import("../../src/engine/agent-manager.js");
-    await manager.switchMemberModel(room.id, member.id, "testprov/claude-b", cred.id);
+    await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
 
     const rec = reg.getMember(member.id)!;
     expect(rec.global.model).toBe("testprov/claude-b");
@@ -162,26 +162,17 @@ describe("F4 model binding persists to the registry", () => {
     expect(rec.scopeOverrides[`room:${room2.id}`]).toBeUndefined();
   });
 
-  it("clearMemberModelBinding clears on the same authority", async () => {
+  it("clearing a model binding is retired: the module exports no clear path", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
-    const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
-    const room = await makeStampedRoom(unified.id);
+    const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
     const manager = await import("../../src/engine/agent-manager.js");
-    manager.clearMemberModelBinding(room.id, unified.id);
-    expect(reg.getMember(unified.id)!.global.model).toBeNull();
+    expect((manager as any).clearMemberModelBinding).toBeUndefined();
 
-    const scoped = reg.createMember({
-      name: "dev",
-      agentTemplate: "pm",
-      model: "testprov/claude-a",
-      credentialId: cred.id,
-      unifiedModel: false,
-    });
-    manager.clearMemberModelBinding(room.id, scoped.id);
-    expect(reg.getMember(scoped.id)!.global.model).toBeNull();
-    expect(reg.getMember(scoped.id)!.scopeOverrides[`room:${room.id}`]).toBeUndefined();
+    // A switch to the same binding is a no-op-safe full switch (still valid).
+    await manager.switchMemberModel(member.id, { model: "testprov/claude-a", credentialId: cred.id });
+    expect(reg.getMember(member.id)!.global.model).toBe("testprov/claude-a");
   });
 });
 
@@ -245,8 +236,8 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     await manager.activateAgent(room.id, member.id);
     expect(createAgentCalls).toBe(1);
 
-    // fish's action: switch via the room member card.
-    await manager.switchMemberModel(room.id, member.id, "testprov/claude-b", cred.id);
+    // fish's action: switch via the member card (single memberId path).
+    await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
     expect(setModelCalls).toEqual(["testprov/claude-b"]);
 
     // The rollback trigger: next activation heals against the registry.

@@ -7,7 +7,8 @@
  * - GET /api/members/:id/events?scope= — reads the scope's event stream
  * - GET /api/members/:id/memory?layer&scope= — rich payload (revision/hash/
  *   budget header/parsed) matching the room members routes
- * - PATCH /api/members/:id/config?scope= — unified write authority:
+ * - Model config is single-path (design-model-switch-single-path-v1): the
+ *   /config route is deleted; PATCH /api/members/:id is the only entry.
  *   unifiedModel fields go global, otherwise the scope override
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
@@ -144,41 +145,29 @@ describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
     expect(JSON.parse(main.body)).toHaveProperty("parsed");
   });
 
-  it("PATCH config: unifiedModel member writes global; scope-overriding member writes the dm scope override", async () => {
+  it("model config is single-path: /config is gone, PATCH /:id writes global via the switch", async () => {
     const { memberId } = await createMember("patchflow");
     const scope = `dm:${memberId}`;
 
-    // Default member is unifiedModel=true → global write, no scope override
+    // The retired /config route is a plain 404.
     const p1 = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}/config?scope=${encodeURIComponent(scope)}`, {
       token,
       body: { model: "global-model-x" },
     });
-    expect(p1.status).toBe(200);
-    let detail = await jsonRequest(ts.port, "GET", `/api/members/${memberId}`, { token });
-    let member = JSON.parse(detail.body).member;
-    expect(member.global.model).toBe("global-model-x");
-    expect(member.scopeOverrides?.[scope]).toBeUndefined();
+    expect(p1.status).toBe(404);
 
-    // Batch-5b: flip request is accepted but ignored — next patch still lands global.
-    const flip = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
+    // The single path: PATCH /api/members/:id — requires a full model+credential
+    // binding and a real credential, so a bare unresolvable model is rejected.
+    const p2 = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
-      body: { unifiedModel: false },
+      body: { model: "global-model-x" },
     });
-    expect(flip.status).toBe(200);
-    const p2 = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}/config?scope=${encodeURIComponent(scope)}`, {
-      token,
-      body: { model: "dm-model-y" },
-    });
-    expect(p2.status).toBe(200);
-    detail = await jsonRequest(ts.port, "GET", `/api/members/${memberId}`, { token });
-    member = JSON.parse(detail.body).member;
-    expect(member.global.model).toBe("dm-model-y");
-    expect(member.scopeOverrides?.[scope]).toBeUndefined();
+    expect(p2.status).toBe(400);
+    expect(JSON.parse(p2.body).error).toBe("invalid_binding");
 
-    // Effective config resolves the global value
     const eff = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/effective-config?scope=${encodeURIComponent(scope)}`, { token });
     expect(eff.status).toBe(200);
-    expect(JSON.parse(eff.body).model).toBe("dm-model-y");
+    expect(JSON.parse(eff.body).model ?? null).toBeNull();
   });
 
   it("scope param validation: invalid scope → 400, missing scope → 400", async () => {
