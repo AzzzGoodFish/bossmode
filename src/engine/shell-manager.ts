@@ -107,7 +107,7 @@ function initSequence(): string {
   // -echo: the command we write must not be echoed back as "output".
   // Empty PS1: no prompt text between commands. The marker printf is APPENDED
   // (not replacing) so prompt frameworks keep working until they replace it.
-  return `stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s;%s\\\\007' \\"\\$?\\" \\"\\$PWD\\"; \${PROMPT_COMMAND:-}"\n`;
+  return `bind 'set enable-bracketed-paste on'; stty -echo; export PS1=''; PROMPT_COMMAND="printf '\\\\033]133;D;%s;%s\\\\007' \\"\\$?\\" \\"\\$PWD\\"; \${PROMPT_COMMAND:-}"\n`;
 }
 
 function stripOsc(text: string): { text: string; markers: Array<{ exitCode: number | null; cwd: string | null; index: number }> } {
@@ -211,7 +211,9 @@ function drainQueue(shell: LiveShell): void {
     if (next.exec) {
       shell.currentExec = next.exec;
       shell.pendingMarker = true;
-      shell.proc.write(`${next.command}\n`);
+      // Readline accepts one complete paste, including embedded newlines.
+      // No command wrapper: the original input is what enters shell history.
+      shell.proc.write(`\x1b[200~${next.command}\x1b[201~\n`);
     } else if (next.keys !== undefined) {
       shell.proc.write(next.keys);
     } else if (next.command !== undefined) {
