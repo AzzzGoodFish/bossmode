@@ -580,7 +580,7 @@ describe("PiSdkRuntime", () => {
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const events: any[] = [];
     handle.subscribe((event) => events.push(event));
-    await handle.prompt("/compact");
+    await await handle.compact();
 
     expect(compact).toHaveBeenCalled();
     expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
@@ -622,7 +622,7 @@ describe("PiSdkRuntime", () => {
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const events: any[] = [];
     handle.subscribe((event) => events.push(event));
-    await handle.prompt("/compact");
+    await await handle.compact();
 
     expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
     expect(events.filter((event) => event.type === "compaction_start")).toHaveLength(1);

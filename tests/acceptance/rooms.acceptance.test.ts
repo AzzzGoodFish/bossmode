@@ -19,7 +19,7 @@ import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
-import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
+import { resetMocks, setMockPromptFn, mockCompactFn } from "../helpers/mock-runtime.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
 
@@ -437,7 +437,8 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
       const msg: RoomMessage = JSON.parse(msgRes.body);
       expect(msg.content).toBe("@pm /compact");
 
-      await vi.waitFor(() => expect(prompts).toEqual(["/compact"]));
+      await vi.waitFor(() => expect(mockCompactFn).toHaveBeenCalledTimes(1));
+      expect(prompts).toEqual([]); // command drives the compact action, never a prompt
       resetMocks();
     });
 
@@ -458,7 +459,8 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
         body: { content: "/compact" },
       });
       expect(msgRes.status).toBe(200);
-      await vi.waitFor(() => expect(prompts).toEqual(["/compact"]));
+      await vi.waitFor(() => expect(mockCompactFn).toHaveBeenCalledTimes(1));
+      expect(prompts).toEqual([]); // command drives the compact action, never a prompt
       resetMocks();
     });
   });

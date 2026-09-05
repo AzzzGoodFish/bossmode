@@ -5,7 +5,8 @@
 //   1. target posts an agent-authored room message
 //   2. target transitions to idle (or is already idle at call time)
 //   3. target transitions to idle after a turn error → reason "error"
-//   4. waiter is @-mentioned → settle mention_interrupt (no abort; message arrives via steer)
+//   4. waiter is @-mentioned → settle mention_interrupt (no abort; the message
+//      interrupts the working member and is delivered as the next turn)
 //   5. timeout (default 30 min, max 360)
 //   6. user Stop → abortAgent settles wait first, then aborts the turn
 //
@@ -196,8 +197,8 @@ export function waitForMember(args: {
       if (msgRoomId !== roomId) return;
 
       // Waiter was @-mentioned (by anyone including user).
-      // Do NOT abort — standard activation steers the message while working;
-      // settle wait one tick later so steer is queued first (tool-result then user msg).
+      // Do NOT abort — the @ message interrupts the working member itself;
+      // settle wait one tick later so the tool result lands before the new turn.
       const mentioned =
         (message.mentionMemberIds && message.mentionMemberIds.includes(waiterMemberId)) ||
         (Array.isArray(message.mentions) && message.mentions.includes(waiterName));

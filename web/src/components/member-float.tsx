@@ -30,7 +30,7 @@ import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-l
 import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
-  steerAgent, restartMember, resetAgentSession,
+  restartMember, resetAgentSession,
   getMemberStats, getMemberSystemPrompt, getMemberAssets,
   getMemberScopedStats,
   getConversationSession, conversationMemberAction, sendDmMessage,
@@ -702,8 +702,7 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   const handleCompact = useCallback(async () => {
     if (!scope) return;
     try {
-      if (dm) await conversationMemberAction(scope.scopeId, member.memberId, "steer", "/compact");
-      else await steerAgent(roomId!, member.memberId, "/compact");
+      await conversationMemberAction(scope.scopeId, member.memberId, "compact");
       toast(`Compact started for ${member.name}`, "success");
     } catch (err) { console.error(err); toast("Couldn’t compact this conversation. Try again.", "error"); }
   }, [dm, roomId, member, scope, toast]);

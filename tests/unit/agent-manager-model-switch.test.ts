@@ -45,7 +45,14 @@ class TestHandle implements AgentHandle {
     this.pendingPromptResolve = null;
   }
 
-  steer(): void {}
+  compactCalls = 0;
+  async compact(): Promise<void> {
+    this.compactCalls += 1;
+    this.emit({ type: "agent_start" });
+    this.emit({ type: "compaction_start", reason: "manual" });
+    this.emit({ type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
+    this.emit({ type: "agent_end" });
+  }
   abort(): void {}
   destroy(): void { this.destroyed = true; }
   waitForIdle(): Promise<void> { return Promise.resolve(); }
@@ -606,11 +613,10 @@ describe("agent-manager model hot switch", () => {
     expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" hasn\'t selected a model yet. Open the member card to choose a model and credential, then try again.');
   });
 
-  it("rejects steer for an Unconfigured member instead of creating a runtime", async () => {
+  it("compact with no live instance rejects honestly instead of creating a runtime", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    member = { ...member, model: undefined, credentialId: undefined };
 
-    await expect(manager.steerAgent("room", "pm", "hello")).rejects.toThrow("hasn't selected a model yet");
+    await expect(manager.compactMember("room:room", "pm")).rejects.toThrow(/No active session/);
     expect(handles).toHaveLength(0);
   });
 

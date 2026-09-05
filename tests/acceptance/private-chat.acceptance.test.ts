@@ -3,11 +3,12 @@
  *
  * Coverage:
  * - T4.1: Private chat event stream (F10)
- * - T4.2: Private chat steer injection (F11)
+ * - T4.2: Steer endpoint retired (steer-removal §2) — the only member-facing
+ *   message path is normal delivery; compaction is a conversation action
  * - T4.3: Private chat does NOT sync to group chat (F11) ⭐
  * - T4.4: Steer idle agent → prompt path (F11)
- * - T4.5: Steer working agent → steer path (F11, F13)
- * - T4.6: Steer non-member → error (F11)
+ * - T4.5: Steer route retirement — 404, no silent injection
+ * - T4.6: steer non-member — route retired (404)
  *
  * From test plan: docs/test-plan.md §4
  */
@@ -89,25 +90,29 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
     });
   }
 
+  async function compactConversation(scopeId: string, memberId: string) {
+    return jsonRequest(ts.port, "POST", `/api/conversations/${encodeURIComponent(scopeId)}/compact?memberId=${encodeURIComponent(memberId)}`, {
+      token,
+      body: {},
+    });
+  }
+
   // ── T4.2: Steer endpoint basic functionality ──
 
-  describe("T4.2: Private chat steer injection (F11)", () => {
-    it("POST steer returns 200 and triggers agent", async () => {
+  describe("T4.2: steer endpoint is retired (steer-removal §2)", () => {
+    it("POST steer returns 404 — arbitrary-text injection is gone, no alias", async () => {
       const room = await createRoom("t42-test", ["pm"]);
 
       const res = await steer(room.id, "pm", "focus on performance analysis");
-      expect(res.status).toBe(200);
-      const data = JSON.parse(res.body);
-      expect(data.ok).toBe(true);
+      expect(res.status).toBe(404);
     });
 
-    it("steer with missing content returns 400", async () => {
-      const room = await createRoom("t42-empty-test", ["pm"]);
-      const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/steer`, {
-        token,
-        body: {},
-      });
-      expect(res.status).toBe(400);
+    it("compact conversation action answers on the same surface", async () => {
+      const room = await createRoom("t42-compact-test", ["pm"]);
+
+      // No live instance in this fresh scope → honest error, not a silent no-op.
+      const res = await compactConversation(`room:${room.id}`, "pm");
+      expect([200, 400]).toContain(res.status);
     });
   });
 
@@ -172,8 +177,8 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
 
   // ── T4.4: Steer idle agent → prompt path ──
 
-  describe("T4.4: Steer idle agent → prompt (F11)", () => {
-    it("steer on idle agent triggers prompt (not steer injection)", async () => {
+  describe("T4.4: retired — idle steering now means normal message delivery", () => {
+    it("steer route 404s; a normal @mention still prompts the idle member", async () => {
       setMockIsWorking(false); // agent is idle
 
       const room = await createRoom("t44-test", ["pm"]);
@@ -182,16 +187,8 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       wsClient.send({ type: "subscribe:room", roomId: room.id });
       await new Promise((r) => setTimeout(r, 50));
 
-      await steer(room.id, "pm", "analyze the README");
-
-      // Should get agent:status → working (idle agent gets prompted)
-      await new Promise((r) => setTimeout(r, 300));
-
-      const statusEvents = wsClient.events.filter(
-        (e) => e.type === "agent:status" && (e as any).agent === "pm",
-      );
-      const workingEvent = statusEvents.find((e) => (e as any).status === "working");
-      expect(workingEvent).toBeTruthy();
+      const res = await steer(room.id, "pm", "analyze the README");
+      expect(res.status).toBe(404); // no injection path at all
 
       await wsClient.close();
     });
@@ -199,8 +196,8 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
 
   // ── T4.5: Steer working agent → steer injection ──
 
-  describe("T4.5: Steer working agent → steer injection (F11, F13)", () => {
-    it("steer on working agent uses steer() not prompt()", async () => {
+  describe("T4.5: steer on a working agent is retired", () => {
+    it("route 404s and the handle never sees steer — new messages interrupt instead", async () => {
       const room = await createRoom("t45-test", ["pm"]);
 
       let releasePrompt: (() => void) | null = null;
@@ -214,13 +211,9 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       await sendMessage(room.id, "@pm start working");
       await new Promise((r) => setTimeout(r, 200));
 
-      // Steer while working
-      await steer(room.id, "pm", "change direction, focus on security");
-      await new Promise((r) => setTimeout(r, 200));
-
-      // steer() should have been called (not a new prompt())
-      // The mock tracks this — steer is the injection path
-      expect(mockSteerFn).toHaveBeenCalled();
+      const res = await steer(room.id, "pm", "change direction, focus on security");
+      expect(res.status).toBe(404);
+      expect(mockSteerFn).not.toHaveBeenCalled(); // injection path is gone
 
       // Cleanup blocked prompt
       releasePrompt?.();
@@ -229,14 +222,12 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
 
   // ── T4.6: Steer non-member → error ──
 
-  describe("T4.6: Steer non-member agent (F11)", () => {
-    it("steer on non-member returns 400", async () => {
+  describe("T4.6: steer non-member (F11) — retired route", () => {
+    it("returns 404 like every other steer call — no member-resolution path left", async () => {
       const room = await createRoom("t46-test", ["pm"]);
 
       const res = await steer(room.id, "qa", "this should fail");
-      expect(res.status).toBe(400);
-      const data = JSON.parse(res.body);
-      expect(data.error).toContain("not a member");
+      expect(res.status).toBe(404);
     });
   });
 

@@ -89,7 +89,9 @@ export interface AgentRuntimeParams {
 
 export interface AgentHandle {
   prompt(message: string): Promise<void>;
-  steer(message: string): void;
+  /** Manual compaction (conversation action). Emits the full event bridge
+   * (agent_start / compaction_start / compaction_end / agent_end). */
+  compact(): Promise<void>;
   /** Abort the run. Message delivery preserves compaction; explicit Stop cancels it. */
   abort(options?: { preserveCompaction?: boolean }): void;
   destroy(): void;

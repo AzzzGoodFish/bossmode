@@ -52,7 +52,7 @@ export const RELOAD_DESCRIPTION = `Rebuild your session in the current scope wit
 
 export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, errors out of a turn, you are @-mentioned, or the timeout elapses.
 
-This is a synchronous wait — your turn stays open (status stays working) until one of those events. Returns the target's message body when they post, or a short status for idle/error/timeout/mention interrupt. Cursor is not advanced — @-mentions while waiting are delivered via the normal activation/steer path; wait only reports that it ended.
+This is a synchronous wait — your turn stays open (status stays working) until one of those events. Returns the target's message body when they post, or a short status for idle/error/timeout/mention interrupt. Cursor is not advanced — @-mentions while waiting are delivered by the normal activation path (they interrupt the wait); wait only reports that it ended.
 
 If the target's turn fails (e.g. request terminated), wait wakes with reason "error" and tells you there was no output — verify status before continuing. Transient provider retries keep the target working and do not wake wait.
 

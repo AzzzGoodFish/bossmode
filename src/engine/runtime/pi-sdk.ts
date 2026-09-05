@@ -547,7 +547,6 @@ class PiSdkAgentHandle implements AgentHandle {
   }
 
   async prompt(message: string): Promise<void> {
-    if (message === "/compact") return this.compact();
     this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
     try {
       let next: string | null = message;
@@ -571,16 +570,6 @@ class PiSdkAgentHandle implements AgentHandle {
     } finally {
       this.watchdogTurn = null;
     }
-  }
-
-  steer(message: string): void {
-    if (message === "/compact") {
-      this.compact().catch((err) => logger.error("runtime:pi-sdk", "compact failed in steer", { error: err.message }));
-      return;
-    }
-    this.session.steer(message).catch((err) => {
-      this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
-    });
   }
 
   abort(options?: { preserveCompaction?: boolean }): void {
@@ -757,7 +746,7 @@ class PiSdkAgentHandle implements AgentHandle {
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
-  private async compact(): Promise<void> {
+  async compact(): Promise<void> {
     this.emit({ type: "agent_start" });
     const bridge = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
     this.manualCompactionBridge = bridge;

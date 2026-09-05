@@ -1022,17 +1022,6 @@ export async function sendMessage(
 
 // -- Private Chat / Steer --
 
-export async function steerAgent(
-  roomId: string,
-  agentName: string,
-  content: string,
-): Promise<void> {
-  await apiFetch(`/api/rooms/${roomId}/agents/${agentName}/steer`, {
-    method: "POST",
-    body: JSON.stringify({ content }),
-  });
-}
-
 export async function reloadMemberResources(
   roomId: string,
   agentName: string,
@@ -1781,9 +1770,9 @@ export async function getConversationTools(scopeId: string, memberId: string): P
 export async function conversationMemberAction(
   scopeId: string,
   memberId: string,
-  action: "abort" | "reset-session" | "reload" | "steer",
+  action: "abort" | "reset-session" | "reload" | "compact",
   text?: string,
-): Promise<{ ok?: boolean; message?: string; reloaded?: boolean }> {
+): Promise<{ ok?: boolean; action?: string; message?: string; reloaded?: boolean }> {
   return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/${action}?memberId=${encodeURIComponent(memberId)}`, {
     method: "POST",
     body: JSON.stringify(text ? { text } : {}),
