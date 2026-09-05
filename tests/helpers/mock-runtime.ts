@@ -58,12 +58,13 @@ export class MockAgentHandle implements AgentHandle {
     }
   }
 
-  async compact(): Promise<void> {
+  async compact(): Promise<{ aborted: boolean }> {
     this.emit({ type: "agent_start" });
     this.emit({ type: "compaction_start", reason: "manual" });
     await mockCompactFn();
     this.emit({ type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
     this.emit({ type: "agent_end" });
+    return { aborted: false };
   }
 
   abort(): void {

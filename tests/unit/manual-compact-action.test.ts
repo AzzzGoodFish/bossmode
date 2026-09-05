@@ -65,7 +65,7 @@ class TestHandle implements AgentHandle {
   emit(event: AgentStreamEvent): void {
     for (const fn of this.listeners) fn(event);
   }
-  async compact(): Promise<void> {
+  async compact(): Promise<{ aborted: boolean }> {
     this.compactCalls += 1;
     this.emit({ type: "agent_start" });
     this.emit({ type: "compaction_start", reason: "manual" });
@@ -74,6 +74,7 @@ class TestHandle implements AgentHandle {
     }
     this.emit({ type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
     this.emit({ type: "agent_end" });
+    return { aborted: false };
   }
   resolvePendingCompact(): void {
     this.pendingCompactResolve?.();

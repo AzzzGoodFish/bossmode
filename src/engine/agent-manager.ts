@@ -1964,7 +1964,11 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
     started = true;
     // From here the event bridge owns the lifecycle: compaction_end resets
     // compacting/status and resumes queued inputs as a fresh prompt.
-    await instance.handle.compact();
+    const outcome = await instance.handle.compact();
+    if (outcome?.aborted) {
+      logger.info("agent", "manualCompactAborted", { member: instance.agentName, scopeId: instance.scopeId });
+      return { ok: false, action: "stopped" };
+    }
     return { ok: true, action: "compacted" };
   } catch (err) {
     const message = formatRuntimeErrorMessage(err);

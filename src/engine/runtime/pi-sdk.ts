@@ -354,7 +354,7 @@ class PiSdkAgentHandle implements AgentHandle {
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
   private watchdogTurn: WatchdogTurnState | null = null;
-  private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
+  private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean; lastEndAborted?: boolean } | null = null;
   private destroyed = false;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
@@ -384,6 +384,7 @@ class PiSdkAgentHandle implements AgentHandle {
         }
         if (rawEvent?.type === "compaction_end") {
           bridge.rawEndSeen = true;
+          bridge.lastEndAborted = rawEvent.aborted === true;
           if (bridge.syntheticEndEmitted) return;
         }
       }
@@ -746,9 +747,9 @@ class PiSdkAgentHandle implements AgentHandle {
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
-  async compact(): Promise<void> {
+  async compact(): Promise<{ aborted: boolean }> {
     this.emit({ type: "agent_start" });
-    const bridge = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
+    const bridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean; lastEndAborted?: boolean } = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
     this.manualCompactionBridge = bridge;
     const emitSyntheticStartIfNeeded = () => {
       if (bridge.rawStartSeen || bridge.syntheticStartEmitted) return;
@@ -758,6 +759,7 @@ class PiSdkAgentHandle implements AgentHandle {
     const emitSyntheticEndIfNeeded = (event: { aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }) => {
       if (bridge.rawEndSeen || bridge.syntheticEndEmitted) return;
       bridge.syntheticEndEmitted = true;
+      bridge.lastEndAborted = event.aborted === true;
       this.emit({ type: "compaction_end", reason: "manual", ...event });
     };
     try {
@@ -765,6 +767,7 @@ class PiSdkAgentHandle implements AgentHandle {
       await Promise.resolve();
       emitSyntheticStartIfNeeded();
       const result = await compactRun;
+      const outcome = { aborted: bridge.lastEndAborted === true };
       const tokensBefore = Number((result as any)?.tokensBefore);
       emitSyntheticEndIfNeeded({
         aborted: false,
@@ -779,6 +782,7 @@ class PiSdkAgentHandle implements AgentHandle {
       this.manualCompactionBridge = null;
       this.emit({ type: "agent_end" });
     }
+    return { aborted: bridge.lastEndAborted === true };
   }
 }
 
