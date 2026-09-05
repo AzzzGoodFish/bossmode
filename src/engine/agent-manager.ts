@@ -1443,7 +1443,10 @@ async function activateAgentInternalContinue(
     // steer (queue-behind-the-turn) is retired for message delivery. Shell
     // commands keep running; blocking tools return their actual running result.
     // The SDK owns session history, including interrupted tool calls.
-    emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
+    // Activity: NO event here — the drained queue emits exactly one user_prompt
+    // (banner + message) when the abort settles (fish 2026-09-05: this path
+    // used to also emit user_steer up front, so one message produced two
+    // activity cards).
     interruptWorkingInstance(roomId, instance, payload,
       "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
       "message_interrupt");
