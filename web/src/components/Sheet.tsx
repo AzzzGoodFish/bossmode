@@ -15,6 +15,10 @@ interface SheetProps {
   size?: "sm" | "md" | "lg" | "xl" | "2xl";
   /** "right" docks a full-height panel to the right edge (desktop); default is the centered modal. */
   dock?: "right";
+  /** Layer override — dialogs that must sit above the member float (z-70)
+   * pass "z-[80]" (fish 2026-09-05: the reset-session confirm was stranded
+   * under the float, unclickable). Default stays z-50. */
+  zClass?: string;
   closeOnOverlayClick?: boolean;
   children: React.ReactNode;
 }
@@ -27,7 +31,7 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
   ).filter((el) => !el.closest("[disabled]") && getComputedStyle(el).display !== "none");
 }
 
-export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = true, children }: SheetProps) {
+export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = true, zClass = "z-50", children }: SheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -103,7 +107,7 @@ export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = 
       // Right-docked full-height panel (member panel family)
       return (
         <div
-          className="fixed inset-0 bg-black/60 z-50"
+          className={`fixed inset-0 bg-black/60 ${zClass}`}
           onMouseDown={handleOverlayMouseDown}
           onMouseUp={handleOverlayMouseUp}
         >
@@ -122,7 +126,7 @@ export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = 
     // Desktop: centered modal
     return (
       <div
-        className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+        className={`fixed inset-0 bg-black/60 flex items-center justify-center ${zClass}`}
         onMouseDown={handleOverlayMouseDown}
         onMouseUp={handleOverlayMouseUp}
       >
@@ -141,7 +145,7 @@ export function Sheet({ open, onClose, size = "md", dock, closeOnOverlayClick = 
 
   // Mobile: bottom sheet
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+    <div className={`fixed inset-0 ${zClass} flex flex-col justify-end`}>
       {/* Overlay */}
       <div
         className="absolute inset-0 bg-black/50"
