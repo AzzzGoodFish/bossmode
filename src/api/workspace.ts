@@ -19,7 +19,7 @@ import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activit
 
 import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getModelCredentialProfile, normalizeModelRef, resolveCredentialProfileForModel, assertModelAvailable } from "../engine/model-credentials.js";
+import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
@@ -580,7 +580,7 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
   }
 
   const body = (await parseBody(req)) as { name?: string; model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null };
-  const patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null } = {};
+  const patch: { mcpServers?: string[] | null; extensions?: string[] | null } = {};
   const hasName = Object.prototype.hasOwnProperty.call(body, "name");
   const hasModel = Object.prototype.hasOwnProperty.call(body, "model");
   const hasCredential = Object.prototype.hasOwnProperty.call(body, "credentialId");

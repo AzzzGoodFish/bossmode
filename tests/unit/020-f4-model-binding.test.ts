@@ -126,7 +126,7 @@ describe("F4 model binding persists to the registry", () => {
     expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-b");
   });
 
-  it("non-model patch (thinking/mcp) routes by the same unified flags", async () => {
+  it("MCP asset patches remain global and do not write room overrides", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
     const roomStore = await import("../../src/workspace/room-store.js");
@@ -135,15 +135,14 @@ describe("F4 model binding persists to the registry", () => {
     const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room1 = await makeStampedRoom(unified.id);
     const manager = await import("../../src/engine/agent-manager.js");
-    manager.persistRoomMemberConfigPatch(room1.id, unified.id, { thinkingLevel: "high", mcpServers: ["playwright"] });
+    manager.persistRoomMemberConfigPatch(room1.id, unified.id, { mcpServers: ["playwright"] });
     let rec = reg.getMember(unified.id)!;
-    expect(rec.global.thinkingLevel).toBe("high");
     expect(rec.global.mcpServers).toEqual(["playwright"]);
     expect(rec.scopeOverrides[`room:${room1.id}`]).toBeUndefined();
     expect(roomStore.getRoom(room1.id)!.memberOverrides).toBeUndefined();
     // Read side agrees (this was the invisible-write bug).
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
-    expect(resolveRoomMember(room1.id, unified.id)?.thinkingLevel).toBe("high");
+    expect(resolveRoomMember(room1.id, unified.id)?.mcpServers).toEqual(["playwright"]);
 
     // Batch-5b: scoped/mixed members also write global (flags ignored).
     const scoped = reg.createMember({
@@ -155,9 +154,8 @@ describe("F4 model binding persists to the registry", () => {
       unifiedExtensions: false,
     });
     const room2 = await makeStampedRoom(scoped.id, "dev");
-    manager.persistRoomMemberConfigPatch(room2.id, scoped.id, { thinkingLevel: "low", mcpServers: ["playwright"] });
+    manager.persistRoomMemberConfigPatch(room2.id, scoped.id, { mcpServers: ["playwright"] });
     rec = reg.getMember(scoped.id)!;
-    expect(rec.global.thinkingLevel).toBe("low");
     expect(rec.global.mcpServers).toEqual(["playwright"]);
     expect(rec.scopeOverrides[`room:${room2.id}`]).toBeUndefined();
   });
@@ -249,7 +247,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     expect(createAgentCalls).toBe(1);
   });
 
-  it("F3: DM live config change heals the drifted DM instance (setModel, no recreate)", async () => {
+  it("§10: a direct config write does NOT touch a live DM instance — only switchMemberModel does", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
@@ -260,12 +258,18 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(1);
 
-    // Config changes while the DM instance is alive (e.g. member settings page).
+    // A raw registry write bypasses the switch path — with activate-heal
+    // removed (§10), a later activation must NOT reconcile it. The live
+    // instance keeps running its applied model.
     reg.updateMember(member.id, { global: { model: "testprov/claude-b" } });
-
     await manager.activateDmMember(member.id);
-    expect(setModelCalls).toEqual(["testprov/claude-b"]);
-    expect(createAgentCalls).toBe(1); // healed in place, not recreated
+    expect(setModelCalls).toEqual([]);
+    expect(createAgentCalls).toBe(1);
     expect(reg.getEffectiveConfig(member.id, `dm:${member.id}`).model).toBe("testprov/claude-b");
+
+    // The sanctioned path switches the live instance without recreating it.
+    await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
+    expect(setModelCalls).toEqual(["testprov/claude-b"]);
+    expect(createAgentCalls).toBe(1);
   });
 });

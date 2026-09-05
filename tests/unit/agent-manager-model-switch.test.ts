@@ -58,9 +58,17 @@ class TestHandle implements AgentHandle {
   }
   async setModel(model: string): Promise<void> {
     if (this.failSetModel) throw new Error("setModel failed");
+    if (this.failSetModelOnce) {
+      this.failSetModelOnce = false;
+      this.setModelCalls.push(model); // SDK assigned state.model before failing
+      this.runtimeParams.model = model;
+      throw new Error("setModel failed");
+    }
     this.setModelCalls.push(model);
     this.runtimeParams.model = model;
   }
+  /** Fail setModel once (the call still "changed SDK state" per §10), then succeed. */
+  failSetModelOnce = false;
   thinkingCalls: string[] = [];
   async setThinkingLevel(level: string): Promise<void> {
     this.thinkingCalls.push(level);
@@ -149,7 +157,9 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
     id,
     name: `profile ${id}`,
     enabled: true,
-    providerSlug: "anthropic",
+    // Provider-per-credential so the explicit providerSlug match has real
+    // cases on both sides (same-provider key switch AND cross-provider).
+    providerSlug: id === "cred-proxy" ? "anthropic-proxy" : "anthropic",
   })),
 }));
 
@@ -216,7 +226,6 @@ describe("agent-manager model hot switch", () => {
     expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(handles[0].destroyed).toBe(false);
-    expect(handles[0].refreshCalls).toBe(1);
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
     expect(registryRecord.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
   });
@@ -234,7 +243,6 @@ describe("agent-manager model hot switch", () => {
     expect(first.destroyed).toBe(false);
     expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
     expect(first.runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
-    expect(exportedCalls.at(-1)).toMatchObject({ modelRef: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
     expect(registryRecord.global).toEqual({ model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
   });
 
@@ -502,16 +510,17 @@ describe("agent-manager model hot switch", () => {
     const registry = await import("../../src/workspace/member-registry.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
-    first.failSetModel = true;
+    // §10 shape: the SDK assigned state.model and THEN setModel threw — the
+    // rollback must put the original binding back on this same handle.
+    first.failSetModelOnce = true;
 
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" })).rejects.toThrow(/setModel failed/);
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+      .rejects.toThrow(/restored to its previous model/);
 
     // Commit happens only after a successful apply — the registry was never written.
     expect(registry.updateMember).not.toHaveBeenCalled();
     expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
-    // The failed setModel threw before mutating anything — the handle still runs
-    // the original model and stays alive.
-    expect(first.setModelCalls).toEqual([]);
+    expect(first.setModelCalls).toEqual(["anthropic/claude-b", "anthropic/claude-a"]); // applied then rolled back
     expect(first.runtimeParams.model).toBe("anthropic/claude-a");
     expect(first.destroyed).toBe(false);
   });
@@ -548,25 +557,46 @@ describe("agent-manager model hot switch", () => {
     expect(registry.updateMember).toHaveBeenCalledTimes(1);
   });
 
-  it("multi-instance partial failure rolls back every switched instance and commits nothing", async () => {
+  it("multi-instance partial failure rolls back EVERY attempted instance (incl. the thrower) and commits nothing", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
-    handles[1].failSetModel = true;
+    // §10: room2's setModel fails AFTER assigning SDK state (once), so its
+    // rollback must put the original model back rather than skip it.
+    handles[1].failSetModelOnce = true;
 
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" })).rejects.toThrow(/setModel failed/);
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+      .rejects.toThrow(/failed at room:room2.*restored to its previous model/s);
 
-    // room applied first then was rolled back to the original; room2 failed
-    // outright (never mutated). Neither commits.
+    // No commit, both handles back on the original binding, both alive.
     expect(registry.updateMember).not.toHaveBeenCalled();
     expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
-    const roomHandle = handles.find((h) => h.setModelCalls.includes("anthropic/claude-b"))!;
-    const failedHandle = handles.find((h) => !h.setModelCalls.includes("anthropic/claude-b"))!;
-    expect(roomHandle.setModelCalls).toEqual(["anthropic/claude-b", "anthropic/claude-a"]); // switch then rollback
-    expect(roomHandle.runtimeParams.model).toBe("anthropic/claude-a");
-    expect(failedHandle.setModelCalls).toEqual([]); // setModel threw before any change
-    for (const h of handles) expect(h.destroyed).toBe(false);
+    for (const h of handles) {
+      expect(h.setModelCalls[h.setModelCalls.length - 1]).toBe("anthropic/claude-a");
+      expect(h.runtimeParams.model).toBe("anthropic/claude-a");
+      expect(h.destroyed).toBe(false);
+    }
+    const failedHandle = handles.find((h) => h.setModelCalls.includes("anthropic/claude-b"))!;
+    expect(failedHandle.setModelCalls).toEqual(["anthropic/claude-b", "anthropic/claude-a"]); // applied then rolled back
+  });
+
+  it("rollback that fails again stops that exact scope's instance and names it in the error", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const registry = await import("../../src/workspace/member-registry.js");
+    await manager.activateAgent("room", "pm");
+    await manager.activateAgent("room2", "pm");
+    handles[1].failSetModel = true; // fails the switch AND its rollback
+
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+      .rejects.toThrow(/failed at room:room2.*could not restore room:room2.*stopped/s);
+
+    expect(registry.updateMember).not.toHaveBeenCalled();
+    const healthy = handles.find((h) => !h.failSetModel)!;
+    expect(healthy.runtimeParams.model).toBe("anthropic/claude-a"); // restored
+    expect(healthy.destroyed).toBe(false);
+    const broken = handles.find((h) => h.failSetModel)!;
+    expect(broken.destroyed).toBe(true); // stopped at that exact scope
   });
 
   it("rejects a second concurrent switch for the same member", async () => {
@@ -577,10 +607,11 @@ describe("agent-manager model hot switch", () => {
     // Hold setModel so the switch stays in flight.
     first.setModel = async (model: string) => { await new Promise((r) => setTimeout(r, 50)); first.setModelCalls.push(model); first.runtimeParams.model = model; };
 
+    // §10: the lock is acquired synchronously at entry — the second call gets
+    // the conflict error immediately, even while the first is still validating.
     const inFlight = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
-    // Let the first switch reach the held setModel (lock acquired).
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await expect(manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" })).rejects.toThrow(/already in progress/);
+    await expect(manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" }))
+      .rejects.toMatchObject({ name: "MemberModelSwitchConflictError" });
     await inFlight;
     expect(first.setModelCalls).toEqual(["anthropic/claude-b"]);
   });
@@ -598,6 +629,94 @@ describe("agent-manager model hot switch", () => {
     expect(handles[0].thinkingCalls).toEqual(["high"]);
     expect(handles[1].thinkingCalls).toEqual([]); // queued, applied on settlement
     expect(handles[0].runtimeParams.thinkingLevel).toBe("high");
+  });
+
+  it("a creation during a switch waits for the switch to end before building (no latecomer)", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+    const first = handles[0];
+    // Hold the switch in setModel so the gate stays closed.
+    let releaseSetModel!: () => void;
+    first.setModel = async (model: string) => {
+      await new Promise<void>((resolve) => { releaseSetModel = resolve; });
+      first.setModelCalls.push(model);
+      first.runtimeParams.model = model;
+    };
+    const inFlight = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // switch is now held in setModel
+
+    const creating = manager.buildMemberAgentSession("pm", "room:room3");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Gated: nothing built while the switch is in flight, and the switch did
+    // not wait on it either (it never registered as a pending creation).
+    expect(handles).toHaveLength(1);
+
+    releaseSetModel();
+    await inFlight;
+    const built = await creating;
+    expect(built).toBeTruthy();
+    expect(handles).toHaveLength(2);
+    // The new instance is NOT part of the switch result (it built after, from
+    // the committed binding) — no latecomer sweep exists to include it.
+    expect(built!.handle.runtimeParams.model).toBe("anthropic/claude-a"); // member mock still points at claude-a
+  }, 15000);
+
+  it("§10: the switch WAITS for an in-flight creation — its snapshot includes it (no timeout path)", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm"); // fast runtime: 1 handle
+
+    // Slow runtime for the second scope: its creation registers and hangs in
+    // createAgent behind a latch.
+    let releaseCreate!: () => void;
+    const slowRuntime = {
+      name: "test",
+      async createAgent(opts: any) {
+        await new Promise<void>((resolve) => { releaseCreate = resolve; });
+        const handle = new TestHandle(opts.member.model);
+        handles.push(handle);
+        return handle;
+      },
+      async shutdownAll() {},
+    };
+    registry.get.mockReturnValue(slowRuntime as any);
+
+    const creating = manager.buildMemberAgentSession("pm", "room:room3");
+    await new Promise((resolve) => setTimeout(resolve, 20)); // creation now pending, latched
+
+    const switching = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The switch must NOT have snapshotted yet — it is waiting for the pending
+    // creation (no setModel on the live instance in the meantime).
+    expect(handles[0].setModelCalls).toEqual([]);
+
+    releaseCreate();
+    const built = await creating;
+    expect(built).toBeTruthy();
+    const result = await switching;
+    // The waited-for creation is in the snapshot and got the switch applied.
+    const scopes = result.instances.map((r: any) => r.scopeId).sort();
+    expect(scopes).toEqual(["room:room", "room:room3"]);
+    for (const h of handles) expect(h.setModelCalls).toEqual(["anthropic/claude-b"]);
+    // Restore the fast runtime for the rest of the file (clearAllMocks does
+    // not undo mockReturnValue).
+    registry.get.mockImplementation(() => runtime);
+  }, 15000);
+
+  it("§10: invalid requests export nothing; a valid switch refreshes the instance catalog", async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.activateAgent("room", "pm");
+
+    // Entry validation is read-only — a rejected switch never writes models.json.
+    const before = exportedCalls.length;
+    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-proxy" }))
+      .rejects.toThrow(/does not serve model/);
+    expect(exportedCalls.length).toBe(before);
+
+    // A valid switch DOES export at apply time — a newly created provider
+    // must reach the old session's dir so runtime.refresh can find it.
+    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    expect(exportedCalls.length).toBeGreaterThan(before);
+    expect(exportedCalls.at(-1)).toMatchObject({ modelRef: "anthropic/claude-b", credentialId: "cred-a" });
   });
 
   it("validates the credential before touching any instance", async () => {

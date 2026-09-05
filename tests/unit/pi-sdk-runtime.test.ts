@@ -52,7 +52,8 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
-  createMemberCredentialStore: (roomId: string, memberId: string) => ({ kind: "credentials", roomId, memberId }),
+  createCredentialStore: (profile: any) => ({ kind: "credentials", profile, read: vi.fn(), list: vi.fn(async () => []), modify: vi.fn(), delete: vi.fn() }),
+  getModelCredentialProfile: (id: string) => ({ id, providerSlug: "anthropic", enabled: true, name: "Test account" }),
   // Faithful room-scope shape (topic/dm branches not exercised in this suite).
   resolvePiAgentDir: (roomIdOrScope: string, memberIdOrName: string) =>
     join(dir, "pi-agent", "runtime", String(roomIdOrScope).replace(/[^a-zA-Z0-9._-]+/g, "_"), String(memberIdOrName).replace(/[^a-zA-Z0-9._-]+/g, "_")),
@@ -77,7 +78,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     ModelRuntime: {
       create: async (...args: any[]) => {
         modelRegistryCreate(...args);
-        return { kind: "model-runtime", args };
+        return { kind: "model-runtime", args, refresh: modelRegistryRefresh, getAuth: vi.fn(), checkAuth: vi.fn() };
       },
     },
     ModelRegistry: class {
@@ -118,7 +119,15 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       },
     },
     DefaultResourceLoader,
-    createAgentSession: (...args: any[]) => createAgentSession(...args),
+    createAgentSession: async (...args: any[]) => {
+      const result = await createAgentSession(...args);
+      result.session.modelRuntime = args[0].modelRuntime;
+      result.session.model = { ...args[0].model, contextWindow: result.session.model?.contextWindow };
+      // SDK holds the exact supplied model object.
+      Object.assign(args[0].model, result.session.model);
+      result.session.model = args[0].model;
+      return result;
+    },
   };
 });
 
@@ -208,7 +217,7 @@ describe("PiSdkRuntime", () => {
     await new PiSdkRuntime().createAgent(baseOpts());
 
     expect(modelRegistryCreate).toHaveBeenCalledWith(expect.objectContaining({
-      credentials: expect.objectContaining({ roomId: "room-a", memberId: "pm" }),
+      credentials: expect.objectContaining({ read: expect.any(Function), modify: expect.any(Function) }),
       modelsPath: join(agentDir, "models.json"),
     }));
   });
@@ -656,7 +665,7 @@ describe("PiSdkRuntime", () => {
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     await handle.refreshModelRegistry?.();
-    await handle.setModel?.("anthropic/claude-opus-4-6");
+    await handle.setModel?.("anthropic/claude-opus-4-6", "cred-b");
 
     expect(modelRegistryRefresh).toHaveBeenCalled();
     expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));

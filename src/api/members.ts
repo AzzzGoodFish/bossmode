@@ -577,15 +577,21 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       }
       try {
         modelSwitch = await switchMemberModel(m.id, { model: targetModel, credentialId: targetCred });
+        // Return the committed record, not the pre-switch object held by this route.
+        m = getMember(m.id)!;
       } catch (err: any) {
-        sendJson(res, 400, { error: "model_switch_failed", message: err.message || String(err) });
+        if (err && err.name === "MemberModelSwitchConflictError") {
+          sendJson(res, 409, { error: "switch_in_progress", message: err.message || String(err) });
+        } else {
+          sendJson(res, 400, { error: "model_switch_failed", message: err.message || String(err) });
+        }
         return;
       }
     }
 
     let thinkingSwitch: Awaited<ReturnType<typeof switchMemberThinkingLevel>> | undefined;
-    if (body.thinkingLevel !== undefined && body.thinkingLevel !== null) {
-      thinkingSwitch = await switchMemberThinkingLevel(m.id, String(body.thinkingLevel));
+    if (body.thinkingLevel !== undefined) {
+      thinkingSwitch = await switchMemberThinkingLevel(m.id, body.thinkingLevel === null ? "off" : String(body.thinkingLevel));
     }
 
     if (body.name && body.name.trim() !== m.name) {
@@ -593,14 +599,20 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       // Keep frontmatter name in sync with registry rename.
       updateMemberProfileFrontmatter(m.id, { name: m.name }, m.name);
     }
-    m = updateMember(m.id, {
-      agentTemplate: body.agentTemplate,
-      global: {
-        ...(body.thinkingLevel !== undefined && body.thinkingLevel !== null ? { thinkingLevel: body.thinkingLevel } : {}),
-        ...(body.skills !== undefined ? { skills: body.skills } : {}),
-        ...(body.mcpServers !== undefined ? { mcpServers: body.mcpServers } : {}),
-      },
-    });
+    // Non-model fields commit in ONE save, and only when there is something to
+    // save — a pure model PATCH must not run a second record write after the
+    // switch already committed (an unrelated write failure would wrongly fail
+    // the whole request after the switch succeeded).
+    const globalPatch: { thinkingLevel?: string; skills?: string[]; mcpServers?: string[] } = {};
+    if (body.thinkingLevel !== undefined) globalPatch.thinkingLevel = body.thinkingLevel ?? "off";
+    if (body.skills !== undefined) globalPatch.skills = body.skills;
+    if (body.mcpServers !== undefined) globalPatch.mcpServers = body.mcpServers;
+    if (body.agentTemplate !== undefined || Object.keys(globalPatch).length > 0) {
+      m = updateMember(m.id, {
+        ...(body.agentTemplate !== undefined ? { agentTemplate: body.agentTemplate } : {}),
+        global: globalPatch,
+      });
+    }
     if (body.title !== undefined) {
       updateMemberProfileFrontmatter(
         m.id,

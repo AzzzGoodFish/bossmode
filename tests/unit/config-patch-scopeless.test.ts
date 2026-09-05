@@ -39,6 +39,14 @@ describe("single-path member config PATCH", () => {
     });
     expect(bad.status).toBe(404);
 
+    const thinking = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, { token, body: { thinkingLevel: "high" } });
+    expect(thinking.status).toBe(200);
+    expect(JSON.parse(thinking.body).member.global.thinkingLevel).toBe("high");
+    // The picker sends null for Off; it must not silently keep the old level.
+    const off = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, { token, body: { thinkingLevel: null } });
+    expect(off.status).toBe(200);
+    expect(JSON.parse(off.body).member.global.thinkingLevel).toBe("off");
+
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((r) => ts.server.close(() => r()));
   });

@@ -17,8 +17,9 @@ import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
-import { exportPiConfigForMember, normalizeModelRef, createMemberCredentialStore, resolvePiAgentDir } from "../model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
+import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
@@ -363,6 +364,7 @@ class PiSdkAgentHandle implements AgentHandle {
   constructor(
     private session: AgentSession,
     private modelRegistry: ModelRegistry,
+    private credentials: ModelCredentialBinding,
     private resourceLoader: DefaultResourceLoader,
     private baseExtensionPaths: string[],
     private baseToolNames: string[],
@@ -612,26 +614,23 @@ class PiSdkAgentHandle implements AgentHandle {
   }
 
   async refreshModelRegistry(opts?: { allowNetwork?: boolean }): Promise<void> {
-    // Prefer a disk-only reload: models.json is written by exportPiConfigForMember
-    // right before switch, and network catalog fetches can hang (fish 2026-07-30).
-    const allowNetwork = opts?.allowNetwork ?? false;
-    const runtime = (this.modelRegistry as any).runtime;
-    if (runtime && typeof runtime.refresh === "function") {
-      await runtime.refresh({ allowNetwork });
-      return;
-    }
-    await this.modelRegistry.refresh();
+    await this.session.modelRuntime.refresh({ allowNetwork: opts?.allowNetwork ?? false });
   }
 
-  async setModel(modelRef: string): Promise<void> {
+  async setModel(modelRef: string, credentialId: string): Promise<void> {
     const { provider, modelId } = splitModelRef(modelRef);
-    const model = this.modelRegistry.find(provider, modelId);
-    if (!model) {
-      logger.warn("runtime:pi-sdk", "setModel target not found", { modelRef });
-      throw new Error(`Model not found: ${modelRef}`);
+    const profile = getModelCredentialProfile(credentialId);
+    if (!profile || !profile.enabled || profile.providerSlug !== provider) {
+      throw new Error(`Invalid credential binding for ${modelRef}`);
     }
-    await this.session.setModel(model);
+    await this.credentials.runProfile(profile, () => this.session.modelRuntime.refresh({ allowNetwork: false }));
+    const found = this.modelRegistry.find(provider, modelId);
+    if (!found) throw new Error(`Model not found: ${modelRef}`);
+    const model = this.credentials.bind(found, profile);
+    await this.credentials.run(model, () => this.session.setModel(model));
     this.runtimeParams.model = resolveModelLabel(modelRef);
+    this.runtimeParams.credentialId = profile.id;
+    this.runtimeParams.credentialName = profile.name;
   }
 
   setThinkingLevel(level: string): void {
@@ -839,15 +838,15 @@ export class PiSdkRuntime implements AgentRuntime {
     mkdirSync(sessionDir, { recursive: true });
 
     if (!piConfig.profile) throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
-    // Live-read the member's current credential binding on every request so a
-    // mid-session credential switch takes effect on the next model call.
-    const authStorageCredentials = createMemberCredentialStore(opts.roomId, opts.member.id);
+    const authStorageCredentials = new ModelCredentialBinding(piConfig.profile);
     const runtime = await ModelRuntime.create({ credentials: authStorageCredentials, modelsPath: join(runtimeAgentDir, "models.json"), allowModelNetwork: false });
+    authStorageCredentials.attach(runtime);
     const modelRegistry = new ModelRegistry(runtime);
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
     const transportSettings = applyRuntimeTransportSettings(settingsManager);
-    const model = modelRegistry.find(provider, modelId);
-    if (!model) throw new Error(`Model not found: ${resolvedModel}`);
+    const foundModel = modelRegistry.find(provider, modelId);
+    if (!foundModel) throw new Error(`Model not found: ${resolvedModel}`);
+    const model = authStorageCredentials.bind(foundModel, piConfig.profile);
     const authCheck = await modelRegistry.getApiKeyAndHeaders(model);
     if (!authCheck.ok) throw new Error(`Credential projection failed for ${resolvedModel}: ${authCheck.error}`);
     if (!authCheck.apiKey && piConfig.profile?.authType !== "ambient") throw new Error(`Credential projection failed for ${resolvedModel}: no API key available for provider ${provider}`);
@@ -957,6 +956,7 @@ export class PiSdkRuntime implements AgentRuntime {
       excludeTools: ["bash"],
     });
 
+    authStorageCredentials.followSession(() => session.model);
     await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
 
     if (appendConfiguredModelChange) {
@@ -978,6 +978,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const handle = new PiSdkAgentHandle(
       session,
       modelRegistry,
+      authStorageCredentials,
       resourceLoader,
       extensionPaths,
       baseTools,

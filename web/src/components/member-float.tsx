@@ -45,14 +45,34 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 type FloatTab = "profile" | "assets" | "activity" | "settings";
 type FloatTarget = { memberId: string; scopeId?: string; tab?: FloatTab };
-const MemberFloatCtx = createContext<{ open: (memberId: string, scopeId?: string, tab?: FloatTab) => void }>({ open: () => {} });
+
+/** The float context is the roster↔float shared channel. saveMember is the
+ * SINGLE save path for a member's global config (fish 2026-09-05: the float
+ * Settings tab and the Workstations chips each called patchGlobalMember
+ * directly and only updated their own view — switching a model in one place
+ * left the other showing the old one). It patches, then bumps the member's
+ * save version; every view depends on saveVersions and refetches, so no view
+ * can forget to sync. */
+type MemberFloatContextValue = {
+  open: (memberId: string, scopeId?: string, tab?: FloatTab) => void;
+  saveMember: (memberId: string, patch: Record<string, unknown>) => Promise<MemberDetail>;
+  saveVersions: Readonly<Record<string, number>>;
+};
+const MemberFloatCtx = createContext<MemberFloatContextValue>({ open: () => {}, saveMember: () => Promise.reject(new Error("no float provider")), saveVersions: {} });
 export const useMemberFloat = () => useContext(MemberFloatCtx);
 
 export function MemberFloatProvider({ children, onFired, liveStatuses }: { children: React.ReactNode; onFired?: () => void; liveStatuses?: ReadonlyMap<string, string> }) {
   const [target, setTarget] = useState<FloatTarget | null>(null);
   const open = useCallback((memberId: string, scopeId?: string, tab?: FloatTab) => setTarget({ memberId, scopeId, tab }), []);
+  const [saveVersions, setSaveVersions] = useState<Record<string, number>>({});
+  const saveMember = useCallback(async (memberId: string, patch: Record<string, unknown>) => {
+    const res = await patchGlobalMember(memberId, patch);
+    setSaveVersions((prev) => ({ ...prev, [res.member.memberId]: (prev[res.member.memberId] ?? 0) + 1 }));
+    return res.member;
+  }, []);
+  const ctx = useMemo<MemberFloatContextValue>(() => ({ open, saveMember, saveVersions }), [open, saveMember, saveVersions]);
   return (
-    <MemberFloatCtx.Provider value={{ open }}>
+    <MemberFloatCtx.Provider value={ctx}>
       {children}
       {target && <MemberDetailFloat key={`${target.memberId}:${target.scopeId ?? ""}`} memberId={target.memberId} scopeId={target.scopeId} initialTab={target.tab} liveStatuses={liveStatuses} onClose={() => setTarget(null)} onFired={() => { setTarget(null); onFired?.(); }} />}
     </MemberFloatCtx.Provider>
@@ -72,6 +92,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
   onFired: () => void;
 }) {
   const { toast } = useDialog();
+  const { saveVersions } = useMemberFloat();
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [scopes, setScopes] = useState<MemberScopeInfo[]>([]);
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -82,10 +103,19 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
   const [dmSending, setDmSending] = useState(false);
 
   useEffect(() => {
-    getMemberDetail(memberId).then(setMember).catch((e) => setLoadError(String(e?.message || e)));
     getMemberScopes(memberId).then((r) => setScopes(r.scopes)).catch(() => {});
     getAvailableModels().then(setModels).catch(() => {});
   }, [memberId]);
+
+  const saveVersion = saveVersions[memberId];
+  useEffect(() => {
+    let active = true;
+    getMemberDetail(memberId)
+      .then((detail) => { if (active) { setMember(detail); setLoadError(null); } })
+      .catch((e) => { if (active) setLoadError(String(e?.message || e)); });
+    // A read started before a save must not replace the saved record later.
+    return () => { active = false; };
+  }, [saveVersion, memberId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -211,6 +241,7 @@ function ProfileTab({ member, setMember, scopes }: {
   setMember: (m: MemberDetail) => void;
   scopes: MemberScopeInfo[];
 }) {
+  const float = useMemberFloat();
   const [titleDraft, setTitleDraft] = useState(member.title ?? "");
   const [cardSave, setCardSave] = useState<SaveState>("idle");
   const [cardError, setCardError] = useState<string | null>(null);
@@ -235,8 +266,8 @@ function ProfileTab({ member, setMember, scopes }: {
     if (title === (member.title ?? "")) return;
     setCardSave("saving"); setCardError(null);
     try {
-      const res = await patchGlobalMember(member.memberId, { title });
-      setMember(res.member);
+      const saved = await float.saveMember(member.memberId, { title });
+      setMember(saved);
       flashSaved(setCardSave);
     } catch (e) {
       setCardError(String((e as Error)?.message || e));
@@ -678,6 +709,7 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   onFired: () => void;
 }) {
   const { toast, confirm } = useDialog();
+  const float = useMemberFloat();
   const [cfgSave, setCfgSave] = useState<SaveState>("idle");
   const [cfgError, setCfgError] = useState<string | null>(null);
   const [fireDraft, setFireDraft] = useState("");
@@ -733,8 +765,8 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   const saveConfig = async (patch: Record<string, unknown>) => {
     setCfgSave("saving"); setCfgError(null);
     try {
-      const res = await patchGlobalMember(member.memberId, patch);
-      setMember(res.member);
+      const saved = await float.saveMember(member.memberId, patch);
+      setMember(saved);
       flashCfg();
     } catch (e) {
       setCfgError(String((e as Error)?.message || e));

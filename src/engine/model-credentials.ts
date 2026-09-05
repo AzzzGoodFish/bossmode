@@ -355,14 +355,17 @@ function persistApiKeyForProfile(profileId: string, providerSlug: string, apiKey
   return next;
 }
 
-/** Profile-scoped store for OAuth login / one-off profile mutation flows. */
+// Serialize OAuth rotations of the same account across all live sessions.
+const profileModifications = new Map<string, Promise<void>>();
+
+/** Fixed-profile store for sessions, OAuth login and profile mutations. */
 class ProfileCredentialStore implements CredentialStore {
   constructor(private readonly profileId: string, private readonly providerSlug: string) {}
 
   async read(providerId: string): Promise<Credential | undefined> {
     if (providerId !== this.providerSlug) return undefined;
     const profile = getModelCredentialProfile(this.profileId);
-    if (!profile) return undefined;
+    if (!profile || !profile.enabled || profile.providerSlug !== this.providerSlug) return undefined;
     return authEntry(profile) as Credential | undefined;
   }
 
@@ -372,140 +375,27 @@ class ProfileCredentialStore implements CredentialStore {
   }
 
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
-    if (providerId !== this.providerSlug) return fn(undefined);
-    const current = await this.read(providerId);
-    const next = await fn(current);
-    if (next?.type === "oauth") {
-      const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
-      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(this.profileId, this.providerSlug, oauth);
-    } else if (next?.type === "api_key" && typeof (next as any).key === "string" && (next as any).key.length > 0) {
-      persistApiKeyForProfile(this.profileId, this.providerSlug, (next as any).key);
-    }
-    return next;
-  }
-
-  async delete(_providerId: string): Promise<void> {
-    // No-op: credential lifecycle is owned by bossmode's profile store.
-  }
-}
-
-/**
- * Member-scoped store (design-model-switch-single-path-v1 §4) — the member's
- * APPLIED binding is the credential authority for its live sessions:
- *
- * 1. switch target — during a live switch, setModel's auth check for the new
- *    provider must resolve the TARGET credential before the applied binding
- *    flips (instance.switchTargetCredentialId, set by applyModelSwitchToInstance).
- * 2. applied binding — the instance's current model+credentialId. A plain
- *    config save does NOT change what an existing session authenticates with;
- *    only a completed switch flips this.
- * 3. global config — sessions created before any switch, or no live instance
- *    (read at creation time).
- *
- * Request-lifetime pinning: pi resolves auth (and OAuth-refreshes) per request
- * via read(); the profile resolved at read time is remembered so the refresh
- * write-back in modify() lands on the SAME profile the request started with —
- * a mid-request account switch cannot steal the rotation.
- */
-class MemberCredentialStore implements CredentialStore {
-  constructor(private readonly roomId: string, private readonly memberId: string) {}
-
-  /** providerId → profileId pinned at the read that started the request. */
-  private readonly pinned = new Map<string, string>();
-
-  private async resolveAppliedInstance(): Promise<{ appliedCredentialId?: string; switchTargetCredentialId?: string } | null> {
+    if (providerId !== this.providerSlug) return undefined;
+    const previous = profileModifications.get(this.profileId);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    profileModifications.set(this.profileId, pending);
+    await previous;
     try {
-      const { getAgentInstanceForScope } = await import("../engine/agent-manager.js");
-      const instance = getAgentInstanceForScope(this.roomId, this.memberId);
-      if (!instance) return null;
-      return {
-        appliedCredentialId: instance.appliedCredentialId,
-        switchTargetCredentialId: (instance as { switchTargetCredentialId?: string }).switchTargetCredentialId,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  private async resolveGlobalProfile(): Promise<ModelCredentialProfile | null> {
-    try {
-      const { getMember } = await import("../workspace/member-registry.js");
-      const member = getMember(this.memberId);
-      const credentialId = member?.global?.credentialId;
-      if (!credentialId) return null;
-      const profile = getModelCredentialProfile(credentialId);
-      if (!profile || !profile.enabled) return null;
-      return profile;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Resolution order: switch target → applied → global config. */
-  private async resolveProfileForProvider(providerId: string): Promise<ModelCredentialProfile | null> {
-    const check = async (profileId: string | undefined): Promise<ModelCredentialProfile | null> => {
-      if (!profileId) return null;
-      const profile = getModelCredentialProfile(profileId);
-      if (!profile || !profile.enabled || profile.providerSlug !== providerId) return null;
-      return profile;
-    };
-    const instance = await this.resolveAppliedInstance();
-    return (await check(instance?.switchTargetCredentialId))
-      ?? (await check(instance?.appliedCredentialId))
-      ?? this.resolveGlobalProfile().then((p) => (p && p.providerSlug === providerId ? p : null));
-  }
-
-  async read(providerId: string): Promise<Credential | undefined> {
-    const profile = await this.resolveProfileForProvider(providerId);
-    if (!profile) return undefined;
-    this.pinned.set(providerId, profile.id);
-    return authEntry(profile) as Credential | undefined;
-  }
-
-  async list(): Promise<readonly CredentialInfo[]> {
-    const instance = await this.resolveAppliedInstance();
-    const ids = [instance?.switchTargetCredentialId, instance?.appliedCredentialId];
-    const out: CredentialInfo[] = [];
-    const seen = new Set<string>();
-    for (const id of ids) {
-      if (!id || seen.has(id)) continue;
-      const profile = getModelCredentialProfile(id);
-      if (!profile || !profile.enabled) continue;
-      const credential = authEntry(profile) as Credential | undefined;
-      if (credential) {
-        out.push({ providerId: profile.providerSlug, type: credential.type });
-        seen.add(id);
+      const current = await this.read(providerId);
+      const next = await fn(current);
+      if (next?.type === "oauth") {
+        const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
+        if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(this.profileId, this.providerSlug, oauth);
+      } else if (next?.type === "api_key" && typeof next.key === "string" && next.key.length > 0) {
+        persistApiKeyForProfile(this.profileId, this.providerSlug, next.key);
       }
+      // SDK contract: undefined from fn leaves the entry unchanged.
+      return next ?? current;
+    } finally {
+      if (profileModifications.get(this.profileId) === pending) profileModifications.delete(this.profileId);
+      release();
     }
-    if (out.length === 0) {
-      const global = await this.resolveGlobalProfile();
-      if (global) {
-        const credential = authEntry(global) as Credential | undefined;
-        if (credential) out.push({ providerId: global.providerSlug, type: credential.type });
-      }
-    }
-    return out;
-  }
-
-  async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
-    // Pin: the refresh rotation writes back to the profile this request
-    // started with (pinned by read), never to whatever is bound "now".
-    let profileId = this.pinned.get(providerId);
-    let profile = profileId ? getModelCredentialProfile(profileId) : null;
-    if (!profile || !profile.enabled) {
-      profile = await this.resolveProfileForProvider(providerId);
-      profileId = profile?.id;
-    }
-    if (!profile) return fn(undefined);
-    const current = authEntry(profile) as Credential | undefined;
-    const next = await fn(current);
-    if (next?.type === "oauth") {
-      const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
-      if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(profileId!, profile.providerSlug, oauth);
-    } else if (next?.type === "api_key" && typeof (next as any).key === "string" && (next as any).key.length > 0) {
-      persistApiKeyForProfile(profileId!, profile.providerSlug, (next as any).key);
-    }
-    return next;
   }
 
   async delete(_providerId: string): Promise<void> {
@@ -516,11 +406,6 @@ class MemberCredentialStore implements CredentialStore {
 /** Profile-scoped store (OAuth login / profile mutation). */
 export function createCredentialStore(profile: Pick<ModelCredentialProfile, "id" | "providerSlug">): CredentialStore {
   return new ProfileCredentialStore(profile.id, profile.providerSlug);
-}
-
-/** Member-scoped store — live-reads the room member's current credential binding per request. */
-export function createMemberCredentialStore(roomId: string, memberId: string): CredentialStore {
-  return new MemberCredentialStore(roomId, memberId);
 }
 
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
@@ -2093,7 +1978,7 @@ export function assertModelAvailable(modelRef: string, context: string): void {
 }
 
 /** Provider entry for models.json — endpoint + model metadata only, no secrets.
- * Auth is supplied per-request by MemberCredentialStore. */
+ * Auth is supplied per-request by the session's fixed-profile store. */
 function piProviderCatalogEntry(profile: ModelCredentialProfile): Record<string, unknown> | undefined {
   if (shouldUseSdkBuiltinCatalog(profile)) return undefined;
   const full = piProviderConfig(profile);
@@ -2288,7 +2173,7 @@ export function exportPiConfigForMember(args: {
   mkdirSync(agentDir, { recursive: true });
 
   // Materialize ALL enabled providers (endpoint + model metadata only). Auth is
-  // live-read per request via MemberCredentialStore, so cross-provider setModel
+  // live-read per request via the session's fixed-profile store, so cross-provider setModel
   // works without recreating the runtime.
   writePrivateJson(join(agentDir, "models.json"), {
     providers: buildAllProvidersCatalog(profile.id),

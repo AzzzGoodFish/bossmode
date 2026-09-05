@@ -1,122 +1,117 @@
-/**
- * Member credential store — applied-binding semantics
- * (design-model-switch-single-path-v1 §4):
- * - No live instance → reads the member's GLOBAL config credential.
- * - A live instance answers with its APPLIED binding; a plain config save
- *   does not change what an existing session authenticates with.
- * - During a switch, the instance's switch TARGET credential answers for the
- *   new provider (setModel's auth check) while the old applied credential
- *   still answers for the old provider.
- * - Request pinning: a profile resolved by read() is the profile modify()
- *   writes back to (OAuth rotation cannot land on a different account).
- */
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let dir: string;
-
 vi.mock("../../src/shared/config.js", () => ({
   getBossmodeDir: () => dir,
   ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
 }));
 
-/** Fake live-instance surface the store resolves through agent-manager. */
-const state = vi.hoisted(() => ({ instance: null as null | { appliedCredentialId?: string; switchTargetCredentialId?: string } }));
-
-vi.mock("../../src/engine/agent-manager.js", () => ({
-  getAgentInstanceForScope: (_scopeId: string, _memberId: string) => state.instance,
-}));
-
-async function seedTwoKeys() {
-  const mod = await import("../../src/engine/model-credentials.js");
-  await mod.ensurePiCatalogWarm();
-  mod.setPiCatalogModelsForTests([
-    { provider: "anthropic", id: "claude-a", name: "Claude A", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, input: ["text"] },
-    { provider: "openai", id: "gpt-a", name: "GPT A", api: "openai-completions", baseUrl: "https://api.openai.com/v1", contextWindow: 200000, input: ["text"] },
-  ]);
-  const anthropicA = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-AAA", name: "Key A" });
-  const anthropicB = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-BBB", name: "Key B" });
-  const openai = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-OOO", name: "Key O" });
-  return { mod, anthropicA, anthropicB, openai };
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
 }
 
-describe("member credential store — applied binding", () => {
+async function setup() {
+  const credentials = await import("../../src/engine/model-credentials.js");
+  const { ModelCredentialBinding } = await import("../../src/engine/runtime/model-credential-binding.js");
+  const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+  const profiles = ["A", "B"].map((id) => ({
+    id, name: id, enabled: true, providerSlug: "test-auth", profileKind: "custom_endpoint",
+    protocol: "openai-responses", baseUrl: "http://127.0.0.1:1", authType: "oauth", requestProfile: "standard",
+    oauthCredentials: { access: `${id}-old`, refresh: `${id}-refresh`, expires: Date.now() - 60_000 },
+    models: [], createdAt: Date.now(), updatedAt: Date.now(),
+  }));
+  writeFileSync(join(dir, "model-credentials.json"), JSON.stringify({ profiles, migrations: [] }));
+  const binding = new ModelCredentialBinding(profiles[0]);
+  const runtime = await ModelRuntime.create({ credentials: binding, modelsPath: null, allowModelNetwork: false });
+  binding.attach(runtime);
+  const refresh = vi.fn(async (credential: any) => ({
+    ...credential, access: credential.refresh + "-rotated", expires: Date.now() + 60_000,
+  }));
+  runtime.models.setProvider({
+    id: "test-auth", getModels: () => [],
+    auth: { oauth: { refresh, toAuth: async (credential: any) => ({ apiKey: credential.access }) } },
+  } as any);
+  const model = { provider: "test-auth", id: "sample", api: "openai-responses" } as any;
+  const a = binding.bind(model, profiles[0]);
+  const b = binding.bind(model, profiles[1]);
+  let current = a;
+  binding.followSession(() => current);
+  return { credentials, binding, runtime, refresh, a, b, switchToB: () => { current = b; } };
+}
+
+describe("model snapshot credentials through real SDK getAuth", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-member-cred-"));
-    state.instance = null;
+    dir = mkdtempSync(join(tmpdir(), "bossmode-model-auth-"));
     vi.resetModules();
   });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  it("keeps A across read/modify while B authenticates, and writes each rotation to its own profile", async () => {
+    const { binding, runtime, refresh, credentials, a, b, switchToB } = await setup();
+    const entered = gate();
+    const resume = gate();
+    const read = binding.read.bind(binding);
+    let paused = false;
+    binding.read = async (provider) => {
+      const value = await read(provider);
+      if (value?.type === "oauth" && value.access === "A-old" && !paused) {
+        paused = true;
+        entered.release();
+        await resume.promise;
+      }
+      return value;
+    };
+    const oldRequest = runtime.getAuth(a);
+    await entered.promise;
+    switchToB();
+    expect((await runtime.getAuth(b))?.auth.apiKey).toBe("B-refresh-rotated");
+    resume.release();
+    expect((await oldRequest)?.auth.apiKey).toBe("A-refresh-rotated");
+    expect(refresh.mock.calls.map(([credential]) => credential.refresh)).toEqual(["B-refresh", "A-refresh"]);
+    expect(credentials.getModelCredentialProfile("A")?.oauthCredentials?.access).toBe("A-refresh-rotated");
+    expect(credentials.getModelCredentialProfile("B")?.oauthCredentials?.access).toBe("B-refresh-rotated");
   });
 
-  it("no live instance → reads the member's global config credential (live)", async () => {
-    const { mod, anthropicA, anthropicB } = await seedTwoKeys();
-    const { createMember, updateMember } = await import("../../src/workspace/member-registry.js");
-    const m = createMember({ name: "dev", agentTemplate: "pm" });
-    updateMember(m.id, { global: { credentialId: anthropicA.id } });
-
-    const store = mod.createMemberCredentialStore("room-1", m.id);
-    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-AAA" });
-    expect(await store.read("openai")).toBeUndefined();
-
-    // A config save changes what the NEXT session reads (no live instance).
-    updateMember(m.id, { global: { credentialId: anthropicB.id } });
-    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-BBB" });
-    mod.setPiCatalogModelsForTests(null);
+  it("the SDK model assignment selects the account immediately, while old snapshots remain usable", async () => {
+    const { binding, runtime, a, b, switchToB } = await setup();
+    switchToB(); // SDK assigns state.model before awaiting model_select handlers.
+    expect(await binding.read("test-auth")).toMatchObject({ access: "B-old" });
+    expect((await runtime.getAuth(a))?.auth.apiKey).toBe("A-refresh-rotated");
+    expect((await runtime.getAuth(b))?.auth.apiKey).toBe("B-refresh-rotated");
   });
 
-  it("live instance: the APPLIED binding wins over a later global save", async () => {
-    const { mod, anthropicA, anthropicB } = await seedTwoKeys();
-    const { createMember, updateMember } = await import("../../src/workspace/member-registry.js");
-    const m = createMember({ name: "dev", agentTemplate: "pm" });
-    updateMember(m.id, { global: { credentialId: anthropicA.id } });
-
-    state.instance = { appliedCredentialId: anthropicA.id };
-    const store = mod.createMemberCredentialStore("room-1", m.id);
-
-    // Config saved to B after the session was built — the session still reads A.
-    updateMember(m.id, { global: { credentialId: anthropicB.id } });
-    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-AAA" });
-    mod.setPiCatalogModelsForTests(null);
+  it("serializes same-account rotations and returns current when the SDK declines a second refresh", async () => {
+    const { runtime, refresh, a } = await setup();
+    const results = await Promise.all([runtime.getAuth(a), runtime.getAuth(a)]);
+    expect(results.map((result) => result?.auth.apiKey)).toEqual(["A-refresh-rotated", "A-refresh-rotated"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("mid-switch: the target credential answers the new provider, the applied one still answers the old", async () => {
-    const { mod, anthropicA, openai } = await seedTwoKeys();
-    state.instance = { appliedCredentialId: anthropicA.id, switchTargetCredentialId: openai.id };
-    const store = mod.createMemberCredentialStore("room-1", "rm_dev");
-
-    expect(await store.read("openai")).toEqual({ type: "api_key", key: "sk-OOO" });
-    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-AAA" });
-    mod.setPiCatalogModelsForTests(null);
+  it.each(["disabled", "another-provider"])("stops reading a bound profile after it becomes %s", async (change) => {
+    const credentials = await import("../../src/engine/model-credentials.js");
+    const input = {
+      profileKind: "custom_endpoint" as const, name: "Account", providerSlug: "fixture-provider",
+      protocol: "openai-responses" as const, baseUrl: "http://127.0.0.1:1", authType: "api_key" as const,
+      apiKey: "fixture-key", models: [{ id: "fixture-model" }],
+    };
+    const profile = await credentials.saveModelCredentialProfile(input);
+    const store = credentials.createCredentialStore(profile);
+    expect(await store.read(profile.providerSlug)).toEqual({ type: "api_key", key: "fixture-key" });
+    await credentials.saveModelCredentialProfile({
+      ...input, id: profile.id,
+      ...(change === "disabled" ? { enabled: false } : { providerSlug: "another-provider" }),
+    });
+    expect(await store.read(profile.providerSlug)).toBeUndefined();
+    expect(await store.list()).toEqual([]);
   });
 
-  it("request pinning: modify writes back to the profile the request started with, not the current binding", async () => {
-    const { mod, anthropicA, anthropicB } = await seedTwoKeys();
-    const { createMember, updateMember, getMember } = await import("../../src/workspace/member-registry.js");
-    const m = createMember({ name: "dev", agentTemplate: "pm" });
-    updateMember(m.id, { global: { credentialId: anthropicA.id } });
-
-    state.instance = { appliedCredentialId: anthropicA.id };
-    const store = mod.createMemberCredentialStore("room-1", m.id);
-
-    // Request starts: read pins profile A.
-    expect(await store.read("anthropic")).toEqual({ type: "api_key", key: "sk-AAA" });
-
-    // The switch completes mid-request (applied flips to B).
-    state.instance = { appliedCredentialId: anthropicB.id };
-    updateMember(m.id, { global: { credentialId: anthropicB.id } });
-
-    // The OAuth-style rotation from the started request lands on A, not B.
-    await store.modify("anthropic", async () => ({ type: "api_key" as const, key: "sk-ROTATED" }));
-    expect(getMember(m.id)!.global!.credentialId).toBe(anthropicB.id); // binding untouched
-    const a = mod.getModelCredentialProfile(anthropicA.id)!;
-    const b = mod.getModelCredentialProfile(anthropicB.id)!;
-    expect((a as any).apiKey).toBe("sk-ROTATED");
-    expect((b as any).apiKey).toBe("sk-BBB");
-    mod.setPiCatalogModelsForTests(null);
+  it("does not infer a credential for an unbound model", async () => {
+    const { runtime, a } = await setup();
+    expect(() => runtime.getAuth({ ...a })).toThrow("Model has no credential binding");
   });
 });

@@ -78,6 +78,7 @@ describe("DM model wake (member PATCH none→some)", () => {
     );
     expect(patch.status).toBe(200);
     expect(JSON.parse(patch.body).modelSwitch.model).toBe("wake-prov-a/model-a");
+    expect(JSON.parse(patch.body).member.global).toMatchObject({ model: "wake-prov-a/model-a", credentialId: profileId });
 
     // Fire-and-forget after response — allow microtask/timer to run.
     await new Promise((r) => setTimeout(r, 50));

@@ -34,6 +34,13 @@ function validateCredentialMatchesModel(credentialId: unknown, model: string | u
   if (!credential) throw new Error("Model credential profile not found");
   if (!credential.enabled) throw new Error("Model credential profile is disabled");
   resolveCredentialProfileForModel({ modelRef: model, credentialId });
+  // Explicit provider match (design §10): the ref's provider segment must equal
+  // the profile's providerSlug — model-id-only matching would accept a foreign
+  // provider that happens to serve the same id.
+  const provider = model.includes("/") ? model.split("/")[0] : "";
+  if (provider !== credential.providerSlug) {
+    throw new Error(`Credential "${credential.name}" (${credential.providerSlug}) does not serve model ${model}`);
+  }
   return credentialId;
 }
 
