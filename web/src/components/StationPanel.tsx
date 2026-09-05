@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
   abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession, steerAgent,
-  getMemberStats, getMemberActiveTools, patchGlobalMember,
+  getMemberStats, getMemberActiveTools,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
 } from "../api/client";
@@ -106,7 +106,10 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
         setMemberInfos(map);
       })
       .catch(console.error);
-  }, [members, roomId]);
+    // float.saveVersions: a save from anywhere (this panel's chips, the
+    // float's Settings tab) bumps the version and triggers a refetch, so the
+    // roster never shows a stale model (fish 2026-09-05 sync gap).
+  }, [members, roomId, float.saveVersions]);
 
   useEffect(() => {
     getConfiguredModels().then(setModels).catch(console.error);
@@ -237,15 +240,18 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
     setChipPop((prev) => prev && prev.name === name && prev.kind === kind ? null : { name, kind, rect: el.getBoundingClientRect() });
   };
 
-  /** Chip pop selection → write the member's global config (identical patch
-   * to the float Settings tab), then reflect it back into the roster row. */
+  /** Chip pop selection → the single save path (float context saveMember):
+   * patches the member's global config and bumps its save version, so the
+   * roster AND an open float on the same member both end up showing the
+   * fresh record. The local memberInfos update below is instant feedback;
+   * the version bump also triggers this panel's refetch (server is truth). */
   const saveChipConfig = async (name: string, patch: Record<string, unknown>) => {
     const info = memberInfos[name];
     if (!info || chipSaving) return;
     setChipSaving(true);
     try {
-      const res = await patchGlobalMember(info.id || name, patch);
-      const g = res.member.global;
+      const saved = await float.saveMember(info.id || name, patch);
+      const g = saved.global;
       setMemberInfos((prev) => ({
         ...prev,
         [name]: {
