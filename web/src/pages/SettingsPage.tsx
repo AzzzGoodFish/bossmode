@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, KeyRound, Pencil, Trash2, PlugZap, RefreshCw } from "lucide-react";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { MobileTopBar } from "../components/MobileTopBar";
@@ -653,6 +653,44 @@ function nextProviderProfileName(profiles: PublicModelCredentialProfile[], provi
   return `${displayName} ${existing.length + 1}`;
 }
 
+/** OAuth paste row (fish 2026-09-05: "Submit stayed grey after pasting").
+ * Three defenses: autofocus on mount (a paste shortcut lands here, not in the
+ * composer behind the sheet); the click reads the live DOM value so a state
+ * sync hiccup can never strand the button; busy reads as "Submitting…" so a
+ * grey button means working, not broken. */
+function OAuthPasteRow({ busy, onSubmit }: { busy: boolean; onSubmit: (value: string) => void }) {
+  const [text, setText] = useState("");
+  const [emptyHint, setEmptyHint] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const t = window.setTimeout(() => ref.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+  const submit = () => {
+    const v = (ref.current?.value ?? text).trim();
+    if (!v) { setEmptyHint(true); window.setTimeout(() => setEmptyHint(false), 1600); return; }
+    onSubmit(v);
+  };
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2">
+        <input
+          ref={ref}
+          className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder="Paste code or response"
+        />
+        <button type="button" onClick={submit} disabled={busy} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">
+          {busy ? "Submitting…" : "Submit"}
+        </button>
+      </div>
+      {emptyHint && <div className="text-[11px] text-ink-4">Paste the redirect URL or code first.</div>}
+    </div>
+  );
+}
+
 function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: PublicModelCredentialProfile[]; onClose: () => void; onSaved: () => void }) {
   const { toast } = useDialog();
   const [providers, setProviders] = useState<PublicModelProvider[]>([]);
@@ -664,7 +702,6 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [oauthJob, setOauthJob] = useState<OAuthLoginJob | null>(null);
-  const [oauthInput, setOauthInput] = useState("");
 
   useEffect(() => {
     getModelProviderCatalog()
@@ -680,7 +717,6 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     setApiKey("");
     setApiUrl("");
     setOauthJob(null);
-    setOauthInput("");
   }, [selected?.providerSlug]);
 
   useEffect(() => {
@@ -732,35 +768,28 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     finally { setBusy(false); }
   };
 
-  const submitOAuthInput = async () => {
-    if (!oauthJob || !oauthInput.trim()) return;
-    setBusy(true);
-    try {
-      const next = await submitOAuthConnectionInput(oauthJob.id, oauthInput.trim());
-      setOauthJob(next);
-      if (next.status === "completed") {
-        toast("Provider connected", "success");
-        onSaved();
-      }
-    } catch (err) { console.error("Failed to submit provider sign-in code", err); toast(userActionError("submit the sign-in code", "Check the code, then try again."), "error"); }
-    finally { setBusy(false); }
+  // fish 2026-09-05: "Submit stayed grey after pasting" — the root cause was
+  // the server holding the submit response until the whole login settles (up
+  // to 30s) while the client kept busy=true the whole time: the button read
+  // grey/frozen after every option pick or paste submit. Now submits are
+  // fire-and-forget: the 1.8s poll owns all state updates and the completion
+  // toast; the POST only updates the job snapshot when it lands.
+  const submitOAuthValue = (value: string) => {
+    if (!oauthJob) return;
+    void submitOAuthConnectionInput(oauthJob.id, value)
+      .then((next) => setOauthJob(next))
+      .catch((err) => { console.error("Failed to submit provider sign-in code", err); toast(userActionError("submit the sign-in code", "Check the code, then try again."), "error"); });
   };
 
   /** Select-type prompt (e.g. Codex browser-vs-device-code): render options as
    * buttons, submit the option ID — never make the user type an internal id
-   * into the paste box (fish 2026-09-04 hit exactly that dead end). */
-  const submitOAuthOption = async (optionId: string) => {
+   * into the paste box (fish 2026-09-04 hit exactly that dead end).
+   * Fire-and-forget like the paste row — the poll owns state updates. */
+  const submitOAuthOption = (optionId: string) => {
     if (!oauthJob) return;
-    setBusy(true);
-    try {
-      const next = await submitOAuthConnectionInput(oauthJob.id, optionId);
-      setOauthJob(next);
-      if (next.status === "completed") {
-        toast("Provider connected", "success");
-        onSaved();
-      }
-    } catch (err) { console.error("Failed to submit provider sign-in option", err); toast(userActionError("submit the sign-in choice", "Try again."), "error"); }
-    finally { setBusy(false); }
+    void submitOAuthConnectionInput(oauthJob.id, optionId)
+      .then((next) => setOauthJob(next))
+      .catch((err) => { console.error("Failed to submit provider sign-in option", err); toast(userActionError("submit the sign-in choice", "Try again."), "error"); });
   };
 
   const cancelOAuth = async () => {
@@ -860,7 +889,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
                               ))}
                             </div>
                           </div>
-                        ) : oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className="flex-1 bg-surface-1 border border-line rounded px-3 py-2 text-sm" value={oauthInput} onChange={(e) => setOauthInput(e.target.value)} placeholder="Paste code or response" /><button type="button" onClick={submitOAuthInput} disabled={busy || !oauthInput.trim()} className="px-3 py-2 bg-accent text-accent-contrast rounded text-xs disabled:opacity-40">Submit</button></div>}
+                        ) : oauthJob.status === "awaiting_input" && <OAuthPasteRow busy={busy} onSubmit={(v) => void submitOAuthValue(v)} />}
                         {oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}
                         {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-ink-3 hover:text-ink-1">Cancel login</button>}
                       </div>}
