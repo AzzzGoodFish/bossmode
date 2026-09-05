@@ -13,7 +13,7 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import * as topicStore from "../workspace/topic-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -507,7 +507,7 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     // Store the user's command for transparency, but do not route its textual @mention
     // as a normal model turn. The command itself drives the member event lifecycle.
     postMessage(params.id, "user", content, [], { mentionMemberIds: [] });
-    steerAgent(params.id, compactCommand.member.id, "/compact").catch((err) => {
+    compactMember(`room:${params.id}`, compactCommand.member.id).catch((err) => {
       logger.error("api", "manual compact command failed", { roomId: params.id, memberId: compactCommand.member.id, member: compactCommand.member.name, error: String(err) });
     });
 
@@ -828,35 +828,6 @@ addRoute("GET", "/api/rooms/:id/members/:ref/events", async (req, res, params) =
   const before = beforeSeq;
   const result = loadEventsPaginated(params.id, memberId, limit, before);
   sendJson(res, 200, { events: result.events, hasMore: result.hasMore, nextBeforeSeq: result.hasMore ? Math.max(0, (result.total - result.events.length)) : null });
-});
-
-addRoute("POST", "/api/rooms/:id/agents/:agent/steer", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-
-  const member = roomStore.resolveRoomMemberRef(params.id, params.agent);
-  if (!member) {
-    sendJson(res, 400, { error: `Agent "${params.agent}" is not a member of this room` });
-    return;
-  }
-
-  const body = (await parseBody(req)) as { content?: string };
-  if (!body.content) {
-    sendJson(res, 400, { error: "content is required" });
-    return;
-  }
-
-  try {
-    steerAgent(params.id, member.id, body.content).catch((err) => {
-      logger.error("api", "steer error", { agent: params.agent, roomId: params.id, error: String(err) });
-    });
-    sendJson(res, 200, { ok: true });
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
 });
 
 // ── Agent Reload ──

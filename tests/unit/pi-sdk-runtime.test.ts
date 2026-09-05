@@ -560,82 +560,50 @@ describe("PiSdkRuntime", () => {
     expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "saved session file missing, starting fresh", expect.objectContaining({ sessionFile: missing }));
   });
 
-  it("manual compact emits compaction lifecycle without synthetic assistant message", async () => {
+  it.each(["success", "stopped", "failure"])("manual compact reports SDK %s without replacement lifecycle events", async (result) => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const compact = vi.fn(async () => ({ summary: "short summary", tokensBefore: 28100 }));
-    createAgentSession.mockResolvedValueOnce({
-      session: {
-        subscribe: vi.fn(() => vi.fn()),
-        prompt: vi.fn(),
-        steer: vi.fn(),
-        abort: vi.fn(),
-        abortCompaction: vi.fn(),
-        abortBranchSummary: vi.fn(),
-        dispose: vi.fn(),
-        compact,
-        setModel: vi.fn(),
-        setThinkingLevel: vi.fn(),
-        bindExtensions: sessionBindExtensions,
-        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
-        sessionId: "session-a",
-        sessionFile: join(dir, "session.json"),
-        thinkingLevel: "off",
-        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
-        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
-      },
+    const mock = makeWatchdogSession({ contextWindow: 18000, reserveTokens: 1000, onPrompt: async () => {} });
+    mock.session.compact = vi.fn(async () => {
+      mock.emit({ type: "compaction_start", reason: "manual" });
+      mock.emit({ type: "compaction_end", reason: "manual", aborted: result === "stopped", willRetry: false,
+        ...(result === "failure" ? { errorMessage: "summary failed" } : {}) });
+      // SDK 0.82.1 rejects both cancellation and real failures after its end event.
+      if (result !== "success") throw new Error(result === "stopped" ? "Compaction cancelled" : "summary failed");
+      return { summary: "summary" };
     });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
-
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const events: any[] = [];
     handle.subscribe((event) => events.push(event));
-    await handle.prompt("/compact");
-
-    expect(compact).toHaveBeenCalled();
+    if (result === "failure") await expect(handle.compact()).rejects.toThrow("summary failed");
+    else expect(await handle.compact()).toEqual({ aborted: result === "stopped" });
     expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
-    expect(events[2]).toMatchObject({ type: "compaction_end", reason: "manual", tokensBefore: 28100, result: { summary: "short summary", tokensBefore: 28100 } });
-    expect(events.some((event) => event.type === "message_update" || event.type === "message_end")).toBe(false);
   });
 
-  it("does not duplicate manual compaction events when SDK emits raw lifecycle events", async () => {
+  it.each([false, true])("abort before SDK compaction_start honors preserveCompaction=%s", async (preserveCompaction) => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    let listener: ((event: any) => void) | undefined;
-    const compact = vi.fn(async () => {
-      listener?.({ type: "compaction_start", reason: "manual" });
-      listener?.({ type: "compaction_end", reason: "manual", result: { summary: "sdk summary", tokensBefore: 30000 }, aborted: false, willRetry: false });
-      return { summary: "sdk summary", tokensBefore: 30000 };
+    const mock = makeWatchdogSession({ contextWindow: 18000, reserveTokens: 1000, onPrompt: async () => {} });
+    let release!: () => void;
+    const beforeStart = new Promise<void>((resolve) => { release = resolve; });
+    let controllerReady = false;
+    let cancelled = false;
+    mock.session.abortCompaction = vi.fn(() => { if (controllerReady) cancelled = true; });
+    mock.session.compact = vi.fn(async () => {
+      await beforeStart;
+      controllerReady = true;
+      mock.emit({ type: "compaction_start", reason: "manual" });
+      mock.emit({ type: "compaction_end", reason: "manual", aborted: cancelled, willRetry: false });
+      if (cancelled) throw new Error("Compaction cancelled");
     });
-    createAgentSession.mockResolvedValueOnce({
-      session: {
-        subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
-        prompt: vi.fn(),
-        steer: vi.fn(),
-        abort: vi.fn(),
-        abortCompaction: vi.fn(),
-        abortBranchSummary: vi.fn(),
-        dispose: vi.fn(),
-        compact,
-        setModel: vi.fn(),
-        setThinkingLevel: vi.fn(),
-        bindExtensions: sessionBindExtensions,
-        extensionRunner: { setFlagValue: sessionExtensionSetFlagValue, emit: sessionExtensionEmit, hasHandlers: sessionExtensionHasHandlers },
-        sessionId: "session-a",
-        sessionFile: join(dir, "session.json"),
-        thinkingLevel: "off",
-        settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
-        model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
-      },
-    });
+    createAgentSession.mockResolvedValueOnce({ session: mock.session });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
-
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    const events: any[] = [];
-    handle.subscribe((event) => events.push(event));
-    await handle.prompt("/compact");
-
-    expect(events.map((event) => event.type)).toEqual(["agent_start", "compaction_start", "compaction_end", "agent_end"]);
-    expect(events.filter((event) => event.type === "compaction_start")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "compaction_end")).toHaveLength(1);
+    const operation = handle.compact();
+    handle.abort({ preserveCompaction });
+    release();
+    expect(await operation).toEqual({ aborted: !preserveCompaction });
+    expect(mock.session.abortCompaction).toHaveBeenCalledTimes(preserveCompaction ? 0 : 2);
   });
 
   it("refreshes registry and awaits SDK model switch", async () => {

@@ -817,7 +817,8 @@ export async function handleToolCallback(
       const targetStatus = getAgentStatus(roomId, target.id);
       const timeoutMinutes = params?.timeoutMinutes !== undefined ? Number(params.timeoutMinutes) : undefined;
 
-      // mention_interrupt does NOT abort — activation steers the @ message while working;
+      // mention_interrupt does NOT abort — the @ message interrupts the working
+      // member (interruptWorkingInstance) and is delivered as the next turn;
       // wait only reports why it ended. Stop button is the sole abort path.
       const outcome = await waitForMember({
         roomId,

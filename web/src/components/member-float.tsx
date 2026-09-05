@@ -30,7 +30,7 @@ import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-l
 import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
-  steerAgent, restartMember, resetAgentSession,
+  restartMember, resetAgentSession,
   getMemberStats, getMemberSystemPrompt, getMemberAssets,
   getMemberScopedStats,
   getConversationSession, conversationMemberAction, sendDmMessage,
@@ -734,11 +734,16 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   const handleCompact = useCallback(async () => {
     if (!scope) return;
     try {
-      if (dm) await conversationMemberAction(scope.scopeId, member.memberId, "steer", "/compact");
-      else await steerAgent(roomId!, member.memberId, "/compact");
-      toast(`Compact started for ${member.name}`, "success");
-    } catch (err) { console.error(err); toast("Couldn’t compact this conversation. Try again.", "error"); }
-  }, [dm, roomId, member, scope, toast]);
+      const result = await conversationMemberAction(scope.scopeId, member.memberId, "compact");
+      if (result.action === "stopped") {
+        toast("Compaction stopped", "info");
+      } else if (result.ok) {
+        toast(`Compacted ${member.name}`, "success");
+      } else {
+        throw new Error(result.message || "Couldn’t compact this conversation.");
+      }
+    } catch (err) { console.error(err); toast(String((err as Error)?.message || "Couldn’t compact this conversation."), "error"); }
+  }, [member, scope, toast]);
   const handleResetSession = useCallback(async () => {
     if (!scope) return;
     const ok = await confirm(`Reset session for @${member.name}?\n\nThis clears the member's working session memory and starts fresh. Messages and activity history stay visible.`);

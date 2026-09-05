@@ -355,7 +355,7 @@ class PiSdkAgentHandle implements AgentHandle {
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
   private watchdogTurn: WatchdogTurnState | null = null;
-  private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
+  private manualCompactionOutcome: { aborted: boolean } | null = null;
   private destroyed = false;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
@@ -377,17 +377,12 @@ class PiSdkAgentHandle implements AgentHandle {
     this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
       this.observeCompactionWatchdog(raw);
-      const bridge = this.manualCompactionBridge;
-      const rawEvent = raw as any;
-      if (bridge && rawEvent?.reason === "manual") {
-        if (rawEvent?.type === "compaction_start") {
-          bridge.rawStartSeen = true;
-          if (bridge.syntheticStartEmitted) return;
+      if (this.manualCompactionOutcome && (raw.type === "compaction_start" || raw.type === "compaction_end") && raw.reason === "manual") {
+        if (raw.type === "compaction_start" && this.manualCompactionOutcome.aborted) {
+          // Stop can arrive before the SDK creates its abort controller.
+          this.session.abortCompaction();
         }
-        if (rawEvent?.type === "compaction_end") {
-          bridge.rawEndSeen = true;
-          if (bridge.syntheticEndEmitted) return;
-        }
+        if (raw.type === "compaction_end") this.manualCompactionOutcome.aborted = raw.aborted;
       }
       const mapped = mapPiAgentEvent(raw);
       if (mapped) this.emit(mapped);
@@ -549,7 +544,6 @@ class PiSdkAgentHandle implements AgentHandle {
   }
 
   async prompt(message: string): Promise<void> {
-    if (message === "/compact") return this.compact();
     this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
     try {
       let next: string | null = message;
@@ -575,20 +569,11 @@ class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
-  steer(message: string): void {
-    if (message === "/compact") {
-      this.compact().catch((err) => logger.error("runtime:pi-sdk", "compact failed in steer", { error: err.message }));
-      return;
-    }
-    this.session.steer(message).catch((err) => {
-      this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
-    });
-  }
-
   abort(options?: { preserveCompaction?: boolean }): void {
     // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
     if (options?.preserveCompaction) return;
+    if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
     try { this.session.abortCompaction(); } catch {}
     try { this.session.abortBranchSummary(); } catch {}
   }
@@ -756,39 +741,21 @@ class PiSdkAgentHandle implements AgentHandle {
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
-  private async compact(): Promise<void> {
+  async compact(): Promise<{ aborted: boolean }> {
+    const outcome = { aborted: false };
+    this.manualCompactionOutcome = outcome;
     this.emit({ type: "agent_start" });
-    const bridge = { rawStartSeen: false, rawEndSeen: false, syntheticStartEmitted: false, syntheticEndEmitted: false };
-    this.manualCompactionBridge = bridge;
-    const emitSyntheticStartIfNeeded = () => {
-      if (bridge.rawStartSeen || bridge.syntheticStartEmitted) return;
-      bridge.syntheticStartEmitted = true;
-      this.emit({ type: "compaction_start", reason: "manual" });
-    };
-    const emitSyntheticEndIfNeeded = (event: { aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }) => {
-      if (bridge.rawEndSeen || bridge.syntheticEndEmitted) return;
-      bridge.syntheticEndEmitted = true;
-      this.emit({ type: "compaction_end", reason: "manual", ...event });
-    };
     try {
-      const compactRun = this.session.compact();
-      await Promise.resolve();
-      emitSyntheticStartIfNeeded();
-      const result = await compactRun;
-      const tokensBefore = Number((result as any)?.tokensBefore);
-      emitSyntheticEndIfNeeded({
-        aborted: false,
-        willRetry: false,
-        ...(Number.isFinite(tokensBefore) ? { tokensBefore } : {}),
-        ...(result !== undefined ? { result } : {}),
-      });
-    } catch (err: any) {
-      emitSyntheticStartIfNeeded();
-      emitSyntheticEndIfNeeded({ aborted: false, willRetry: false, errorMessage: err.message || String(err), result: { error: err.message || String(err) } });
+      // The supported SDK emits compaction_start/end itself, then rejects on
+      // cancellation or failure. Never manufacture replacement events.
+      await this.session.compact();
+    } catch (err) {
+      if (!outcome.aborted) throw err;
     } finally {
-      this.manualCompactionBridge = null;
+      this.manualCompactionOutcome = null;
       this.emit({ type: "agent_end" });
     }
+    return outcome;
   }
 }
 

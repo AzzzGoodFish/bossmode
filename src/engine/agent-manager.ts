@@ -338,18 +338,6 @@ function updateDispatchState(instance: AgentInstance, next: DispatchState, trigg
   instance.dispatchState = next;
 }
 
-function flushQueuedInputs(instance: AgentInstance, trigger: string): void {
-  if (instance.queuedInputs.length === 0) return;
-  const queued = instance.queuedInputs.splice(0);
-  logger.info("agent", "flushQueuedInputs", { member: instance.agentName, count: queued.length, trigger });
-  // Activity: each flushed input is a mid-turn injection — same user_steer event as
-  // live steer (fish 2026-08-09: in-flight @ was invisible in Activity).
-  for (const input of queued) {
-    emitAgentLocalEvent(instance.roomId, instance.memberId, { type: "user_steer", text: input });
-    instance.handle.steer(input);
-  }
-}
-
 function queueInput(instance: AgentInstance, input: string, trigger: string): void {
   instance.queuedInputs.push(input);
   logger.info("agent", "queueInput", { member: instance.agentName, count: instance.queuedInputs.length, trigger });
@@ -388,6 +376,9 @@ function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): bo
   // After agent_end, turnActive is false while public status may still read "working"
   // until transition — gate on turn/dispatch, not public status (fish 2026-08-09).
   if (instance.turnActive || instance.promptInFlight || instance.dispatchState !== "idle") return false;
+  // Never drain into a prompt while compaction is running or requested —
+  // queued inputs resume once the operation settles (steer-removal §3).
+  if (instance.compacting) return false;
   const queued = instance.queuedInputs.splice(0);
   const message = queued.join("\n\n");
   logger.info("agent", "drainQueuedInputsAsPrompt", { member: instance.agentName, count: queued.length, trigger });
@@ -1417,7 +1408,10 @@ async function activateAgentInternalContinue(
     // steer (queue-behind-the-turn) is retired for message delivery. Shell
     // commands keep running; blocking tools return their actual running result.
     // The SDK owns session history, including interrupted tool calls.
-    emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
+    // Activity: NO event here — the drained queue emits exactly one user_prompt
+    // (banner + message) when the abort settles (fish 2026-09-05: this path
+    // used to also emit user_steer up front, so one message produced two
+    // activity cards).
     interruptWorkingInstance(roomId, instance, payload,
       "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
       "message_interrupt");
@@ -1990,53 +1984,79 @@ function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHist
   });
 }
 
-// -- Steer --
+// -- Manual compaction (conversation action) --
 
-export async function steerAgent(roomId: string, memberRef: string, instruction: string): Promise<void> {
-  const preResolved = resolveRoomMember(roomId, memberRef);
-  if (preResolved && !isMemberConfigured(preResolved)) {
-    throw new Error(memberUnconfiguredMessage(preResolved.name));
+/** Manual compaction as ONE explicit conversation action (steer-removal §2):
+ * room, DM and topic all address the live instance by its real scopeId — no
+ * more room-path shortcuts. The operation marks the lifecycle busy BEFORE the
+ * first await, so ordinary and urgent messages queue (they never cancel it);
+ * explicit Stop stays the one canceller, including in the window between the
+ * old prompt settling and compaction actually starting. Shell processes are
+ * never killed — blocking shell waits are settled so the member's turn can
+ * end, but the commands keep running in the PTY. */
+export async function compactMember(scopeId: string, memberId: string): Promise<{ ok: boolean; action: string }> {
+  let instance: AgentInstance | undefined = instances.get(instanceKey(scopeId, memberId)) ?? undefined;
+  if (!instance) {
+    // The room /compact command can arrive before any activation — build the
+    // session (no prompt) so there is something to compact. Unresolvable or
+    // unconfigured members still fail honestly.
+    instance = (await buildMemberAgentSession(memberId, scopeId)) ?? undefined;
+    if (!instance) throw new Error(`No active session in this scope — nothing to compact (${scopeId})`);
   }
-  const instance = await getOrCreate(roomId, memberRef);
-  const agentName = instance?.agentName || memberRef;
-  if (!instance) throw new Error(`Cannot steer agent "${agentName}": not found`);
+  if (instance.compacting) throw new Error("Compaction is already in progress for this session");
+  if (!instance.handle.compact) throw new Error("Runtime does not support manual compaction");
 
-  // Slash commands (e.g. /compact, /model) are transparently forwarded to the runtime.
-  // Plain instructions are sent as-is — the private-message envelope and reply footer
-  // were removed along with private chat (stream 1 envelope normalization).
-  const isSlashCommand = instruction.startsWith('/');
-  const userMessage = instruction;
-
-  setActivationSource(roomId, instance.memberId, isSlashCommand ? "system" : "private_instruction");
-
-  // A steer is a delivery point (hybrid spec msg:#14818): the delivery cursor
-  // refreshes to the latest message so the next activation's backlog hint
-  // only covers what arrived after this steer.
-  const steerLatestId = getLatestMessageId(roomId);
-  if (steerLatestId) roomStore.setCursor(roomId, instance.memberId, steerLatestId);
-
-  // Emit user_steer only at actual delivery (steer/prompt). Queued paths emit on
-  // flushQueuedInputs so Activity never double-counts the same injection.
-  if (instance.compacting) {
-    queueInput(instance, userMessage, "steer");
-    return;
+  // Busy before the next await (§3): once an instance is in hand (live or
+  // freshly built — the build itself is gated), the lifecycle is marked
+  // synchronously so message paths see a compacting/busy instance and queue;
+  // Stop finds a busy lifecycle in every window instead of an already-idle
+  // no-op. Reuses the existing compacting/dispatch fields — no second queue,
+  // no timers.
+  instance.compacting = true;
+  updateDispatchState(instance, "running", "compact-requested");
+  transition(instance, instance.roomId, instance.agentName, "working", "compact-requested");
+  let started = false;
+  try {
+    // Settle the old turn first: shell waits return as running (commands stay
+    // alive in the PTY), the SDK abort finishes the in-flight prompt.
+    if (instance.turnActive || instance.promptInFlight || instance.status === "working") {
+      settleMemberShellWaits(instance.memberId);
+      try { instance.handle.abort(); } catch { /* already stopped */ }
+      await instance.handle.waitForIdle();
+      // Stop landed in the gap (old prompt finished, compact not started):
+      // abortAgent marked dispatchState "aborting" — honor it, do not compact.
+      if (instance.dispatchState === "aborting") {
+        logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, scopeId: instance.scopeId });
+        return { ok: false, action: "stopped" };
+      }
+    }
+    started = true;
+    // From here the event bridge owns the lifecycle: compaction_end resets
+    // compacting/status and resumes queued inputs as a fresh prompt.
+    const outcome = await instance.handle.compact();
+    if (outcome?.aborted) {
+      logger.info("agent", "manualCompactAborted", { member: instance.agentName, scopeId: instance.scopeId });
+      return { ok: false, action: "stopped" };
+    }
+    return { ok: true, action: "compacted" };
+  } catch (err) {
+    const message = formatRuntimeErrorMessage(err);
+    if (started) {
+      // The bridge already emitted compaction_end(aborted/error) and settled.
+      logger.error("agent", "manualCompactFailed", { member: instance.agentName, scopeId: instance.scopeId, error: message });
+      postMessage(instance.roomId, "system", `Manual compaction failed for "${instance.agentName}": ${message}`);
+    }
+    throw err;
+  } finally {
+    if (!started) {
+      // Never reached the SDK operation (stopped in the window or pre-start
+      // failure): restore the lifecycle here and resume queued inputs.
+      instance.compacting = false;
+      updateDispatchState(instance, "idle", "compact-not-started");
+      transition(instance, instance.roomId, instance.agentName, "idle", "compact-not-started");
+      drainQueuedInputsAsPrompt(instance, "compact-not-started");
+    }
   }
-
-  if (instance.status === "working") {
-    emitAgentLocalEvent(roomId, instance.memberId, { type: "user_steer", text: userMessage });
-    instance.handle.steer(userMessage);
-    return;
-  }
-
-  if (instance.dispatchState !== "idle") {
-    queueInput(instance, userMessage, "steer");
-    return;
-  }
-
-  emitAgentLocalEvent(roomId, instance.memberId, { type: "user_steer", text: userMessage });
-  await runPrompt(instance, userMessage, "steer", (err) => {
-    logger.error("agent", "steer error", { agent: agentName, error: formatRuntimeErrorMessage(err) });
-  });
 }
 
 // -- Abort --
@@ -2318,7 +2338,6 @@ function wireInstanceEvents(
       instance.turnActive = true;
       if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
       updateDispatchState(instance, "running", event.type);
-      flushQueuedInputs(instance, event.type);
     } else if (event.type === "agent_end") {
       // pi session-level retry: willRetry agent_end is not a real turn end — keep
       // turnActive/dispatch/queue as-is so public status stays working and wait

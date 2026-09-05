@@ -45,7 +45,15 @@ class TestHandle implements AgentHandle {
     this.pendingPromptResolve = null;
   }
 
-  steer(): void {}
+  compactCalls = 0;
+  async compact(): Promise<{ aborted: boolean }> {
+    this.compactCalls += 1;
+    this.emit({ type: "agent_start" });
+    this.emit({ type: "compaction_start", reason: "manual" });
+    this.emit({ type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
+    this.emit({ type: "agent_end" });
+    return { aborted: false };
+  }
   abort(): void {}
   destroy(): void { this.destroyed = true; }
   waitForIdle(): Promise<void> { return Promise.resolve(); }
@@ -804,12 +812,15 @@ describe("agent-manager model hot switch", () => {
     expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" hasn\'t selected a model yet. Open the member card to choose a model and credential, then try again.');
   });
 
-  it("rejects steer for an Unconfigured member instead of creating a runtime", async () => {
+  it("compact with no live instance builds for a configured member; an unresolvable one fails honestly", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    member = { ...member, model: undefined, credentialId: undefined };
 
-    await expect(manager.steerAgent("room", "pm", "hello")).rejects.toThrow("hasn't selected a model yet");
-    expect(handles).toHaveLength(0);
+    const result = await manager.compactMember("room:room2", "pm");
+    expect(result).toEqual({ ok: true, action: "compacted" }); // built, never prompted
+    expect(handles[0].promptCalls).toEqual([]);
+
+    member = null;
+    await expect(manager.compactMember("room:room", "ghost")).rejects.toThrow(/No active session/);
   });
 
   it("blocks activation when a member has a model but no bound credential", async () => {

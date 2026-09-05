@@ -11,6 +11,7 @@ import type {
 
 // Mutable mock state — tests can reassign via setMockPromptFn etc.
 export let mockPromptFn = vi.fn().mockResolvedValue(undefined);
+export let mockCompactFn = vi.fn().mockResolvedValue(undefined);
 export let mockSteerFn = vi.fn();
 export let mockAbortFn = vi.fn();
 export let mockIsWorking = false;
@@ -24,11 +25,13 @@ export function emitMockEvent(event: AgentStreamEvent): void {
 }
 
 export function setMockPromptFn(fn: any): void { mockPromptFn = fn; }
+export function setMockCompactFn(fn: any): void { mockCompactFn = fn; }
 export function setMockSteerFn(fn: any): void { mockSteerFn = fn; }
 export function setMockIsWorking(v: boolean): void { mockIsWorking = v; }
 
 export function resetMocks(): void {
   mockPromptFn = vi.fn().mockResolvedValue(undefined);
+  mockCompactFn = vi.fn().mockResolvedValue(undefined);
   mockSteerFn = vi.fn();
   mockAbortFn = vi.fn();
   mockIsWorking = false;
@@ -55,8 +58,13 @@ export class MockAgentHandle implements AgentHandle {
     }
   }
 
-  steer(message: string): void {
-    mockSteerFn(message);
+  async compact(): Promise<{ aborted: boolean }> {
+    this.emit({ type: "agent_start" });
+    this.emit({ type: "compaction_start", reason: "manual" });
+    await mockCompactFn();
+    this.emit({ type: "compaction_end", reason: "manual", aborted: false, willRetry: false });
+    this.emit({ type: "agent_end" });
+    return { aborted: false };
   }
 
   abort(): void {

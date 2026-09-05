@@ -41,7 +41,7 @@ describe("MockRuntime", () => {
     expect(handle).toBeDefined();
     expect(handle.isWorking).toBe(false);
     expect(typeof handle.prompt).toBe("function");
-    expect(typeof handle.steer).toBe("function");
+    expect(typeof handle.compact).toBe("function");
   });
 
   it("should shutdown cleanly", async () => {

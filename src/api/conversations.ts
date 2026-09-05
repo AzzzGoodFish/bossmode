@@ -1,6 +1,6 @@
 /**
  * 0.20 unified conversation session ops — contract §2.2
- * POST /api/conversations/:scope/{reset-session,reload,abort,steer}
+ * POST /api/conversations/:scope/{reset-session,reload,abort,compact}
  * GET  /api/conversations/:scope/{events,context-usage,tools}
  *
  * Room scopes require ?memberId= (or ?member= name/id). DM scopes embed memberId.
@@ -18,7 +18,7 @@ import {
   getMemberActiveTools,
   reloadMemberResources,
   resetAgentSession,
-  steerAgent,
+  compactMember,
   getMemberBusyState,
 } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
@@ -134,25 +134,22 @@ addRoute("POST", "/api/conversations/:scope/abort", async (req, res, params) => 
   sendJson(res, 200, { ...result, scopeId: target.scopeId });
 });
 
-addRoute("POST", "/api/conversations/:scope/steer", async (req, res, params) => {
+addRoute("POST", "/api/conversations/:scope/compact", async (req, res, params) => {
   const url = parseUrl(req);
   const target = resolveTarget(params.scope, url.searchParams);
   if ("error" in target) {
     sendJson(res, target.status, { error: target.error });
     return;
   }
-  const body = (await parseBody(req)) as { content?: string };
-  if (!body.content) {
-    sendJson(res, 400, { error: "content is required" });
-    return;
-  }
+  // Manual compaction is one explicit conversation action (steer-removal §2):
+  // the real scopeId keys the live instance — room, DM and topic alike.
   try {
-    void steerAgent(target.roomId, target.memberId, body.content).catch((err) => {
-      logger.error("api", "steer error", { scopeId: target.scopeId, member: target.memberName, error: String(err) });
-    });
-    sendJson(res, 200, { ok: true, scopeId: target.scopeId });
+    const result = await compactMember(target.scopeId, target.memberId);
+    sendJson(res, 200, { ...result, scopeId: target.scopeId });
   } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
+    const message = err?.message || String(err);
+    logger.error("api", "manual compact failed", { scopeId: target.scopeId, member: target.memberName, error: message });
+    sendJson(res, 400, { error: "compact_failed", message });
   }
 });
 

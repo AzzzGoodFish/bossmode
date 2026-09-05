@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession, steerAgent,
+  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession,
   getMemberStats, getMemberActiveTools,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,

@@ -203,7 +203,7 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     expect(systemFails).toHaveLength(1);
   });
 
-  it("mid-turn mention interrupts the run (design-interrupt-on-message-v1): abort, no steer", async () => {
+  it("mid-turn mention interrupts the run (design-interrupt-on-message-v1): abort, no steer, one activity card", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     state.promptImpl = vi.fn(async () => {
@@ -218,17 +218,31 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     expect(getAgentStatus("room1", "rm_dev")).toBe("working");
 
     // Second @ while working → interrupt path: abort (never steer), the
-    // message is queued at the front banner-wrapped, Activity still records
-    // the delivery as a user_steer event.
+    // message is queued at the front banner-wrapped. fish 2026-09-05: NO
+    // user_steer event here — the drained queue emits exactly one user_prompt
+    // (banner + message); the old pre-emit made one message two cards.
     await activateAgent("room1", "developer");
     expect(handle.steer).not.toHaveBeenCalled();
     expect(handle.abort).toHaveBeenCalled();
     const steers = state.appendEventToDisk.mock.calls
       .map((c: any[]) => c[2])
       .filter((e: any) => e?.type === "user_steer");
-    expect(steers.length).toBeGreaterThanOrEqual(1);
+    expect(steers).toHaveLength(0);
 
     release();
     await first;
+    await new Promise((r) => setTimeout(r, 40));
+
+    // The drained interrupt produced exactly one user_prompt (banner +
+    // message), and the model received the interrupted message exactly once.
+    const prompts = state.appendEventToDisk.mock.calls
+      .map((c: any[]) => c[2])
+      .filter((e: any) => e?.type === "user_prompt");
+    const interruptCards = prompts.filter((e: any) => typeof e.text === "string" && e.text.includes("interrupted by this message"));
+    expect(interruptCards).toHaveLength(1);
+    expect(interruptCards[0].text).toContain("@developer hi");
+    const modelCalls = handle.prompt.mock.calls.filter((c: any[]) => String(c[0]).includes("interrupted by this message"));
+    expect(modelCalls).toHaveLength(1);
+    expect(String(modelCalls[0][0])).toContain("@developer hi");
   });
 });

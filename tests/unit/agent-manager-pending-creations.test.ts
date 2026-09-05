@@ -177,7 +177,7 @@ describe("agent-manager pending creation dedup", () => {
     await activation;
   });
 
-  it("queues activation during promptSubmitted and flushes it as steer on agent_start", async () => {
+  it("queues activation during promptSubmitted; the queued message runs as a prompt after settlement (no steer flush)", async () => {
     let resolvePrompt!: () => void;
     mocks.prompt.mockReturnValue(new Promise<void>((resolve) => { resolvePrompt = resolve; }));
 
@@ -189,11 +189,16 @@ describe("agent-manager pending creation dedup", () => {
     expect(mocks.prompt).toHaveBeenCalledTimes(1);
     expect(mocks.steer).not.toHaveBeenCalled();
 
+    // agent_start no longer flushes queued inputs via steer (steer-removal §1).
     mocks.subscribeCb?.({ type: "agent_start" });
-    expect(mocks.steer).toHaveBeenCalledTimes(1);
+    expect(mocks.steer).not.toHaveBeenCalled();
 
+    // The turn settles → the queued activation drains as the next prompt.
+    mocks.subscribeCb?.({ type: "agent_end" });
     resolvePrompt();
     await Promise.all([first, second]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mocks.prompt.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("does not prompt again between agent_end and prompt promise settlement; queued input prompts after settle", async () => {
