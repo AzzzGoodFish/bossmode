@@ -12,7 +12,7 @@ import {
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
-import { getMemberInstances, destroyInstance, switchMemberModelInActiveRooms } from "../engine/agent-manager.js";
+import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
@@ -185,39 +185,26 @@ addRoute("PUT", "/api/members/:id", async (req, res, params) => {
   const existing = getMember(params.id);
   if (!existing) { sendJson(res, 404, { error: "Member not found" }); return; }
   const body = (await parseBody(req)) as any;
-  const model = Object.prototype.hasOwnProperty.call(body, "model") ? optionalModel(body.model) : existing.model;
-  const credentialInput = Object.prototype.hasOwnProperty.call(body, "credentialId")
-    ? body.credentialId
-    : existing.credentialId;
-  let credentialId: string | undefined;
-  try {
-    credentialId = validateCredentialMatchesModel(credentialInput, model);
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
-    return;
+  // Single-path model switch (design-model-switch-single-path-v1 §7): the old
+  // model-configuration path is retired — model/credentialId/thinkingLevel are
+  // member-global and go through PATCH /api/members/:id only.
+  for (const key of ["model", "credentialId", "thinkingLevel"]) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      sendJson(res, 400, { error: "model_config_is_global", message: `${key} is member-global — update it via PATCH /api/members/:id` });
+      return;
+    }
   }
   const member = saveMember({
     id: params.id,
     name: body.name ?? existing.name,
     agent: body.agent ?? existing.agent,
-    model,
+    model: existing.model,
     runtime: ONLY_SUPPORTED_RUNTIME,
-    thinkingLevel: body.thinkingLevel ?? existing.thinkingLevel,
+    thinkingLevel: existing.thinkingLevel,
     avatar: body.avatar ?? existing.avatar,
     contextLimit: body.contextLimit ?? existing.contextLimit,
-    credentialId,
+    credentialId: existing.credentialId,
   });
-
-  const modelChanged = model !== existing.model || credentialId !== existing.credentialId;
-  if (modelChanged && model) {
-    try {
-      await switchMemberModelInActiveRooms(existing.name, model, credentialId);
-    } catch (err: any) {
-      sendJson(res, 400, { error: err.message || String(err) });
-      return;
-    }
-  }
-
   sendJson(res, 200, member);
 });
 

@@ -13,7 +13,7 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import * as topicStore from "../workspace/topic-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, switchMemberModel, switchMemberThinkingLevel, clearMemberModelBinding, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, steerAgent, abortAgent, resetAgentSession, reloadMemberResources, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -557,17 +557,6 @@ function normalizeRoomModelInput(value: unknown): string | null | undefined {
   return trimmed ? normalizeModelRef(trimmed) : null;
 }
 
-function validateCredentialMatchesModel(credentialId: unknown, model: string | null | undefined): string | null | undefined {
-  if (credentialId === null || credentialId === "") return null;
-  if (credentialId === undefined) return undefined;
-  if (typeof credentialId !== "string") throw new Error("credentialId must be a string");
-  if (!model) throw new Error("credentialId requires an explicit model override");
-  const credential = getModelCredentialProfile(credentialId);
-  if (!credential) throw new Error("Model credential profile not found");
-  if (!credential.enabled) throw new Error("Model credential profile is disabled");
-  resolveCredentialProfileForModel({ modelRef: model, credentialId });
-  return credentialId;
-}
 
 addRoute("GET", "/api/rooms/:id/members", async (_req, res, params) => {
   const room = roomStore.getRoom(params.id);
@@ -598,38 +587,6 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
   const hasThinking = Object.prototype.hasOwnProperty.call(body, "thinkingLevel");
   const hasMcpServers = Object.prototype.hasOwnProperty.call(body, "mcpServers");
   const hasExtensions = Object.prototype.hasOwnProperty.call(body, "extensions");
-
-  let model: string | null | undefined;
-  if (hasModel) {
-    model = normalizeRoomModelInput(body.model);
-    if (model) {
-      try {
-        assertModelAvailable(model, "PATCH room member model");
-      } catch (err: any) {
-        sendJson(res, 400, { error: err.message || String(err) });
-        return;
-      }
-    }
-    patch.model = model ?? null;
-  }
-
-  try {
-    const credentialTargetModel = model === undefined ? resolveRoomMember(params.id, roomMember.id)?.model : model;
-    const credentialId = hasCredential ? validateCredentialMatchesModel(body.credentialId, credentialTargetModel) : undefined;
-    if (hasCredential) patch.credentialId = credentialId ?? null;
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
-    return;
-  }
-
-  if (hasThinking) {
-    if (body.thinkingLevel === null || body.thinkingLevel === "") patch.thinkingLevel = null;
-    else if (typeof body.thinkingLevel === "string" && THINKING_LEVELS.has(body.thinkingLevel)) patch.thinkingLevel = body.thinkingLevel;
-    else {
-      sendJson(res, 400, { error: "thinkingLevel must be one of off|minimal|low|medium|high|xhigh|max" });
-      return;
-    }
-  }
 
   if (hasMcpServers) {
     if (body.mcpServers === null) patch.mcpServers = null;
@@ -676,7 +633,15 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     }
   }
 
-  if (!hasName && !hasModel && !hasCredential && !hasThinking && !hasMcpServers && !hasExtensions) {
+  // Single-path model switch (design-model-switch-single-path-v1 §7): model,
+  // credential and thinking are member-global — this room route no longer
+  // accepts them. Use PATCH /api/members/:id.
+  if (hasModel || hasCredential || hasThinking) {
+    sendJson(res, 400, { error: "model_config_is_global", message: "model, credentialId and thinkingLevel are member-global — update them via PATCH /api/members/:id" });
+    return;
+  }
+
+  if (!hasName && !hasMcpServers && !hasExtensions) {
     sendJson(res, 400, { error: "Nothing to update" });
     return;
   }
@@ -705,40 +670,12 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     result.taskReferencesUpdated = taskStore.renameParticipant(params.id, { memberId: renamed.member.id, oldName, newName: renamed.member.name });
   }
 
-  if (hasThinking || hasMcpServers || hasExtensions) {
-    // Non-model fields commit immediately, on the same 0.20 authority as the
-    // model switch (registry for mem_* members, F4 same-root fix). Model/
-    // credential go through switchMemberModel so the live instance is updated
-    // before the binding commits.
-    const nonModelPatch: { thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null } = {};
-    if (hasThinking) nonModelPatch.thinkingLevel = patch.thinkingLevel;
-    if (hasMcpServers) nonModelPatch.mcpServers = patch.mcpServers;
-    if (hasExtensions) nonModelPatch.extensions = patch.extensions;
-    persistRoomMemberConfigPatch(params.id, currentMemberRef, nonModelPatch);
-    if (hasMcpServers || hasExtensions) broadcastMemberStatus(params.id, currentMemberRef);
-  }
-  try {
-    if (hasModel || hasCredential) {
-      const current = resolveRoomMember(params.id, currentMemberRef);
-      const targetModel = hasModel ? (patch.model ?? null) : (current?.model ?? null);
-      const targetCred = hasCredential ? (patch.credentialId ?? null) : (current?.credentialId ?? null);
-      if (targetModel) {
-        result.modelSwitch = await switchMemberModel(params.id, currentMemberRef, targetModel, targetCred);
-      } else {
-        // Clearing the model binding — no live switch to apply. Same 0.20
-        // authority as switchMemberModel (registry for mem_*, F4).
-        clearMemberModelBinding(params.id, currentMemberRef);
-      }
-    }
-    if (hasThinking) {
-      const effectiveThinking = resolveRoomMember(params.id, currentMemberRef);
-      if (effectiveThinking?.thinkingLevel) {
-        result.thinkingSwitch = await switchMemberThinkingLevel(params.id, currentMemberRef, effectiveThinking.thinkingLevel);
-      }
-    }
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
-    return;
+  if (hasMcpServers || hasExtensions) {
+    const roomPatch: { mcpServers?: string[] | null; extensions?: string[] | null } = {};
+    if (hasMcpServers) roomPatch.mcpServers = patch.mcpServers;
+    if (hasExtensions) roomPatch.extensions = patch.extensions;
+    persistRoomMemberConfigPatch(params.id, currentMemberRef, roomPatch);
+    broadcastMemberStatus(params.id, currentMemberRef);
   }
   result.member = resolveRoomMember(params.id, currentMemberRef);
   sendJson(res, 200, result);

@@ -41,7 +41,7 @@ import {
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
-import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, setMemberActiveCredentialOverride, getMemberActiveCredentialOverride } from "./model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
 import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
@@ -189,6 +189,10 @@ interface AgentInstance {
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
   appliedCredentialId?: string;
+  /** Live model switch in progress (design-model-switch-single-path-v1): the
+   * TARGET credential served to setModel's auth check before the applied
+   * binding flips. Set/cleared only by applyModelSwitchToInstance. */
+  switchTargetCredentialId?: string;
   /** Batch 6 §3: reload requested mid-run — flushed when the turn settles. */
   pendingReload: string | null;
 }
@@ -510,10 +514,11 @@ async function applyModelSwitchToInstance(
 
   if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
 
-  // Pin the target credential so setModel's checkAuth(newProvider) resolves
-  // before room.json commits the binding (2026-07-30 QA cross-provider block).
-  const previousOverride = getMemberActiveCredentialOverride(instance.roomId, instance.memberId);
-  setMemberActiveCredentialOverride(instance.roomId, instance.memberId, resolvedCredentialId);
+  // Pin the target credential on the instance so setModel's checkAuth(newProvider)
+  // resolves it (the applied binding still points at the old credential until
+  // the switch succeeds — MemberCredentialStore reads this field first).
+  const previousTarget = instance.switchTargetCredentialId;
+  instance.switchTargetCredentialId = resolvedCredentialId;
   try {
     if (instance.handle.refreshModelRegistry) {
       // models.json was just rewritten locally — reload disk only, never hang on network.
@@ -538,7 +543,7 @@ async function applyModelSwitchToInstance(
     }
     await instance.handle.setModel(model);
   } catch (err) {
-    setMemberActiveCredentialOverride(instance.roomId, instance.memberId, previousOverride ?? null);
+    instance.switchTargetCredentialId = previousTarget;
     throw err;
   }
 
@@ -549,6 +554,7 @@ async function applyModelSwitchToInstance(
   }
   instance.appliedModel = model;
   instance.appliedCredentialId = resolvedCredentialId;
+  instance.switchTargetCredentialId = undefined;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
   broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
 }
@@ -611,7 +617,7 @@ function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason:
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
   contextCompactionWarningCache.delete(key);
-  setMemberActiveCredentialOverride(instance.roomId, instance.memberId, null);
+  instance.switchTargetCredentialId = undefined;
   try { instance.unsubscribe(); } catch {}
   try { instance.handle.destroy(); } catch {}
   instance.status = "inactive";
@@ -669,9 +675,6 @@ async function applyCredentialRefreshToInstance(instance: AgentInstance, pending
       instance.handle.runtimeParams.credentialName = exported.profile?.name;
     }
     instance.appliedCredentialId = exported.profile?.id || instance.appliedCredentialId;
-    if (instance.appliedCredentialId) {
-      setMemberActiveCredentialOverride(instance.roomId, instance.memberId, instance.appliedCredentialId);
-    }
     logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: instance.roomId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
   } catch (err) {
     // Profile gone / export empty already dropped above. Network/timeouts must NOT
@@ -1523,10 +1526,6 @@ export function persistRoomMemberConfigPatch(roomId: string, memberRef: string, 
 }
 
 /** Clear a member's model binding on the same authority as persistConfigPatch. */
-export function clearMemberModelBinding(roomId: string, memberRef: string): void {
-  persistRoomMemberConfigPatch(roomId, memberRef, { model: null, credentialId: null });
-}
-
 /**
  * Scope labels for the DM Core prompt's "Scopes you exist in" line (flagship
  * ①): rooms the member belongs to + this DM. Previously the DM compile call
@@ -1540,66 +1539,140 @@ export function buildDmScopeLabels(memberId: string, dmScopeId: string): string[
   ];
 }
 
-export async function switchMemberModel(roomId: string, memberRef: string, model: string, credentialId?: string | null, persistRoomOverride = true): Promise<{ applied: boolean; pending: boolean; active: boolean; model: string }> {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const normalizedModel = normalizeSwitchModelRef(model);
+/** In-flight model switches per memberId — the second concurrent request fails
+ * fast instead of interleaving (design-model-switch-single-path-v1 §3.2). */
+const memberSwitchLocks = new Set<string>();
+
+export interface MemberModelSwitchResult {
+  model: string;
+  credentialId: string;
+  instances: Array<{ scopeId: string; applied: boolean }>;
+}
+
+/**
+ * The ONE model switch method (design-model-switch-single-path-v1 §3), keyed by
+ * memberId: validate the complete target binding → apply to every live
+ * instance of the member (room + DM + topic, idle and working) via the SDK's
+ * session.setModel → save the global config once. Failures roll every
+ * already-switched instance back to its original binding; the config is only
+ * written after all instances accepted the switch. Instances created during
+ * the switch window are caught by a second sweep (they assembled from the old
+ * config) so no session is left on a stale binding.
+ */
+export async function switchMemberModel(memberId: string, binding: { model: string; credentialId: string }): Promise<MemberModelSwitchResult> {
+  if (memberSwitchLocks.has(memberId)) {
+    throw new Error("A model switch is already in progress for this member — retry when it finishes.");
+  }
+  const normalizedModel = normalizeSwitchModelRef(binding.model);
+  if (!normalizedModel) throw new Error("model is required");
   assertModelAvailable(normalizedModel, "switchMemberModel");
-
-  // Pre-validate the target binding can export (writes models.json for the member runtime dir).
-  // Do NOT touch room.json yet — binding commits only after the live instance accepts the switch.
-  const exported = exportPiConfigForMember({
-    roomId,
-    memberName: memberId,
-    modelRef: normalizedModel,
-    credentialId: credentialId || undefined,
-  });
-  if (!exported) throw new Error(`No model credentials configured for ${normalizedModel}`);
-
-  const key = instanceKey(roomId, memberId);
-  const instance = instances.get(key);
-
-  if (instance) {
-    // Apply first (refresh registry + setModel). On failure the room binding stays unchanged.
-    await applyModelSwitchToInstance(instance, { model: normalizedModel, credentialId: credentialId || undefined }, "switchMemberModel");
+  const { getModelCredentialProfile } = await import("./model-credentials.js");
+  const profile = getModelCredentialProfile(binding.credentialId);
+  if (!profile || !profile.enabled) {
+    throw new Error(`Credential profile not found or disabled: ${binding.credentialId}`);
+  }
+  // The model/credential pair must resolve to THIS profile (provider match).
+  const probe = exportPiConfigForMember({ roomId: `dm:${memberId}`, memberName: memberId, modelRef: normalizedModel, credentialId: binding.credentialId });
+  if (!probe || probe.profile?.id !== profile.id) {
+    throw new Error(`Credential "${profile.name}" (${profile.providerSlug}) does not serve model ${normalizedModel}`);
   }
 
-  // Commit binding only after a successful apply (or when no live instance needs applying).
-  if (persistRoomOverride) {
-    persistConfigPatch(roomId, memberId, { model: normalizedModel, credentialId: credentialId || null });
+  memberSwitchLocks.add(memberId);
+  try {
+    const targets = [...instances.values()].filter((inst) => inst.memberId === memberId);
+    const originals = new Map(targets.map((inst) => [inst, { model: inst.appliedModel, credentialId: inst.appliedCredentialId }]));
+    const switched: typeof targets = [];
+    try {
+      for (const inst of targets) {
+        await applyModelSwitchToInstance(inst, { model: normalizedModel, credentialId: binding.credentialId }, "switchMemberModel");
+        switched.push(inst);
+      }
+    } catch (err) {
+      let rollbackFailed = false;
+      for (const inst of switched) {
+        const original = originals.get(inst)!;
+        try {
+          if (original.model) {
+            await applyModelSwitchToInstance(inst, { model: original.model, credentialId: original.credentialId }, "switchMemberModel-rollback");
+          } else {
+            destroyInstance(inst.roomId, inst.memberId);
+          }
+        } catch (rollbackErr) {
+          rollbackFailed = true;
+          logger.error("agent", "modelSwitchRollbackFailed", { member: inst.agentName, scopeId: inst.scopeId, error: String(rollbackErr) });
+          destroyInstance(inst.roomId, inst.memberId);
+        }
+      }
+      if (rollbackFailed) {
+        throw new Error(`Model switch failed (${String((err as Error)?.message || err)}) and rollback could not fully restore every instance — affected instances were stopped. Their conversation history is preserved; start them again.`);
+      }
+      throw err;
+    }
+
+    // Second sweep: instances created while the switch was in flight assembled
+    // from the old config — bring them onto the new binding too.
+    const latecomers = [...instances.values()].filter((inst) => inst.memberId === memberId && !originals.has(inst));
+    for (const inst of latecomers) {
+      try {
+        await applyModelSwitchToInstance(inst, { model: normalizedModel, credentialId: binding.credentialId }, "switchMemberModel-late");
+        switched.push(inst);
+      } catch (lateErr) {
+        logger.warn("agent", "modelSwitchLateInstanceFailed", { member: inst.agentName, scopeId: inst.scopeId, error: String(lateErr) });
+      }
+    }
+
+    // Commit the global config exactly once, after every instance accepted.
+    try {
+      const { updateMember } = await import("../workspace/member-registry.js");
+      updateMember(memberId, { global: { model: normalizedModel, credentialId: binding.credentialId } });
+    } catch (saveErr) {
+      let rollbackFailed = false;
+      for (const inst of switched) {
+        const original = originals.get(inst) ?? { model: normalizedModel, credentialId: undefined };
+        if (!original.model) continue;
+        try {
+          await applyModelSwitchToInstance(inst, { model: original.model, credentialId: original.credentialId }, "switchMemberModel-save-rollback");
+        } catch {
+          rollbackFailed = true;
+          destroyInstance(inst.roomId, inst.memberId);
+        }
+      }
+      throw new Error(rollbackFailed
+        ? `Config save failed (${String((saveErr as Error)?.message || saveErr)}) and instances could not be restored — affected instances were stopped; history preserved.`
+        : `Config save failed (${String((saveErr as Error)?.message || saveErr)}) — live instances were restored to their previous model.`);
+    }
+
+    return {
+      model: normalizedModel,
+      credentialId: profile.id,
+      instances: switched.map((inst) => ({ scopeId: inst.scopeId, applied: true })),
+    };
+  } finally {
+    memberSwitchLocks.delete(memberId);
   }
-
-  return { applied: Boolean(instance), pending: false, active: Boolean(instance), model: normalizedModel };
 }
 
-export async function switchMemberThinkingLevel(roomId: string, memberRef: string, thinkingLevel: string): Promise<{ applied: boolean; pending: boolean; active: boolean; thinkingLevel: string }> {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const memberName = member?.name || memberRef;
-  const key = instanceKey(roomId, memberId);
-  const instance = instances.get(key);
-  if (!instance) return { applied: false, pending: false, active: false, thinkingLevel };
-
-  const pending = { thinkingLevel };
-  if (instance.status === "working" || instance.dispatchState !== "idle") {
-    instance.pendingThinkingSwitch = pending;
-    logger.info("agent", "thinkingSwitchQueued", { member: memberName, memberId, roomId, thinkingLevel, status: instance.status, dispatchState: instance.dispatchState });
-    return { applied: false, pending: true, active: true, thinkingLevel };
+/** Thinking level is member-global too (§6): apply to every live instance of
+ * the member. Working instances queue the level for their next settlement
+ * (per-instance pending switch), idle ones apply immediately. */
+export async function switchMemberThinkingLevel(memberId: string, thinkingLevel: string): Promise<{ applied: string[]; pending: string[] }> {
+  const targets = [...instances.values()].filter((inst) => inst.memberId === memberId);
+  const applied: string[] = [];
+  const pending: string[] = [];
+  for (const inst of targets) {
+    const p = { thinkingLevel };
+    if (inst.status === "working" || inst.dispatchState !== "idle") {
+      inst.pendingThinkingSwitch = p;
+      pending.push(inst.scopeId);
+      continue;
+    }
+    await applyThinkingSwitchToInstance(inst, p, "switchMemberThinkingLevel");
+    applied.push(inst.scopeId);
   }
-
-  await applyThinkingSwitchToInstance(instance, pending, "switchMemberThinkingLevel");
-  return { applied: true, pending: false, active: true, thinkingLevel };
+  return { applied, pending };
 }
 
-export async function switchMemberModelInActiveRooms(memberName: string, model: string, credentialId?: string | null): Promise<Array<{ roomId: string; applied: boolean; pending: boolean; active: boolean; model: string }>> {
-  const rooms = Array.from(instances.values())
-    .filter((instance) => instance.agentName === memberName && !roomStore.hasRoomMemberModelOverride(instance.roomId, memberName))
-    .map((instance) => instance.roomId);
-  if (rooms.length === 0) return [];
-  const results = [];
-  for (const roomId of rooms) results.push({ roomId, ...(await switchMemberModel(roomId, memberName, model, credentialId, false)) });
-  return results;
-}
+
 
 // -- Status --
 
@@ -2159,9 +2232,8 @@ export function destroyInstance(roomId: string, memberRef: string): void {
   const memberName = resolved?.name || memberRef;
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
-  // Drop any live credential override so a recreated instance starts from room binding.
-  setMemberActiveCredentialOverride(roomId, memberId, null);
   if (instance) {
+    instance.switchTargetCredentialId = undefined;
     instance.handle.abort();
     instance.handle.destroy();
     instance.unsubscribe();

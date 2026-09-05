@@ -260,7 +260,7 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
   });
 
   describe("Room member MCP access PATCH", () => {
-    it("accepts the max thinking level override", async () => {
+    it("rejects thinkingLevel — member-global via PATCH /api/members/:id only", async () => {
       const { saveMember } = await import("../../src/workforce/member-store.js");
       saveMember({ name: "pm", agent: "pm", runtime: "test" });
 
@@ -275,8 +275,8 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
         token,
         body: { thinkingLevel: "max" },
       });
-      expect(res.status).toBe(200);
-      expect(JSON.parse(res.body).member.thinkingLevel).toBe("max");
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toBe("model_config_is_global");
     });
 
     it("rejects invalid-config MCP servers", async () => {

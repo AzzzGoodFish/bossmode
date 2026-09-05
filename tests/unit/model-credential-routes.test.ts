@@ -587,21 +587,22 @@ describe("model credential profile API routes", () => {
     expect(created.global.model ?? null).toBeNull();
     const memberId = created.id || created.memberId;
 
+    // Single-path switch (design-model-switch-single-path-v1 §6): a bare model
+    // with no usable credential is rejected, and explicit null is a parameter
+    // error — clearing is not a supported action.
     const overrideRes = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: "anthropic/claude-sonnet-4-6" },
     });
-    expect(overrideRes.status).toBe(200);
-    const patched = JSON.parse(overrideRes.body).member || JSON.parse(overrideRes.body);
-    expect(patched.global.model).toBe("anthropic/claude-sonnet-4-6");
+    expect(overrideRes.status).toBe(400);
+    expect(JSON.parse(overrideRes.body).error).toBe("invalid_binding");
 
     const clearedRes = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: null },
     });
-    expect(clearedRes.status).toBe(200);
-    const cleared = JSON.parse(clearedRes.body).member || JSON.parse(clearedRes.body);
-    expect(cleared.global.model ?? null).toBeNull();
+    expect(clearedRes.status).toBe(400);
+    expect(JSON.parse(clearedRes.body).error).toBe("invalid_model");
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
@@ -639,14 +640,14 @@ describe("model credential profile API routes", () => {
     })).body).member || {};
     const memberId = created.id || created.memberId;
 
+    // A model paired with an explicitly null credential is rejected — the
+    // switch requires a complete binding.
     const cleared = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { model: "other-provider/model-y", credentialId: null },
     });
-    expect(cleared.status).toBe(200);
-    const clearedBody = (JSON.parse(cleared.body).member || JSON.parse(cleared.body));
-    expect(clearedBody.global.model).toBe("other-provider/model-y");
-    expect(clearedBody.global.credentialId ?? null).toBeNull();
+    expect(cleared.status).toBe(400);
+    expect(JSON.parse(cleared.body).error).toBe("invalid_binding");
 
     await jsonRequest(ts.port, "DELETE", `/api/model-credential-profiles/${profileA.id}`, { token });
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
