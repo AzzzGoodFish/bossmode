@@ -97,7 +97,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
       {/* Confirm dialog */}
       {confirmState && (
-        <Sheet open={!!confirmState} onClose={() => handleConfirm(false)} size="sm">
+        <Sheet open={!!confirmState} onClose={() => handleConfirm(false)} size="sm" zClass="z-[80]">
           <div className="p-5">
             <p className="text-sm text-ink-1 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
             <div className="flex gap-2 justify-end">
@@ -160,7 +160,7 @@ function PromptDialog({ state, onClose }: { state: PromptState; onClose: (value:
   };
 
   return (
-    <Sheet open onClose={() => onClose(null)} size="sm" closeOnOverlayClick={false}>
+    <Sheet open onClose={() => onClose(null)} size="sm" closeOnOverlayClick={false} zClass="z-[80]">
       <div className="p-5">
         <p className="text-sm text-ink-1 mb-3">{state.message}</p>
         <input
