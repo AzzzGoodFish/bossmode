@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupConfigMock, type TestServer } from "../helpers/test-server.js";
+import { createTestServer, closeTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupConfigMock, type TestServer } from "../helpers/test-server.js";
 
 setupConfigMock();
 
@@ -90,6 +90,43 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await new Promise<void>((r) => ts.server.close(() => r()));
   }, 20000);
+
+  it.each(["room", "dm", "topic"])("%s messages wait for compaction; only explicit Stop aborts it", async (kind) => {
+    const { ts, roomId, memberId } = await setupRoomWithActivatedMember(`compact-${kind}`);
+    const manager = await import("../../src/engine/agent-manager.js");
+    const { createTopic } = await import("../../src/workspace/topic-store.js");
+    const topic = kind === "topic" ? createTopic({ roomId, title: "compaction", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
+    const scopeId = kind === "dm" ? `dm:${memberId}` : topic ? `topic:${topic.id}` : roomId;
+    try {
+      const instance = await manager.buildMemberAgentSession(memberId, kind === "room" ? `room:${roomId}` : scopeId);
+      expect(instance).toBeTruthy();
+      const handle = instance!.handle as any;
+      handle.emit({ type: "agent_start" });
+      handle.emit({ type: "compaction_start" });
+      const abort = vi.spyOn(handle, "abort");
+      const prompt = vi.spyOn(handle, "prompt");
+      const queued = instance!.queuedInputs.length;
+      if (kind === "dm") await manager.activateDmMember(memberId);
+      else if (topic) await manager.activateTopicMember(roomId, topic.id, memberId);
+      else {
+        const { addMessage } = await import("../../src/workspace/message-store.js");
+        addMessage(roomId, { sender: "user", content: `@compact-${kind} continue`, mentions: [`compact-${kind}`] });
+        await manager.activateAgent(roomId, memberId);
+      }
+      expect(abort).not.toHaveBeenCalled();
+      expect(prompt).not.toHaveBeenCalled();
+      expect(instance!.queuedInputs.length).toBeGreaterThan(queued);
+      if (kind !== "dm") {
+        // Even an urgent message must not cancel compaction.
+        await manager.interruptAgent(scopeId, memberId, "user");
+        expect(abort).not.toHaveBeenCalled();
+      }
+      manager.abortAgent(scopeId, memberId);
+      expect(abort).toHaveBeenCalledTimes(1);
+    } finally {
+      await closeTestServer(ts);
+    }
+  });
 
   it("assembly is unified: exactly one runtime.createAgent call site in agent-manager", () => {
     const here = dirname(fileURLToPath(import.meta.url));

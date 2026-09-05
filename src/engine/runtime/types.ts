@@ -90,7 +90,8 @@ export interface AgentRuntimeParams {
 export interface AgentHandle {
   prompt(message: string): Promise<void>;
   steer(message: string): void;
-  abort(): void;
+  /** Abort the run. Message delivery preserves compaction; explicit Stop cancels it. */
+  abort(options?: { preserveCompaction?: boolean }): void;
   destroy(): void;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;

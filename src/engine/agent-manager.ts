@@ -1441,11 +1441,11 @@ async function activateAgentInternalContinue(
     // Interrupt-on-message (design-interrupt-on-message-v1, fish 2026-09-04):
     // a mid-turn mention now aborts the run and processes immediately —
     // steer (queue-behind-the-turn) is retired for message delivery. Shell
-    // commands keep running (the shell is daemon-owned); the dangling
-    // shell_exec tool result is synthesized with its exec id at agent_end.
+    // commands keep running; blocking tools return their actual running result.
+    // The SDK owns session history, including interrupted tool calls.
     emitAgentLocalEvent(roomId, memberId, { type: "user_steer", text: payload });
     interruptWorkingInstance(roomId, instance, payload,
-      "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
+      "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
       "message_interrupt");
     return;
   }
@@ -2026,10 +2026,11 @@ export async function interruptAgent(roomId: string, memberRef: string, urgentBy
     return { ok: true, action: "activated" };
   }
 
-  if (instance.status === "working") {
+  if (instance.status === "working" && !instance.compacting) {
     const banner = `[INTERRUPTED] Your previous turn was aborted by an urgent message (!${memberName}) from ${urgentByName}. That turn may have left partial work — verify its state before building on it.`;
     try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
-    instance.handle.abort();
+    try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+    instance.handle.abort({ preserveCompaction: true });
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(roomId, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
     logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId, urgentBy: urgentByName });
@@ -2446,10 +2447,14 @@ export async function activateDmMember(memberId: string): Promise<void> {
       prompt = `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     }
 
+    if (instance.compacting) {
+      queueInput(instance, prompt, "message-during-compaction");
+      return;
+    }
     if (instance.status === "working") {
       // Interrupt-on-message (design v1.1): DM messages interrupt a working run.
       interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
+        "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
         "dm-message-interrupt");
       return;
     }
@@ -2474,20 +2479,19 @@ export async function activateDmMember(memberId: string): Promise<void> {
 
 /** Interrupt a working member so a new message is processed immediately
  * (design-interrupt-on-message-v1). Shared by room, DM and topic activation:
- * abort the run (shell commands keep running — the shell is daemon-owned;
- * the dangling shell_exec result is synthesized with its exec id), then park
+ * abort the run (shell commands keep running and tool waits return normally), then park
  * the banner-wrapped prompt at the FRONT of the queue so it runs the moment
  * the abort settles. */
 function interruptWorkingInstance(scopeId: string, instance: AgentInstance, prompt: string, banner: string, trigger: string): void {
+  if (instance.compacting) {
+    queueInput(instance, prompt, trigger);
+    return;
+  }
   try { settleWaitOnAbort(scopeId, instance.memberId); } catch { /* ignore */ }
   // Blocking shell_exec waits end now (running + exec id) so the gentle abort
   // is not held hostage by a blockUntilMs wait (qa rc.22 note ①).
   try { settleMemberShellWaits(instance.memberId); } catch { /* ignore */ }
-  if (typeof (instance.handle as any).abortForInterrupt === "function") {
-    (instance.handle as any).abortForInterrupt();
-  } else {
-    instance.handle.abort();
-  }
+  instance.handle.abort({ preserveCompaction: true });
   updateDispatchState(instance, "aborting", trigger);
   instance.queuedInputs.unshift(`${banner}\n\n${prompt}`);
   logger.info("agent", "messageInterrupt", { member: instance.agentName, memberId: instance.memberId, roomId: scopeId, trigger, queueDepth: instance.queuedInputs.length });
@@ -2570,10 +2574,14 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
       `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`,
     ].filter(Boolean).join("\n\n");
 
+    if (instance.compacting) {
+      queueInput(instance, prompt, "message-during-compaction");
+      return;
+    }
     if (instance.status === "working") {
       // Interrupt-on-message (design v1.1): topic mentions interrupt a working run.
       interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. It may have left partial work — if a tool call was cut short, its result says what was still running (shell commands keep running; collect them with shell_wait).",
+        "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
         "topic-message-interrupt");
       return;
     }
@@ -2606,9 +2614,14 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
     logger.info("agent", "urgentInterruptNotInTopic", { member: memberName, memberId, topicId, urgentBy: urgentByName });
     return { ok: false, action: "not_in_topic" };
   }
+  if (instance.compacting) {
+    await activateTopicMember(parentRoomId, topicId, memberRef);
+    return { ok: true, action: "queued" };
+  }
   if (instance.status === "working") {
     try { settleWaitOnAbort(`topic:${topicId}`, memberId); } catch { /* ignore */ }
-    try { instance.handle.abort(); } catch { /* ignore */ }
+    try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+    try { instance.handle.abort({ preserveCompaction: true }); } catch { /* ignore */ }
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
     logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId: `topic:${topicId}`, urgentBy: urgentByName });

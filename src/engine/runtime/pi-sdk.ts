@@ -13,7 +13,6 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
-import { getShellPendingExec } from "../shell-manager.js";
 import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
@@ -335,10 +334,6 @@ const WATCHDOG_CONTINUE_PROMPT =
 const WATCHDOG_EMPTY_RETRY_PROMPT =
   "⚠ Your previous response came back empty (no content). Repeat your previous response.";
 
-function safeParseJson(text: string): unknown {
-  try { return JSON.parse(text); } catch { return null; }
-}
-
 function assistantTextOf(content: unknown): string {
   if (!Array.isArray(content)) return "";
   return content
@@ -358,9 +353,6 @@ class PiSdkAgentHandle implements AgentHandle {
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
-  /** Message interrupt (design-interrupt-on-message-v1): abort was requested
-   * for an incoming message — synthesize dangling tool results at agent_end. */
-  private interruptRequested = false;
   private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionBridge: { rawStartSeen: boolean; rawEndSeen: boolean; syntheticStartEmitted: boolean; syntheticEndEmitted: boolean } | null = null;
   private destroyed = false;
@@ -432,19 +424,6 @@ class PiSdkAgentHandle implements AgentHandle {
       run.compactionEventSeen = true;
       return;
     }
-    // The run ended right after a watchdog abort OR a message interrupt
-    // (design-interrupt-on-message-v1): repair dangling tool calls NOW
-    // (synchronously), before the SDK's own post-run compaction check
-    // summarizes the branch — a tool_use without tool_result breaks that request.
-    if (raw?.type === "agent_end" && this.interruptRequested) {
-      this.interruptRequested = false;
-      this.synthesizeDanglingToolResults("message-interrupt");
-      return;
-    }
-    if (raw?.type === "agent_end" && run.interventionRequested) {
-      this.synthesizeDanglingToolResults("watchdog-abort");
-      return;
-    }
     if (raw?.type !== "message_end" || raw.message?.role !== "assistant") return;
     if (raw.message.stopReason === "error" || raw.message.stopReason === "aborted") return;
     const usage = raw.message.usage;
@@ -482,61 +461,6 @@ class PiSdkAgentHandle implements AgentHandle {
       void this.session.abort().catch((err) => {
         logger.error("runtime:pi-sdk", "compaction watchdog: abort failed", { error: String(err) });
       });
-    }
-  }
-
-  /**
-   * Append failure tool results for tool calls the aborted run never executed
-   * (the agent loop's abort path only finalizes in-flight calls). Mirrors the
-   * SDK's failToolCallsFromTruncatedMessage precedent. Writes both the session
-   * branch (summarization input) and live agent state (next request input).
-   */
-  private synthesizeDanglingToolResults(trigger: string): number {
-    try {
-      const messages = (this.session as any).state?.messages as any[] | undefined;
-      const sessionManager = (this.session as any).sessionManager;
-      if (!Array.isArray(messages) || typeof sessionManager?.appendMessage !== "function") return 0;
-      let assistantIdx = -1;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const role = messages[i]?.role;
-        if (role === "assistant") { assistantIdx = i; break; }
-        if (role === "user") break; // turn boundary — nothing dangling from this turn
-      }
-      if (assistantIdx < 0) return 0;
-      const assistant = messages[assistantIdx];
-      const toolCalls = Array.isArray(assistant.content) ? assistant.content.filter((c: any) => c?.type === "toolCall") : [];
-      if (toolCalls.length === 0) return 0;
-      const answered = new Set<string>();
-      for (let i = assistantIdx + 1; i < messages.length; i++) {
-        const m = messages[i];
-        if (m?.role === "toolResult" && m.toolCallId) answered.add(m.toolCallId);
-      }
-      let synthesized = 0;
-      for (const tc of toolCalls) {
-        if (!tc?.id || answered.has(tc.id)) continue;
-        let text = `Tool call "${tc.name}" was not executed: the turn was interrupted for automatic context compaction. Re-issue the tool call.`;
-        if (trigger === "message-interrupt") {
-          text = this.interruptedToolCallText(tc);
-        }
-        const resultMessage = {
-          role: "toolResult",
-          toolCallId: tc.id,
-          toolName: tc.name,
-          content: [{ type: "text", text }],
-          isError: true,
-          timestamp: Date.now(),
-        };
-        sessionManager.appendMessage(resultMessage);
-        messages.push(resultMessage);
-        synthesized++;
-      }
-      if (synthesized > 0) {
-        logger.warn("runtime:pi-sdk", "compaction watchdog: synthesized failure results for dangling tool calls", { count: synthesized, trigger });
-      }
-      return synthesized;
-    } catch (err) {
-      logger.error("runtime:pi-sdk", "compaction watchdog: dangling tool result synthesis failed", { error: String(err) });
-      return 0;
     }
   }
 
@@ -594,22 +518,6 @@ class PiSdkAgentHandle implements AgentHandle {
     return null;
   }
 
-  /** Design-interrupt-on-message-v1: the per-tool interrupted-result text.
-   * shell_exec gets the exec id so the member can collect it with
-   * shell_read; everything else gets the generic re-issue line. */
-  private interruptedToolCallText(tc: { name?: string; arguments?: unknown }): string {
-    if (tc?.name === "shell_exec") {
-      const args = (typeof tc.arguments === "string" ? safeParseJson(tc.arguments) : tc.arguments) as { shell?: string } | null;
-      const shellRef = args?.shell || "your shell";
-      const pending = args?.shell ? getShellPendingExec(this.toolAssembly.memberId || "", String(args.shell)) : null;
-      if (pending) {
-        return `Interrupted by a new message. Your command is still running as exec ${pending.exec} on shell ${shellRef} — wait for it with shell_wait, then read the output with shell_read.`;
-      }
-      return `Interrupted by a new message. Your shell command may still be running on shell ${shellRef} — wait with shell_wait (or shell_list to find the exec).`;
-    }
-    return `Interrupted by a new message. This tool call did not complete — re-issue it if still needed.`;
-  }
-
   private async compactForWatchdog(run: CompactionWatchdogRun, reason: string): Promise<void> {
     if (run.compactionEventSeen) {
       // The SDK's own post-run check already compacted after our abort.
@@ -636,17 +544,6 @@ class PiSdkAgentHandle implements AgentHandle {
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
-  }
-
-  /** Design-interrupt-on-message-v1: abort the current run because a new
-   * message arrived; dangling tool results are synthesized at agent_end with
-   * per-tool text (shell_exec carries the exec id). */
-  abortForInterrupt(): void {
-    this.interruptRequested = true;
-    void this.session.abort().catch((err) => {
-      this.interruptRequested = false;
-      logger.error("runtime:pi-sdk", "message-interrupt abort failed", { error: String(err) });
-    });
   }
 
   async prompt(message: string): Promise<void> {
@@ -686,8 +583,10 @@ class PiSdkAgentHandle implements AgentHandle {
     });
   }
 
-  abort(): void {
+  abort(options?: { preserveCompaction?: boolean }): void {
+    // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
+    if (options?.preserveCompaction) return;
     try { this.session.abortCompaction(); } catch {}
     try { this.session.abortBranchSummary(); } catch {}
   }

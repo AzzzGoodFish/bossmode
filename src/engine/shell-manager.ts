@@ -523,18 +523,6 @@ function sliceLines(shell: LiveShell, from: number, to: number): Array<{ n: numb
   return out;
 }
 
-/** Interrupt synthesis support (design-interrupt-on-message-v1): the shell's
- * still-running exec, if any — used to tell the member which exec id to
- * collect with shell_read after being interrupted. */
-export function getShellPendingExec(memberId: string, shellId: string): { exec: string } | null {
-  const shell = shells.get(shellKey(memberId, shellId));
-  if (!shell) return null;
-  if (shell.currentExec) return { exec: shell.currentExec.id };
-  const queued = shell.writeQueue.find((w) => w.exec)?.exec;
-  if (queued) return { exec: queued.id };
-  return null;
-}
-
 /** Design-interrupt-on-message-v1.1: shell_wait — block until an exec is done
  * (or the wait budget runs out). Default 30s; blockUntilMs 0 waits forever.
  * Done returns exit code + line range + output; a timeout returns running with

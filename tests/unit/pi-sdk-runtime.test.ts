@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 
 vi.mock("../../src/workspace/extension-store.js", () => ({
   resolveMemberExtensionPaths: () => [],
@@ -783,6 +784,12 @@ function assistantMsg(totalTokens: number, content: any[], stopReason = "toolUse
   return { role: "assistant", stopReason, usage: { input: totalTokens, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens }, content, timestamp: Date.now() };
 }
 
+function responsesInput(messages: any[]) {
+  return convertResponsesMessages({
+    id: "test", provider: "openai-codex", api: "openai-codex-responses", input: ["text"],
+  } as any, { messages }, new Set(["openai-codex"]));
+}
+
 describe("PiSdkAgentHandle compaction watchdog action", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-watchdog-"));
@@ -795,7 +802,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("mid-run crossing with pending tool calls: aborts, repairs dangling calls, compacts once, continues", async () => {
+  it("mid-run crossing: aborts and compacts without rewriting SDK history", async () => {
     const mock = makeWatchdogSession({
       contextWindow: 50000,
       reserveTokens: 1000, // threshold 49000, action line max(16232, 25000) = 25000
@@ -821,65 +828,57 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     expect(mock.session.compact).toHaveBeenCalledTimes(1); // exactly one compaction
     expect(mock.calls).toHaveLength(2);
     expect(mock.calls[1]).toContain("automatically compacted"); // continue instruction
-    // Dangling tc2 repaired into both the session branch and live state; tc1 untouched.
-    expect(mock.appended).toHaveLength(1);
-    expect(mock.appended[0]).toMatchObject({ role: "toolResult", toolCallId: "tc2", isError: true });
-    expect(mock.messages.filter((m) => m.role === "toolResult" && m.toolCallId === "tc2")).toHaveLength(1);
+    expect(mock.appended).toEqual([]);
+    expect(mock.messages).toHaveLength(2);
+    // The real provider converter supplies missing results, without modifying history.
+    const input = responsesInput(mock.messages);
+    expect(input.filter((m: any) => m.type === "function_call_output").map((m: any) => m.call_id)).toEqual(["tc1", "tc2"]);
+    expect(mock.messages).toHaveLength(2);
     expect(loggerWarn).toHaveBeenCalledWith("runtime:pi-sdk", "compaction watchdog: mid-run crossing, aborting for compaction", expect.any(Object));
   });
 
-  it("message interrupt: dangling shell_exec gets a result naming the live exec id (design v1.1)", async () => {
-    // Real shell + a genuinely running command, so the synthesized result can
-    // name the exec the member should shell_wait for.
-    const shells = await import("../../src/engine/shell-manager.js");
-    const created = await shells.createShell({ memberId: "pm" });
-    expect(created.ok).toBe(true);
-    const shellId = created.ok ? created.shell : "s0";
-    const started = await shells.execInShell({ memberId: "pm", shell: shellId, command: "sleep 2", blockUntilMs: 0 });
-    expect(started.ok && started.status).toBe("running");
-    const execId = started.ok ? started.exec : "e0";
-
-    // Hold the run open: session.prompt resolves only after the interrupt
-    // landed and agent_end was observed (run still alive in the watchdog).
-    let releasePrompt: (() => void) | undefined;
-    const held = new Promise<void>((resolve) => { releasePrompt = resolve; });
+  it.each(["aborted", "error", "toolUse"])("message abort preserves %s history and sends paired Codex input", async (stopReason) => {
+    let ready!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((r) => { ready = r; });
+    const held = new Promise<void>((r) => { release = r; });
     const mock = makeWatchdogSession({
       contextWindow: 50000,
       reserveTokens: 1000,
       onPrompt: async (m) => {
-        const assistant = assistantMsg(1000, [
-          { type: "toolCall", id: "tc1", name: "shell_exec", arguments: JSON.stringify({ shell: shellId, command: "sleep 2" }) },
-          { type: "toolCall", id: "tc2", name: "read", arguments: { path: "x" } },
-        ]);
-        m.messages.push(assistant);
-        m.emit({ type: "message_end", message: assistant });
-        // Turn stays open until the interrupt lands.
+        m.messages.push(assistantMsg(1000, [
+          { type: "toolCall", id: "call_interrupted|fc_interrupted", name: "chat", arguments: { message: "partial" } },
+        ], stopReason));
+        ready();
         await held;
+        m.emit({ type: "agent_end", messages: m.messages });
       },
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    const promptPromise = handle.prompt("do work");
-    await new Promise((r) => setTimeout(r, 50));
-
-    (handle as any).abortForInterrupt();
-    // agent_end must be observed while the watchdog run is still open —
-    // emit it BEFORE releasing the held prompt.
-    mock.emit({ type: "agent_end", messages: [] });
-    releasePrompt?.();
-    await promptPromise;
+    const running = handle.prompt("work");
+    await started;
+    const before = JSON.stringify(mock.messages);
+    handle.abort({ preserveCompaction: true });
+    release();
+    await running;
 
     expect(mock.session.abort).toHaveBeenCalledTimes(1);
-    expect(mock.appended).toHaveLength(2);
-    const shellResult = mock.appended.find((m: any) => m.toolCallId === "tc1");
-    expect(shellResult?.content?.[0]?.text).toContain(`still running as exec ${execId} on shell ${shellId}`);
-    expect(shellResult?.content?.[0]?.text).toContain("shell_wait");
-    const genericResult = mock.appended.find((m: any) => m.toolCallId === "tc2");
-    expect(genericResult?.content?.[0]?.text).toContain("Interrupted by a new message");
-
-    await shells.closeShell("pm", shellId);
-  }, 15000);
+    expect(mock.session.abortCompaction).not.toHaveBeenCalled();
+    expect(mock.session.abortBranchSummary).not.toHaveBeenCalled();
+    expect(mock.appended).toEqual([]);
+    expect(JSON.stringify(mock.messages)).toBe(before);
+    const input = responsesInput([...mock.messages, { role: "user", content: "continue", timestamp: Date.now() }]);
+    const calls = input.filter((m: any) => m.type === "function_call");
+    const results = input.filter((m: any) => m.type === "function_call_output");
+    expect(calls.map((m: any) => m.call_id)).toEqual(results.map((m: any) => m.call_id));
+    expect(calls).toHaveLength(stopReason === "toolUse" ? 1 : 0);
+    // Explicit Stop, unlike message delivery, still cancels compaction.
+    handle.abort();
+    expect(mock.session.abortCompaction).toHaveBeenCalledTimes(1);
+    expect(mock.session.abortBranchSummary).toHaveBeenCalledTimes(1);
+  });
 
   it("crossing at a natural run end (no tool calls): watchdog does not act (SDK boundary check owns it)", async () => {
     const mock = makeWatchdogSession({
