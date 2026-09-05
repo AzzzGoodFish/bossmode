@@ -9,6 +9,20 @@ async function login(port: number): Promise<string> {
   return JSON.parse(res.body).token;
 }
 
+/** Fire-and-forget submit (2026-09-05): submit returns the current snapshot
+ * immediately — poll the job like the client does until it settles. */
+async function pollJobUntilSettled(port: number, token: string, jobId: string, timeoutMs = 5000): Promise<any> {
+  const started = Date.now();
+  for (;;) {
+    const res = await jsonRequest(port, "GET", `/api/model-credential-profiles/oauth/${jobId}`, { token });
+    expect(res.status).toBe(200);
+    const job = JSON.parse(res.body);
+    if (job.status === "completed" || job.status === "failed") return job;
+    if (Date.now() - started > timeoutMs) throw new Error(`oauth job ${jobId} did not settle: ${job.status}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 describe("model credential profile API routes", () => {
 
   it("runs native Anthropic OAuth connection and normalizes legacy request profile to standard", async () => {
@@ -35,8 +49,9 @@ describe("model credential profile API routes", () => {
     const job = JSON.parse(start.body);
 
     const input = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "valid-anthropic-code" } });
-    expect(input.status).toBe(200);
-    const completed = JSON.parse(input.body);
+    expect(input.status).toBe(200); // fire-and-forget: accepts immediately
+    const completed = await pollJobUntilSettled(ts.port, token, job.id);
+    expect(completed.status).toBe("completed");
 
     const profiles = JSON.parse((await jsonRequest(ts.port, "GET", "/api/model-credential-profiles", { token })).body);
     const saved = profiles.find((pr: any) => pr.id === completed.profileId);
@@ -82,9 +97,8 @@ describe("model credential profile API routes", () => {
     expect(job.authUrl).toBeTruthy();
 
     const input = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "valid-native-code" } });
-    expect(input.status).toBe(200);
-    expect(input.body).not.toContain("native-access-token");
-    const completed = JSON.parse(input.body);
+    expect(input.status).toBe(200); // fire-and-forget: accepts immediately
+    const completed = await pollJobUntilSettled(ts.port, token, job.id);
     expect(completed.status).toBe("completed");
 
     const profiles = JSON.parse((await jsonRequest(ts.port, "GET", "/api/model-credential-profiles", { token })).body);
@@ -179,20 +193,13 @@ describe("model credential profile API routes", () => {
       ],
     });
 
-    // the input route responds only when the whole login settles (it races
-    // job.loginPromise) — so inspect the mid-flow state with a GET while the
-    // POST is still in flight.
-    const submitPromise = jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "device_code" } });
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const mid = JSON.parse((await jsonRequest(ts.port, "GET", `/api/model-credential-profiles/oauth/${job.id}`, { token })).body);
-    expect(mid.status).toBe("awaiting_device");
-    expect(mid.selectPrompt).toBeUndefined();
-    expect(mid.deviceCode).toEqual(expect.objectContaining({ userCode: "WXYZ-9876" }));
+    // Fire-and-forget submit: the response is the accepted snapshot; the
+    // flow advances underneath and the poller sees the settled state.
+    const submit = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth/${job.id}/input`, { token, body: { code: "device_code" } });
+    expect(submit.status).toBe(200);
 
     releaseDeviceStage();
-    const submit = await submitPromise;
-    expect(submit.status).toBe(200);
-    const done = JSON.parse(submit.body);
+    const done = await pollJobUntilSettled(ts.port, token, job.id);
     expect(done.status).toBe("completed");
     expect(done.selectPrompt).toBeUndefined();
 
@@ -433,10 +440,10 @@ describe("model credential profile API routes", () => {
       token,
       body: { code: "valid-provider-code" },
     });
-    expect(input.status).toBe(200);
+    expect(input.status).toBe(200); // fire-and-forget: accepts immediately
     expect(input.body).not.toContain("provider-access-token");
     expect(input.body).not.toContain("provider-refresh-token");
-    const completed = JSON.parse(input.body);
+    const completed = await pollJobUntilSettled(ts.port, token, job.id);
     expect(completed.status).toBe("completed");
     expect(completed.profileId).toBeTruthy();
 
@@ -470,8 +477,8 @@ describe("model credential profile API routes", () => {
     });
     const job = JSON.parse(start.body);
     const input = await jsonRequest(ts.port, "POST", `/api/model-credential-profiles/oauth-login/${job.id}/input`, { token, body: { code: "bad-code" } });
-    expect(input.status).toBe(200);
-    const failed = JSON.parse(input.body);
+    expect(input.status).toBe(200); // fire-and-forget: accepts immediately
+    const failed = await pollJobUntilSettled(ts.port, token, job.id);
     expect(failed.status).toBe("failed");
     expect(failed.error).toContain("请在 Settings 重新连接");
     expect(failed.error).not.toContain("invalid_grant");

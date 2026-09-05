@@ -1083,8 +1083,15 @@ export async function submitOAuthLoginJobInput(id: string, input: { code?: strin
   const waiter = job.inputWaiter;
   if (!waiter) throw new Error("OAuth login job is not waiting for input");
   job.inputWaiter = undefined;
+  // Fire-and-forget (architect ruling 2026-09-05, matching the client):
+  // accept the input, return the current snapshot immediately — state
+  // progression is owned by the poller. No waiting on loginPromise (the old
+  // 30s race held a connection hostage for nothing).
   waiter.resolve(input.code);
-  await Promise.race([job.loginPromise, new Promise<void>((resolve) => setTimeout(resolve, 30_000))]);
+  if (job.status === "awaiting_input" || job.status === "awaiting_device") {
+    job.prompt = "Input submitted — waiting for the provider…";
+    job.updatedAt = now();
+  }
   return sanitizeOAuthJob(job);
 }
 
