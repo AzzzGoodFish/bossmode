@@ -106,7 +106,6 @@ type OAuthLoginJob = OAuthLoginJobPublic & {
   abortController: AbortController;
   ready: Promise<void>;
   resolveReady: () => void;
-  loginPromise: Promise<void>;
 };
 
 const oauthJobs = new Map<string, OAuthLoginJob>();
@@ -712,7 +711,7 @@ export function setOAuthLoginAdapterForTests(adapter: OAuthLoginAdapter | null):
 }
 
 function startOAuthLogin(job: OAuthLoginJob): void {
-  job.loginPromise = getOAuthLoginAdapter().login(job.providerId, {
+  void getOAuthLoginAdapter().login(job.providerId, {
     signal: job.abortController.signal,
     onAuth: (info) => {
       job.authUrl = info.url;
@@ -814,7 +813,6 @@ function createOAuthLoginJob(providerId: string, profileInput: ModelCredentialPr
     abortController: new AbortController(),
     ready: ready.promise,
     resolveReady: ready.resolve,
-    loginPromise: Promise.resolve(),
   };
   oauthJobs.set(job.id, job);
   startOAuthLogin(job);
@@ -931,8 +929,12 @@ export async function submitOAuthLoginJobInput(id: string, input: { code?: strin
   const waiter = job.inputWaiter;
   if (!waiter) throw new Error("OAuth login job is not waiting for input");
   job.inputWaiter = undefined;
+  // Acknowledge input without waiting for token exchange; GET owns progress.
+  job.status = "starting";
+  job.selectPrompt = undefined;
+  job.prompt = "Input submitted. Waiting for the provider...";
+  job.updatedAt = now();
   waiter.resolve(input.code);
-  await Promise.race([job.loginPromise, new Promise<void>((resolve) => setTimeout(resolve, 30_000))]);
   return sanitizeOAuthJob(job);
 }
 

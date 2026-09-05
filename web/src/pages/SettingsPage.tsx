@@ -653,6 +653,37 @@ function nextProviderProfileName(profiles: PublicModelCredentialProfile[], provi
   return `${displayName} ${existing.length + 1}`;
 }
 
+/** Both connection dialogs follow the same server-owned OAuth job. */
+function useOAuthJobPolling(job: OAuthLoginJob | null, setJob: (job: OAuthLoginJob) => void, onSaved: () => void) {
+  const { toast } = useDialog();
+  useEffect(() => {
+    if (!job || ["completed", "failed", "cancelled"].includes(job.status)) return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await getOAuthConnectionJob(job.id);
+        if (!active) return;
+        setJob(next);
+        if (["completed", "failed", "cancelled"].includes(next.status)) {
+          active = false;
+          window.clearInterval(timer);
+          if (next.status === "completed") {
+            toast("Provider connected", "success");
+            onSaved();
+          }
+        }
+      } catch (err) {
+        if (!active) return;
+        active = false;
+        window.clearInterval(timer);
+        console.error("Failed to continue provider sign-in", err);
+        toast(userActionError("continue provider sign-in", "Start sign-in again."), "error");
+      }
+    }, 1800);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [job?.id, job?.status]);
+}
+
 /** OAuth paste row (fish 2026-09-05: "Submit stayed grey after pasting").
  * Three defenses: autofocus on mount (a paste shortcut lands here, not in the
  * composer behind the sheet); the click reads the live DOM value so a state
@@ -719,25 +750,7 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     setOauthJob(null);
   }, [selected?.providerSlug]);
 
-  useEffect(() => {
-    if (!oauthJob || ["completed", "failed", "cancelled"].includes(oauthJob.status)) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const next = await getOAuthConnectionJob(oauthJob.id);
-        setOauthJob(next);
-        if (next.status === "completed") {
-          toast("Provider connected", "success");
-          window.clearInterval(timer);
-          onSaved();
-        }
-      } catch (err) {
-        window.clearInterval(timer);
-        console.error("Failed to continue provider sign-in", err);
-        toast(userActionError("continue provider sign-in", "Start sign-in again."), "error");
-      }
-    }, 1800);
-    return () => window.clearInterval(timer);
-  }, [oauthJob?.id, oauthJob?.status]);
+  useOAuthJobPolling(oauthJob, setOauthJob, onSaved);
 
   const connectApiKey = async () => {
     if (!selected) return;
@@ -768,16 +781,10 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
     finally { setBusy(false); }
   };
 
-  // fish 2026-09-05: "Submit stayed grey after pasting" — the root cause was
-  // the server holding the submit response until the whole login settles (up
-  // to 30s) while the client kept busy=true the whole time: the button read
-  // grey/frozen after every option pick or paste submit. Now submits are
-  // fire-and-forget: the 1.8s poll owns all state updates and the completion
-  // toast; the POST only updates the job snapshot when it lands.
+  // Submit only acknowledges input; the shared poller owns job display and completion.
   const submitOAuthValue = (value: string) => {
     if (!oauthJob) return;
     void submitOAuthConnectionInput(oauthJob.id, value)
-      .then((next) => setOauthJob(next))
       .catch((err) => { console.error("Failed to submit provider sign-in code", err); toast(userActionError("submit the sign-in code", "Check the code, then try again."), "error"); });
   };
 
@@ -788,7 +795,6 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
   const submitOAuthOption = (optionId: string) => {
     if (!oauthJob) return;
     void submitOAuthConnectionInput(oauthJob.id, optionId)
-      .then((next) => setOauthJob(next))
       .catch((err) => { console.error("Failed to submit provider sign-in option", err); toast(userActionError("submit the sign-in choice", "Try again."), "error"); });
   };
 
@@ -976,6 +982,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const [oauthCode, setOauthCode] = useState("");
   const [oauthInputError, setOauthInputError] = useState("");
   const [oauthBusy, setOauthBusy] = useState(false);
+  useOAuthJobPolling(oauthJob, setOauthJob, onSaved);
   const inputCls = "w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 focus:outline-none focus:border-line-strong";
   const builtinProvider = form.profileKind === "builtin_provider";
   const updateModelCustomizations = (next: ModelCredentialProfileInput["modelCustomizations"]) => setForm({ ...form, modelCustomizations: next });
@@ -1046,12 +1053,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     setOauthBusy(true);
     setOauthInputError("");
     try {
-      const job = await submitOAuthLoginJobInput(oauthJob.id, oauthCode);
-      setOauthJob(job);
-      if (job.status === "completed") {
-        toast("OAuth connected.", "success");
-        onSaved();
-      } else if (job.error) toast("Sign-in failed. Check the response and try again.", "error");
+      await submitOAuthLoginJobInput(oauthJob.id, oauthCode);
     } catch (err) {
       console.error("Failed to submit OAuth input", err);
       // Authored validation messages (pre-parse / state mismatch) show inline
@@ -1092,7 +1094,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
             {form.authType === "api_key" && <Field label="API key"><input type="password" className={inputCls} value={form.apiKey || ""} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={profile?.hasSecret ? "Leave blank to keep existing key" : "sk-..."} /></Field>}
             {form.authType === "oauth" && <div className="rounded border border-line-soft p-3 space-y-2">
               <Field label="OAuth provider"><select className={inputCls} value={form.oauthProviderId || ""} onChange={(e) => setForm({ ...form, oauthProviderId: e.target.value })}><option value="">Select provider...</option>{["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"].map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
-              <div className="flex items-center gap-2 text-xs"><span className={profile?.hasSecret ? "text-onair" : "text-ink-3"}>{profile?.hasSecret ? "OAuth connected" : "OAuth not connected"}</span><button type="button" disabled={oauthBusy || !form.oauthProviderId} onClick={startOAuth} className="text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">Start login</button>{oauthJob && oauthJob.status === "awaiting_input" && <button type="button" disabled={oauthBusy} onClick={cancelOAuth} className="text-ink-3 hover:text-ink-4">Cancel</button>}</div>
+              <div className="flex items-center gap-2 text-xs"><span className={profile?.hasSecret ? "text-onair" : "text-ink-3"}>{profile?.hasSecret ? "OAuth connected" : "OAuth not connected"}</span><button type="button" disabled={oauthBusy || !form.oauthProviderId} onClick={startOAuth} className="text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">Start login</button>{oauthJob && !["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" disabled={oauthBusy} onClick={cancelOAuth} className="text-ink-3 hover:text-ink-4">Cancel</button>}</div>
               {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthStatusLabel(oauthJob.status)}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}{oauthJob.status === "awaiting_input" && oauthInputError && <div className="text-blocked break-all">{oauthInputError}</div>}</div>}
               <p className="text-xs text-ink-3">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
