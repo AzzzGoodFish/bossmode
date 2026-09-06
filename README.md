@@ -9,7 +9,7 @@
 A human–agent collaboration platform built around proven organizational patterns.
 
 [![npm](https://img.shields.io/npm/v/bossmode?style=flat-square&color=173e3d)](https://www.npmjs.com/package/bossmode)
-[![Node](https://img.shields.io/badge/Node.js-%E2%89%A520.6-26343a?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A522-26343a?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-4f7773?style=flat-square)](LICENSE)
 
 <br />
@@ -201,7 +201,7 @@ A member can compact its context, reload its resources, restart its runtime, or 
 npm install -g bossmode@latest
 ```
 
-Requires **Node.js 20.6.0 or newer**.
+Requires **Node.js 22.0.0 or newer**.
 
 ### 2. Start Bossmode
 
