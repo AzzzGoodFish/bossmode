@@ -62,8 +62,9 @@ function secondsFromMs(ms: number | undefined, fallbackSeconds: number): number 
   return Math.round((ms ?? fallbackSeconds * 1000) / 1000);
 }
 
-export function oauthStatusLabel(status: OAuthLoginJob["status"]): string {
-  switch (status) {
+export function oauthStatusLabel(job: OAuthLoginJob): string {
+  if (job.status === "awaiting_input" && job.selectPrompt) return "Waiting for your choice";
+  switch (job.status) {
     case "starting": return "Waiting for sign-in";
     case "awaiting_device": return "Waiting for sign-in";
     case "awaiting_input": return "Waiting for code";
@@ -684,6 +685,41 @@ function useOAuthJobPolling(job: OAuthLoginJob | null, setJob: (job: OAuthLoginJ
   }, [job?.id, job?.status]);
 }
 
+function OAuthAuthorizationDetails({ job }: { job: OAuthLoginJob }) {
+  return (
+    <>
+      {job.authUrl && <a className="text-accent-ink hover:underline break-all" href={job.authUrl} target="_blank" rel="noreferrer">Open login page</a>}
+      {job.deviceCode && <div className="space-y-1"><div>Code: <code>{job.deviceCode.userCode}</code></div><a className="text-accent-ink hover:underline break-all" href={job.deviceCode.verificationUri} target="_blank" rel="noreferrer">{job.deviceCode.verificationUri}</a></div>}
+      {job.userCode && !job.deviceCode && <div>Code: <code>{job.userCode}</code></div>}
+    </>
+  );
+}
+
+function OAuthChoicePrompt({ prompt, busy, onSubmit }: {
+  prompt: NonNullable<OAuthLoginJob["selectPrompt"]>;
+  busy: boolean;
+  onSubmit: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="text-ink-2">{prompt.message}</div>
+      <div className="flex flex-col gap-1.5">
+        {prompt.options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={busy}
+            onClick={() => onSubmit(option.id)}
+            className="w-full text-left rounded border border-line bg-surface-1 px-3 py-2 text-xs text-ink-1 hover:border-accent hover:bg-accent-dim disabled:opacity-40 cursor-pointer"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** OAuth paste row (fish 2026-09-05: "Submit stayed grey after pasting").
  * Three defenses: autofocus on mount (a paste shortcut lands here, not in the
  * composer behind the sheet); the click reads the live DOM value so a state
@@ -873,28 +909,11 @@ function ConnectProviderSheet({ profiles, onClose, onSaved }: { profiles: Public
                     <div className="space-y-3">
                       {!oauthJob && <button type="button" onClick={startOAuth} disabled={busy} className="px-4 py-2 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed">{busy ? "Starting..." : "Start login"}</button>}
                       {oauthJob && <div className="rounded border border-line-soft bg-inset p-3 space-y-2 text-xs text-ink-3">
-                        <div>Status: <span className="font-medium">{oauthJob.status === "awaiting_input" && oauthJob.selectPrompt ? "Waiting for your choice" : oauthStatusLabel(oauthJob.status)}</span></div>
+                        <div>Status: <span className="font-medium">{oauthStatusLabel(oauthJob)}</span></div>
                         {oauthJob.prompt && !(oauthJob.status === "awaiting_input" && oauthJob.selectPrompt) && <div>{oauthJob.prompt}</div>}
-                        {oauthJob.authUrl && <a className="text-accent-ink hover:underline break-all" href={oauthJob.authUrl} target="_blank" rel="noreferrer">Open login page</a>}
-                        {oauthJob.deviceCode && <div className="space-y-1"><div>Code: <code>{oauthJob.deviceCode.userCode}</code></div><a className="text-accent-ink hover:underline break-all" href={oauthJob.deviceCode.verificationUri} target="_blank" rel="noreferrer">{oauthJob.deviceCode.verificationUri}</a></div>}
-                        {oauthJob.userCode && !oauthJob.deviceCode && <div>Code: <code>{oauthJob.userCode}</code></div>}
+                        <OAuthAuthorizationDetails job={oauthJob} />
                         {oauthJob.status === "awaiting_input" && oauthJob.selectPrompt ? (
-                          <div className="space-y-2">
-                            <div className="text-ink-2">{oauthJob.selectPrompt.message}</div>
-                            <div className="flex flex-col gap-1.5">
-                              {oauthJob.selectPrompt.options.map((o) => (
-                                <button
-                                  key={o.id}
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void submitOAuthOption(o.id)}
-                                  className="w-full text-left rounded border border-line bg-surface-1 px-3 py-2 text-xs text-ink-1 hover:border-accent hover:bg-accent-dim disabled:opacity-40 cursor-pointer"
-                                >
-                                  {o.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                          <OAuthChoicePrompt prompt={oauthJob.selectPrompt} busy={busy} onSubmit={submitOAuthOption} />
                         ) : oauthJob.status === "awaiting_input" && <OAuthPasteRow busy={busy} onSubmit={(v) => void submitOAuthValue(v)} />}
                         {oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}
                         {!["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" onClick={cancelOAuth} disabled={busy} className="text-ink-3 hover:text-ink-1">Cancel login</button>}
@@ -1048,12 +1067,12 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     } catch (err) { console.error("Failed to start OAuth sign-in", err); toast(userActionError("start sign-in"), "error"); }
     finally { setOauthBusy(false); }
   };
-  const submitOAuth = async () => {
+  const submitOAuth = async (value: string) => {
     if (!oauthJob) return;
     setOauthBusy(true);
     setOauthInputError("");
     try {
-      await submitOAuthLoginJobInput(oauthJob.id, oauthCode);
+      await submitOAuthLoginJobInput(oauthJob.id, value);
     } catch (err) {
       console.error("Failed to submit OAuth input", err);
       // Authored validation messages (pre-parse / state mismatch) show inline
@@ -1095,7 +1114,21 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
             {form.authType === "oauth" && <div className="rounded border border-line-soft p-3 space-y-2">
               <Field label="OAuth provider"><select className={inputCls} value={form.oauthProviderId || ""} onChange={(e) => setForm({ ...form, oauthProviderId: e.target.value })}><option value="">Select provider...</option>{["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"].map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
               <div className="flex items-center gap-2 text-xs"><span className={profile?.hasSecret ? "text-onair" : "text-ink-3"}>{profile?.hasSecret ? "OAuth connected" : "OAuth not connected"}</span><button type="button" disabled={oauthBusy || !form.oauthProviderId} onClick={startOAuth} className="text-accent-ink hover:opacity-80 disabled:text-ink-4 disabled:cursor-not-allowed">Start login</button>{oauthJob && !["completed", "failed", "cancelled"].includes(oauthJob.status) && <button type="button" disabled={oauthBusy} onClick={cancelOAuth} className="text-ink-3 hover:text-ink-4">Cancel</button>}</div>
-              {oauthJob && <div className="text-xs text-ink-2 space-y-1"><div>Status: {oauthStatusLabel(oauthJob.status)}</div><div>{oauthJob.prompt}</div>{oauthJob.authUrl && <div>Auth URL: <code className="break-all">{oauthJob.authUrl}</code></div>}{oauthJob.userCode && <div>Code: <code>{oauthJob.userCode}</code></div>}{oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}{oauthJob.status === "awaiting_input" && <div className="flex gap-2"><input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" /><button type="button" disabled={oauthBusy} onClick={submitOAuth} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button></div>}{oauthJob.status === "awaiting_input" && oauthInputError && <div className="text-blocked break-all">{oauthInputError}</div>}</div>}
+              {oauthJob && <div className="text-xs text-ink-2 space-y-1">
+                <div>Status: {oauthStatusLabel(oauthJob)}</div>
+                {oauthJob.prompt && !(oauthJob.status === "awaiting_input" && oauthJob.selectPrompt) && <div>{oauthJob.prompt}</div>}
+                <OAuthAuthorizationDetails job={oauthJob} />
+                {oauthJob.error && <div className="text-blocked break-all">Sign-in failed: {oauthJob.error} — check the response and retry from Start login.</div>}
+                {oauthJob.status === "awaiting_input" && (oauthJob.selectPrompt ? (
+                  <OAuthChoicePrompt prompt={oauthJob.selectPrompt} busy={oauthBusy} onSubmit={submitOAuth} />
+                ) : (
+                  <div className="flex gap-2">
+                    <input className={inputCls} value={oauthCode} onChange={(e) => setOauthCode(e.target.value)} placeholder="Paste OAuth input if requested" />
+                    <button type="button" disabled={oauthBusy} onClick={() => void submitOAuth(oauthCode)} className="px-3 py-2 text-xs bg-accent text-accent-contrast rounded disabled:opacity-40">Submit</button>
+                  </div>
+                ))}
+                {oauthJob.status === "awaiting_input" && oauthInputError && <div className="text-blocked break-all">{oauthInputError}</div>}
+              </div>}
               <p className="text-xs text-ink-3">Tokens are stored locally and are never shown in the API or UI.</p>
             </div>}
             <div className="text-xs rounded border border-think/30 bg-think-dim text-think p-3">Keys are stored unencrypted on this device and hidden after saving. Use a scoped key.</div>
