@@ -856,6 +856,8 @@ export class PiSdkRuntime implements AgentRuntime {
   };
 
   private handles = new Set<PiSdkAgentHandle>();
+  /** Shared shutdown settlement: concurrent shutdownAll calls await the same teardown. */
+  private shutdownSettlement: Promise<void> | null = null;
 
   async detect(): Promise<RuntimeDetectResult> {
     return { available: true, version: PI_SDK_VERSION, path: "@earendil-works/pi-coding-agent" };
@@ -1089,20 +1091,25 @@ export class PiSdkRuntime implements AgentRuntime {
   }
 
   async shutdownAll(): Promise<void> {
-    // Service exit waits for every teardown settlement and surfaces errors —
-    // it must not clear-and-return while sessions are still tearing down.
+    // Concurrent callers share ONE settlement — a call landing mid-shutdown
+    // awaits the same teardown instead of racing on an empty/cleared set.
+    if (this.shutdownSettlement) return this.shutdownSettlement;
     const failures: unknown[] = [];
     const settlements: Promise<void>[] = [];
     for (const handle of this.handles) {
-      const settled = handle.destroyAndWait
-        ? handle.destroyAndWait().catch((err: unknown) => { failures.push(err); })
-        : Promise.resolve().then(() => { try { handle.destroy(); } catch (err) { failures.push(err); } });
-      settlements.push(settled);
+      settlements.push((handle as PiSdkAgentHandle).destroyAndWait().catch((err: unknown) => { failures.push(err); }));
     }
     this.handles.clear();
-    await Promise.all(settlements);
-    if (failures.length > 0) {
-      throw new AggregateError(failures, `shutdownAll: ${failures.length} session teardown(s) incomplete`);
-    }
+    this.shutdownSettlement = (async () => {
+      await Promise.all(settlements);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, `shutdownAll: ${failures.length} session teardown(s) incomplete`);
+      }
+    })().finally(() => {
+      // Sharing only matters while a shutdown is in flight; once settled, a
+      // later call starts fresh (the handle set is already cleared).
+      this.shutdownSettlement = null;
+    });
+    return this.shutdownSettlement;
   }
 }

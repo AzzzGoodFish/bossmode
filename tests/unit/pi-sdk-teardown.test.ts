@@ -133,7 +133,7 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
     }
   });
 
-  it("T6: shutdownAll awaits every teardown settlement and aggregates failures", async () => {
+  it("T6: shutdownAll awaits every teardown settlement and aggregates failures; concurrent calls share one settlement", async () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     const rt = new PiSdkRuntime();
     let release: (() => void) | null = null;
@@ -143,16 +143,21 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
     (rt as any).handles.add(good);
     (rt as any).handles.add(bad);
     let settled = false;
-    const p = rt.shutdownAll().then(() => { settled = true; }, () => { settled = true; });
+    const mark = (p: Promise<void>) => p.then(() => { settled = true; }, () => { settled = true; });
+    const p1 = rt.shutdownAll();
+    const p2 = rt.shutdownAll(); // concurrent — must share the first settlement
+    mark(p1); mark(p2);
     await new Promise((r) => setTimeout(r, 30));
     expect(settled).toBe(false); // waits for the gated teardown — not clear-and-return
     release?.();
-    await p;
-    // aggregate failure surfaces on the shutdownAll promise
-    const r2 = new PiSdkRuntime();
-    (r2 as any).handles.add(handleWith(realRunner(async () => { throw new Error("agg boom"); })));
-    await expect(r2.shutdownAll()).rejects.toThrow(/1 session teardown/);
-    // after a rejected shutdownAll the set is cleared — a repeat call resolves
+    await Promise.allSettled([p1, p2]);
+    expect(settled).toBe(true);
+    // both concurrent callers observe the SAME failure outcome
+    let failed1 = false; let failed2 = false;
+    await p1.catch((e: any) => { failed1 = /teardown|shutdownAll/.test(e.message); });
+    await p2.catch((e: any) => { failed2 = /teardown|shutdownAll/.test(e.message); });
+    expect(failed1 && failed2).toBe(true);
+    // after settlement the set is empty — a later call resolves fresh
     await expect(rt.shutdownAll()).resolves.toBeUndefined();
   });
 });
