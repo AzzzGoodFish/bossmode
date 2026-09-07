@@ -115,6 +115,11 @@ export interface AgentHandle {
   /** Abort the run. Message delivery preserves compaction; explicit Stop cancels it. */
   abort(options?: { preserveCompaction?: boolean }): void;
   destroy(): void;
+  /** Awaitable teardown for background children: waits for the extension
+   *  session_shutdown emission AND runs the SDK's synchronous dispose
+   *  (resource cleanups) to completion — a confirmed end of cleanup, not just
+   *  an issued request. Throws when shutdown or dispose fails. */
+  destroyAndWait?(): Promise<void>;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
   /** Snapshot the live session for a background fork: current session file plus

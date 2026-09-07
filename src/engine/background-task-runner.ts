@@ -212,6 +212,24 @@ function settleTerminal(record: BackgroundTaskRecord, update: Parameters<typeof 
   }
 }
 
+/** Awaitable child teardown. Returns a diagnostic string when the confirmed
+ *  cleanup failed, null when cleanup completed (or no awaitable surface
+ *  existed — reported, never sold as confirmed). */
+async function cleanupChild(handle: AgentHandle): Promise<string | null> {
+  if (typeof handle.destroyAndWait === "function") {
+    try {
+      await handle.destroyAndWait();
+      return null;
+    } catch (err: any) {
+      return `cleanup incomplete: ${err?.message || String(err)}`;
+    }
+  }
+  try { handle.destroy(); } catch (err: any) {
+    return `cleanup incomplete (non-awaitable destroy): ${err?.message || String(err)}`;
+  }
+  return "cleanup not confirmable: runtime exposes no awaitable teardown";
+}
+
 async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentContext): Promise<void> {
   const { memberId, taskId } = record;
   const controller = new AbortController();
@@ -287,10 +305,10 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     }
 
     // Cancel may have landed while the child was being created: do not start
-    // model work; clean up and settle cancelled.
+    // model work; clean up (awaited) and settle cancelled.
     if (controller.signal.aborted || getBackgroundTask(memberId, taskId)?.status === "cancelling") {
-      try { handle.destroy(); } catch {}
-      return settle({ status: "cancelled", error: "cancelled by member request" });
+      const cleanupError = await cleanupChild(handle);
+      return settle({ status: "cancelled", error: cleanupError ? `cancelled by member request; ${cleanupError}` : "cancelled by member request" });
     }
 
     const collected: { text: string | null } = { text: null };
@@ -319,24 +337,29 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
       signal.removeEventListener("abort", onAbort);
     }
 
-    // Cleanup first, then publish. destroy is issued asynchronously — we do
-    // NOT claim cleanup is confirmed complete, only that it was initiated
-    // before the terminal record became visible.
+    // CONFIRMED cleanup before publishing: run has settled (prompt resolved,
+    // including abort), extension session_shutdown is awaited, and the SDK's
+    // synchronous dispose (resource cleanups) has run to completion. Only a
+    // confirmed cleanup failure — or an SDK surface that offers no
+    // confirmation — is reported, never "request issued" sold as "done".
     try { unsubscribe(); } catch {}
-    try { handle.destroy(); } catch (err) {
-      logger.warn("background-tasks", "child destroy reported failure", { taskId, error: String(err) });
+    const cleanupError = await cleanupChild(handle);
+    if (cleanupError) {
+      // Observable at error level; non-done terminals also carry it in their
+      // reason so waiters see the cleanup state.
+      logger.error("background-tasks", "child cleanup confirmed failed", { taskId, error: cleanupError });
     }
 
     const cancelled = signal.aborted || getBackgroundTask(memberId, taskId)?.status === "cancelling";
     if (cancelled) {
-      return settle({ status: "cancelled", error: "cancelled by member request" });
+      return settle({ status: "cancelled", error: cleanupError ? `cancelled by member request; ${cleanupError}` : "cancelled by member request" });
     }
     if (promptError) {
-      return settle({ status: "failed", error: `child run failed: ${String((promptError as Error)?.message || promptError)}` });
+      return settle({ status: "failed", error: `child run failed: ${String((promptError as Error)?.message || promptError)}${cleanupError ? `; ${cleanupError}` : ""}` });
     }
     const text = collected.text;
     if (text === null || text.trim().length === 0) {
-      return settle({ status: "failed", error: "child session ended without a successful final text" });
+      return settle({ status: "failed", error: `child session ended without a successful final text${cleanupError ? `; ${cleanupError}` : ""}` });
     }
     return settle({ status: "done", result: text });
   } finally {

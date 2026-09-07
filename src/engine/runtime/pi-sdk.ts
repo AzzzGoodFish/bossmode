@@ -602,6 +602,26 @@ class PiSdkAgentHandle implements AgentHandle {
     this.listeners.clear();
   }
 
+  async destroyAndWait(): Promise<void> {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    try { this.backgroundCleanup?.(); } catch {}
+    try { this.abort(); } catch {}
+    try {
+      if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
+        await this.session.extensionRunner.emit({ type: "session_shutdown" } as any);
+      }
+    } catch (err: any) {
+      throw new Error(`extension session_shutdown failed: ${err?.message || String(err)}`);
+    }
+    try { this.unsubscribeSession?.(); } catch {}
+    // Synchronous SDK teardown; throws AggregateError when a registered
+    // resource cleanup (e.g. provider session caches) fails — that throw IS
+    // the observable, confirmable failure surface.
+    this.session.dispose();
+    this.listeners.clear();
+  }
+
   async waitForIdle(): Promise<void> {
     if (this.currentRun) await this.currentRun.catch(() => {});
   }

@@ -36,6 +36,7 @@ const fakeHandle = {
   prompt: FAKE_PROMPT,
   abort: vi.fn(),
   destroy: vi.fn(),
+  destroyAndWait: vi.fn(async () => {}),
   subscribe: vi.fn((fn: (event: any) => void) => { handleEmit = fn; return () => { handleEmit = null; }; }),
   sessionId: "child-sdk-session-id",
   runtimeParams: { thinkingLevel: "off", model: "anthropic/model-x", credentialId: "cred-a" },
@@ -180,7 +181,7 @@ describe("background runner + tool dispatch", () => {
     const record = store.getBackgroundTask(memberId, started.taskId);
     expect(record?.status).toBe("done");
     expect(record?.result).toBe("THE ANSWER");
-    expect(fakeHandle.destroy).toHaveBeenCalled();
+    expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
   });
 
   it("fork mode: child resumes a forked file in the task dir, cut before the in-flight call (latest user kept)", async () => {
@@ -301,7 +302,39 @@ describe("background runner + tool dispatch", () => {
     const record = store.getBackgroundTask(memberId, started.taskId);
     expect(record?.status).toBe("cancelled");
     expect(FAKE_PROMPT).not.toHaveBeenCalled(); // no model work started
-    expect(fakeHandle.destroy).toHaveBeenCalled();
+    expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
+  });
+
+  it("terminal is published only after the awaited cleanup completes", async () => {
+    let releaseCleanup: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { releaseCleanup = r; });
+    (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { await gate; });
+    const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
+    if (!started.ok) return;
+    for (let i = 0; i < 200 && !promptDeferred; i++) await new Promise((r) => setTimeout(r, 5));
+    handleEmit?.({ type: "message_end", text: "DONE TEXT", stopReason: "stop" });
+    promptDeferred?.();
+    await new Promise((r) => setTimeout(r, 30));
+    // run settled but cleanup gated: not yet terminal
+    expect(store.getBackgroundTask(memberId, started.taskId)?.status).toBe("running");
+    releaseCleanup?.();
+    for (let i = 0; i < 40 && store.getBackgroundTask(memberId, started.taskId)?.status === "running"; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const record = store.getBackgroundTask(memberId, started.taskId);
+    expect(record?.status).toBe("done");
+    expect(record?.result).toBe("DONE TEXT");
+  });
+
+  it("a confirmed cleanup failure reaches non-done terminal reasons and the error log", async () => {
+    (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { throw new Error("ws pool refused to close"); });
+    const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
+    if (!started.ok) return;
+    await runToCompletion();
+    const record = store.getBackgroundTask(memberId, started.taskId);
+    // done keeps the real result; the cleanup failure is observable via the error log
+    expect(record?.status).toBe("done");
+    expect(record?.result).toBe("THE ANSWER");
   });
 
   it("background_wait: timeout returns the real non-terminal status without the answer; repeat read after done", async () => {
