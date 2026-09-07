@@ -360,6 +360,8 @@ export class PiSdkAgentHandle implements AgentHandle {
   private manualCompactionOutcome: { aborted: boolean } | null = null;
   private destroyed = false;
   private destroyPromise: Promise<void> | null = null;
+  /** Called once only after every SDK teardown surface succeeded. */
+  private onTeardownSuccess: (() => void) | undefined;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
   private toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string };
@@ -374,9 +376,11 @@ export class PiSdkAgentHandle implements AgentHandle {
     runtimeParams: AgentRuntimeParams,
     bossmodeToolNames: Iterable<string>,
     toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
+    onTeardownSuccess?: () => void,
   ) {
     this.runtimeParams = runtimeParams;
     this.sessionId = session.sessionId;
+    this.onTeardownSuccess = onTeardownSuccess;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
@@ -657,6 +661,10 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (errors.length > 0) {
       throw new Error(`teardown incomplete (${errors.length}): ${errors.join("; ")}`);
     }
+    // A completed background task must not retain its full PiSdkAgentHandle
+    // (and session) until service shutdown. Failed teardown stays registered so
+    // shutdownAll can surface it rather than pretending cleanup succeeded.
+    this.onTeardownSuccess?.();
   }
 
   async waitForIdle(): Promise<void> {
@@ -1035,7 +1043,8 @@ export class PiSdkRuntime implements AgentRuntime {
         credentialId: piConfig.profile?.id,
         credentialName: piConfig.profile?.name,
       };
-      const handle = new PiSdkAgentHandle(
+      let handle: PiSdkAgentHandle;
+      handle = new PiSdkAgentHandle(
         session,
         modelRegistry,
         authStorageCredentials,
@@ -1045,6 +1054,7 @@ export class PiSdkRuntime implements AgentRuntime {
         runtimeParams,
         customTools.map((t) => t.name),
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
+        () => this.handles.delete(handle),
       );
       this.handles.add(handle);
       logger.info("runtime:pi-sdk", "createAgent", {

@@ -178,6 +178,22 @@ describe("PiSdkRuntime background session variant", () => {
     expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ execution: "background" }));
   });
 
+  it("removes each successfully cleaned background handle before the next task", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const runtime = new PiSdkRuntime();
+
+    const first = await runtime.createAgent(baseOpts({ background: { sessionDir: join(dir, "task-one") } }));
+    expect((runtime as any).handles.size).toBe(1);
+    await first.destroyAndWait!();
+    expect((runtime as any).handles.size).toBe(0);
+
+    const second = await runtime.createAgent(baseOpts({ background: { sessionDir: join(dir, "task-two") } }));
+    expect((runtime as any).handles.size).toBe(1);
+    await second.destroyAndWait!();
+    expect((runtime as any).handles.size).toBe(0);
+  });
+
   it("live sessions still report identity via onSessionChanged", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
