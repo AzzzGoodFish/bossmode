@@ -107,6 +107,10 @@ beforeEach(async () => {
         if (opts.background) {
           expect(opts.background.sessionDir).toBeTruthy();
           expect(opts.background.inheritCodexSessionIdFrom).toBeUndefined();
+          // the child binds tools with the SAME id format the live parent used
+          // (bare room id for rooms) — scope-keyed callbacks must not see a
+          // normalized "room:<id>" the parent never used
+          expect(opts.roomId).toBe(roomId);
         }
         return fakeHandle as any;
       },
@@ -182,6 +186,7 @@ describe("background runner + tool dispatch", () => {
     expect(record?.status).toBe("done");
     expect(record?.result).toBe("THE ANSWER");
     expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
+    expect(record?.scopeId).toBe(`room:${roomId}`); // full scope id for ownership/display
   });
 
   it("fork mode: child resumes a forked file in the task dir, cut before the in-flight call (latest user kept)", async () => {

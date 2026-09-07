@@ -53,11 +53,6 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
     if (!parent) return null;
     return roomStore.resolveRoomMemberRef(parent, agentName);
   }
-  if (roomId.startsWith("room:")) {
-    // Background child sessions bind tools with the full scope id; the roster
-    // is keyed by the bare room id.
-    return roomStore.resolveRoomMemberRef(roomId.slice("room:".length), agentName);
-  }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
 
@@ -73,12 +68,7 @@ function resolveReadTarget(
   actor: { id: string; name: string },
   scopeParam: unknown,
 ): { ok: true; roomId: string } | { ok: false; error: string } {
-  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") {
-    // Background child sessions bind tools with the full "room:<id>" scope id;
-    // message stores key by the bare room id.
-    const target = currentRoomId.startsWith("room:") ? currentRoomId.slice("room:".length) : currentRoomId;
-    return { ok: true, roomId: target };
-  }
+  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") return { ok: true, roomId: currentRoomId };
   const scopeId = String(scopeParam).trim();
   try {
     const access = assertMemberScopeAccess(actor.id, scopeId);
@@ -1127,11 +1117,6 @@ function terminalWaitResult(record: import("../shared/types.js").BackgroundTaskR
 function resolveBackgroundActor(roomId: string, agentName: string): { memberId: string; scopeId: string } | null {
   if (roomId.startsWith("dm:")) {
     return { memberId: roomId.slice(3), scopeId: roomId };
-  }
-  if (roomId.startsWith("room:")) {
-    const roster = roomStore.getRoom(roomId.slice(5));
-    const actor = roster ? (roomStore as any).resolveRoomMemberRef(roomId.slice(5), agentName) : undefined;
-    return actor ? { memberId: actor.id, scopeId: roomId } : null;
   }
   if (roomId.startsWith("topic:")) {
     const parentRoomId = resolveOwningRoomId(roomId);

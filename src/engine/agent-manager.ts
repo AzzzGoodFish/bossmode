@@ -1204,7 +1204,11 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
           skillPaths: [...skillPaths],
           cwd,
           roomMembers: [...roomMembers],
-          toolScopeId: keyRoomId.startsWith("room:") || keyRoomId.startsWith("dm:") || keyRoomId.startsWith("topic:") ? keyRoomId : `room:${keyRoomId}`,
+          // EXACTLY the id createAgent binds tools with (bare room id for rooms;
+          // full scope id for dm/topic) — background children must receive the
+          // same binding format the live parent used, or scope-keyed tool
+          // callbacks (create_task, queries…) misresolve.
+          toolScopeId: keyRoomId,
           runtimeName: member.runtime,
         },
         unsubscribe: () => {},
