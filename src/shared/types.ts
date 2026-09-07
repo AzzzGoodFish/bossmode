@@ -570,6 +570,54 @@ export interface TaskEventMeta {
   snippet?: string;
 }
 
+// -- Background tasks (member-owned; result delivered only via background_wait) --
+
+export type BackgroundTaskStatus =
+  | "starting"
+  | "running"
+  | "cancelling"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+/** Terminal background task statuses — immutable once reached. */
+export type BackgroundTaskTerminalStatus = "done" | "failed" | "cancelled" | "interrupted";
+
+export type BackgroundSessionMode = "new" | "fork";
+
+export type BackgroundTaskKind = "generic" | "recall" | "memorize";
+
+export interface BackgroundTaskSnapshot {
+  model: string | null;
+  credentialId: string | null;
+  thinkingLevel: string | null;
+}
+
+export interface BackgroundTaskRecord {
+  taskId: string;
+  kind: BackgroundTaskKind;
+  memberId: string;
+  /** Scope the task was started from (display/filtering; child session is its own scope). */
+  scopeId: string;
+  sessionMode: BackgroundSessionMode;
+  /** Activation prompt sent to the child session (reproducibility). */
+  prompt: string;
+  /** Parent model/account/thinking snapshot taken at start; child never follows later switches. */
+  snapshot: BackgroundTaskSnapshot;
+  status: BackgroundTaskStatus;
+  startedAt: string; // ISO 8601 UTC
+  endedAt: string | null; // ISO 8601 UTC
+  /** Final assistant text; set only on done. Read via background_wait only. */
+  result: string | null;
+  /** Failure/cancel/interrupt detail; returned by background_wait, never by status. */
+  error: string | null;
+  /** Directory holding task.json and the SDK-written session JSONL. */
+  sessionDir: string;
+  /** For fork mode: parent session file reference at fork time. */
+  parentSessionRef: string | null;
+}
+
 // -- Topic activity (plan-topic-threads-v1: room stream keeps only these two cards) --
 
 export interface TopicEventMeta {
