@@ -356,8 +356,13 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     if (cancelled) {
       return settle({ status: "cancelled", error: cleanupError ? `cancelled by member request; ${cleanupError}` : "cancelled by member request" });
     }
+    /** Failure reason suffix for tasks whose side effects are not rolled
+     *  back — the wait result must say what may already be on disk (QA S3). */
+    const writesNote = record.kind === "memorize"
+      ? "; already-completed writes are never rolled back — check the memory assets before rerunning"
+      : "";
     if (promptError) {
-      return settle({ status: "failed", error: `child run failed: ${String((promptError as Error)?.message || promptError)}${cleanupError ? `; ${cleanupError}` : ""}` });
+      return settle({ status: "failed", error: `child run failed: ${String((promptError as Error)?.message || promptError)}${cleanupError ? `; ${cleanupError}` : ""}${writesNote}` });
     }
     const text = collected.text;
     if (cleanupError) {
@@ -367,10 +372,10 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
       const note = text !== null && text.trim().length > 0
         ? "; the child produced a final text, discarded because cleanup could not be confirmed; any writes it made may already be in effect"
         : "";
-      return settle({ status: "failed", error: `${cleanupError}${note}` });
+      return settle({ status: "failed", error: `${cleanupError}${note}${writesNote}` });
     }
     if (text === null || text.trim().length === 0) {
-      return settle({ status: "failed", error: "child session ended without a successful final text" });
+      return settle({ status: "failed", error: `child session ended without a successful final text${writesNote}` });
     }
     return settle({ status: "done", result: text });
   } finally {
