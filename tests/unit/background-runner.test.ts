@@ -106,7 +106,6 @@ beforeEach(async () => {
         lastCreateOpts = opts;
         if (opts.background) {
           expect(opts.background.sessionDir).toBeTruthy();
-          expect(opts.background.inheritCodexSessionIdFrom).toBeUndefined();
           // the child binds tools with the SAME id format the live parent used
           // (bare room id for rooms) — scope-keyed callbacks must not see a
           // normalized "room:<id>" the parent never used

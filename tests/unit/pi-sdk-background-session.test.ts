@@ -3,7 +3,6 @@
  * - session writes into the task dir (SessionManager.create receives it)
  * - custom tool factory is built with execution:"background"
  * - member session identity is NOT reported via onSessionChanged
- * - Codex fork mode registers HTTP session-id inheritance; other providers do not
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +25,6 @@ const toolsFactory = vi.fn(() => [
   { name: "query_room_messages" },
   { name: "chat" },
 ]);
-const inheritanceRegister = vi.fn(() => ({ release: vi.fn() }));
 const onSessionChanged = vi.fn();
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -50,10 +48,6 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
 
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
   createBossmodeSdkTools: (opts: any) => toolsFactory(opts),
-}));
-
-vi.mock("../../src/engine/runtime/codex-header-inheritance.js", () => ({
-  registerCodexSessionHeaderInheritance: (...args: any[]) => inheritanceRegister(...args),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
@@ -182,23 +176,6 @@ describe("PiSdkRuntime background session variant", () => {
       background: { sessionDir: join(dir, "taskdir") },
     }));
     expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ execution: "background" }));
-  });
-
-  it("registers codex session-id inheritance for fork-mode codex children only", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "openai-codex" } };
-    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
-
-    await new PiSdkRuntime().createAgent(baseOpts({
-      background: { sessionDir: join(dir, "taskdir"), inheritCodexSessionIdFrom: "parent-sdk-session-id" },
-    }));
-    expect(inheritanceRegister).toHaveBeenCalledWith("child-sdk-session-id", "parent-sdk-session-id");
-
-    inheritanceRegister.mockClear();
-    await new PiSdkRuntime().createAgent(baseOpts({
-      background: { sessionDir: join(dir, "taskdir2") }, // no parent id → no registration
-    }));
-    await new PiSdkRuntime().createAgent(baseOpts()); // live session → never registers
-    expect(inheritanceRegister).not.toHaveBeenCalled();
   });
 
   it("live sessions still report identity via onSessionChanged", async () => {

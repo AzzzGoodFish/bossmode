@@ -21,7 +21,6 @@ import { exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, 
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
-import { registerCodexSessionHeaderInheritance } from "./codex-header-inheritance.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
 
@@ -361,7 +360,6 @@ export class PiSdkAgentHandle implements AgentHandle {
   private manualCompactionOutcome: { aborted: boolean } | null = null;
   private destroyed = false;
   private destroyPromise: Promise<void> | null = null;
-  private backgroundCleanup: (() => void) | undefined;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
   private toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string };
@@ -376,11 +374,9 @@ export class PiSdkAgentHandle implements AgentHandle {
     runtimeParams: AgentRuntimeParams,
     bossmodeToolNames: Iterable<string>,
     toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
-    backgroundCleanup?: () => void,
   ) {
     this.runtimeParams = runtimeParams;
     this.sessionId = session.sessionId;
-    this.backgroundCleanup = backgroundCleanup;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
@@ -615,7 +611,6 @@ export class PiSdkAgentHandle implements AgentHandle {
 
   private async runTeardown(): Promise<void> {
     const errors: string[] = [];
-    try { this.backgroundCleanup?.(); } catch {}
     // The SDK's AgentSession.abort() awaits waitForIdle itself — awaiting ITS
     // promise here is the awaitable run-end, unlike the void handle.abort().
     try {
@@ -1000,9 +995,8 @@ export class PiSdkRuntime implements AgentRuntime {
     // when tools is provided it becomes a lifetime allowlist and strips extension
     // tools like web_search/fetch_content). MCP is gated by whether its adapter
     // is in additionalExtensionPaths, not by a create-time name list.
-    let backgroundCleanup: (() => void) | null = null;
-    // Once the SDK session exists, any later failure (MCP bind, setModel,
-    // registration) must not leak it — dispose before rethrowing.
+    // Once the SDK session exists, any later failure (MCP bind or setModel)
+    // must not leak it — dispose before rethrowing.
     let sessionObtained: AgentSession | null = null;
     try {
       const { session } = await createAgentSession({
@@ -1029,15 +1023,6 @@ export class PiSdkRuntime implements AgentRuntime {
 
       if (!opts.background) {
         opts.onSessionChanged?.({ sessionId: session.sessionId, sessionFile: session.sessionFile });
-      } else if (opts.background.inheritCodexSessionIdFrom && provider === "openai-codex") {
-        const registration = registerCodexSessionHeaderInheritance(session.sessionId, opts.background.inheritCodexSessionIdFrom);
-        if (registration) {
-          backgroundCleanup = () => registration.release();
-        } else {
-          logger.warn("runtime:pi-sdk", "codex session-id inheritance unavailable; background child runs with its own header", {
-            agent: opts.member.name,
-          });
-        }
       }
 
       const runtimeParams: AgentRuntimeParams = {
@@ -1060,7 +1045,6 @@ export class PiSdkRuntime implements AgentRuntime {
         runtimeParams,
         customTools.map((t) => t.name),
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
-        backgroundCleanup ?? undefined,
       );
       this.handles.add(handle);
       logger.info("runtime:pi-sdk", "createAgent", {
@@ -1078,7 +1062,6 @@ export class PiSdkRuntime implements AgentRuntime {
       return handle;
     } catch (err) {
       if (sessionObtained) {
-        try { backgroundCleanup?.(); } catch {}
         try { sessionObtained.dispose(); } catch (disposeErr: any) {
           logger.error("runtime:pi-sdk", "post-failure session dispose also failed", {
             agent: opts.member.name,

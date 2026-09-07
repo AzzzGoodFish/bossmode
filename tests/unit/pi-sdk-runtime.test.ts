@@ -306,6 +306,19 @@ describe("PiSdkRuntime", () => {
     });
   });
 
+  it.each(["sse", "websocket"] as const)("passes Codex %s transport straight to the SDK settings manager", async (transport) => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "openai-codex" } };
+    bossmodeConfig = { runtime: { sessionResume: true, codexTransport: transport, websocketConnectTimeoutMs: 3210 }, mcp: { enabled: false } };
+    settingsGetTransport.mockReturnValueOnce(transport);
+    settingsGetWebSocketConnectTimeoutMs.mockReturnValueOnce(3210);
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+
+    await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, model: "openai-codex/gpt-6-astra" } }));
+
+    expect(settingsApplyOverrides).toHaveBeenCalledWith({ transport, websocketConnectTimeoutMs: 3210 });
+    expect(loggerInfo).toHaveBeenCalledWith("runtime:pi-sdk", "createAgent", expect.objectContaining({ transport }));
+  });
+
   it("always loads the MCP adapter (platform infrastructure) even with MCP flag off and no member config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");

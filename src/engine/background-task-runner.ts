@@ -23,9 +23,6 @@
  *   been confirmed complete. If even the failure record cannot be written,
  *   waiters get an explicitly unsaved failure snapshot (never forever-running,
  *   never fake success).
- *
- * Codex header inheritance is FROZEN (architect 2026-09-07 11:31, fish
- * decision pending): the runner does not pass inheritCodexSessionIdFrom.
  */
 import { existsSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";

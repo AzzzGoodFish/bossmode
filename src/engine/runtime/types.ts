@@ -66,12 +66,9 @@ export interface CreateAgentOpts {
   /** Background task child session variant. Same assembly path and prompt
    *  sources as a live member session; differences: the session writes into the
    *  task directory, scope-posting/background-start tools are rejected at
-   *  execution time, member session state is not overwritten, and (fork mode,
-   *  Codex provider) the child's HTTP session-id header may inherit the parent
-   *  value for prefix-cache reuse. */
+   *  execution time, and member session state is not overwritten. */
   background?: {
     sessionDir: string;
-    inheritCodexSessionIdFrom?: string;
     /** Pre-built child session manager (fork mode): the runner forks the parent
      *  prefix, applies the cut in memory, and hands the manager over so the
      *  child continues from the cut leaf — the branch move only persists on
