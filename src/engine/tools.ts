@@ -1028,10 +1028,17 @@ export async function handleToolCallback(
     case "background_wait": {
       const actor = resolveBackgroundActor(roomId, agentName);
       if (!actor) return { ok: false, error: "Member or scope not found" };
-      const { getBackgroundTask, whenTerminal, isTerminalBackgroundTaskStatus } = await import("./background-task-store.js");
+      const { getBackgroundTask, whenTerminal, isTerminalBackgroundTaskStatus, registerBackgroundWaitSettle } = await import("./background-task-store.js");
       const taskId = String(params?.taskId ?? "").trim();
       const record = getBackgroundTask(actor.memberId, taskId);
       if (!record) return { ok: false, error: `background task not found: ${taskId || "(none)"}` };
+      // Scope authorization in addition to member ownership: the caller's
+      // current access must cover the task's scope.
+      try {
+        assertMemberScopeAccess(actor.memberId, record.scopeId as ScopeId);
+      } catch {
+        return { ok: false, error: `background task not found: ${taskId}` };
+      }
       const blockMs = params?.blockMs === undefined ? 30000 : Number(params.blockMs);
       if (!Number.isFinite(blockMs) || blockMs < 0) return { ok: false, error: "blockMs must be a non-negative number (0 = wait until completion)" };
       if (isTerminalBackgroundTaskStatus(record.status)) {
@@ -1039,22 +1046,39 @@ export async function handleToolCallback(
       }
       const wait = whenTerminal(actor.memberId, taskId);
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let unregisterSettle: (() => void) | undefined;
+      const interrupted = new Promise<null>((resolveInterrupt) => {
+        unregisterSettle = registerBackgroundWaitSettle(actor.memberId, () => resolveInterrupt(null));
+      });
       const timeout = blockMs > 0 ? new Promise<null>((resolve) => { timeoutHandle = setTimeout(() => resolve(null), blockMs); }) : null;
       try {
-        const settled = timeout ? await Promise.race([wait.promise, timeout]) : await wait.promise;
+        const racers: Promise<unknown>[] = [wait.promise];
+        if (timeout) racers.push(timeout);
+        racers.push(interrupted);
+        const settled = await Promise.race(racers) as import("../shared/types.js").BackgroundTaskRecord | null;
         if (settled) return terminalWaitResult(settled);
         const current = getBackgroundTask(actor.memberId, taskId);
-        return { ok: true, taskId, status: current?.status ?? record.status, note: "wait budget exhausted; the task keeps running — call background_wait again" };
+        return { ok: true, taskId, status: current?.status ?? record.status, note: "wait ended (timeout or interrupt); the task keeps running — call background_wait again" };
       } finally {
         if (timeoutHandle) clearTimeout(timeoutHandle);
+        unregisterSettle?.();
         wait.dispose();
       }
     }
     case "background_cancel": {
       const actor = resolveBackgroundActor(roomId, agentName);
       if (!actor) return { ok: false, error: "Member or scope not found" };
+      const { getBackgroundTask } = await import("./background-task-store.js");
+      const taskId = String(params?.taskId ?? "").trim();
+      const record = getBackgroundTask(actor.memberId, taskId);
+      if (!record) return { ok: false, error: `background task not found: ${taskId || "(none)"}` };
+      try {
+        assertMemberScopeAccess(actor.memberId, record.scopeId as ScopeId);
+      } catch {
+        return { ok: false, error: `background task not found: ${taskId}` };
+      }
       const { cancelBackgroundTask } = await import("./background-task-runner.js");
-      const result = cancelBackgroundTask(actor.memberId, String(params?.taskId ?? "").trim());
+      const result = cancelBackgroundTask(actor.memberId, taskId);
       if (!result.ok) return { ok: false, error: result.error };
       return { ok: true, taskId: result.taskId, status: result.status, ...(result.note ? { note: result.note } : {}) };
     }

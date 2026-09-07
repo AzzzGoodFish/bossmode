@@ -606,6 +606,18 @@ class PiSdkAgentHandle implements AgentHandle {
     if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
+  forkSnapshot(): { sessionFile: string; branchEntries: unknown[] } | null {
+    try {
+      const sm = (this.session as any).sessionManager;
+      const sessionFile: string | undefined = this.session.sessionFile ?? sm?.getSessionFile?.();
+      if (!sessionFile) return null;
+      const branchEntries: unknown[] = typeof sm?.getBranch === "function" ? sm.getBranch() : [];
+      return { sessionFile, branchEntries };
+    } catch {
+      return null;
+    }
+  }
+
   async refreshModelRegistry(opts?: { allowNetwork?: boolean }): Promise<void> {
     await this.session.modelRuntime.refresh({ allowNetwork: opts?.allowNetwork ?? false });
   }
@@ -828,6 +840,12 @@ export class PiSdkRuntime implements AgentRuntime {
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
+    if (opts.background?.sessionManager) {
+      // Fork mode: the runner already forked the parent prefix, applied the
+      // cut, and hands the manager over. Never re-open the file — the branch
+      // move only persists on the next append.
+      sessionManager = opts.background.sessionManager;
+    } else
     try {
       const resumeFile = opts.resumeSession?.sessionFile;
       if (resumeFile && existsSync(resumeFile)) {

@@ -72,6 +72,11 @@ export interface CreateAgentOpts {
   background?: {
     sessionDir: string;
     inheritCodexSessionIdFrom?: string;
+    /** Pre-built child session manager (fork mode): the runner forks the parent
+     *  prefix, applies the cut in memory, and hands the manager over so the
+     *  child continues from the cut leaf — the branch move only persists on
+     *  the next append, so re-opening the file would lose it. */
+    sessionManager?: import("@earendil-works/pi-coding-agent").SessionManager;
   };
 }
 
@@ -112,6 +117,10 @@ export interface AgentHandle {
   destroy(): void;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
+  /** Snapshot the live session for a background fork: current session file plus
+   *  the entries of the CURRENT legal branch (read-only; never opens or writes
+   *  the parent file through SDK APIs). Optional — background fork only. */
+  forkSnapshot?(): { sessionFile: string; branchEntries: unknown[] } | null;
 
   // Metadata for status reporting
   readonly pid?: number; // deprecated: CLI rollback metadata

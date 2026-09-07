@@ -348,7 +348,53 @@ export function updateBackgroundTask(
   return next;
 }
 
+// -- Interrupt support (member turn abort ends blocking waits; tasks keep running) --
+
+const memberWaitSettles = new Map<string, Set<() => void>>();
+
+/** Register a settle callback for a member's in-flight background_wait calls.
+ * Interrupt paths call settleBackgroundWaits so the tool returns the task's
+ * real current status instead of holding the member's abort hostage. */
+export function registerBackgroundWaitSettle(memberId: string, settle: () => void): () => void {
+  let set = memberWaitSettles.get(memberId);
+  if (!set) {
+    set = new Set();
+    memberWaitSettles.set(memberId, set);
+  }
+  set.add(settle);
+  return () => {
+    set!.delete(settle);
+    if (set!.size === 0) memberWaitSettles.delete(memberId);
+  };
+}
+
+export function settleBackgroundWaits(memberId: string): void {
+  const set = memberWaitSettles.get(memberId);
+  if (!set) return;
+  const fns = [...set];
+  set.clear();
+  memberWaitSettles.delete(memberId);
+  for (const fn of fns) fn();
+}
+
 // -- Restart sweep (service init only; never member reload) --------------
+
+/**
+ * Last-resort observable failure: the record itself cannot be written (disk
+ * error). Waiters are resolved with an UNSAVED terminal snapshot — clearly
+ * marked — so no one waits forever and nothing is reported as saved. The disk
+ * record stays non-terminal; the restart sweep will mark it interrupted.
+ */
+export function failBackgroundTaskUnsaved(memberId: string, taskId: string, reason: string): void {
+  const record = getBackgroundTask(memberId, taskId);
+  logger.error("background-tasks", "record write failed; waiters resolved with unsaved failure", {
+    memberId,
+    taskId,
+    reason,
+  });
+  if (!record) return;
+  notifyTerminal({ ...record, status: "failed", error: `record write failed (unsaved diagnosis): ${reason}`, endedAt: new Date().toISOString() });
+}
 
 /**
  * Service-startup-only: mark every non-terminal task of every member

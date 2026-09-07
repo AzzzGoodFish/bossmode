@@ -44,6 +44,7 @@ import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
+import { settleBackgroundWaits } from "./background-task-store.js";
 import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
 
@@ -150,6 +151,20 @@ interface PendingCredentialRefresh {
   changeType: "profileUpdated" | "profileDeleted";
 }
 
+/** Start-time sources a background child inherits from a live instance. */
+export interface BackgroundSessionSources {
+  /** Member config as applied at instance build (model/credential/thinking of that moment). */
+  member: AgentMemberConfig;
+  compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[] };
+  skills: string[];
+  skillPaths: string[];
+  cwd: string;
+  roomMembers: string[];
+  /** Scope id the child's tool callbacks bind to (room:…/dm:…/topic:…). */
+  toolScopeId: string;
+  runtimeName: string;
+}
+
 interface AgentInstance {
   handle: AgentHandle;
   /** Conversation scope id: "room:<roomId>" | "dm:<memberId>". */
@@ -185,6 +200,11 @@ interface AgentInstance {
   compacting: boolean;
   /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
   turnActive: boolean;
+  /** Start-time session sources (background fork snapshot): exactly what this
+   *  instance was built from — member config, compiled prompts, skills, cwd,
+   *  roomMembers, tool-scope id, runtime name. Background children inherit
+   *  these instead of re-resolving config (single assembly path). */
+  sessionSources: BackgroundSessionSources;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -1173,6 +1193,20 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         lastCompletedFinalSeq: 0,
         compacting: false,
         turnActive: false,
+        sessionSources: {
+          member: { ...member },
+          compiled: {
+            agentPrompt: compiled.agentPrompt,
+            envPrompt: compiled.envPrompt,
+            appendSystemPrompt: [...compiled.appendSystemPrompt],
+          },
+          skills,
+          skillPaths: [...skillPaths],
+          cwd,
+          roomMembers: [...roomMembers],
+          toolScopeId: keyRoomId.startsWith("room:") || keyRoomId.startsWith("dm:") || keyRoomId.startsWith("topic:") ? keyRoomId : `room:${keyRoomId}`,
+          runtimeName: member.runtime,
+        },
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: member.model ? normalizeSwitchModelRef(member.model) : "",
@@ -2073,6 +2107,8 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   // Stop is the sole abort entry. If blocked in wait(), settle it SYNCHRONOUSLY first
   // so the tool call can return mention_interrupt before the turn is torn down.
   try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
+  try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+  try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
 
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
@@ -2119,6 +2155,7 @@ export async function interruptAgent(roomId: string, memberRef: string, urgentBy
     const banner = `[INTERRUPTED] Your previous turn was aborted by an urgent message (!${memberName}) from ${urgentByName}. That turn may have left partial work — verify its state before building on it.`;
     try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
     try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+    try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
     instance.handle.abort({ preserveCompaction: true });
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(roomId, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
@@ -2572,6 +2609,9 @@ function interruptWorkingInstance(scopeId: string, instance: AgentInstance, prom
   // Blocking shell_exec waits end now (running + exec id) so the gentle abort
   // is not held hostage by a blockUntilMs wait (qa rc.22 note ①).
   try { settleMemberShellWaits(instance.memberId); } catch { /* ignore */ }
+  // Background waits end the same way: the tool returns the task's real
+  // current status; the task itself keeps running (independent controller).
+  try { settleBackgroundWaits(instance.memberId); } catch { /* ignore */ }
   instance.handle.abort({ preserveCompaction: true });
   updateDispatchState(instance, "aborting", trigger);
   instance.queuedInputs.unshift(`${banner}\n\n${prompt}`);
@@ -2702,6 +2742,7 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
   if (instance.status === "working") {
     try { settleWaitOnAbort(`topic:${topicId}`, memberId); } catch { /* ignore */ }
     try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+    try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
     try { instance.handle.abort({ preserveCompaction: true }); } catch { /* ignore */ }
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
