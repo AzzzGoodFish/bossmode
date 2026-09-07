@@ -114,4 +114,45 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
     await Promise.all([p1, p2]);
     expect(settled).toBe(true);
   });
+
+  it("T5: void destroy() logs teardown failures instead of leaking unhandled rejections (main-session path)", async () => {
+    const { logger } = await import("../../src/foundation/logger.js");
+    const runner = realRunner(async () => { throw new Error("main-session shutdown handler failed"); });
+    const handle = handleWith(runner);
+    handle.destroy(); // void entry — must not produce an unhandled rejection
+    // no unhandledRejection by the time the teardown settles:
+    let unhandled = false;
+    const onUnhandled = () => { unhandled = true; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await new Promise((r) => setTimeout(r, 60));
+      expect(unhandled).toBe(false);
+      expect((logger.error as any).mock.calls.some((c: any[]) => String(c[2]?.error ?? "").includes("teardown incomplete"))).toBe(true);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("T6: shutdownAll awaits every teardown settlement and aggregates failures", async () => {
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const rt = new PiSdkRuntime();
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { release = r; });
+    const good = handleWith(realRunner(async () => { await gate; })); // still tearing down
+    const bad = handleWith(realRunner(async () => { throw new Error("shutdown boom"); }), () => { throw new Error("dispose boom"); });
+    (rt as any).handles.add(good);
+    (rt as any).handles.add(bad);
+    let settled = false;
+    const p = rt.shutdownAll().then(() => { settled = true; }, () => { settled = true; });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(settled).toBe(false); // waits for the gated teardown — not clear-and-return
+    release?.();
+    await p;
+    // aggregate failure surfaces on the shutdownAll promise
+    const r2 = new PiSdkRuntime();
+    (r2 as any).handles.add(handleWith(realRunner(async () => { throw new Error("agg boom"); })));
+    await expect(r2.shutdownAll()).rejects.toThrow(/1 session teardown/);
+    // after a rejected shutdownAll the set is cleared — a repeat call resolves
+    await expect(rt.shutdownAll()).resolves.toBeUndefined();
+  });
 });

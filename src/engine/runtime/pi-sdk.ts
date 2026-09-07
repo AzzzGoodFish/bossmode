@@ -587,8 +587,13 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   destroy(): void {
-    // Same single teardown path; void callers just don't await the settlement.
-    void this.destroyAndWait();
+    // Same single teardown path. The void entry must swallow (and log) the
+    // rejection — main-session stop/reload callers never await it, and an
+    // unobserved promise here becomes an unhandled rejection. Await callers
+    // still get the error from destroyAndWait itself.
+    this.destroyAndWait().catch((err: any) => {
+      logger.error("runtime:pi-sdk", "session teardown incomplete (void destroy)", { error: err?.message || String(err) });
+    });
   }
 
   /** Idempotent awaitable teardown: every caller awaits the SAME settlement
@@ -1084,7 +1089,20 @@ export class PiSdkRuntime implements AgentRuntime {
   }
 
   async shutdownAll(): Promise<void> {
-    for (const handle of this.handles) handle.destroy();
+    // Service exit waits for every teardown settlement and surfaces errors —
+    // it must not clear-and-return while sessions are still tearing down.
+    const failures: unknown[] = [];
+    const settlements: Promise<void>[] = [];
+    for (const handle of this.handles) {
+      const settled = handle.destroyAndWait
+        ? handle.destroyAndWait().catch((err: unknown) => { failures.push(err); })
+        : Promise.resolve().then(() => { try { handle.destroy(); } catch (err) { failures.push(err); } });
+      settlements.push(settled);
+    }
     this.handles.clear();
+    await Promise.all(settlements);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `shutdownAll: ${failures.length} session teardown(s) incomplete`);
+    }
   }
 }
