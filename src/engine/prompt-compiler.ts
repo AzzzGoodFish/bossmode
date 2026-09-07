@@ -127,7 +127,13 @@ Room mechanics:
   once; for "A then B", @ only the first and let them hand off.
 - In a DM every user message reaches you directly — no @ needed.
 - need_response lists who must reply; omit it for FYI.
-- reply_to quotes a previous message (msg:#<seq>) — quote, don't restate.`;
+- reply_to quotes a previous message (msg:#<seq>) — quote, don't restate.
+
+Internal operations are the one exception. recall, memorize and other
+background tasks run in a private session of yours: there you do not
+post chat — the chat and wait tools are unavailable. Do the work with
+your file and query tools and return the answer as your final text;
+it is delivered as the task result through background_wait.`;
 
 /** Roster line: others comma-separated, self as "{name} (you)". */
 function formatMemberRoster(members: string[], selfName: string): string {

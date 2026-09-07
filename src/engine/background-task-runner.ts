@@ -63,16 +63,18 @@ import type {
 export function backgroundActivationPrompt(kind: BackgroundTaskKind, prompt: string): string {
   if (kind === "recall") {
     return [
-      "Background recall task. You are the same member, working privately in a background session.",
-      "Search the shared memory assets (project memories, user memory, this workspace's records) for information relevant to the current conversation, and organize what you find.",
-      "Do not post any chat message — the chat tool is unavailable here. Return your findings as your final text; it will be delivered verbatim as the task result.",
+      "Background recall task — you are the same member working privately in a background session; the chat and wait tools are unavailable here by design.",
+      "Find what the current conversation needs from the shared memory assets: the room's project memory directory, the user memory directory, and this scope's full message history (query_room_messages works here; history reads never consume unread positions).",
+      "Organize the relevant facts, decisions and open items you find, citing where each came from. If something is genuinely not recorded, say so plainly — never invent.",
+      "Do not post any chat message. Return your findings as your final text; it is delivered verbatim as the task result through background_wait.",
     ].join("\n");
   }
   if (kind === "memorize") {
     return [
-      "Background memorize task. You are the same member, working privately in a background session.",
-      "Review the current conversation and maintain the shared memory assets: record durable facts, decisions and open items in the right places, and report exactly what you changed (files touched, additions, updates).",
-      "Do not post any chat message — the chat tool is unavailable here. Return your change report as your final text; it will be delivered verbatim as the task result.",
+      "Background memorize task — you are the same member working privately in a background session; the chat and wait tools are unavailable here by design.",
+      "Review the conversation you forked from and maintain the shared memory assets: record durable facts, decisions and open items in the right layer (user memory for who the user is and how they work; project memory for this room's decisions and state), keeping each file current rather than duplicating.",
+      "Report exactly what you changed: each file touched and what was added or updated. Already-completed writes are never rolled back, so make each edit deliberate.",
+      "Do not post any chat message. Return your change report as your final text; it is delivered verbatim as the task result through background_wait.",
     ].join("\n");
   }
   return prompt;

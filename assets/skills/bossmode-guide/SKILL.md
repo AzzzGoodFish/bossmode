@@ -94,6 +94,16 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - If a new message interrupts you mid-turn, your run is aborted and the message is processed immediately (the envelope says so). Shell commands are NOT killed: the interrupted `shell_exec` gets a tool result like "still running as exec e5 — wait for it with shell_wait". Finish handling the new message, then `shell_wait` for the original command and read its output.
 - The one-shot `bash` tool is gone; file tools and shells cover everything it did.
 
+## Background tasks (recall, memorize, and generic)
+
+- `background_start({prompt, sessionMode})` runs a prompt in a private child session of yours: same model, account, thinking level, tools and prompt as you have right now (a snapshot — later switches don't affect a running task). `sessionMode: "fork"` copies this conversation's history up to before the turn that started the task; `"new"` starts empty.
+- `recall()` and `memorize()` are the purpose-built entries — no parameters. recall searches the shared memory assets for what the current conversation needs; memorize reviews the conversation and maintains those assets, reporting exactly what it changed. Both fork by default.
+- Both return the task id and its real status immediately. You keep working; the task keeps running even when you're interrupted — a new message or a wait timeout only ends the waiting, never the task.
+- **`background_wait({taskId, blockMs?})` is the only way to receive a result.** It blocks up to blockMs (default 30000; 0 = until done) and returns the saved final text, or the explicit failure/cancel/interrupt reason. A timeout returns the task's real current status without the answer — call it again to keep waiting. Repeated waits re-read the same saved result; nothing is consumed.
+- `background_status()` lists your tasks in this scope — lifecycle facts only. `background_cancel({taskId})` requests cancellation: the task reports cancelled once it has actually stopped; finished tasks keep their terminal status and answer.
+- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. Start a new task if you still need the work.
+- Records live under your member directory, filed by the UTC start date; they stay for the conversation's lifetime.
+
 ## Your MCP servers and extensions — CJS note
 
 - If you write an extension as plain JavaScript (CommonJS), the factory export must be `module.exports = function (pi) { … }`. Writing `exports.default = fn` fails pi's factory validation ("does not export a valid factory function"). ESM files use `export default`.
