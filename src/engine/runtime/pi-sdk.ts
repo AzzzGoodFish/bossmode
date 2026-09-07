@@ -371,6 +371,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private modelRegistry: ModelRegistry,
     private credentials: ModelCredentialBinding,
     private resourceLoader: DefaultResourceLoader,
+    private settingsManager: SettingsManager,
     private baseExtensionPaths: string[],
     private baseToolNames: string[],
     runtimeParams: AgentRuntimeParams,
@@ -781,6 +782,16 @@ export class PiSdkAgentHandle implements AgentHandle {
 
     if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
     else await this.resourceLoader.reload();
+    // Agent/session reload re-reads settings and clears in-memory overrides.
+    // Reapply runtime transport only after it completes so explicit Codex SSE/WS
+    // and timeout configuration remains effective for the next provider call.
+    const transportSettings = applyRuntimeTransportSettings(this.settingsManager);
+    logger.info("runtime:pi-sdk", "reloadResources transport", {
+      agent: opts.member.name,
+      transport: transportSettings.transport,
+      websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
+      httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
+    });
     await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
     // Refresh bossmode tool name set from the same factory that builds customTools (leader gate, new tools).
     this.toolAssembly = {
@@ -897,7 +908,6 @@ export class PiSdkRuntime implements AgentRuntime {
     authStorageCredentials.attach(runtime);
     const modelRegistry = new ModelRegistry(runtime);
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
-    const transportSettings = applyRuntimeTransportSettings(settingsManager);
     const foundModel = modelRegistry.find(provider, modelId);
     if (!foundModel) throw new Error(`Model not found: ${resolvedModel}`);
     const model = authStorageCredentials.bind(foundModel, piConfig.profile);
@@ -990,6 +1000,10 @@ export class PiSdkRuntime implements AgentRuntime {
       appendSystemPrompt,
     });
     await resourceLoader.reload();
+    // DefaultResourceLoader.reload() reloads SettingsManager and clears its
+    // in-memory overrides. Apply runtime transport afterwards, immediately
+    // before the SDK session is created.
+    const transportSettings = applyRuntimeTransportSettings(settingsManager);
 
     const customTools = createBossmodeSdkTools({
       roomId: opts.roomId,
@@ -1049,6 +1063,7 @@ export class PiSdkRuntime implements AgentRuntime {
         modelRegistry,
         authStorageCredentials,
         resourceLoader,
+        settingsManager,
         extensionPaths,
         baseTools,
         runtimeParams,

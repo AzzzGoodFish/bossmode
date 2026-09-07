@@ -47,6 +47,7 @@ function handleWith(runner: ExtensionRunner, disposeImpl?: () => void): Instance
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
     [],
     [],
     { model: "test/m", thinkingLevel: "off" },

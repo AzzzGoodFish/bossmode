@@ -319,6 +319,20 @@ describe("PiSdkRuntime", () => {
     expect(loggerInfo).toHaveBeenCalledWith("runtime:pi-sdk", "createAgent", expect.objectContaining({ transport }));
   });
 
+  it.each(["sse", "websocket"] as const)("reapplies Codex %s transport and timeouts after member resource reload", async (transport) => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "openai-codex" } };
+    bossmodeConfig = { runtime: { sessionResume: true, codexTransport: transport, websocketConnectTimeoutMs: 3210, httpIdleTimeoutMs: 6543 }, mcp: { enabled: false } };
+    settingsGetTransport.mockReturnValue(transport);
+    settingsGetWebSocketConnectTimeoutMs.mockReturnValue(3210);
+    settingsGetHttpIdleTimeoutMs.mockReturnValue(6543);
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, model: "openai-codex/gpt-6-astra" } }));
+
+    await handle.reloadResources!({ roomId: "room-a", member: baseOpts().member, agentPrompt: "agent prompt", appendSystemPrompt: [], skillPaths: [], skillNames: [] });
+
+    expect(settingsApplyOverrides.mock.calls.filter(([value]) => JSON.stringify(value) === JSON.stringify({ transport, websocketConnectTimeoutMs: 3210, httpIdleTimeoutMs: 6543 }))).toHaveLength(2);
+  });
+
   it("always loads the MCP adapter (platform infrastructure) even with MCP flag off and no member config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
