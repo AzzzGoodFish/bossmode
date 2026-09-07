@@ -740,8 +740,12 @@ addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
 
   const { readdirSync, existsSync } = await import("node:fs");
   const extDir = memberExtensionsDir(m.id);
+  // Extensions: only real extension entries, not npm install artifacts.
+  // node_modules / package.json / package-lock.json are created by `npm install`
+  // inside an extension folder and must not inflate the count.
+  const NPM_ARTIFACTS = new Set(["node_modules", "package.json", "package-lock.json"]);
   const extensions = existsSync(extDir)
-    ? readdirSync(extDir).filter((e) => !e.startsWith(".")).sort()
+    ? readdirSync(extDir).filter((e) => !e.startsWith(".") && !NPM_ARTIFACTS.has(e)).sort()
     : [];
 
   const skills = listMemberSkills(m.id)
