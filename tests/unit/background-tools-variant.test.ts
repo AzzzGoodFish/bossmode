@@ -29,13 +29,14 @@ describe("createBossmodeSdkTools execution=background", () => {
     expect(shape(background)).toEqual(shape(live));
   });
 
-  it("rejects chat execution inside a background session with an explicit error", async () => {
-    const tool = background.find((t) => t.name === "chat")!;
-    await expect(
-      (tool.execute as any)?.("id", { message: "hello" }),
-    ).rejects.toThrow(/not available inside a background task/);
-    // no dispatcher call happened
-    expect(calls.find((c) => c.tool === "chat")).toBeUndefined();
+  it("rejects chat and member-wait execution inside a background session with an explicit error", async () => {
+    for (const name of ["chat", "wait"]) {
+      const tool = background.find((t) => t.name === name)!;
+      await expect(
+        (tool.execute as any)?.("id", name === "chat" ? { message: "hello" } : { member: "other" }),
+      ).rejects.toThrow(/not available inside a background task/);
+    }
+    expect(calls.find((c) => c.tool === "chat" || c.tool === "wait")).toBeUndefined();
   });
 
   it("rejects background-start family tools inside a background session", async () => {
@@ -55,10 +56,15 @@ describe("createBossmodeSdkTools execution=background", () => {
     expect(calls).toContainEqual({ tool: "query_room_messages", params: { query: "x" } });
   });
 
-  it("live variant still dispatches chat", async () => {
+  it("live variant still dispatches chat and wait", async () => {
     calls.length = 0;
     const tool = live.find((t) => t.name === "chat")!;
     await (tool.execute as any)?.("id", { message: "hi" });
     expect(calls.find((c) => c.tool === "chat")).toBeDefined();
+    const waitTool = live.find((t) => t.name === "wait");
+    if (waitTool) {
+      await (waitTool.execute as any)?.("id", { member: "other" });
+      expect(calls.find((c) => c.tool === "wait")).toBeDefined();
+    }
   });
 });

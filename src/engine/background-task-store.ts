@@ -5,31 +5,52 @@
 //   never rewritten by this store. Date folders are archive organization only:
 //   tasks never migrate across days (a task keeps its start date).
 //
-// Rules (architecture/background-task-foundation-discussion-20260907.md):
+// Rules (architecture/background-task-foundation-discussion-20260907.md + review
+// 2026-09-07 11:34):
 // - Terminal statuses (done/failed/cancelled/interrupted) are immutable.
-// - Result is readable only through the wait path (the record itself is the store;
-//   the wait tool is the only surface that exposes result/error to the model).
-// - `interrupted` is produced only by the restart sweep, never by the live runtime.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+// - starting is cancellable (starting → cancelling); cancelling → done is only
+//   for work that genuinely completed before the cancel took effect.
+// - Writes are atomic (temp file + rename); a failed write throws — never
+//   reported as saved.
+// - Records are strictly validated: unknown/missing fields are a diagnostic,
+//   never guessed defaults. sessionDir is derived from the path the record was
+//   found at, never trusted from file contents.
+// - `interrupted` is produced only by the restart sweep (service init), never
+//   by the live runtime; member reload must not sweep.
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { memberDir } from "../workspace/member-registry.js";
 import { getBossmodeDir } from "../shared/config.js";
+import { logger } from "../foundation/logger.js";
 import type {
   BackgroundSessionMode,
   BackgroundTaskKind,
   BackgroundTaskRecord,
+  BackgroundTaskSnapshot,
   BackgroundTaskStatus,
   BackgroundTaskTerminalStatus,
 } from "../shared/types.js";
+
+const TASK_ID_PATTERN = /^bgt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const VALID_KINDS = new Set<BackgroundTaskKind>(["generic", "recall", "memorize"]);
+const VALID_MODES = new Set<BackgroundSessionMode>(["new", "fork"]);
+const VALID_STATUSES = new Set<BackgroundTaskStatus>([
+  "starting", "running", "cancelling", "done", "failed", "cancelled", "interrupted",
+]);
 
 export function isTerminalBackgroundTaskStatus(status: BackgroundTaskStatus): status is BackgroundTaskTerminalStatus {
   return status === "done" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
 
+/** Task ids are opaque full UUIDs prefixed bgt-; validate before any path use. */
+export function isValidBackgroundTaskId(taskId: string): boolean {
+  return TASK_ID_PATTERN.test(taskId);
+}
+
 /** Allowed live transitions; anything else (and any write to a terminal record) is rejected. */
 const ALLOWED_TRANSITIONS: Record<BackgroundTaskStatus, BackgroundTaskStatus[]> = {
-  starting: ["running", "failed", "interrupted"],
+  starting: ["running", "cancelling", "failed", "interrupted"],
   running: ["done", "failed", "cancelling", "interrupted"],
   cancelling: ["cancelled", "done", "failed", "interrupted"],
   done: [],
@@ -56,42 +77,96 @@ function taskJsonPath(dir: string): string {
   return join(dir, "task.json");
 }
 
-// -- Normalization ------------------------------------------------------
+// -- Atomic persistence --------------------------------------------------
 
-function normalizeRecord(raw: any): BackgroundTaskRecord | null {
-  if (!raw || typeof raw !== "object") return null;
-  const taskId = String(raw.taskId ?? "").trim();
-  const memberId = String(raw.memberId ?? "").trim();
-  if (!taskId || !memberId) return null;
+/** Atomic record write: temp file + rename. Throws on failure — never silent. */
+function writeRecord(record: BackgroundTaskRecord): void {
+  const final = taskJsonPath(record.sessionDir);
+  const tmp = `${final}.tmp`;
+  writeFileSync(tmp, JSON.stringify(record, null, 2), "utf-8");
+  renameSync(tmp, final);
+}
+
+// -- Validation ----------------------------------------------------------
+
+export interface InvalidRecord {
+  path: string;
+  reason: string;
+}
+
+/**
+ * Strict validation: every enum field must be a known value, timestamps ISO
+ * strings, memberId must match the owning member. The record's sessionDir is
+ * replaced by the directory the file was actually found in — file contents
+ * never decide write paths.
+ */
+function parseRecord(raw: any, foundDir: string, expectedMemberId: string): BackgroundTaskRecord | InvalidRecord {
+  const invalid = (reason: string): InvalidRecord => ({ path: taskJsonPath(foundDir), reason });
+  if (!raw || typeof raw !== "object") return invalid("not an object");
+  if (typeof raw.taskId !== "string" || !isValidBackgroundTaskId(raw.taskId)) return invalid(`bad taskId: ${String(raw.taskId)}`);
+  if (raw.memberId !== expectedMemberId) return invalid(`memberId mismatch: ${String(raw.memberId)}`);
+  if (!VALID_KINDS.has(raw.kind)) return invalid(`bad kind: ${String(raw.kind)}`);
+  if (!VALID_MODES.has(raw.sessionMode)) return invalid(`bad sessionMode: ${String(raw.sessionMode)}`);
+  if (!VALID_STATUSES.has(raw.status)) return invalid(`bad status: ${String(raw.status)}`);
+  if (typeof raw.startedAt !== "string" || Number.isNaN(Date.parse(raw.startedAt))) return invalid("bad startedAt");
+  if (raw.endedAt !== null && raw.endedAt !== undefined && (typeof raw.endedAt !== "string" || Number.isNaN(Date.parse(raw.endedAt)))) return invalid("bad endedAt");
+  if (isTerminalBackgroundTaskStatus(raw.status)) {
+    if (!raw.endedAt) return invalid(`terminal status ${raw.status} without endedAt`);
+    if (raw.status === "done" && typeof raw.result !== "string") return invalid("done without string result");
+    if (raw.status !== "done" && typeof raw.error !== "string") return invalid(`${raw.status} without string error`);
+  } else if (raw.result !== null && raw.result !== undefined) {
+    return invalid(`non-terminal status ${raw.status} with result`);
+  }
+  if (basename(foundDir) !== raw.taskId) return invalid(`taskId does not match directory name ${basename(foundDir)}`);
   return {
-    taskId,
-    kind: (["generic", "recall", "memorize"] as const).includes(raw.kind) ? raw.kind : "generic",
-    memberId,
-    scopeId: String(raw.scopeId ?? "").trim(),
-    sessionMode: raw.sessionMode === "new" || raw.sessionMode === "fork" ? raw.sessionMode : "new",
+    taskId: raw.taskId,
+    kind: raw.kind,
+    memberId: raw.memberId,
+    scopeId: typeof raw.scopeId === "string" ? raw.scopeId : "",
+    sessionMode: raw.sessionMode,
     prompt: typeof raw.prompt === "string" ? raw.prompt : "",
     snapshot: {
       model: raw.snapshot?.model ?? null,
       credentialId: raw.snapshot?.credentialId ?? null,
       thinkingLevel: raw.snapshot?.thinkingLevel ?? null,
     },
-    status: raw.status as BackgroundTaskStatus,
-    startedAt: String(raw.startedAt ?? new Date().toISOString()),
-    endedAt: raw.endedAt ? String(raw.endedAt) : null,
+    status: raw.status,
+    startedAt: raw.startedAt,
+    endedAt: raw.endedAt ?? null,
     result: typeof raw.result === "string" ? raw.result : null,
     error: typeof raw.error === "string" ? raw.error : null,
-    sessionDir: String(raw.sessionDir ?? ""),
-    parentSessionRef: raw.parentSessionRef ? String(raw.parentSessionRef) : null,
+    sessionDir: foundDir, // derived from disk layout, never from file contents
+    parentSessionRef: typeof raw.parentSessionRef === "string" ? raw.parentSessionRef : null,
   };
 }
 
-function writeRecord(record: BackgroundTaskRecord): void {
-  writeFileSync(taskJsonPath(record.sessionDir), JSON.stringify(record, null, 2), "utf-8");
+function basename(dir: string): string {
+  const parts = dir.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? "";
 }
 
-// -- Wait registry (in-process; concurrent + repeatable) ----------------
+/** Read + validate one record. Bad records log a diagnostic and read as absent. */
+function loadRecordAt(foundDir: string, expectedMemberId: string): BackgroundTaskRecord | null {
+  const p = taskJsonPath(foundDir);
+  if (!existsSync(p)) return null;
+  let raw: any;
+  try {
+    raw = JSON.parse(readFileSync(p, "utf-8"));
+  } catch (err) {
+    logger.error("background-tasks", "unreadable task record", { path: p, error: String(err) });
+    return null;
+  }
+  const parsed = parseRecord(raw, foundDir, expectedMemberId);
+  if ("reason" in parsed) {
+    logger.error("background-tasks", "invalid task record", { path: parsed.path, reason: parsed.reason });
+    return null;
+  }
+  return parsed;
+}
 
-type TerminalListener = (record: BackgroundTaskRecord) => void;
+// -- Wait registry (in-process; concurrent, repeatable, disposable) -------
+
+type TerminalListener = (record: BackgroundTaskRecord | null) => void;
 
 const terminalListeners = new Map<string, Set<TerminalListener>>();
 
@@ -106,23 +181,47 @@ function notifyTerminal(record: BackgroundTaskRecord): void {
   terminalListeners.delete(listenerKey(record.memberId, record.taskId));
 }
 
+export interface TerminalWait {
+  promise: Promise<BackgroundTaskRecord>;
+  /** Remove this waiter without affecting other waiters. Call on timeout/abort. */
+  dispose(): void;
+}
+
 /**
- * Resolves with the terminal record. Resolves immediately for tasks already
- * terminal. Multiple concurrent waiters all resolve; settling is one-shot —
- * later waiters read the stored terminal record immediately.
+ * Register a terminal waiter for an EXISTING task. Missing tasks resolve null
+ * immediately (never a forever-pending promise). Terminal tasks resolve the
+ * stored record immediately. Concurrent + repeatable: every waiter gets the
+ * record; no consumption. dispose() detaches a single waiter.
  */
-export function whenTerminal(memberId: string, taskId: string): Promise<BackgroundTaskRecord> {
+export function whenTerminal(memberId: string, taskId: string): TerminalWait {
   const existing = getBackgroundTask(memberId, taskId);
-  if (existing && isTerminalBackgroundTaskStatus(existing.status)) return Promise.resolve(existing);
-  return new Promise<BackgroundTaskRecord>((resolve) => {
+  if (!existing) {
+    return { promise: Promise.reject(new Error(`background task not found: ${taskId}`)), dispose: () => {} };
+  }
+  if (isTerminalBackgroundTaskStatus(existing.status)) {
+    return { promise: Promise.resolve(existing), dispose: () => {} };
+  }
+  let listener: TerminalListener;
+  const promise = new Promise<BackgroundTaskRecord>((resolve) => {
+    listener = (record) => resolve(record ?? getBackgroundTask(memberId, taskId)!);
     const key = listenerKey(memberId, taskId);
     let listeners = terminalListeners.get(key);
     if (!listeners) {
       listeners = new Set();
       terminalListeners.set(key, listeners);
     }
-    listeners.add(resolve);
+    listeners.add(listener);
   });
+  return {
+    promise,
+    dispose() {
+      const listeners = terminalListeners.get(listenerKey(memberId, taskId));
+      if (listeners) {
+        listeners.delete(listener);
+        if (listeners.size === 0) terminalListeners.delete(listenerKey(memberId, taskId));
+      }
+    },
+  };
 }
 
 // -- CRUD ---------------------------------------------------------------
@@ -133,17 +232,17 @@ export interface CreateBackgroundTaskInput {
   kind: BackgroundTaskKind;
   sessionMode: BackgroundSessionMode;
   prompt: string;
-  snapshot: BackgroundTaskRecord["snapshot"];
+  snapshot: BackgroundTaskSnapshot;
   parentSessionRef?: string | null;
 }
 
 export function createBackgroundTask(input: CreateBackgroundTaskInput): BackgroundTaskRecord {
   const startedAt = new Date().toISOString();
   const folder = dateFolder(startedAt);
-  let taskId = `bgt-${randomUUID().slice(0, 8)}`;
+  let taskId = `bgt-${randomUUID()}`;
   let dir = taskDir(input.memberId, folder, taskId);
   while (existsSync(dir)) {
-    taskId = `bgt-${randomUUID().slice(0, 8)}`;
+    taskId = `bgt-${randomUUID()}`;
     dir = taskDir(input.memberId, folder, taskId);
   }
   mkdirSync(dir, { recursive: true });
@@ -168,17 +267,14 @@ export function createBackgroundTask(input: CreateBackgroundTaskInput): Backgrou
 }
 
 export function getBackgroundTask(memberId: string, taskId: string): BackgroundTaskRecord | null {
+  if (!isValidBackgroundTaskId(taskId)) return null;
   const root = backgroundTasksRoot(memberId);
   if (!existsSync(root)) return null;
-  // taskId is unique per member; scan the (few) date folders to locate it.
+  // taskId is unique per member; scan the date folders to locate it.
   for (const folder of readdirSync(root)) {
-    const p = taskJsonPath(join(root, folder, taskId));
-    if (!existsSync(p)) continue;
-    try {
-      return normalizeRecord(JSON.parse(readFileSync(p, "utf-8")));
-    } catch {
-      return null; // unreadable record: treated as absent; never guessed around
-    }
+    const foundDir = join(root, folder, taskId);
+    if (!existsSync(taskJsonPath(foundDir))) continue;
+    return loadRecordAt(foundDir, memberId);
   }
   return null;
 }
@@ -196,14 +292,9 @@ export function listBackgroundTasks(memberId: string): BackgroundTaskRecord[] {
       continue;
     }
     for (const entry of entries) {
-      const p = taskJsonPath(join(folderDir, entry));
-      if (!existsSync(p)) continue;
-      try {
-        const record = normalizeRecord(JSON.parse(readFileSync(p, "utf-8")));
-        if (record) records.push(record);
-      } catch {
-        // unreadable record: skipped from listing, not fatal
-      }
+      if (!isValidBackgroundTaskId(entry)) continue;
+      const record = loadRecordAt(join(folderDir, entry), memberId);
+      if (record) records.push(record);
     }
   }
   records.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
@@ -218,8 +309,9 @@ export interface BackgroundTaskUpdate {
 
 /**
  * Single live transition path. Rejects illegal transitions and any write to a
- * terminal record; on success persists atomically (single writeFileSync) and
- * wakes concurrent waiters if the new status is terminal.
+ * terminal record; persists atomically and wakes concurrent waiters if the new
+ * status is terminal. Write failures throw — the caller must not report
+ * success when this throws.
  */
 export function updateBackgroundTask(
   memberId: string,
@@ -256,12 +348,13 @@ export function updateBackgroundTask(
   return next;
 }
 
-// -- Restart sweep ------------------------------------------------------
+// -- Restart sweep (service init only; never member reload) --------------
 
 /**
- * Startup-only: mark every non-terminal task of every member `interrupted`.
- * Records and already-terminal results are preserved; execution never resumes.
- * Returns the number of tasks marked interrupted.
+ * Service-startup-only: mark every non-terminal task of every member
+ * `interrupted`. Records and already-terminal results are preserved; execution
+ * never resumes. Invalid records are skipped with their diagnostic already
+ * logged — a bad record must not block startup.
  */
 export function sweepInterruptedBackgroundTasks(): number {
   const membersRoot = join(getBossmodeDir(), "members");
@@ -278,8 +371,12 @@ export function sweepInterruptedBackgroundTasks(): number {
           error: "interrupted by service restart; not resumed",
         });
         marked += 1;
-      } catch {
-        // unreadable/illegal record: leave on disk, do not block startup
+      } catch (err) {
+        logger.error("background-tasks", "restart sweep failed for task", {
+          memberId,
+          taskId: record.taskId,
+          error: String(err),
+        });
       }
     }
   }

@@ -1,6 +1,6 @@
 /**
- * Background task store (step 1): lifecycle records, task.json persistence,
- * UTC date folders, transition rules, wait registry, restart sweep.
+ * Background task store: lifecycle records, atomic task.json persistence,
+ * UTC date folders, strict validation, disposable waiters, restart sweep.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
@@ -10,6 +10,7 @@ import { join } from "node:path";
 let dir: string;
 let store: typeof import("../../src/engine/background-task-store.js");
 let registry: typeof import("../../src/workspace/member-registry.js");
+let loggerMod: typeof import("../../src/foundation/logger.js");
 
 function seed() {
   dir = mkdtempSync(join(tmpdir(), "bm-bgstore-"));
@@ -18,20 +19,20 @@ function seed() {
   vi.resetModules();
 }
 
+let errorSpy: ReturnType<typeof vi.spyOn> | null = null;
+
 beforeEach(async () => {
   seed();
   store = await import("../../src/engine/background-task-store.js");
   registry = await import("../../src/workspace/member-registry.js");
-  memberRegistered = false;
-  memberId = "";
+  loggerMod = await import("../../src/foundation/logger.js");
+  errorSpy = vi.spyOn(loggerMod.logger, "error");
 });
 
 afterEach(() => {
   delete process.env.BOSSMODE_DIR;
   rmSync(dir, { recursive: true, force: true });
 });
-
-const SNAPSHOT = { model: "test/model", credentialId: "cred-1", thinkingLevel: "medium" };
 
 let memberRegistered = false;
 let memberId = "";
@@ -42,29 +43,33 @@ function mkTask(overrides: Partial<Parameters<typeof store.createBackgroundTask>
     memberRegistered = true;
   }
   return store.createBackgroundTask({
-    memberId: memberId,
+    memberId,
     scopeId: "room:bgroom",
     kind: "recall",
     sessionMode: "fork",
     prompt: "collect memory",
-    snapshot: SNAPSHOT,
+    snapshot: { model: "test/model", credentialId: "cred-1", thinkingLevel: "medium" },
     ...overrides,
   });
 }
 
+function diagLogged(): boolean {
+  return (errorSpy?.mock.calls.length ?? 0) > 0;
+}
+
 describe("background task store", () => {
-  it("creates a task in a UTC date folder with the starting record on disk", () => {
+  it("creates a task in a UTC date folder with the starting record on disk (full-UUID id, no tmp leftover)", () => {
     const record = mkTask();
     expect(record.status).toBe("starting");
     expect(record.result).toBeNull();
-    expect(record.error).toBeNull();
-    // layout: members/<id>/background-tasks/<YYYY-MM-DD>/<taskId>/task.json
+    expect(record.taskId).toMatch(/^bgt-[0-9a-f-]{36}$/);
     const folder = record.startedAt.slice(0, 10);
     const expected = join(dir, "members", memberId, "background-tasks", folder, record.taskId, "task.json");
     expect(existsSync(expected)).toBe(true);
+    expect(existsSync(`${expected}.tmp`)).toBe(false); // atomic write left no temp behind
     const onDisk = JSON.parse(readFileSync(expected, "utf-8"));
     expect(onDisk.taskId).toBe(record.taskId);
-    expect(onDisk.snapshot).toEqual(SNAPSHOT);
+    expect(onDisk.snapshot).toEqual({ model: "test/model", credentialId: "cred-1", thinkingLevel: "medium" });
   });
 
   it("round-trips via getBackgroundTask and lists across date folders", () => {
@@ -72,11 +77,17 @@ describe("background task store", () => {
     const loaded = store.getBackgroundTask(memberId, a.taskId);
     expect(loaded?.prompt).toBe("collect memory");
     expect(loaded?.sessionMode).toBe("fork");
-    // same-member second task in same folder
     const b = mkTask({ kind: "memorize", sessionMode: "new" });
     const list = store.listBackgroundTasks(memberId);
     expect(list.map((t) => t.taskId).sort()).toEqual([a.taskId, b.taskId].sort());
     expect(store.getBackgroundTask("mem_other", a.taskId)).toBeNull();
+  });
+
+  it("rejects malformed task ids before any path use", () => {
+    const a = mkTask();
+    expect(store.getBackgroundTask(memberId, "../other-member")).toBeNull();
+    expect(store.getBackgroundTask(memberId, `${a.taskId}x`)).toBeNull();
+    expect(() => store.updateBackgroundTask(memberId, "../../etc", { status: "running" })).toThrow(/not found/);
   });
 
   it("runs the legal lifecycle starting→running→cancelling→cancelled and stamps endedAt", () => {
@@ -88,6 +99,15 @@ describe("background task store", () => {
     expect(done.error).toBe("cancelled by member");
     expect(done.endedAt).toBeTruthy();
     expect(store.getBackgroundTask(memberId, a.taskId)?.status).toBe("cancelled");
+  });
+
+  it("allows cancelling a starting task (cancel during initialization)", () => {
+    const a = mkTask();
+    const cancelled = store.updateBackgroundTask(memberId, a.taskId, { status: "cancelling", error: undefined });
+    expect(cancelled.status).toBe("cancelling");
+    const final = store.updateBackgroundTask(memberId, a.taskId, { status: "cancelled", error: "cancelled before start" });
+    expect(final.status).toBe("cancelled");
+    expect(final.error).toBe("cancelled before start");
   });
 
   it("allows cancelling→done when work finished before the cancel took effect, keeping the result", () => {
@@ -107,30 +127,43 @@ describe("background task store", () => {
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { error: "boom" })).toThrow(/terminal/);
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { status: "cancelled", error: "by request" })).toThrow(/illegal/);
     store.updateBackgroundTask(memberId, a.taskId, { status: "failed", error: "boom" });
-    // terminal is immutable
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { status: "done", result: "late" })).toThrow(/terminal/);
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { error: "again" })).toThrow(/terminal/);
-    // unknown task
     expect(() => store.updateBackgroundTask(memberId, "bgt-nope", { status: "running" })).toThrow(/not found/);
   });
 
-  it("whenTerminal resolves immediately for terminal tasks and concurrently for live ones", async () => {
+  it("whenTerminal: immediate for terminal, concurrent for live, repeatable, disposable per waiter", async () => {
     const a = mkTask();
     store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
-    const p1 = store.whenTerminal(memberId, a.taskId);
-    const p2 = store.whenTerminal(memberId, a.taskId); // concurrent waiter
+    const w1 = store.whenTerminal(memberId, a.taskId);
+    const w2 = store.whenTerminal(memberId, a.taskId); // concurrent waiter
     let settled = 0;
-    void p1.then(() => { settled += 1; });
-    void p2.then(() => { settled += 1; });
+    void w1.promise.then(() => { settled += 1; });
+    void w2.promise.then(() => { settled += 1; });
     await Promise.resolve();
     expect(settled).toBe(0); // still pending while running
+
+    // a timed-out waiter disposes itself without touching the other waiter
+    const w3 = store.whenTerminal(memberId, a.taskId);
+    let settled3 = false;
+    void w3.promise.then(() => { settled3 = true; });
+    w3.dispose();
+    expect(settled3).toBe(false);
+
     store.updateBackgroundTask(memberId, a.taskId, { status: "done", result: "answer" });
-    const [r1, r2] = await Promise.all([p1, p2]);
+    const [r1, r2] = await Promise.all([w1.promise, w2.promise]);
     expect(r1.result).toBe("answer");
     expect(r2.result).toBe("answer");
-    // repeatable read: waiting again on a terminal task returns the stored record
-    const again = await store.whenTerminal(memberId, a.taskId);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled3).toBe(false); // disposed waiter never resolved
+    // repeatable read
+    const again = await store.whenTerminal(memberId, a.taskId).promise;
     expect(again.status).toBe("done");
+  });
+
+  it("whenTerminal for a missing task rejects instead of registering a forever-pending promise", async () => {
+    const w = store.whenTerminal(memberId, "bgt-00000000-0000-4000-8000-000000000000");
+    await expect(w.promise).rejects.toThrow(/not found/);
   });
 
   it("restart sweep marks non-terminal tasks interrupted and keeps terminal records untouched", () => {
@@ -139,18 +172,18 @@ describe("background task store", () => {
     const cancelling = mkTask({ kind: "generic", sessionMode: "new" });
     store.updateBackgroundTask(memberId, cancelling.taskId, { status: "running" });
     store.updateBackgroundTask(memberId, cancelling.taskId, { status: "cancelling" });
+    const starting = mkTask();
     const finished = mkTask();
     store.updateBackgroundTask(memberId, finished.taskId, { status: "running" });
     store.updateBackgroundTask(memberId, finished.taskId, { status: "done", result: "kept" });
 
     const marked = store.sweepInterruptedBackgroundTasks();
-    expect(marked).toBe(2);
+    expect(marked).toBe(3); // running + cancelling + starting
     expect(store.getBackgroundTask(memberId, live.taskId)?.status).toBe("interrupted");
     expect(store.getBackgroundTask(memberId, live.taskId)?.error).toContain("restart");
-    expect(store.getBackgroundTask(memberId, cancelling.taskId)?.status).toBe("interrupted");
+    expect(store.getBackgroundTask(memberId, starting.taskId)?.status).toBe("interrupted");
     expect(store.getBackgroundTask(memberId, finished.taskId)?.status).toBe("done");
     expect(store.getBackgroundTask(memberId, finished.taskId)?.result).toBe("kept");
-    // sweep is idempotent
     expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
   });
 
@@ -159,12 +192,56 @@ describe("background task store", () => {
     expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
   });
 
-  it("skips unreadable task.json without crashing listing or sweep", () => {
+  it("treats corrupt records as absent with a diagnostic (no guessed defaults)", () => {
     const a = mkTask();
     const p = join(a.sessionDir, "task.json");
     writeFileSync(p, "{ not json", "utf-8");
     expect(store.listBackgroundTasks(memberId)).toEqual([]);
-    expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
     expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+    expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
+    expect(diagLogged()).toBe(true);
+  });
+
+  it("rejects records with unknown enum values or member mismatch instead of normalizing them", () => {
+    const a = mkTask();
+    const p = join(a.sessionDir, "task.json");
+    const raw = JSON.parse(readFileSync(p, "utf-8"));
+    // unknown kind
+    writeFileSync(p, JSON.stringify({ ...raw, kind: "mystery" }), "utf-8");
+    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+    // unknown status
+    writeFileSync(p, JSON.stringify({ ...raw, status: "paused" }), "utf-8");
+    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+    // wrong member ownership
+    writeFileSync(p, JSON.stringify({ ...raw, memberId: "mem_other" }), "utf-8");
+    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+    // forged sessionDir in contents must not leak into the loaded record
+    writeFileSync(p, JSON.stringify({ ...raw, sessionDir: "/tmp/elsewhere" }), "utf-8");
+    const loaded = store.getBackgroundTask(memberId, a.taskId);
+    expect(loaded?.sessionDir).toBe(a.sessionDir);
+    expect(diagLogged()).toBe(true);
+  });
+
+  it("terminal records missing their terminal evidence fail validation", () => {
+    const a = mkTask();
+    store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
+    store.updateBackgroundTask(memberId, a.taskId, { status: "failed", error: "boom" });
+    const p = join(a.sessionDir, "task.json");
+    const raw = JSON.parse(readFileSync(p, "utf-8"));
+    writeFileSync(p, JSON.stringify({ ...raw, error: null }), "utf-8"); // failed without error
+    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+  });
+
+  it("a leftover .tmp file never shadows the last valid record", () => {
+    const a = mkTask();
+    store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
+    // simulated crash mid-write: garbage in the temp file, rename never happened
+    writeFileSync(join(a.sessionDir, "task.json.tmp"), "{ partial", "utf-8");
+    const loaded = store.getBackgroundTask(memberId, a.taskId);
+    expect(loaded?.status).toBe("running");
+    // next successful write replaces both record and temp cleanly
+    store.updateBackgroundTask(memberId, a.taskId, { status: "done", result: "ok" });
+    expect(store.getBackgroundTask(memberId, a.taskId)?.result).toBe("ok");
+    expect(existsSync(join(a.sessionDir, "task.json.tmp"))).toBe(false);
   });
 });

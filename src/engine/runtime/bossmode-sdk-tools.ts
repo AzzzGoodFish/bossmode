@@ -40,10 +40,11 @@ function truncate(text: string): string {
  *  registered so the fork prefix is unchanged; only execution is rejected). */
 const BACKGROUND_FORBIDDEN_TOOLS = new Set([
   "chat",
+  "wait",
   "background_start",
   "recall",
   "memorize",
-]);
+]);;
 
 export function createBossmodeSdkTools(opts: {
   roomId: string;
