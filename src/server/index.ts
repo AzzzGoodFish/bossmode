@@ -24,6 +24,7 @@ import { runRoomAttachmentsMigrationOnStartup } from "../workspace/room-attachme
 import { initProjection } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
+import { sweepInterruptedBackgroundTasks } from "../engine/background-task-store.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
@@ -181,6 +182,16 @@ export function startServer(opts: ServerOptions): Promise<void> {
     runRoomAttachmentsMigrationOnStartup();
   } catch (err) {
     logger.error("server", "identity-memory-v1 startup migration failed", { error: String(err) });
+  }
+
+  // Background tasks: service-startup-only sweep. Non-terminal tasks from a
+  // previous daemon run are marked interrupted (terminal; never resumed).
+  // Runs exactly here — never on member reload or session rebuild.
+  try {
+    const marked = sweepInterruptedBackgroundTasks();
+    if (marked > 0) logger.info("server", "background tasks marked interrupted by restart", { marked });
+  } catch (err) {
+    logger.error("server", "background task restart sweep failed", { error: String(err) });
   }
 
   // Warm the credential-less pi model catalog cache (provider list, model metadata) so
