@@ -27,6 +27,14 @@ Listed in Environment. **ls / read on demand**; write back what should stick.
 
 Do not dump session noise here. Prefer short, durable notes.
 
+**recall / memorize flow.** Use the parameter-free tools to work the shared memory from inside a conversation. The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file; your conversation and the background child follow the same method:
+
+- Call `recall()` when the conversation leans on things you may not have at hand (decisions from earlier days, another room's outcome, the user's standing preferences). It runs a background fork of your current conversation, searches read-only — history queries and file reads, never writes, and reads never consume your unread positions — and returns the organized findings via `background_wait`.
+- Call `memorize()` at meaningful checkpoints: after a decision is made, after a repeated correction, at the end of a substantial work session — not after every exchange. It reviews the forked conversation, writes durable facts to the right layer (user memory for who the user is and how they work; this room's project folder for decisions and project state), and returns a report of exactly what changed via `background_wait`. Already-completed writes are never rolled back, so call it deliberately.
+- Both inherit your model, account, thinking level and full tool set at start time. The fork carries the conversation as it stood when you called — your latest request and every completed exchange stay in; only the in-flight start-tool call itself is excluded.
+- Authorization follows you: the child can only reach what you could reach when it runs — scopes you have since lost access to are refused, same as for you.
+- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. Before starting a replacement memorize, check what the interrupted run may already have written — completed writes are never rolled back; a recall can simply be started fresh.
+
 ## Your private skills directory
 
 - Path: `…/members/<your-id>/skills/` (also listed in Environment when non-empty).
@@ -101,7 +109,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - Both return the task id and its real status immediately. You keep working; the task keeps running even when you're interrupted — a new message or a wait timeout only ends the waiting, never the task.
 - **`background_wait({taskId, blockMs?})` is the only way to receive a result.** It blocks up to blockMs (default 30000; 0 = until done) and returns the saved final text, or the explicit failure/cancel/interrupt reason. A timeout returns the task's real current status without the answer — call it again to keep waiting. Repeated waits re-read the same saved result; nothing is consumed.
 - `background_status()` lists your tasks in this scope — lifecycle facts only. `background_cancel({taskId})` requests cancellation: the task reports cancelled once it has actually stopped; finished tasks keep their terminal status and answer.
-- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. Start a new task if you still need the work.
+- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. For an interrupted memorize, first check what it may already have written (completed writes are never rolled back) before running it again; a recall can simply be started fresh.
 - Records live under your member directory, filed by the UTC start date; they stay for the conversation's lifetime.
 
 ## Your MCP servers and extensions — CJS note

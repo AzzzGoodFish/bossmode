@@ -53,6 +53,11 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
     if (!parent) return null;
     return roomStore.resolveRoomMemberRef(parent, agentName);
   }
+  if (roomId.startsWith("room:")) {
+    // Background child sessions bind tools with the full scope id; the roster
+    // is keyed by the bare room id.
+    return roomStore.resolveRoomMemberRef(roomId.slice("room:".length), agentName);
+  }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
 
@@ -68,7 +73,12 @@ function resolveReadTarget(
   actor: { id: string; name: string },
   scopeParam: unknown,
 ): { ok: true; roomId: string } | { ok: false; error: string } {
-  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") return { ok: true, roomId: currentRoomId };
+  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") {
+    // Background child sessions bind tools with the full "room:<id>" scope id;
+    // message stores key by the bare room id.
+    const target = currentRoomId.startsWith("room:") ? currentRoomId.slice("room:".length) : currentRoomId;
+    return { ok: true, roomId: target };
+  }
   const scopeId = String(scopeParam).trim();
   try {
     const access = assertMemberScopeAccess(actor.id, scopeId);
@@ -309,11 +319,20 @@ function resolveCallerMemberId(roomId: string, agentName: string): string {
   return agentName;
 }
 
+export interface ToolExecutionContext {
+  /** "background" = background task child session: same tool implementations,
+   *  but side effects that belong to the LIVE member conversation are
+   *  suppressed — history queries must not advance the member's unread
+   *  cursor (read-to-clear is a live-turn behavior only). */
+  execution?: "live" | "background";
+}
+
 export async function handleToolCallback(
   tool: string,
   roomId: string,
   agentName: string,
   params: Record<string, any>,
+  context?: ToolExecutionContext,
 ): Promise<unknown> {
   logger.info("callback", "tool-callback", { tool, room: roomId, agent: agentName });
 
@@ -447,7 +466,11 @@ export async function handleToolCallback(
       // member's own room advances the delivery cursor to the furthest message
       // seen — the unread hint disappears on the next activation. Cross-scope
       // reads and DM (which has no backlog semantics) never touch the cursor.
-      if (!targetRoomId.startsWith("dm:") && !targetRoomId.startsWith("topic:") && targetRoomId === roomId && messages.length > 0) {
+      // Background child sessions never advance the cursor: the read is an
+      // internal lookup, not the member reading their room — unread
+      // positions must survive recall/memorize runs.
+      const isBackgroundRead = context?.execution === "background";
+      if (!isBackgroundRead && !targetRoomId.startsWith("dm:") && !targetRoomId.startsWith("topic:") && targetRoomId === roomId && messages.length > 0) {
         let maxSeq = -1;
         let maxMsg: RoomMessage | null = null;
         for (const m of messages) {

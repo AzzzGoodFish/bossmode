@@ -57,16 +57,18 @@ export function backgroundActivationPrompt(kind: BackgroundTaskKind, prompt: str
   if (kind === "recall") {
     return [
       "Background recall task — you are the same member working privately in a background session; the chat and wait tools are unavailable here by design.",
-      "Find what the current conversation needs from the shared memory assets: the room's project memory directory, the user memory directory, and this scope's full message history (query_room_messages works here; history reads never consume unread positions).",
-      "Organize the relevant facts, decisions and open items you find, citing where each came from. If something is genuinely not recorded, say so plainly — never invent.",
+      "This task is READ-ONLY: find and organize; never modify memory assets and never do memorize's work on the side (write tools remain available for reading purposes only — the read-only rule is procedural, not a sandbox).",
+      "Follow the shared memory method (bossmode-guide references/memory.md): determine what the current conversation needs, look at the existing directories and records first without assuming project names, search this scope's full message history (query_room_messages works here; background reads never consume unread positions) and the memory dirs with file tools.",
+      "Report the relevant facts, decisions and open items with their sources; separate facts from proposals, rejected approaches and historical authorizations — a past authorization is not a new license. State uncertainty where it exists; if something is genuinely not recorded, say so plainly. Never invent.",
       "Do not post any chat message. Return your findings as your final text; it is delivered verbatim as the task result through background_wait.",
     ].join("\n");
   }
   if (kind === "memorize") {
     return [
       "Background memorize task — you are the same member working privately in a background session; the chat and wait tools are unavailable here by design.",
-      "Review the conversation you forked from and maintain the shared memory assets: record durable facts, decisions and open items in the right layer (user memory for who the user is and how they work; project memory for this room's decisions and state), keeping each file current rather than duplicating.",
-      "Report exactly what you changed: each file touched and what was added or updated. Already-completed writes are never rolled back, so make each edit deliberate.",
+      "Follow the shared memory method (bossmode-guide references/memory.md): read the original text before maintaining it, compare source and time, never overwrite a newer conclusion, never duplicate an existing record.",
+      "Keep the layer rules: member persona for identity and working rules, reusable skills for procedures, user memory for who the user is and how they work, this project's memory for decisions and state — do not flatten everything into project notes. Distinguish facts, proposals and rejected approaches.",
+      "Report every file you actually changed and what changed; if some writes fail or the run ends partway, report the partial state honestly. After a successful run, add a brief maintenance-completion time in the project memory — no coverage ledgers, no second bookkeeping database.",
       "Do not post any chat message. Return your change report as your final text; it is delivered verbatim as the task result through background_wait.",
     ].join("\n");
   }

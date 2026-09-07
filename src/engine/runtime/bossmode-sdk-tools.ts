@@ -68,7 +68,7 @@ export function createBossmodeSdkTools(opts: {
       throw new Error(`tool "${tool}" is not available inside a background task; finish the task and return the result as your final text`);
     }
     const { handleToolCallback } = await import("../tools.js");
-    return handleToolCallback(tool, opts.roomId, opts.agentName, params);
+    return handleToolCallback(tool, opts.roomId, opts.agentName, params, { execution: opts.execution });
   };
 
   const tools: ToolDefinition[] = [
