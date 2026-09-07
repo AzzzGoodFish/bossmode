@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -28,28 +28,26 @@ describe("session-store", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("clearSession removes resume metadata and preserves runtime", () => {
+  it("writes one member current.json reference and reset removes only that reference", () => {
     const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
+    const archive = join(tempDir, "members", "rm_pm", "sessions", "2026-09-07", "rooms", room.id, "session.jsonl");
+    mkdirSync(join(archive, ".."), { recursive: true });
+    writeFileSync(archive, "{\"type\":\"session\"}\n", "utf8");
 
-    sessionStore.saveSession(room.id, "pm", {
-      runtime: "pi-cli",
-      sessionId: "session-123",
-      sessionFile: "/tmp/session.json",
-    });
+    sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive });
+    expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({ rm_pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive } });
 
-    sessionStore.clearSession(room.id, "pm", "pi-cli");
-
-    expect(sessionStore.getSessions(room.id).pm).toEqual({ runtime: "pi-cli" });
+    sessionStore.clearSession(room.id, "rm_pm", "pi-cli");
+    expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({});
+    expect(readFileSync(archive, "utf8")).toBe("{\"type\":\"session\"}\n");
   });
 
-  it("deleteSessionEntry removes a legacy session key", () => {
-    const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
+  it("keeps member scope references independent", () => {
+    sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli", sessionId: "room" });
+    sessionStore.saveSession("dm:rm_pm", "rm_pm", { runtime: "pi-cli", sessionId: "dm" });
+    sessionStore.deleteSessionEntry("room:room_a", "rm_pm");
 
-    sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "current" });
-    sessionStore.saveSession(room.id, "pm", { runtime: "pi-cli", sessionId: "legacy" });
-
-    sessionStore.deleteSessionEntry(room.id, "pm");
-
-    expect(sessionStore.getSessions(room.id)).toEqual({ rm_pm: { runtime: "pi-cli", sessionId: "current" } });
+    expect(sessionStore.getCurrentSession("rm_pm", "room:room_a")).toBeUndefined();
+    expect(sessionStore.getCurrentSession("rm_pm", "dm:rm_pm")).toMatchObject({ sessionId: "dm" });
   });
 });

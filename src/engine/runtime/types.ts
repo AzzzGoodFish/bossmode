@@ -57,6 +57,10 @@ export interface CreateAgentOpts {
 
   // Session resume
   resumeSession?: { sessionId?: string; sessionFile?: string };
+  /** Member-owned directory for a newly created main session. Ignored on resume. */
+  sessionDir?: string;
+  /** A just-forked main-session manager. It must not be re-opened before first append. */
+  sessionManager?: unknown;
   // SDK session id when the runtime exposes one (background runner records it;
   // live sessions report identity through onSessionChanged instead).
   readonly sessionId?: string;

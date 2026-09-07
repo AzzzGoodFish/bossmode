@@ -27,6 +27,8 @@ Listed in Environment. **ls / read on demand**; write back what should stick.
 
 Do not dump session noise here. Prefer short, durable notes.
 
+For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read memory. The session search commands and limits are in `scripts/session-search.mjs`; it is read-only and uses the member directory already provided in your environment.
+
 **recall / memorize flow.** Use the parameter-free tools to work the shared memory from inside a conversation. The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file; your conversation and the background child follow the same method:
 
 - Call `recall()` when the conversation leans on things you may not have at hand (decisions from earlier days, another room's outcome, the user's standing preferences). It runs a background fork of your current conversation, searches read-only — history queries and file reads, never writes, and reads never consume your unread positions — and returns the organized findings via `background_wait`.

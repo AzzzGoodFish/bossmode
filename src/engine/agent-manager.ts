@@ -14,6 +14,7 @@ import { getBossmodeDir, readConfig } from "../shared/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
+import { mainSessionDirectory } from "../workspace/member-session-paths.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
 import { parseMentions, parseUrgentMentions, initRouter } from "../communication/router.js";
@@ -870,6 +871,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     let skills: string[];
     let skillPaths: string[] = [];
     let resumeSession: { sessionId?: string; sessionFile?: string } | undefined;
+    let sessionDir: string | undefined;
+    let forkSessionManager: unknown;
     let onSessionChanged: ((session: { sessionId?: string; sessionFile?: string }) => void) | undefined;
     let callbacks: Parameters<typeof runtime.createAgent>[0]["callbacks"];
 
@@ -916,6 +919,10 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
       keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
+      sessionDir = mainSessionDirectory(memberId, dmScopeId);
+      const savedSession = sessionStore.getSessions(dmScopeId, memberId)[memberId];
+      resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
+      onSessionChanged = (session) => sessionStore.saveSession(dmScopeId, memberId, { runtime: member.runtime, ...session });
       logLabel = "dmAgentCreated";
       errLabel = "dm";
       const dmKey = key;
@@ -997,7 +1004,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       } catch {
         sessionResumeEnabled = true;
       }
-      const sessions = sessionStore.getSessions(ref.roomId);
+      const sessions = sessionStore.getSessions(ref.roomId, memberId);
       const savedSession = sessions[memberId];
       resumeSession = (sessionResumeEnabled && savedSession)
         ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
@@ -1006,6 +1013,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         logger.info("agent", "resumeSession", { member: member.name, runtime: member.runtime, sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile });
       }
       cwd = activeWorkspaceRoot(memberId);
+      sessionDir = mainSessionDirectory(memberId, `room:${ref.roomId}`);
       roomMembers = r.members;
       keyRoomId = ref.roomId;
       logLabel = "agentCreated";
@@ -1088,6 +1096,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       clearStaleMounts(scopeId, memberId);
       skills = resolveSkills(member, agentDef);
       cwd = activeWorkspaceRoot(memberId);
+      sessionDir = mainSessionDirectory(memberId, scopeId);
       roomMembers = r.members;
       keyRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
       logLabel = "topicAgentCreated";
@@ -1114,6 +1123,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         });
         if (fork.mode === "fork" && fork.sessionFile) {
           resumeSession = { sessionId: fork.sessionId, sessionFile: fork.sessionFile };
+          forkSessionManager = fork.sessionManager;
           if (fork.prefixSummary && topicRec && !topicRec.guideText?.includes(fork.prefixSummary.slice(0, 40))) {
             const { buildTopicGuideText } = await import("../workspace/topic-store.js");
             topicRec.guideText = buildTopicGuideText({
@@ -1164,6 +1174,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         skillNames: skills,
         roomMembers,
         resumeSession,
+        sessionDir,
+        sessionManager: forkSessionManager,
         onSessionChanged,
         callbacks,
       });
@@ -2262,7 +2274,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const resolved = resolveRoomMember(roomId, memberRef);
   const memberId = resolved?.id || memberRef;
   const agentName = resolved?.name || memberRef;
-  const sessions = sessionStore.getSessions(roomId);
+  const sessions = sessionStore.getSessions(roomId, memberId);
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
   const runtime = sessions[memberId]?.runtime || instance?.handle.runtimeName || "pi-cli";

@@ -898,7 +898,7 @@ export class PiSdkRuntime implements AgentRuntime {
 
     const defaultAgentDir = resolvePiAgentDir(opts.roomId, opts.member.id);
     const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
-    const sessionDir = opts.background?.sessionDir ?? join(runtimeAgentDir, "sessions");
+    const sessionDir = opts.background?.sessionDir ?? opts.sessionDir ?? join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
@@ -917,11 +917,10 @@ export class PiSdkRuntime implements AgentRuntime {
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
-    if (opts.background?.sessionManager) {
-      // Fork mode: the runner already forked the parent prefix, applied the
-      // cut, and hands the manager over. Never re-open the file — the branch
-      // move only persists on the next append.
-      sessionManager = opts.background.sessionManager;
+    if (opts.background?.sessionManager || opts.sessionManager) {
+      // A forked manager has an in-memory branch cut. Never re-open its file
+      // before the first append, or the SDK would restore the old leaf.
+      sessionManager = (opts.background?.sessionManager ?? opts.sessionManager) as SessionManager;
     } else
     try {
       const resumeFile = opts.resumeSession?.sessionFile;

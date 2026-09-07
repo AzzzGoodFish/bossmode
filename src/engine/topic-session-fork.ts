@@ -5,25 +5,22 @@
  *
  * Degradation: no room session / empty / fork failure → { mode: "fresh" }.
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { logger } from "../foundation/logger.js";
-import { getSessions } from "../workspace/session-store.js";
-import { roomDir } from "../workspace/room-store.js";
+import { getCurrentSession, mainSessionDirectory, saveCurrentSession } from "../workspace/session-store.js";
 import type { TopicSeedMode } from "../workspace/topic-store.js";
 
 export interface TopicForkResult {
   mode: TopicSeedMode;
   sessionFile?: string;
   sessionId?: string;
+  /** The cut manager is handed to the first topic activation without re-open. */
+  sessionManager?: SessionManager;
   /** Extractive prefix summary used in the topic guide. */
   prefixSummary: string;
   reason?: string;
-}
-
-function topicSessionsPath(parentRoomId: string, topicId: string): string {
-  return join(roomDir(parentRoomId), "topics", topicId, "sessions.json");
 }
 
 export function saveTopicSession(
@@ -32,14 +29,8 @@ export function saveTopicSession(
   memberId: string,
   session: { sessionId?: string; sessionFile?: string },
 ): void {
-  const path = topicSessionsPath(parentRoomId, topicId);
-  mkdirSync(dirname(path), { recursive: true });
-  let all: Record<string, { sessionId?: string; sessionFile?: string }> = {};
-  try {
-    if (existsSync(path)) all = JSON.parse(readFileSync(path, "utf-8"));
-  } catch { /* start empty */ }
-  all[memberId] = session;
-  writeFileSync(path, JSON.stringify(all, null, 2), "utf-8");
+  void parentRoomId; // scope identity is topic-owned; room history is not an archive dependency.
+  saveCurrentSession(memberId, `topic:${topicId}`, { runtime: "pi-sdk", ...session });
 }
 
 export function getTopicSession(
@@ -47,14 +38,8 @@ export function getTopicSession(
   topicId: string,
   memberId: string,
 ): { sessionId?: string; sessionFile?: string } | undefined {
-  const path = topicSessionsPath(parentRoomId, topicId);
-  if (!existsSync(path)) return undefined;
-  try {
-    const all = JSON.parse(readFileSync(path, "utf-8"));
-    return all[memberId];
-  } catch {
-    return undefined;
-  }
+  void parentRoomId;
+  return getCurrentSession(memberId, `topic:${topicId}`);
 }
 
 function userTextFromEntry(entry: any): string {
@@ -130,7 +115,7 @@ export function forkRoomSessionPrefix(args: {
     return { mode: "fresh", prefixSummary: "", reason: "seedMode=fresh" };
   }
 
-  const saved = getSessions(args.parentRoomId)[args.memberId];
+  const saved = getCurrentSession(args.memberId, `room:${args.parentRoomId}`);
   const sourceFile = saved?.sessionFile;
   if (!sourceFile || !existsSync(sourceFile)) {
     logger.info("topic", "fork degraded: no room session", {
@@ -149,7 +134,7 @@ export function forkRoomSessionPrefix(args: {
       return { mode: "fresh", prefixSummary: "", reason: "no-forkable-entry" };
     }
 
-    const sessionDir = join(roomDir(args.parentRoomId), "topics", args.topicId, "sessions");
+    const sessionDir = mainSessionDirectory(args.memberId, `topic:${args.topicId}`);
     mkdirSync(sessionDir, { recursive: true });
 
     // forkFrom writes a NEW file under sessionDir (room file untouched).
@@ -172,11 +157,7 @@ export function forkRoomSessionPrefix(args: {
     const prefixEntries = typeof source.getBranch === "function" ? source.getBranch(leafId) : entries;
     const prefixSummary = extractPrefixSummary(prefixEntries);
 
-    let sessionId: string | undefined;
-    try {
-      const opened = SessionManager.open(forkedPath, sessionDir, args.cwd);
-      sessionId = opened.getSessionId?.();
-    } catch { /* optional */ }
+    const sessionId = forked.getSessionId?.() || (forked as any).sessionId;
 
     saveTopicSession(args.parentRoomId, args.topicId, args.memberId, {
       sessionId,
@@ -190,7 +171,7 @@ export function forkRoomSessionPrefix(args: {
       leafId,
       sessionFile: forkedPath,
     });
-    return { mode: "fork", sessionFile: forkedPath, sessionId, prefixSummary };
+    return { mode: "fork", sessionFile: forkedPath, sessionId, sessionManager: forked, prefixSummary };
   } catch (err) {
     logger.warn("topic", "fork failed, degrading to fresh", {
       parentRoomId: args.parentRoomId,

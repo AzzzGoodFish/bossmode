@@ -6,6 +6,7 @@ import type { IncomingMessage } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
+import { clearCurrentSession } from "../workspace/session-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
@@ -256,6 +257,9 @@ addRoute("DELETE", "/api/rooms/:id", async (_req, res, params) => {
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
+  }
+  for (const member of room.roomMembers ?? []) {
+    if (member.sourceMemberId) clearCurrentSession(member.sourceMemberId, `room:${params.id}`);
   }
   roomStore.deleteRoom(params.id);
   sendJson(res, 200, { ok: true });

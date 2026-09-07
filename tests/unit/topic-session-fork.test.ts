@@ -137,7 +137,8 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
     expect(r.sessionFile).toBeTruthy();
     expect(r.sessionFile).not.toBe(srcFile);
     expect(existsSync(r.sessionFile!)).toBe(true);
-    expect(r.sessionFile).toContain(join("topics", "topic_fork", "sessions"));
+    expect(r.sessionFile).toContain(join("members", "rm_dev", "sessions"));
+    expect(r.sessionFile).toContain(join("topics", "topic_fork"));
     expect(r.prefixSummary).toMatch(/flaky test|User:/);
     // Room source file still exists untouched (at least same path).
     expect(existsSync(srcFile!)).toBe(true);
