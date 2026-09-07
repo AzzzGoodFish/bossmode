@@ -57,8 +57,22 @@ export interface CreateAgentOpts {
 
   // Session resume
   resumeSession?: { sessionId?: string; sessionFile?: string };
+  // SDK session id when the runtime exposes one (background runner records it;
+  // live sessions report identity through onSessionChanged instead).
+  readonly sessionId?: string;
   // Called whenever runtime reports session identity (initial + later changes after compact/fork)
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
+
+  /** Background task child session variant. Same assembly path and prompt
+   *  sources as a live member session; differences: the session writes into the
+   *  task directory, scope-posting/background-start tools are rejected at
+   *  execution time, member session state is not overwritten, and (fork mode,
+   *  Codex provider) the child's HTTP session-id header may inherit the parent
+   *  value for prefix-cache reuse. */
+  background?: {
+    sessionDir: string;
+    inheritCodexSessionIdFrom?: string;
+  };
 }
 
 export interface AgentCallbacks {

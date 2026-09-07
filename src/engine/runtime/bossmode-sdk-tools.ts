@@ -36,15 +36,30 @@ function truncate(text: string): string {
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
 }
 
+/** Tools forbidden inside a background task session (same declarations stay
+ *  registered so the fork prefix is unchanged; only execution is rejected). */
+const BACKGROUND_FORBIDDEN_TOOLS = new Set([
+  "chat",
+  "background_start",
+  "recall",
+  "memorize",
+]);
+
 export function createBossmodeSdkTools(opts: {
   roomId: string;
   agentName: string;
   roomMembers: string[];
   /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
   scopeKind?: "dm" | "room";
+  /** "background" = background task child session: same tool declarations, but
+   *  scope-posting and background-start tools are rejected at execution time. */
+  execution?: "live" | "background";
 }): ToolDefinition[] {
   const scopeKind = opts.scopeKind || "room";
   const call = async (tool: string, params: Record<string, any>) => {
+    if (opts.execution === "background" && BACKGROUND_FORBIDDEN_TOOLS.has(tool)) {
+      throw new Error(`tool "${tool}" is not available inside a background task; finish the task and return the result as your final text`);
+    }
     const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, opts.roomId, opts.agentName, params);
   };
