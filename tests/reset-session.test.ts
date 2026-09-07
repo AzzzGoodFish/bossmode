@@ -196,7 +196,7 @@ describe("resetAgentSession", () => {
 
     expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
     expect(mockHandle.destroy).toHaveBeenCalledTimes(1);
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "pm", "pi-cli");
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "pm", "pi-cli");
     expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "pm", null);
     expect(appendEventToDisk).toHaveBeenCalledWith(
       "room1",
@@ -237,9 +237,9 @@ describe("resetAgentSession", () => {
 
     resetAgentSession("room1", "architect");
 
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room1", "rm_architect", "pi-cli");
-    expect(sessionStore.clearSession).not.toHaveBeenCalledWith("room1", "architect", expect.any(String));
-    expect(sessionStore.deleteSessionEntry).toHaveBeenCalledWith("room1", "architect");
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "rm_architect", "pi-cli");
+    expect(sessionStore.clearSession).not.toHaveBeenCalledWith("room:room1", "architect", expect.any(String));
+    expect(sessionStore.deleteSessionEntry).toHaveBeenCalledWith("room:room1", "architect");
     expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "rm_architect", null);
     expect(roomStore.setCursor).not.toHaveBeenCalledWith("room1", "architect", null);
     expect(roomStore.deleteCursor).toHaveBeenCalledWith("room1", "architect");
