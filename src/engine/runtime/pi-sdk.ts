@@ -348,7 +348,7 @@ function assistantHasToolCalls(message: any): boolean {
   return Array.isArray(message?.content) && message.content.some((c: any) => c?.type === "toolCall");
 }
 
-class PiSdkAgentHandle implements AgentHandle {
+export class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
   /** SDK session id (background runner records it; live path reports via onSessionChanged). */
@@ -360,6 +360,7 @@ class PiSdkAgentHandle implements AgentHandle {
   private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionOutcome: { aborted: boolean } | null = null;
   private destroyed = false;
+  private destroyPromise: Promise<void> | null = null;
   private backgroundCleanup: (() => void) | undefined;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
@@ -586,40 +587,76 @@ class PiSdkAgentHandle implements AgentHandle {
   }
 
   destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    try { this.backgroundCleanup?.(); } catch {}
-    try { this.abort(); } catch {}
-    try {
-      if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
-        this.session.extensionRunner.emit({ type: "session_shutdown" } as any).catch((err: any) => {
-          logger.warn("runtime:pi-sdk", "extension session_shutdown failed", { error: err.message || String(err) });
-        });
-      }
-    } catch {}
-    try { this.unsubscribeSession?.(); } catch {}
-    try { this.session.dispose(); } catch {}
-    this.listeners.clear();
+    // Same single teardown path; void callers just don't await the settlement.
+    void this.destroyAndWait();
   }
 
+  /** Idempotent awaitable teardown: every caller awaits the SAME settlement
+   *  (repeated calls wait for the first, they never return early while the
+   *  first teardown is still in flight). Collection covers every surface the
+   *  SDK actually exposes: the session's own abort (which awaits waitForIdle),
+   *  extension session_shutdown handler failures (delivered via onError —
+   *  emit() catches handler throws and never rejects), emit failure itself,
+   *  and the synchronous dispose (registered resource cleanups, e.g. provider
+   *  session caches — AggregateError on failure). Each stage runs even when an
+   *  earlier one fails; all errors are aggregated into one throw at the end. */
   async destroyAndWait(): Promise<void> {
-    if (this.destroyed) return;
-    this.destroyed = true;
+    if (!this.destroyPromise) {
+      this.destroyed = true;
+      this.destroyPromise = this.runTeardown();
+    }
+    return this.destroyPromise;
+  }
+
+  private async runTeardown(): Promise<void> {
+    const errors: string[] = [];
     try { this.backgroundCleanup?.(); } catch {}
-    try { this.abort(); } catch {}
+    // The SDK's AgentSession.abort() awaits waitForIdle itself — awaiting ITS
+    // promise here is the awaitable run-end, unlike the void handle.abort().
     try {
-      if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
-        await this.session.extensionRunner.emit({ type: "session_shutdown" } as any);
-      }
+      await this.session.abort();
     } catch (err: any) {
-      throw new Error(`extension session_shutdown failed: ${err?.message || String(err)}`);
+      errors.push(`abort: ${err?.message || String(err)}`);
+    }
+    try {
+      if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
+      this.session.abortCompaction();
+      this.session.abortBranchSummary();
+    } catch {}
+    const runner: any = this.session.extensionRunner;
+    if (typeof runner?.hasHandlers === "function" && runner.hasHandlers("session_shutdown")) {
+      // Handler failures surface via onError ({extensionPath, event, error}),
+      // never as emit() rejections — collect them for THIS shutdown only.
+      const shutdownErrors: string[] = [];
+      const off = typeof runner.onError === "function"
+        ? runner.onError((e: any) => {
+            if (e?.event === "session_shutdown") shutdownErrors.push(`${e?.extensionPath ?? "extension"}: ${e?.error ?? "unknown error"}`);
+          })
+        : null;
+      try {
+        await runner.emit({ type: "session_shutdown" } as any);
+      } catch (err: any) {
+        errors.push(`session_shutdown emit: ${err?.message || String(err)}`);
+      } finally {
+        try { off?.(); } catch {}
+      }
+      errors.push(...shutdownErrors);
     }
     try { this.unsubscribeSession?.(); } catch {}
-    // Synchronous SDK teardown; throws AggregateError when a registered
-    // resource cleanup (e.g. provider session caches) fails — that throw IS
-    // the observable, confirmable failure surface.
-    this.session.dispose();
+    // Always runs, even when earlier stages failed. dispose() is synchronous
+    // and throws AggregateError when a registered resource cleanup fails.
+    try {
+      this.session.dispose();
+    } catch (err: any) {
+      const detail = err instanceof AggregateError && Array.isArray(err.errors)
+        ? err.errors.map((e: any) => e?.message || String(e)).join(", ")
+        : err?.message || String(err);
+      errors.push(`dispose: ${detail}`);
+    }
     this.listeners.clear();
+    if (errors.length > 0) {
+      throw new Error(`teardown incomplete (${errors.length}): ${errors.join("; ")}`);
+    }
   }
 
   async waitForIdle(): Promise<void> {
@@ -957,76 +994,93 @@ export class PiSdkRuntime implements AgentRuntime {
     // tools like web_search/fetch_content). MCP is gated by whether its adapter
     // is in additionalExtensionPaths, not by a create-time name list.
     let backgroundCleanup: (() => void) | null = null;
-    const { session } = await createAgentSession({
-      cwd: opts.cwd,
-      agentDir: runtimeAgentDir,
-      modelRuntime: runtime,
-      model,
-      thinkingLevel: (opts.member.thinkingLevel || "off") as any,
-      resourceLoader,
-      sessionManager,
-      settingsManager,
-      customTools,
-      // Batch 7 P2: one-shot bash is retired — persistent shells replace it.
-      excludeTools: ["bash"],
-    });
+    // Once the SDK session exists, any later failure (MCP bind, setModel,
+    // registration) must not leak it — dispose before rethrowing.
+    let sessionObtained: AgentSession | null = null;
+    try {
+      const { session } = await createAgentSession({
+        cwd: opts.cwd,
+        agentDir: runtimeAgentDir,
+        modelRuntime: runtime,
+        model,
+        thinkingLevel: (opts.member.thinkingLevel || "off") as any,
+        resourceLoader,
+        sessionManager,
+        settingsManager,
+        customTools,
+        // Batch 7 P2: one-shot bash is retired — persistent shells replace it.
+        excludeTools: ["bash"],
+      });
+      sessionObtained = session;
 
-    authStorageCredentials.followSession(() => session.model);
-    await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
+      authStorageCredentials.followSession(() => session.model);
+      await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
 
-    if (appendConfiguredModelChange) {
-      await session.setModel(model);
-    }
-
-    if (!opts.background) {
-      opts.onSessionChanged?.({ sessionId: session.sessionId, sessionFile: session.sessionFile });
-    } else if (opts.background.inheritCodexSessionIdFrom && provider === "openai-codex") {
-      const registration = registerCodexSessionHeaderInheritance(session.sessionId, opts.background.inheritCodexSessionIdFrom);
-      if (registration) {
-        backgroundCleanup = () => registration.release();
-      } else {
-        logger.warn("runtime:pi-sdk", "codex session-id inheritance unavailable; background child runs with its own header", {
-          agent: opts.member.name,
-        });
+      if (appendConfiguredModelChange) {
+        await session.setModel(model);
       }
-    }
 
-    const runtimeParams: AgentRuntimeParams = {
-      model: resolvedModel,
-      thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
-      // Panel metadata: bossmode-composed segments only (never pi built-in text).
-      systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
-      skills: opts.skillNames ?? skillPaths,
-      extensions: ["bossmode-sdk-tools", ...activeExtensionPaths],
-      credentialId: piConfig.profile?.id,
-      credentialName: piConfig.profile?.name,
-    };
-    const handle = new PiSdkAgentHandle(
-      session,
-      modelRegistry,
-      authStorageCredentials,
-      resourceLoader,
-      extensionPaths,
-      baseTools,
-      runtimeParams,
-      customTools.map((t) => t.name),
-      { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
-      backgroundCleanup ?? undefined,
-    );
-    this.handles.add(handle);
-    logger.info("runtime:pi-sdk", "createAgent", {
-      agent: opts.member.name,
-      model: resolvedModel,
-      thinking: runtimeParams.thinkingLevel,
-      skills: skillPaths.length,
-      transport: transportSettings.transport,
-      websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
-      httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
-      piSdkVersion: PI_SDK_VERSION,
-      mcpEnabled: mcpSettings.enabled,
-      mcpServers: mcpSettings.serverNames,
-    });
-    return handle;
+      if (!opts.background) {
+        opts.onSessionChanged?.({ sessionId: session.sessionId, sessionFile: session.sessionFile });
+      } else if (opts.background.inheritCodexSessionIdFrom && provider === "openai-codex") {
+        const registration = registerCodexSessionHeaderInheritance(session.sessionId, opts.background.inheritCodexSessionIdFrom);
+        if (registration) {
+          backgroundCleanup = () => registration.release();
+        } else {
+          logger.warn("runtime:pi-sdk", "codex session-id inheritance unavailable; background child runs with its own header", {
+            agent: opts.member.name,
+          });
+        }
+      }
+
+      const runtimeParams: AgentRuntimeParams = {
+        model: resolvedModel,
+        thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
+        // Panel metadata: bossmode-composed segments only (never pi built-in text).
+        systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
+        skills: opts.skillNames ?? skillPaths,
+        extensions: ["bossmode-sdk-tools", ...activeExtensionPaths],
+        credentialId: piConfig.profile?.id,
+        credentialName: piConfig.profile?.name,
+      };
+      const handle = new PiSdkAgentHandle(
+        session,
+        modelRegistry,
+        authStorageCredentials,
+        resourceLoader,
+        extensionPaths,
+        baseTools,
+        runtimeParams,
+        customTools.map((t) => t.name),
+        { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
+        backgroundCleanup ?? undefined,
+      );
+      this.handles.add(handle);
+      logger.info("runtime:pi-sdk", "createAgent", {
+        agent: opts.member.name,
+        model: resolvedModel,
+        thinking: runtimeParams.thinkingLevel,
+        skills: skillPaths.length,
+        transport: transportSettings.transport,
+        websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
+        httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
+        piSdkVersion: PI_SDK_VERSION,
+        mcpEnabled: mcpSettings.enabled,
+        mcpServers: mcpSettings.serverNames,
+      });
+      return handle;
+    } catch (err) {
+      if (sessionObtained) {
+        try { backgroundCleanup?.(); } catch {}
+        try { sessionObtained.dispose(); } catch (disposeErr: any) {
+          logger.error("runtime:pi-sdk", "post-failure session dispose also failed", {
+            agent: opts.member.name,
+            error: disposeErr?.message || String(disposeErr),
+          });
+        }
+      }
+      throw err;
+    }
   }
 
   async shutdownAll(): Promise<void> {

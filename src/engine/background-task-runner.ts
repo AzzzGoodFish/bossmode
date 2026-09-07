@@ -358,8 +358,17 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
       return settle({ status: "failed", error: `child run failed: ${String((promptError as Error)?.message || promptError)}${cleanupError ? `; ${cleanupError}` : ""}` });
     }
     const text = collected.text;
+    if (cleanupError) {
+      // Cleanup confirmed failed: the task does NOT report success. The work
+      // may already have taken effect (writes are never rolled back) — the
+      // reason says so explicitly.
+      const note = text !== null && text.trim().length > 0
+        ? "; the child produced a final text, discarded because cleanup could not be confirmed; any writes it made may already be in effect"
+        : "";
+      return settle({ status: "failed", error: `${cleanupError}${note}` });
+    }
     if (text === null || text.trim().length === 0) {
-      return settle({ status: "failed", error: `child session ended without a successful final text${cleanupError ? `; ${cleanupError}` : ""}` });
+      return settle({ status: "failed", error: "child session ended without a successful final text" });
     }
     return settle({ status: "done", result: text });
   } finally {

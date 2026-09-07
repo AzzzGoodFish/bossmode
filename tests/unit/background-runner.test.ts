@@ -326,15 +326,16 @@ describe("background runner + tool dispatch", () => {
     expect(record?.result).toBe("DONE TEXT");
   });
 
-  it("a confirmed cleanup failure reaches non-done terminal reasons and the error log", async () => {
-    (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { throw new Error("ws pool refused to close"); });
+  it("a confirmed cleanup failure fails the task — no success claim, applied changes noted", async () => {
+    (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { throw new Error("teardown incomplete (1): dispose: ws pool refused to close"); });
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
     if (!started.ok) return;
     await runToCompletion();
     const record = store.getBackgroundTask(memberId, started.taskId);
-    // done keeps the real result; the cleanup failure is observable via the error log
-    expect(record?.status).toBe("done");
-    expect(record?.result).toBe("THE ANSWER");
+    expect(record?.status).toBe("failed");
+    expect(record?.result).toBeNull();
+    expect(record?.error).toContain("ws pool refused to close");
+    expect(record?.error).toContain("may already be in effect");
   });
 
   it("background_wait: timeout returns the real non-terminal status without the answer; repeat read after done", async () => {
