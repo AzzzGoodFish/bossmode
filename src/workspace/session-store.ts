@@ -7,9 +7,11 @@ import type { AgentSession } from "../shared/types.js";
 export type MainScopeId = `room:${string}` | `dm:${string}` | `topic:${string}`;
 type CurrentSessions = Record<string, AgentSession>;
 
-function scopeId(scope: string): MainScopeId {
-  if (scope.startsWith("room:") || scope.startsWith("dm:") || scope.startsWith("topic:")) return scope as MainScopeId;
-  return `room:${scope}`;
+function scopeId(scope: string, memberId: string): MainScopeId {
+  if (/^room:[^/]+$/.test(scope) || /^topic:[^/]+$/.test(scope)) return scope as MainScopeId;
+  if (scope === `dm:${memberId}`) return scope as MainScopeId;
+  if (!scope.includes(":")) return `room:${scope}`;
+  throw new Error(`Invalid member session scope: ${scope}`);
 }
 
 function currentPath(memberId: string): string {
@@ -21,9 +23,10 @@ function readCurrent(memberId: string): CurrentSessions {
   if (!existsSync(path)) return {};
   try {
     const value = JSON.parse(readFileSync(path, "utf-8"));
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch {
-    return {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
+    return value;
+  } catch (error) {
+    throw new Error(`Invalid member session current.json for ${memberId}: ${String(error)}`);
   }
 }
 
@@ -39,20 +42,29 @@ export { mainSessionDirectory } from "./member-session-paths.js";
 
 /** Returns the member's one authoritative current reference for this scope. */
 export function getCurrentSession(memberId: string, scope: string): AgentSession | undefined {
-  return readCurrent(memberId)[scopeId(scope)];
+  const session = readCurrent(memberId)[scopeId(scope, memberId)];
+  if (!session?.sessionFile) return session;
+  const root = resolve(memberDir(memberId));
+  const absolute = resolve(root, session.sessionFile);
+  if (!absolute.startsWith(root + "/")) throw new Error(`Invalid session path in current.json for ${memberId}`);
+  return { ...session, sessionFile: absolute };
 }
 
 /** Atomically commits a reference only after the SDK has created/opened its session. */
 export function saveCurrentSession(memberId: string, scope: string, session: AgentSession): void {
+  const root = resolve(memberDir(memberId));
+  const id = scopeId(scope, memberId);
+  const file = session.sessionFile ? resolve(session.sessionFile) : undefined;
+  if (file && !file.startsWith(root + "/")) throw new Error(`Session file must be inside member archive: ${file}`);
   const all = readCurrent(memberId);
-  all[scopeId(scope)] = session;
+  all[id] = { ...session, sessionFile: file ? relative(root, file) : undefined };
   writeCurrent(memberId, all);
 }
 
 /** Reset/delete only removes the reference. The SDK JSONL is deliberately retained. */
 export function clearCurrentSession(memberId: string, scope: string): void {
   const all = readCurrent(memberId);
-  const id = scopeId(scope);
+  const id = scopeId(scope, memberId);
   if (!(id in all)) return;
   delete all[id];
   writeCurrent(memberId, all);
@@ -65,8 +77,7 @@ export const deleteCurrentSession = clearCurrentSession;
  * Compatibility-shaped API used by agent-manager while storage is now member-owned.
  * `scope` may be a raw room id only for callers that already provide `memberId`.
  */
-export function getSessions(scope: string, memberId?: string): Record<string, AgentSession> {
-  if (!memberId) return {};
+export function getSessions(scope: string, memberId: string): Record<string, AgentSession> {
   const session = getCurrentSession(memberId, scope);
   return session ? { [memberId]: session } : {};
 }

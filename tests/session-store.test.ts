@@ -36,10 +36,19 @@ describe("session-store", () => {
 
     sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive });
     expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({ rm_pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive } });
+    const raw = JSON.parse(readFileSync(join(tempDir, "members", "rm_pm", "sessions", "current.json"), "utf8"));
+    expect(raw[`room:${room.id}`].sessionFile).toBe(`sessions/2026-09-07/rooms/${room.id}/session.jsonl`);
 
     sessionStore.clearSession(room.id, "rm_pm", "pi-cli");
     expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({});
     expect(readFileSync(archive, "utf8")).toBe("{\"type\":\"session\"}\n");
+  });
+
+  it("refuses to overwrite a malformed current.json", () => {
+    const path = join(tempDir, "members", "rm_pm", "sessions");
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, "current.json"), "not json", "utf8");
+    expect(() => sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli" })).toThrow(/Invalid member session current.json/);
   });
 
   it("keeps member scope references independent", () => {
