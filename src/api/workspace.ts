@@ -1139,6 +1139,9 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, param
   try {
     const { destroyTopicInstances } = await import("../engine/agent-manager.js");
     destroyTopicInstances(topic.id);
+    for (const member of roomStore.getRoomMembers(params.id)) {
+      if (member.sourceMemberId) clearCurrentSession(member.sourceMemberId, `topic:${topic.id}`);
+    }
   } catch (err) {
     logger.warn("api", "destroy topic instances failed", { topicId: topic.id, error: String(err) });
   }

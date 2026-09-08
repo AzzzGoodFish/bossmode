@@ -13,6 +13,8 @@ import {
   MOCK_MEMBER_CREDENTIAL_ID,
 } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
 vi.mock("../../src/workforce/member-store.js", () => ({
@@ -38,11 +40,13 @@ setupConfigMock();
 describe("Acceptance: topic rc.7 trio", () => {
   let ts: TestServer;
   let token: string;
+  let memberId: string;
 
   beforeAll(async () => {
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
-    await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    memberId = JSON.parse(created.body).member.memberId;
   });
   afterAll(async () => {
     if (ts) await closeTestServer(ts);
@@ -83,8 +87,18 @@ describe("Acceptance: topic rc.7 trio", () => {
     }
     expect(participants.length).toBeGreaterThan(0);
 
+    const { mainSessionDirectory } = await import("../../src/workspace/member-session-paths.js");
+    const { saveCurrentSession, getCurrentSession } = await import("../../src/workspace/session-store.js");
+    const archiveDir = mainSessionDirectory(memberId, `topic:${topic.id}`, new Date("2026-09-08T00:00:00Z"));
+    mkdirSync(archiveDir, { recursive: true });
+    const archiveFile = join(archiveDir, "preserved.jsonl");
+    writeFileSync(archiveFile, '{"type":"session","id":"topic-old","timestamp":"2026-09-08T00:00:00Z"}\n');
+    saveCurrentSession(memberId, `topic:${topic.id}`, { runtime: "pi-sdk", sessionId: "topic-old", sessionFile: archiveFile });
+
     const closed = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/close`, { token });
     expect(closed.status).toBe(200);
+    expect(getCurrentSession(memberId, `topic:${topic.id}`)).toBeUndefined();
+    expect(existsSync(archiveFile)).toBe(true);
 
     const roomMsgs = JSON.parse((await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages`, { token })).body);
     const card = roomMsgs.find((m: any) => m.type === "topic_event" && m.topic_event_meta?.action === "closed");
