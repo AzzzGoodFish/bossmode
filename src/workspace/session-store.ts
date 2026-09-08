@@ -100,12 +100,19 @@ export function saveCurrentSession(memberId: string, scopeValue: string, session
   all[scope] = session;
   writeCurrent(memberId, all);
 }
-export function clearCurrentSession(memberId: string, scopeValue: string): void {
-  const scope = canonicalScope(scopeValue, memberId);
+export function clearCurrentSessions(memberId: string, scopeValues: string[]): void {
+  const scopes = scopeValues.map((scope) => canonicalScope(scope, memberId));
   const all = readCurrent(memberId);
-  if (!(scope in all)) return;
-  delete all[scope];
-  writeCurrent(memberId, all);
+  let changed = false;
+  for (const scope of scopes) {
+    if (!(scope in all)) continue;
+    delete all[scope];
+    changed = true;
+  }
+  if (changed) writeCurrent(memberId, all);
+}
+export function clearCurrentSession(memberId: string, scopeValue: string): void {
+  clearCurrentSessions(memberId, [scopeValue]);
 }
 export const deleteCurrentSession = clearCurrentSession;
 export function getSessions(scope: string, memberId: string): Record<string, AgentSession> {

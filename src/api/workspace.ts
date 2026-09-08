@@ -6,7 +6,8 @@ import type { IncomingMessage } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
-import { clearCurrentSession } from "../workspace/session-store.js";
+import * as memberRegistry from "../workspace/member-registry.js";
+import { clearCurrentSession, clearCurrentSessions } from "../workspace/session-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
@@ -771,6 +772,18 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params)
     }
   } catch { /* ignore */ }
 
+  if (globalMemberId) {
+    try {
+      clearCurrentSessions(globalMemberId, [
+        `room:${params.id}`,
+        ...topicStore.listTopics(params.id).map((topic) => `topic:${topic.id}`),
+      ]);
+    } catch (err) {
+      sendJson(res, 500, { error: "Member current-session cleanup failed", memberId: globalMemberId, detail: String(err) });
+      return;
+    }
+  }
+
   const removed = roomStore.removeRoomMemberByRef(params.id, params.memberRef, { globalMemberId });
   if (!removed.ok) {
     sendJson(res, 404, { error: removed.error });
@@ -1136,14 +1149,29 @@ addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, param
     logger.warn("api", "topic close FYI failed", { topicId: topic.id, error: String(err) });
   }
 
+  const cleanupFailures: Array<{ target: string; error: string }> = [];
   try {
     const { destroyTopicInstances } = await import("../engine/agent-manager.js");
     destroyTopicInstances(topic.id);
-    for (const member of roomStore.getRoomMembers(params.id)) {
-      if (member.sourceMemberId) clearCurrentSession(member.sourceMemberId, `topic:${topic.id}`);
-    }
   } catch (err) {
-    logger.warn("api", "destroy topic instances failed", { topicId: topic.id, error: String(err) });
+    cleanupFailures.push({ target: "active-instances", error: String(err) });
+  }
+  for (const member of memberRegistry.listMembers()) {
+    try {
+      clearCurrentSession(member.id, `topic:${topic.id}`);
+    } catch (err) {
+      cleanupFailures.push({ target: member.id, error: String(err) });
+    }
+  }
+  if (cleanupFailures.length) {
+    logger.error("api", "topic closed with incomplete session cleanup", { topicId: topic.id, cleanupFailures });
+    sendJson(res, 500, {
+      error: "Topic closed but current-session cleanup was incomplete",
+      topic,
+      scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }),
+      cleanupFailures,
+    });
+    return;
   }
 
   sendJson(res, 200, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });

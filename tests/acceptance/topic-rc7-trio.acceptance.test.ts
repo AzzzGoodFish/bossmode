@@ -88,17 +88,34 @@ describe("Acceptance: topic rc.7 trio", () => {
     expect(participants.length).toBeGreaterThan(0);
 
     const { mainSessionDirectory } = await import("../../src/workspace/member-session-paths.js");
-    const { saveCurrentSession, getCurrentSession } = await import("../../src/workspace/session-store.js");
+    const { saveCurrentSession, getCurrentSession, clearCurrentSession } = await import("../../src/workspace/session-store.js");
     const archiveDir = mainSessionDirectory(memberId, `topic:${topic.id}`, new Date("2026-09-08T00:00:00Z"));
     mkdirSync(archiveDir, { recursive: true });
     const archiveFile = join(archiveDir, "preserved.jsonl");
     writeFileSync(archiveFile, '{"type":"session","id":"topic-old","timestamp":"2026-09-08T00:00:00Z"}\n');
     saveCurrentSession(memberId, `topic:${topic.id}`, { runtime: "pi-sdk", sessionId: "topic-old", sessionFile: archiveFile });
+    const roomArchiveDir = mainSessionDirectory(memberId, `room:${room.id}`, new Date("2026-09-08T00:00:00Z"));
+    mkdirSync(roomArchiveDir, { recursive: true });
+    const roomArchiveFile = join(roomArchiveDir, "room.jsonl");
+    writeFileSync(roomArchiveFile, '{"type":"session","id":"room-current","timestamp":"2026-09-08T00:00:00Z"}\n');
+    saveCurrentSession(memberId, `room:${room.id}`, { runtime: "pi-sdk", sessionId: "room-current", sessionFile: roomArchiveFile });
+    const siblingId = "topic-sibling";
+    const siblingDir = mainSessionDirectory(memberId, `topic:${siblingId}`, new Date("2026-09-08T00:00:00Z"));
+    mkdirSync(siblingDir, { recursive: true });
+    const siblingFile = join(siblingDir, "sibling.jsonl");
+    writeFileSync(siblingFile, '{"type":"session","id":"sibling-current","timestamp":"2026-09-08T00:00:00Z"}\n');
+    saveCurrentSession(memberId, `topic:${siblingId}`, { runtime: "pi-sdk", sessionId: "sibling-current", sessionFile: siblingFile });
+    const backgroundFile = join(archiveDir, "..", "..", "..", "..", "background-tasks", "2026-09-08", "task", "session.jsonl");
+    mkdirSync(join(backgroundFile, ".."), { recursive: true });
+    writeFileSync(backgroundFile, "background unchanged\n");
 
     const closed = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/close`, { token });
     expect(closed.status).toBe(200);
     expect(getCurrentSession(memberId, `topic:${topic.id}`)).toBeUndefined();
+    expect(getCurrentSession(memberId, `room:${room.id}`)?.sessionId).toBe("room-current");
+    expect(getCurrentSession(memberId, `topic:${siblingId}`)?.sessionId).toBe("sibling-current");
     expect(existsSync(archiveFile)).toBe(true);
+    expect(existsSync(backgroundFile)).toBe(true);
 
     const roomMsgs = JSON.parse((await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/messages`, { token })).body);
     const card = roomMsgs.find((m: any) => m.type === "topic_event" && m.topic_event_meta?.action === "closed");
@@ -107,6 +124,42 @@ describe("Acceptance: topic rc.7 trio", () => {
     expect(fyi).toBeTruthy();
     expect(fyi.needResponse).toEqual([]);
     expect(fyi.replyTo).toEqual({ seq: card.seq, messageId: card.id });
+
+    clearCurrentSession(memberId, `topic:${siblingId}`);
+    const departedAnchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "departed member topic" } })).body);
+    const departedTopicResult = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, { token, body: { anchorMessageId: departedAnchor.id, title: "Departed" } });
+    expect(departedTopicResult.status).toBe(201);
+    const departedTopicId = JSON.parse(departedTopicResult.body).topic.id;
+    const departedDir = mainSessionDirectory(memberId, `topic:${departedTopicId}`, new Date("2026-09-08T00:00:00Z"));
+    mkdirSync(departedDir, { recursive: true });
+    const departedFile = join(departedDir, "departed.jsonl");
+    writeFileSync(departedFile, '{"type":"session","id":"departed-current","timestamp":"2026-09-08T00:00:00Z"}\n');
+    saveCurrentSession(memberId, `topic:${departedTopicId}`, { runtime: "pi-sdk", sessionId: "departed-current", sessionFile: departedFile });
+
+    const removed = await jsonRequest(ts.port, "DELETE", `/api/rooms/${room.id}/members/${memberId}`, { token });
+    expect(removed.status).toBe(200);
+    expect(getCurrentSession(memberId, `room:${room.id}`)).toBeUndefined();
+    expect(getCurrentSession(memberId, `topic:${departedTopicId}`)).toBeUndefined();
+    expect(existsSync(roomArchiveFile)).toBe(true);
+    expect(existsSync(siblingFile)).toBe(true);
+    expect(existsSync(departedFile)).toBe(true);
+    expect(existsSync(backgroundFile)).toBe(true);
+  });
+
+  it("returns an explicit failure when a member current reference cannot be cleaned", async () => {
+    const room = await makeRoom("close-cleanup-error");
+    const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "anchor" } })).body);
+    const { topic } = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, { token, body: { anchorMessageId: anchor.id } })).body);
+    const { mainSessionDirectory } = await import("../../src/workspace/member-session-paths.js");
+    const sessionDir = mainSessionDirectory(memberId, `topic:${topic.id}`, new Date("2026-09-08T00:00:00Z"));
+    mkdirSync(sessionDir, { recursive: true });
+    const currentPath = join(sessionDir, "..", "..", "..", "current.json");
+    writeFileSync(currentPath, "not-json\n");
+    const closed = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/close`, { token });
+    expect(closed.status).toBe(500);
+    expect(JSON.parse(closed.body)).toMatchObject({ error: "Topic closed but current-session cleanup was incomplete" });
+    expect(JSON.parse(closed.body).cleanupFailures).toEqual(expect.arrayContaining([expect.objectContaining({ target: memberId })]));
+    writeFileSync(currentPath, "{}\n");
   });
 
   it("member_status shows a working topic slice", async () => {
