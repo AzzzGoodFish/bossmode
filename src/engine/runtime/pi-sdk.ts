@@ -362,6 +362,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   private destroyPromise: Promise<void> | null = null;
   /** Called once only after every SDK teardown surface succeeded. */
   private onTeardownSuccess: (() => void) | undefined;
+  private sessionReferencePublished = false;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
   private toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string };
@@ -378,6 +379,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     bossmodeToolNames: Iterable<string>,
     toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
     onTeardownSuccess?: () => void,
+    private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
   ) {
     this.runtimeParams = runtimeParams;
     this.sessionId = session.sessionId;
@@ -385,6 +387,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
+      this.publishSessionReferenceIfMaterialized();
       this.observeCompactionWatchdog(raw);
       if (this.manualCompactionOutcome && (raw.type === "compaction_start" || raw.type === "compaction_end") && raw.reason === "manual") {
         if (raw.type === "compaction_start" && this.manualCompactionOutcome.aborted) {
@@ -396,6 +399,15 @@ export class PiSdkAgentHandle implements AgentHandle {
       const mapped = mapPiAgentEvent(raw);
       if (mapped) this.emit(mapped);
     });
+    this.publishSessionReferenceIfMaterialized();
+  }
+
+  private publishSessionReferenceIfMaterialized(): void {
+    if (this.sessionReferencePublished || !this.onSessionMaterialized) return;
+    const sessionFile = this.session.sessionFile;
+    if (!sessionFile || !existsSync(sessionFile)) return;
+    this.onSessionMaterialized({ sessionId: this.session.sessionId, sessionFile });
+    this.sessionReferencePublished = true;
   }
 
   private emit(event: AgentStreamEvent): void {
@@ -574,6 +586,7 @@ export class PiSdkAgentHandle implements AgentHandle {
         next = await this.afterWatchdogRun(settled);
       }
     } finally {
+      this.publishSessionReferenceIfMaterialized();
       this.watchdogTurn = null;
     }
   }
@@ -1042,10 +1055,6 @@ export class PiSdkRuntime implements AgentRuntime {
         await session.setModel(model);
       }
 
-      if (!opts.background) {
-        opts.onSessionChanged?.({ sessionId: session.sessionId, sessionFile: session.sessionFile });
-      }
-
       const runtimeParams: AgentRuntimeParams = {
         model: resolvedModel,
         thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
@@ -1069,6 +1078,7 @@ export class PiSdkRuntime implements AgentRuntime {
         customTools.map((t) => t.name),
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
         () => this.handles.delete(handle),
+        opts.background ? undefined : opts.onSessionChanged,
       );
       this.handles.add(handle);
       logger.info("runtime:pi-sdk", "createAgent", {

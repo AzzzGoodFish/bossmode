@@ -2281,11 +2281,10 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const ref = parseScopeId(scopeId);
   const resolved = ref?.kind === "room" ? resolveRoomMember(ref.roomId, memberRef) : undefined;
   const memberId = resolved?.id || memberRef;
-  const sessions = sessionStore.getSessions(scopeId, memberId);
   const key = instanceKey(scopeId, memberId);
   const instance = instances.get(key);
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
-  const runtime = sessions[memberId]?.runtime || instance?.handle.runtimeName || "pi-cli";
+  const runtime = instance?.handle.runtimeName || "pi-cli";
 
   destroyInstance(scopeId, memberId);
   clearActivationSource(scopeId, memberId);

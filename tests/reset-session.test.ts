@@ -189,6 +189,13 @@ describe("resetAgentSession", () => {
     expect(sessionStore.saveSession).toHaveBeenCalledWith("room1", "rm_architect", expect.objectContaining({ sessionId: "session-123" }));
   });
 
+  it("explicit reset clears a missing-file reference without reading it", () => {
+    vi.mocked(sessionStore.getSessions).mockImplementation(() => { throw new Error("Session file referenced by current.json is missing"); });
+    expect(resetAgentSession("room1", "pm")).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
+    expect(sessionStore.getSessions).not.toHaveBeenCalled();
+    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "pm", "pi-cli");
+  });
+
   it("destroys instance, clears session, resets cursor to null, and emits system event", async () => {
     await activateAgent("room1", "pm");
 

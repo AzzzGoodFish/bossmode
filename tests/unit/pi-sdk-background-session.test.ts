@@ -4,7 +4,7 @@
  * - custom tool factory is built with execution:"background"
  * - member session identity is NOT reported via onSessionChanged
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,8 @@ const toolsFactory = vi.fn(() => [
   { name: "chat" },
 ]);
 const onSessionChanged = vi.fn();
+const sessionPrompt = vi.fn(async () => {});
+let sessionSubscriber: ((event: any) => void) | undefined;
 
 vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -122,11 +124,13 @@ describe("PiSdkRuntime background session variant", () => {
     dir = mkdtempSync(join(tmpdir(), "bossmode-pi-bg-"));
     exportedConfig = null;
     vi.clearAllMocks();
+    sessionSubscriber = undefined;
+    sessionPrompt.mockResolvedValue(undefined);
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: false } };
     createAgentSession.mockResolvedValue({
       session: {
-        subscribe: vi.fn(() => vi.fn()),
-        prompt: vi.fn(),
+        subscribe: vi.fn((subscriber: (event: any) => void) => { sessionSubscriber = subscriber; return vi.fn(); }),
+        prompt: sessionPrompt,
         abort: vi.fn(),
         abortCompaction: vi.fn(),
         abortBranchSummary: vi.fn(),
@@ -194,13 +198,27 @@ describe("PiSdkRuntime background session variant", () => {
     expect((runtime as any).handles.size).toBe(0);
   });
 
-  it("live sessions still report identity via onSessionChanged", async () => {
+  it("publishes a live session only after the SDK file materializes", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     await new PiSdkRuntime().createAgent(baseOpts({ onSessionChanged }));
-    expect(onSessionChanged).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "child-sdk-session-id" }),
-    );
+    expect(onSessionChanged).not.toHaveBeenCalled();
+    const file = join(dir, "task", "session.jsonl");
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, '{"type":"session"}\n');
+    sessionSubscriber?.({ type: "agent_start" });
+    expect(onSessionChanged).toHaveBeenCalledWith({ sessionId: "child-sdk-session-id", sessionFile: file });
+    sessionSubscriber?.({ type: "agent_end" });
+    expect(onSessionChanged).toHaveBeenCalledTimes(1);
     expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ execution: "live" }));
+  });
+
+  it("does not publish when the first live turn fails before the SDK file exists", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    sessionPrompt.mockRejectedValueOnce(new Error("cancelled before materialization"));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts({ onSessionChanged }));
+    await expect(handle.prompt("first")).rejects.toThrow("cancelled before materialization");
+    expect(onSessionChanged).not.toHaveBeenCalled();
   });
 });

@@ -59,6 +59,8 @@ describe("session-store", () => {
     const currentDir = join(tempDir, "members", "rm_pm", "sessions");
     writeFileSync(join(currentDir, "current.json"), JSON.stringify({ "room:room_a": { runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/rooms/room_a/missing.jsonl" } }));
     expect(() => sessionStore.getCurrentSession("rm_pm", "room:room_a")).toThrow(/is missing/);
+    sessionStore.clearCurrentSession("rm_pm", "room:room_a");
+    expect(sessionStore.getCurrentSession("rm_pm", "room:room_a")).toBeUndefined();
   });
 
   it("keeps member scope references independent", () => {
