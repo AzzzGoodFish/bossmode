@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 const script = join(process.cwd(), "scripts/migrate-member-sessions-v1.mjs");
@@ -109,6 +109,27 @@ describe("member session migration", () => {
     expect(JSON.parse(readFileSync(join(root, "migrations", "member-sessions-v1-recovery.json"), "utf8")).state).toBe("prepared");
     expect(run("--recover").at(-1)).toMatchObject({ exitCode: 0 });
     expect(() => readFileSync(join(root, "members", memberId, "sessions", "current.json"))).toThrow();
+  });
+
+  it("rejects symlinked legacy sources and target ancestors", () => {
+    const { memberId, source } = fixture();
+    const sourceLink = join(source, "..", "linked.jsonl");
+    symlinkSync(source, sourceLink);
+    const refsPath = join(root, "rooms", "room_a", "sessions.json");
+    writeFileSync(refsPath, JSON.stringify({ [memberId]: { runtime: "pi-sdk", sessionId: "sid", sessionFile: sourceLink } }));
+    let result = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8" });
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain("invalid-session-source");
+
+    writeFileSync(refsPath, JSON.stringify({ [memberId]: { runtime: "pi-sdk", sessionId: "sid", sessionFile: source } }));
+    const outside = mkdtempSync(join(tmpdir(), "session-target-outside-"));
+    const sessions = join(root, "members", memberId, "sessions");
+    mkdirSync(sessions, { recursive: true });
+    symlinkSync(outside, join(sessions, "2026-09-07"));
+    result = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8" });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("target ancestor is symlink");
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it("archives legacy member DM files without guessing a current session", () => {
