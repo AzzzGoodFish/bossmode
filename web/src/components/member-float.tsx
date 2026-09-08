@@ -479,6 +479,12 @@ function shortenAssetPath(p: string): string {
   return i > 0 ? `~${p.slice(i)}` : p;
 }
 
+/** For diagnostic text that EMBEDS a path (backend issues): shorten only the
+ * path token, keep the message wording verbatim — never eat the sentence. */
+function shortenIssueText(text: string): string {
+  return text.replace(/(^|\s)\S*?(\/\.bossmode\/)/g, "$1~$2");
+}
+
 function MemberExtensionRows({ extensions }: { extensions: MemberExtensionAsset[] }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [copyState, setCopyState] = useState<{ key: string; ok: boolean } | null>(null);
@@ -546,7 +552,7 @@ function MemberExtensionRows({ extensions }: { extensions: MemberExtensionAsset[
             {ext.issues.map((issue, i) => (
               <div key={i} className="flex items-center gap-1.5 pl-[18px] pr-0.5 pb-2 text-[11px] text-blocked">
                 <AlertTriangle size={11} className="shrink-0" />
-                <span>{shortenAssetPath(issue)}</span>
+                <span>{shortenIssueText(issue)}</span>
               </div>
             ))}
           </div>
