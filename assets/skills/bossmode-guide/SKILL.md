@@ -1,20 +1,20 @@
 ---
 name: bossmode-guide
-description: How to live in Bossmode — member.md, memory dirs, skills, archive fold. Read when unsure how to manage identity or environment.
+description: How to live in Bossmode — persona.md, memory dirs, skills, archive fold. Read when unsure how to manage identity or environment.
 ---
 
 # Bossmode environment guide
 
 Platform skill (read-only, shipped with bossmode). Use the **read** tool on this file when you need details. Do not try to edit the package copy.
 
-## Your identity — member.md
+## Your persona — persona.md
 
-- Path is in your Environment segment (`Your profile: …/member.md`).
-- Frontmatter fields `name` / `title` are **card metadata** (UI). They are not injected into your system prompt.
-- The free body after frontmatter **is** your persona. Prefer a `## Persona` section for who you are and how you work.
-- Grow it with the **edit** tool when the user teaches you something lasting. Keep the file under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
-- Birth state is empty body + name only. The first DM icebreaker is how you learn what you are for — then write it down.
-- Your `name` is the routing key (mentions, tasks, scope mapping). You cannot rename yourself — if a rename is truly needed, ask the user.
+- Path is in your Environment segment (`Your profile: …/persona.md`).
+- The entire file is your persona: plain Markdown, without frontmatter, a schema, or required headings.
+- Your name, title, and structured member configuration live in Bossmode's database. Writing them as text in persona.md does not change those fields.
+- Grow the file with the **edit** tool when the user teaches you something lasting. Keep it under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
+- Birth state is an empty file. The first DM icebreaker is how you learn what you are for — then write it down.
+- Use the current name shown in your environment for communication; the stable member ID identifies your records and scope membership.
 
 ## Shared memory (not injected)
 
@@ -52,7 +52,7 @@ For communication and decisions, search chat; for execution history, search your
 ## Archive fold (legacy notes)
 
 - If Environment shows **Legacy notes** under `…/members/<id>/archive/`, those files came from the old principles/mainline system.
-- When relevant: read → fold what is still true into `member.md` or shared memory → **delete the archive file** once folded.
+- When relevant: read → fold what is still true into `persona.md` or shared memory → **delete the archive file** once folded.
 - Empty archive → the legacy line disappears from Environment.
 
 ## Your MCP servers and extensions
@@ -120,17 +120,17 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 
 ## Reload (apply asset changes)
 
-- After editing `member.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.
+- After editing `persona.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.
 - Conversation history is preserved — reload is not a reset. Reset (staff action) starts a new current session but preserves the prior SDK JSONL in your archive; reload keeps using the current session.
 - Mid-run: reload queues and applies when your current turn finishes.
 
 ## Tools and chat
 
 - Room/DM replies only count when they go out via the **chat** tool (see Communication segment).
-- File tools (read/edit/write) and persistent shells are how you maintain member.md, skills, memory dirs, and anything else.
+- File tools (read/edit/write) and persistent shells are how you maintain persona.md, skills, memory dirs, and anything else.
 
 ## What not to do
 
-- Do not invent a second identity store. member.md is the source of truth.
+- Do not invent a second identity store. The database owns structured member identity; persona.md owns your persona.
 - Your own `mcp.json` and `extensions/` are yours to manage — but only add MCP servers and extensions you understand and trust. Anything that runs commands or fetches content can act with your full tool access.
 - Do not leave archive files forever "for later" if you already folded them.

@@ -49,7 +49,6 @@ describe("platform extensions.json retirement", () => {
     const mId = "mem_peel0000000000000000000000";
     const mdir = join(dir, "members", mId);
     mkdirSync(mdir, { recursive: true });
-    const memberJson = join(mdir, "member.json");
     const legacy = {
       id: mId,
       name: "peelbot",
@@ -61,10 +60,10 @@ describe("platform extensions.json retirement", () => {
       createdAt: 1,
       updatedAt: 1,
     };
-    writeFileSync(memberJson, JSON.stringify(legacy), "utf-8");
     const reg = await import("../../src/workspace/member-registry.js");
+    reg.importMemberRecord(legacy);
     reg.updateMember(mId, { global: { thinkingLevel: "high" } });
-    const after = JSON.parse(readFileSync(memberJson, "utf-8"));
+    const after = reg.getMember(mId)!;
     expect(after.global).not.toHaveProperty("extensions");
     expect(after.global.thinkingLevel).toBe("high");
     // effective config has no extensions channel either

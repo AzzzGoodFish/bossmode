@@ -16,7 +16,7 @@ file layout; do not invent a fixed project naming scheme.
 Keep the existing layers in their roles; do not flatten everything into
 project notes:
 
-- **Member persona** (`member.md`): who this member is and how they work —
+- **Member persona** (`persona.md`): who this member is and how they work —
   durable identity and working rules, not project facts.
 - **Reusable skills** (`skills/`): procedures worth repeating. Not a place for
   facts.

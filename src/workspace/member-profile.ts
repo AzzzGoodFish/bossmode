@@ -1,11 +1,9 @@
 /**
- * member.md — frontmatter (name/title) + free body (persona).
- * Spec: docs/bossmode/architecture/spec-member-identity-three-memory-impl-v1.md
+ * persona.md — literal free-form Markdown. Member identity lives in the database.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { asString, parseFrontmatter } from "../shared/frontmatter.js";
 import { logger } from "../foundation/logger.js";
 
 export function memberDir(memberId: string): string {
@@ -14,14 +12,8 @@ export function memberDir(memberId: string): string {
 
 export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 
-export interface MemberProfileFrontmatter {
-  name: string;
-  title?: string;
-}
-
 export interface MemberProfile {
-  frontmatter: MemberProfileFrontmatter;
-  /** Free body after frontmatter (persona). Empty at birth. */
+  /** Literal Markdown, with no metadata parsing or required headings. Empty at birth. */
   body: string;
   /** Raw file text (for diagnostics). */
   raw: string;
@@ -31,7 +23,7 @@ export interface MemberProfile {
 }
 
 export function memberProfilePath(memberId: string): string {
-  return join(memberDir(memberId), "member.md");
+  return join(memberDir(memberId), "persona.md");
 }
 
 export function memberSkillsDir(memberId: string): string {
@@ -61,153 +53,39 @@ export function ensureSharedMemoryDirs(): void {
   mkdirSync(sharedProjectsMemoryDir(), { recursive: true });
 }
 
-/**
- * Birth skeleton: frontmatter name only, empty body.
- * Spec 1.3:
- * ---
- * name: New Member
- * ---
- */
-export function writeMemberProfileSkeleton(
-  memberId: string,
-  fields: { name: string; title?: string },
-): string {
-  const dir = memberDir(memberId);
-  mkdirSync(dir, { recursive: true });
+/** Birth creates an empty persona, its skills directory, and shared memory roots. */
+export function writeMemberProfileSkeleton(memberId: string): string {
+  mkdirSync(memberDir(memberId), { recursive: true });
   mkdirSync(memberSkillsDir(memberId), { recursive: true });
   ensureSharedMemoryDirs();
-  const lines = ["---", `name: ${yamlEscape(fields.name)}`];
-  if (fields.title?.trim()) lines.push(`title: ${yamlEscape(fields.title.trim())}`);
-  lines.push("---", "");
   const path = memberProfilePath(memberId);
-  writeFileSync(path, lines.join("\n") + "\n", "utf-8");
+  if (!existsSync(path)) writeFileSync(path, "", "utf-8");
   return path;
 }
 
-function yamlEscape(value: string): string {
-  // Quote if special YAML chars.
-  if (/[:#{}[\],&*!|>'"%@`]/.test(value) || value !== value.trim() || value === "") {
-    return JSON.stringify(value);
-  }
-  return value;
-}
-
-export function readMemberProfile(memberId: string, fallbackName: string): MemberProfile {
+export function readMemberProfile(memberId: string): MemberProfile {
   const path = memberProfilePath(memberId);
-  if (!existsSync(path)) {
-    return {
-      frontmatter: { name: fallbackName },
-      body: "",
-      raw: "",
-      path,
-      exists: false,
-      overBudget: false,
-    };
+  let raw: string;
+  try { raw = readFileSync(path, "utf-8"); }
+  catch (err: any) {
+    if (err.code !== "ENOENT") throw err;
+    return { body: "", raw: "", path, exists: false, overBudget: false };
   }
-  let raw = "";
-  try {
-    raw = readFileSync(path, "utf-8");
-  } catch (err) {
-    logger.warn("member-profile", "read failed", { memberId, error: String(err) });
-    return {
-      frontmatter: { name: fallbackName },
-      body: "",
-      raw: "",
-      path,
-      exists: false,
-      overBudget: false,
-    };
-  }
-  let meta: Record<string, unknown> = {};
-  let body = raw;
-  try {
-    const parsed = parseFrontmatter(raw);
-    meta = parsed.meta || {};
-    body = parsed.body || "";
-  } catch (err) {
-    // Parse failure: keep body as full file, fall back name — never crash the session.
-    logger.warn("member-profile", "frontmatter parse failed; using registry name", {
-      memberId,
-      error: String(err),
-    });
-    meta = {};
-    body = raw;
-  }
-  const name = asString(meta.name, "").trim() || fallbackName;
-  const title = asString(meta.title, "").trim() || undefined;
-  // description retired (batch 5): legacy lines in existing files are ignored.
   const overBudget = raw.length > MEMBER_PROFILE_BUDGET_CHARS;
   if (overBudget) {
-    logger.warn("member-profile", "member.md over budget", {
-      memberId,
-      chars: raw.length,
-      budget: MEMBER_PROFILE_BUDGET_CHARS,
+    logger.warn("member-profile", "persona.md over budget", {
+      memberId, chars: raw.length, budget: MEMBER_PROFILE_BUDGET_CHARS,
     });
   }
-  return {
-    frontmatter: { name, ...(title ? { title } : {}) },
-    body: body.replace(/^\uFEFF/, "").replace(/^\n+/, ""),
-    raw,
-    path,
-    exists: true,
-    overBudget,
-  };
+  return { body: raw, raw, path, exists: true, overBudget };
 }
 
-/** Build segment ① injection text (frontmatter not injected). */
-export function formatMemberPromptSegment(profile: MemberProfile, fallbackName: string): string {
-  const name = profile.frontmatter.name || fallbackName;
-  const parts = [`# Member`, ``, `I am ${name}.`];
-  const body = profile.body.trim();
-  if (body) {
-    parts.push(``, body);
-  }
-  return parts.join("\n");
+/** Identity is supplied by the registry, never parsed from persona text. */
+export function formatMemberPromptSegment(profile: MemberProfile, currentName: string): string {
+  const identity = `# Member\n\nI am ${currentName}.`;
+  return profile.body ? `${identity}\n\n${profile.body}` : identity;
 }
 
-/** True when body is empty — used for birth icebreaker. */
 export function isBlankPersona(profile: MemberProfile): boolean {
   return !profile.body.trim();
-}
-
-function serializeProfile(fields: { name: string; title?: string }, body: string): string {
-  const lines = ["---", `name: ${yamlEscape(fields.name)}`];
-  if (fields.title?.trim()) lines.push(`title: ${yamlEscape(fields.title.trim())}`);
-  lines.push("---", "");
-  const trimmedBody = body.replace(/^\uFEFF/, "").replace(/^\n+/, "").replace(/\s+$/, "");
-  if (trimmedBody) {
-    return `${lines.join("\n")}\n${trimmedBody}\n`;
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-/**
- * Patch member.md frontmatter fields while preserving body.
- * - name always written when provided (sync with registry rename)
- * - title: undefined = leave; null/"" = clear from frontmatter
- * - description is retired (batch 5): any legacy line is dropped on next write.
- * Creates the file (skeleton + body) if missing.
- */
-export function updateMemberProfileFrontmatter(
-  memberId: string,
-  patch: { name?: string; title?: string | null },
-  fallbackName: string,
-): MemberProfile {
-  const current = readMemberProfile(memberId, fallbackName);
-  const name =
-    patch.name !== undefined
-      ? (patch.name.trim() || fallbackName)
-      : current.frontmatter.name || fallbackName;
-
-  let title = current.frontmatter.title;
-  if (patch.title !== undefined) {
-    const t = (patch.title ?? "").trim();
-    title = t || undefined;
-  }
-
-  mkdirSync(memberDir(memberId), { recursive: true });
-  const path = memberProfilePath(memberId);
-  const raw = serializeProfile({ name, title }, current.body);
-  writeFileSync(path, raw, "utf-8");
-  return readMemberProfile(memberId, fallbackName);
 }

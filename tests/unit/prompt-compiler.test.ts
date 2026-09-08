@@ -44,9 +44,9 @@ const member: AgentMemberConfig = { id: "rm_qa", name: "qa", type: "agent", agen
 describe("prompt compiler (three-segment)", () => {
   it("assembles Member → Communication → Environment in order", async () => {
     const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
-    writeMemberProfileSkeleton("rm_qa", { name: "qa" });
+    writeMemberProfileSkeleton("rm_qa");
     writeFileSync(
-      join(tmpDir, "members", "rm_qa", "member.md"),
+      join(tmpDir, "members", "rm_qa", "persona.md"),
       "---\nname: qa\n---\n\nI prefer short answers.\n",
       "utf-8",
     );
@@ -70,7 +70,7 @@ describe("prompt compiler (three-segment)", () => {
     expect(prompt).not.toContain("QA ROLE"); // agent template not used as identity
   });
 
-  it("birth state: no member.md → I am <name> only; platform guide present; no archive line", async () => {
+  it("birth state: no persona.md → I am <name> only; platform guide present; no archive line", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("I am qa.");
@@ -106,7 +106,7 @@ describe("prompt compiler (three-segment)", () => {
 
   it("Member + Communication are byte-identical between room and topic (cache invariant)", async () => {
     writeFileSync(
-      join(tmpDir, "members", "rm_qa", "member.md"),
+      join(tmpDir, "members", "rm_qa", "persona.md"),
       "---\nname: qa\n---\n\nSteady.\n",
       "utf-8",
     );
@@ -138,36 +138,19 @@ describe("prompt compiler (three-segment)", () => {
     expect(roomC.envPrompt).not.toBe(topicC.envPrompt);
   });
 
-  it("frontmatter fields are not injected; missing name falls back; parse failure does not throw", async () => {
-    writeFileSync(
-      join(tmpDir, "members", "rm_qa", "member.md"),
-      "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n",
-      "utf-8",
-    );
+  it("persona is literal Markdown; identity comes only from the current member name", async () => {
+    const raw = "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n";
+    writeFileSync(join(tmpDir, "members", "rm_qa", "persona.md"), raw, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    let compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
-    expect(compiled.fullPrompt).toContain("I am DisplayQA.");
-    expect(compiled.fullPrompt).toContain("Body only.");
-    expect(compiled.fullPrompt).not.toContain("title: Tester");
-    expect(compiled.fullPrompt).not.toContain("finds bugs");
-
-    // missing name
-    writeFileSync(join(tmpDir, "members", "rm_qa", "member.md"), "---\ntitle: X\n---\n\nHi.\n", "utf-8");
-    vi.resetModules();
-    const { compileMemberPrompt: compile2 } = await import("../../src/engine/prompt-compiler.js");
-    compiled = compile2({ room: room(), member, agentDef, docsRoot: "/docs" });
-    expect(compiled.fullPrompt).toContain("I am qa."); // registry fallback
-
-    // broken frontmatter
-    writeFileSync(join(tmpDir, "members", "rm_qa", "member.md"), "not really yaml ---\nbody\n", "utf-8");
-    vi.resetModules();
-    const { compileMemberPrompt: compile3 } = await import("../../src/engine/prompt-compiler.js");
-    expect(() => compile3({ room: room(), member, agentDef, docsRoot: "/docs" })).not.toThrow();
+    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const section = compiled.sections.find((s) => s.id === "member")!.content;
+    expect(section).toBe(`# Member\n\nI am qa.\n\n${raw}`);
+    expect(compiled.fullPrompt).not.toContain("I am DisplayQA.");
   });
 
-  it("marks profileOverBudget when member.md exceeds 4000 chars without truncating", async () => {
+  it("marks profileOverBudget when persona.md exceeds 4000 chars without truncating", async () => {
     const body = "x".repeat(4500);
-    writeFileSync(join(tmpDir, "members", "rm_qa", "member.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
+    writeFileSync(join(tmpDir, "members", "rm_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.profileOverBudget).toBe(true);

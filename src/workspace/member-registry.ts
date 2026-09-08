@@ -1,10 +1,11 @@
 /**
  * Global member registry (0.20) — one digital employee per name/id.
- * Storage: ~/.bossmode/members/mem_<uuid>/member.json (no separate registry.json).
+ * Storage: authoritative members table in ~/.bossmode/bossmode.db.
  * Contract §2.1 / §6.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { openDb } from "./db/sqlite.js";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
@@ -28,6 +29,7 @@ export type MemberScopeOverride = Partial<MemberGlobalConfig>;
 export interface MemberRecord {
   id: string;
   name: string;
+  title?: string;
   agentTemplate: string;
   /** Default true — scope inherits global model/credential/thinking. */
   unifiedModel: boolean;
@@ -51,7 +53,7 @@ export interface CreateMemberInput {
   mcpServers?: string[];
   unifiedModel?: boolean;
   unifiedExtensions?: boolean;
-  /** Optional frontmatter seed (identity title). */
+  /** Optional member title, stored with identity. */
   title?: string;
 }
 
@@ -79,10 +81,6 @@ export function memberDir(memberId: string): string {
   return join(membersRoot(), memberId);
 }
 
-function memberJsonPath(memberId: string): string {
-  return join(memberDir(memberId), "member.json");
-}
-
 function ensureMembersRoot(): void {
   const root = membersRoot();
   if (!existsSync(root)) mkdirSync(root, { recursive: true });
@@ -99,69 +97,73 @@ function isValidMemberName(name: string): boolean {
   return true;
 }
 
-function readRecordRaw(memberId: string): MemberRecord | null {
-  const p = memberJsonPath(memberId);
-  if (!existsSync(p)) return null;
+interface MemberRow {
+  id: string; name: string; title: string | null; agent_template: string;
+  global_json: string; created_at: number; updated_at: number;
+}
+
+function fromRow(row: MemberRow): MemberRecord {
+  const global = JSON.parse(row.global_json);
+  if (!global || typeof global !== "object" || Array.isArray(global)) throw new Error(`Invalid member configuration: ${row.id}`);
+  return { id: row.id, name: row.name, ...(row.title ? { title: row.title } : {}),
+    agentTemplate: row.agent_template, global,
+    unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
+    createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+function cleanGlobal(global: MemberGlobalConfig): MemberGlobalConfig {
+  const { extensions: _retired, ...rest } = global as MemberGlobalConfig & { extensions?: unknown };
+  return rest;
+}
+
+function translateWriteError(err: unknown, name: string): never {
+  if (String(err).includes("UNIQUE constraint failed: members.name_key")) throw new MemberNameTakenError(name);
+  throw err;
+}
+
+function insertRecord(rec: MemberRecord): void {
   try {
-    const raw = JSON.parse(readFileSync(p, "utf-8")) as MemberRecord;
-    if (!raw?.id || !raw?.name) return null;
-    return {
-      ...raw,
-      // Batch-5b: unified flags retired — config is always global. Legacy disk
-      // values are ignored; the next write persists the normalized shape.
-      unifiedModel: true,
-      unifiedExtensions: true,
-      global: raw.global || {},
-      scopeOverrides: {},
-    };
-  } catch {
-    return null;
-  }
+    openDb().run(`INSERT INTO members (id, name, name_key, title, agent_template, global_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, rec.id, rec.name, rec.name.toLowerCase(), rec.title || null,
+      rec.agentTemplate, JSON.stringify(cleanGlobal(rec.global)), rec.createdAt, rec.updatedAt);
+  } catch (err) { translateWriteError(err, rec.name); }
 }
 
 function writeRecord(rec: MemberRecord): void {
-  const dir = memberDir(rec.id);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.member.json.${process.pid}.tmp`);
-  // Batch-5b peel: legacy unified flags + scope overrides never reach disk
-  // again — any write strips them from an existing record.
-  // Batch 7 closeout (fish 2026-09-04): the platform extension enable list
-  // (global.extensions) is retired with the platform extension store.
-  const { unifiedModel: _um, unifiedExtensions: _ue, scopeOverrides: _so, ...onDisk } = rec;
-  if (onDisk.global && "extensions" in onDisk.global) {
-    const { extensions: _ex, ...restGlobal } = onDisk.global;
-    onDisk.global = restGlobal as typeof onDisk.global;
-  }
-  writeFileSync(tmp, JSON.stringify(onDisk, null, 2) + "\n", "utf-8");
-  renameSync(tmp, memberJsonPath(rec.id));
+  try {
+    openDb().run(`UPDATE members SET name = ?, name_key = ?, title = ?, agent_template = ?, global_json = ?,
+      created_at = ?, updated_at = ? WHERE id = ?`, rec.name, rec.name.toLowerCase(), rec.title || null,
+      rec.agentTemplate, JSON.stringify(cleanGlobal(rec.global)), rec.createdAt, rec.updatedAt, rec.id);
+  } catch (err) { translateWriteError(err, rec.name); }
 }
 
-/** List all member records (scan directory — no registry.json dual source). */
+/** Strict insert for offline migration. Never overwrites an existing ID or creates persona files. */
+export function importMemberRecord(rec: MemberRecord): MemberRecord {
+  if (!rec || typeof rec.id !== "string" || !/^mem_[a-zA-Z0-9_-]+$/.test(rec.id) ||
+      typeof rec.name !== "string" || rec.name !== normalizeName(rec.name) || !isValidMemberName(rec.name) ||
+      typeof rec.agentTemplate !== "string" || !rec.agentTemplate ||
+      !rec.global || typeof rec.global !== "object" || Array.isArray(rec.global) ||
+      !Number.isSafeInteger(rec.createdAt) || !Number.isSafeInteger(rec.updatedAt) ||
+      (rec.title !== undefined && typeof rec.title !== "string")) throw new Error("invalid_member_record");
+  insertRecord(rec);
+  return getMember(rec.id)!;
+}
+
+/** Database only. Files left by old installations are never a live fallback. */
 export function listMembers(): MemberRecord[] {
-  ensureMembersRoot();
-  const root = membersRoot();
-  const out: MemberRecord[] = [];
-  for (const ent of readdirSync(root, { withFileTypes: true })) {
-    if (!ent.isDirectory()) continue;
-    if (!ent.name.startsWith("mem_")) continue;
-    const rec = readRecordRaw(ent.name);
-    if (rec) out.push(rec);
-  }
-  out.sort((a, b) => a.name.localeCompare(b.name));
-  return out;
+  return openDb().all<MemberRow>("SELECT * FROM members").map(fromRow).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function getMember(id: string): MemberRecord | null {
-  return readRecordRaw(id);
+  const row = openDb().get<MemberRow>("SELECT * FROM members WHERE id = ?", id);
+  return row ? fromRow(row) : null;
 }
 
 export function findMemberByName(name: string): MemberRecord | null {
-  const n = normalizeName(name).toLowerCase();
-  if (!n) return null;
-  for (const m of listMembers()) {
-    if (m.name.toLowerCase() === n) return m;
-  }
-  return null;
+  const key = normalizeName(name).toLowerCase();
+  if (!key) return null;
+  const row = openDb().get<MemberRow>("SELECT * FROM members WHERE name_key = ?", key);
+  return row ? fromRow(row) : null;
 }
 
 /** Resolve name or id (read paths). */
@@ -194,6 +196,7 @@ export function createMember(input: CreateMemberInput): MemberRecord {
   const rec: MemberRecord = {
     id,
     name,
+    ...(input.title?.trim() ? { title: input.title.trim() } : {}),
     agentTemplate: input.agentTemplate || "general",
     unifiedModel: true,
     unifiedExtensions: true,
@@ -208,31 +211,40 @@ export function createMember(input: CreateMemberInput): MemberRecord {
     createdAt: now,
     updatedAt: now,
   };
-  writeRecord(rec);
-  // Legacy memory skeleton (batch 3 migrates; batch 1 still allows old readers).
-  mkdirSync(join(memberDir(id), "memory"), { recursive: true });
-  // Birth skeleton: member.md frontmatter + empty body; skills/ + shared memory dirs.
-  writeMemberProfileSkeleton(id, {
-    name,
-    title: (input as { title?: string }).title,
-  });
+  try {
+    mkdirSync(join(memberDir(id), "memory"), { recursive: true });
+    // Persona contains free Markdown only, without identity frontmatter.
+    writeMemberProfileSkeleton(id);
+    insertRecord(rec);
+  } catch (err) {
+    rmSync(memberDir(id), { recursive: true, force: true });
+    throw err;
+  }
   // Batch 7 P1: birth assets — default workspace registry + ssh key pair.
   try { ensureDefaultRegistry(id); } catch { /* synthesized on read anyway */ }
   try { ensureMemberSshKeyPair(id); } catch { /* surfaces at first ssh use */ }
   return rec;
 }
 
+export function updateMemberIdentity(id: string, patch: { name?: string; title?: string | null }): MemberRecord {
+  return openDb().transaction(() => {
+    const rec = getMember(id);
+    if (!rec) throw new MemberNotFoundError(id);
+    const name = patch.name === undefined ? rec.name : normalizeName(patch.name);
+    if ((patch.name !== undefined && typeof patch.name !== "string") || !isValidMemberName(name)) throw new Error("invalid_member_name");
+    if (patch.title !== undefined && patch.title !== null && typeof patch.title !== "string") throw new Error("invalid_member_title");
+    const title = patch.title === undefined ? rec.title : (patch.title?.trim() || undefined);
+    if (name === rec.name && title === rec.title) return rec;
+    rec.name = name;
+    rec.title = title;
+    rec.updatedAt = Date.now();
+    writeRecord(rec);
+    return rec;
+  });
+}
+
 export function renameMember(id: string, newName: string): MemberRecord {
-  const rec = getMember(id);
-  if (!rec) throw new MemberNotFoundError(id);
-  const name = normalizeName(newName);
-  if (!isValidMemberName(name)) throw new Error("invalid_member_name");
-  const clash = findMemberByName(name);
-  if (clash && clash.id !== id) throw new MemberNameTakenError(name);
-  rec.name = name;
-  rec.updatedAt = Date.now();
-  writeRecord(rec);
-  return rec;
+  return updateMemberIdentity(id, { name: newName });
 }
 
 export function updateMember(
@@ -244,15 +256,17 @@ export function updateMember(
     unifiedExtensions?: boolean;
   },
 ): MemberRecord {
-  const rec = getMember(id);
-  if (!rec) throw new MemberNotFoundError(id);
-  if (patch.agentTemplate !== undefined) rec.agentTemplate = patch.agentTemplate;
-  if (patch.global) {
-    rec.global = { ...rec.global, ...patch.global };
-  }
-  rec.updatedAt = Date.now();
-  writeRecord(rec);
-  return rec;
+  return openDb().transaction(() => {
+    const rec = getMember(id);
+    if (!rec) throw new MemberNotFoundError(id);
+    if (patch.agentTemplate !== undefined) rec.agentTemplate = patch.agentTemplate;
+    if (patch.global) {
+      rec.global = { ...rec.global, ...patch.global };
+    }
+    rec.updatedAt = Date.now();
+    writeRecord(rec);
+    return rec;
+  });
 }
 
 /** Scope overrides retired (batch-5b): config is always global. Kept as a
@@ -352,12 +366,33 @@ export function fireMember(id: string, opts?: { confirm?: boolean }): { archived
   const rel = join("backups", `fired-${safeName}-${ts}`);
   const dest = join(getBossmodeDir(), rel);
   mkdirSync(join(getBossmodeDir(), "backups"), { recursive: true });
-  renameSync(memberDir(id), dest);
+  const source = memberDir(id);
+  if (!existsSync(source)) throw new Error("member_assets_missing");
+  // Archive-only export. This is never consulted by the active registry.
+  renameSync(source, dest);
+  let exported = false;
+  try {
+    const { unifiedModel: _um, unifiedExtensions: _ue, scopeOverrides: _so, ...metadata } = rec;
+    writeFileSync(join(dest, "member.json"), JSON.stringify(metadata, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    exported = true;
+    // Persist the identity export and both sides of the rename before the
+    // durable DB deletion. A crash must not erase the only identity copy.
+    for (const path of [join(dest, "member.json"), dest, dirname(dest), dirname(source), getBossmodeDir()]) {
+      const fd = openSync(path, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
+    }
+    openDb().run("DELETE FROM members WHERE id = ?", id);
+  } catch (err) {
+    // Keep identity active if archive publication/removal did not finish.
+    if (exported) rmSync(join(dest, "member.json"));
+    renameSync(dest, source);
+    throw err;
+  }
   return { archived: rel };
 }
 
 /** Hard-delete member dir without archive (tests only). */
 export function deleteMemberForTests(id: string): void {
+  openDb().run("DELETE FROM members WHERE id = ?", id);
   const dir = memberDir(id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 }

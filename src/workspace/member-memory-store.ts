@@ -32,7 +32,7 @@ function memoryRoot(memberId: string): string {
 }
 
 function personaPath(memberId: string): string {
-  return join(memoryRoot(memberId), "persona.md");
+  return join(memberDir(memberId), "persona.md");
 }
 
 function scopeMemoryDir(memberId: string, scopeId: ScopeId): string {

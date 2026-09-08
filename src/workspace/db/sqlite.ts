@@ -1,14 +1,5 @@
-// SQLite projection driver (0.19.1 S1).
-//
-// The DB at ~/.bossmode/bossmode.db is a *rebuildable projection* — files
-// (messages.jsonl, agent-events/*.jsonl, tasks.json) remain the authority.
-// Deleting the DB and restarting rebuilds it; every write is best-effort and
-// must never block a chat/agent turn.
-//
-// Driver: node:sqlite (Node 22.5+ builtin, sync API). We deliberately avoid a
-// native better-sqlite3 dependency — the runtime is pinned to Node >=22 (see
-// package.json engines) where node:sqlite is available. If node:sqlite is ever
-// unavailable, openDb throws a clear error and callers degrade to file-only.
+// SQLite storage: members are authoritative; message/activity/task indexes are rebuildable.
+// Never delete bossmode.db to repair an index. Member read/write failures propagate.
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -98,13 +89,13 @@ function loadDatabaseSync(): new (path: string) => DatabaseSync {
   } catch (err) {
     throw new Error(
       `node:sqlite is unavailable (requires Node >=22.5): ${String(err)}. ` +
-        `The SQLite projection is disabled; file-based data is unaffected.`,
+        `Member storage is unavailable; startup cannot continue.`,
     );
   }
 }
 
 /**
- * Open (or create) the projection DB at the given path and apply migrations.
+ * Open (or create) the database at the given path and apply migrations.
  * Returns a process-cached singleton for the default path.
  */
 export function openDb(path: string = getDbPath()): BossmodeDb {
@@ -115,14 +106,13 @@ export function openDb(path: string = getDbPath()): BossmodeDb {
 
   const Ctor = loadDatabaseSync();
   const raw = new Ctor(path);
-  // WAL: concurrent readers while the writer appends; NORMAL sync is safe for a
-  // disposable projection (a crash at worst loses recent rows that rebuild fixes).
+  // Member identity/configuration is authoritative: commits must be durable.
   raw.exec("PRAGMA journal_mode = WAL");
-  raw.exec("PRAGMA synchronous = NORMAL");
+  raw.exec("PRAGMA synchronous = FULL");
   raw.exec("PRAGMA foreign_keys = ON");
 
   const db = new BossmodeDb(raw, path);
-  runMigrations(db);
+  try { runMigrations(db); } catch (err) { db.close(); throw err; }
   cached = db;
   return db;
 }

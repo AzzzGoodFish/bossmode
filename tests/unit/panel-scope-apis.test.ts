@@ -107,7 +107,8 @@ describe("batch-5b disk peel + scopeless config PATCH", () => {
     const { reg, member } = await seedMember("peelcheck", { unifiedModel: false });
     // Any write (title patch path) strips legacy fields from disk.
     reg.updateMember(member.id, { global: { thinkingLevel: "high" } });
-    const raw = readFileSync(join(dir, "members", member.id, "member.json"), "utf-8");
+    const { openDb } = await import("../../src/workspace/db/sqlite.js");
+    const raw = JSON.stringify(openDb().get("SELECT * FROM members WHERE id = ?", member.id));
     expect(raw).not.toContain("unifiedModel");
     expect(raw).not.toContain("unifiedExtensions");
     expect(raw).not.toContain("scopeOverrides");

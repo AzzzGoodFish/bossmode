@@ -10,7 +10,7 @@ import {
   getMember,
   createMember,
   updateMember,
-  renameMember,
+  updateMemberIdentity,
   fireMember,
   resolveMemberRef,
   getEffectiveConfig,
@@ -41,16 +41,15 @@ import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cur
 import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../shared/types.js";
 import { memberTemplateWarning } from "../workforce/template-lifecycle.js";
-import { readMemberProfile, updateMemberProfileFrontmatter } from "../workspace/member-profile.js";
+import { readMemberProfile } from "../workspace/member-profile.js";
 
 function publicMember(m: MemberRecord) {
-  const profile = readMemberProfile(m.id, m.name);
   return {
     memberId: m.id,
     id: m.id,
     name: m.name,
-    /** Card field from member.md frontmatter (identity batch-1; description retired batch-5). */
-    title: profile.frontmatter.title ?? null,
+    /** Card field from database (identity batch-1; description retired batch-5). */
+    title: m.title ?? null,
     agentTemplate: m.agentTemplate,
     templateWarning: memberTemplateWarning(m.agentTemplate),
     global: m.global,
@@ -301,12 +300,11 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
       const dmStatus = getScopeLiveStatus?.(scopeIdOf({ kind: "dm", memberId: m.id })) || "idle";
       const status = workingScopes.length > 0 || dmStatus === "working" ? "working" : "idle";
 
-      const profile = readMemberProfile(m.id, m.name);
       return {
         memberId: m.id,
         name: m.name,
-        /** member.md frontmatter title — replaces template chip on Contacts. */
-        title: profile.frontmatter.title ?? null,
+        /** database title — replaces template chip on Contacts. */
+        title: m.title ?? null,
         agentTemplate: m.agentTemplate,
         status,
         activeScopes: membershipScopes,
@@ -541,7 +539,7 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as {
       name?: string;
-      /** member.md frontmatter card field (description retired batch-5 — ignored) */
+      /** database card field (description retired batch-5 — ignored) */
       title?: string | null;
       agentTemplate?: string;
       model?: string | null;
@@ -594,10 +592,11 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       thinkingSwitch = await switchMemberThinkingLevel(m.id, body.thinkingLevel === null ? "off" : String(body.thinkingLevel));
     }
 
-    if (body.name && body.name.trim() !== m.name) {
-      m = renameMember(m.id, body.name);
-      // Keep frontmatter name in sync with registry rename.
-      updateMemberProfileFrontmatter(m.id, { name: m.name }, m.name);
+    if (body.name !== undefined || body.title !== undefined) {
+      m = updateMemberIdentity(m.id, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.title !== undefined ? { title: body.title } : {}),
+      });
     }
     // Non-model fields commit in ONE save, and only when there is something to
     // save — a pure model PATCH must not run a second record write after the
@@ -612,13 +611,6 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         ...(body.agentTemplate !== undefined ? { agentTemplate: body.agentTemplate } : {}),
         global: globalPatch,
       });
-    }
-    if (body.title !== undefined) {
-      updateMemberProfileFrontmatter(
-        m.id,
-        { ...(body.title !== undefined ? { title: body.title } : {}) },
-        m.name,
-      );
     }
     sendJson(res, 200, { member: publicMember(m), ...(modelSwitch ? { modelSwitch } : {}), ...(thinkingSwitch ? { thinkingSwitch } : {}) });
 
@@ -688,7 +680,7 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
   sendJson(res, 200, { scopes });
 });
 
-/** member.md read-only panel surface (identity batch-2 / designer contract). */
+/** persona.md read-only panel surface (identity batch-2 / designer contract). */
 addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
   try {
     const m = resolveMemberRef(params.id);
@@ -697,13 +689,9 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       return;
     }
     const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
-    const profile = readMemberProfile(m.id, m.name);
+    const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
-      frontmatter: {
-        name: profile.frontmatter.name,
-        title: profile.frontmatter.title ?? null,
-      },
       body: profile.body,
       charCount: profile.raw.length,
       overBudget: profile.overBudget,
@@ -793,18 +781,17 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
     const url = new URL(req.url || "", "http://localhost");
     const layer = (url.searchParams.get("layer") || "persona") as "persona" | "principles" | "mainline" | "profile";
     const scope = url.searchParams.get("scope") || undefined;
-    // Identity batch-2: principles/mainline panel layers retired → member.md only.
+    // Identity batch-2: principles/mainline panel layers retired → persona.md only.
     if (layer === "principles" || layer === "mainline") {
-      sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read member.md via layer=profile" });
+      sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read persona.md via layer=profile" });
       return;
     }
     if (layer === "profile") {
       const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
-      const profile = readMemberProfile(m.id, m.name);
+      const profile = readMemberProfile(m.id);
       sendJson(res, 200, {
         layer: "profile",
         path: memberProfilePath(m.id),
-        frontmatter: profile.frontmatter,
         content: profile.body,
         raw: profile.raw,
         overBudget: profile.overBudget,
@@ -812,7 +799,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       });
       return;
     }
-    // Legacy persona layer (batch-3 migrates into member.md). principles/mainline already 410 above.
+    // Legacy persona layer (batch-3 migrates into persona.md). principles/mainline already 410 above.
     if (layer !== "persona") {
       sendJson(res, 400, { error: "invalid_layer", message: "layer must be profile or persona" });
       return;

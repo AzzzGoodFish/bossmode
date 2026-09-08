@@ -47,7 +47,7 @@ describe("020 WS-B prompt + instanceKey", () => {
     // Grow persona body beyond birth skeleton.
     const { writeFileSync: wfs } = await import("node:fs");
     wfs(
-      join(dir, "members", member.id, "member.md"),
+      join(dir, "members", member.id, "persona.md"),
       "---\nname: architect\n---\n\nI am careful.\n",
       "utf-8",
     );

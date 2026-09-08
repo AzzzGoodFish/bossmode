@@ -14,17 +14,17 @@ async function login(port: number): Promise<string> {
 }
 
 describe("contacts + room members title chip", () => {
-  it("GET /api/contacts includes frontmatter title", async () => {
+  it("GET /api/contacts includes database title independent of persona", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
     const created = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name: "title-bot" },
+      body: { name: "title-bot", title: "Frontend" },
     });
     const memberId = JSON.parse(created.body).member.memberId as string;
     writeFileSync(
-      join(getTestBossmodeDir(), "members", memberId, "member.md"),
-      "---\nname: title-bot\ntitle: Frontend\n---\n\n## Persona\nHi.\n",
+      join(getTestBossmodeDir(), "members", memberId, "persona.md"),
+      "---\nname: title-bot\ntitle: Not the database title\n---\n\n## Persona\nHi.\n",
       "utf-8",
     );
     const res = await jsonRequest(ts.port, "GET", "/api/contacts", { token });

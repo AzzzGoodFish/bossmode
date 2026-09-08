@@ -277,13 +277,13 @@ function ProfileTab({ member, setMember, scopes }: {
 
   return (
     <div className="space-y-4 pb-2">
-      {/* identity — name read-only (routing key, T1), title editable */}
+      {/* identity — database-backed name and title; this panel currently edits title only */}
       <section>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[11px] font-semibold text-ink-3">Name</span>
-              <span className="inline-flex cursor-help" title="The name is the routing key — it can’t be changed here.">
+              <span className="inline-flex cursor-help" title="The name is stored in the member registry. Name editing is not available in this panel.">
                 <Info size={11} className="text-ink-4" />
               </span>
             </div>
@@ -312,7 +312,7 @@ function ProfileTab({ member, setMember, scopes }: {
         </div>
       </section>
 
-      {/* persona — the member.md body in a plain read-only box (fish
+      {/* persona — the persona.md body in a plain read-only box (fish
        * 2026-09-02: name/title/persona/about only; the ⓘ carries the
        * "this is the persona file" note + path). */}
       <section>

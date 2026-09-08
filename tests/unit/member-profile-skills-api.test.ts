@@ -17,7 +17,7 @@ async function login(port: number): Promise<string> {
 }
 
 describe("member profile + skills panel APIs", () => {
-  it("GET profile returns frontmatter, body, charCount, overBudget", async () => {
+  it("GET profile returns literal Markdown, charCount, overBudget without frontmatter", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
 
@@ -35,7 +35,7 @@ describe("member profile + skills panel APIs", () => {
 
     const root = getTestBossmodeDir();
     writeFileSync(
-      join(root, "members", memberId, "member.md"),
+      join(root, "members", memberId, "persona.md"),
       "---\nname: profile-bot\ntitle: Dev\n---\n\n## Persona\nI write tests first.\n",
       "utf-8",
     );
@@ -43,8 +43,9 @@ describe("member profile + skills panel APIs", () => {
     const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/profile`, { token });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.path).toContain(`members/${memberId}/member.md`);
-    expect(body.frontmatter).toEqual({ name: "profile-bot", title: "Dev" });
+    expect(body.path).toContain(`members/${memberId}/persona.md`);
+    expect(body.frontmatter).toBeUndefined();
+    expect(body.body).toBe("---\nname: profile-bot\ntitle: Dev\n---\n\n## Persona\nI write tests first.\n");
     expect(body.body).toContain("## Persona");
     expect(typeof body.charCount).toBe("number");
     expect(body.overBudget).toBe(false);

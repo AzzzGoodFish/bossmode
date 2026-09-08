@@ -90,21 +90,21 @@ describe("identity-migration", () => {
     };
     expect(walk(backup).some((p) => p.includes("agent-events"))).toBe(false);
 
-    expect(existsSync(join(boss, "members", "mem_test_a", "member.md"))).toBe(true);
-    expect(readFileSync(join(boss, "members", "mem_test_a", "member.md"), "utf-8")).toContain("I am careful.");
-    expect(existsSync(join(boss, "members", "mem_test_a", "archive", "persona.md"))).toBe(true);
-    expect(existsSync(join(boss, "members", "mem_test_a", "memory", "persona.md"))).toBe(false);
+    // The old general migration must not recreate retired member.md.
+    expect(existsSync(join(boss, "members", "mem_test_a", "member.md"))).toBe(false);
+    expect(readFileSync(join(boss, "members", "mem_test_a", "memory", "persona.md"), "utf8")).toBe("I am careful.\n");
+
   });
 
   it("second apply is no-op skip (already_clean)", async () => {
     seedDirty();
     const { runIdentityMigration } = await import("../../src/workspace/identity-migration.js");
     runIdentityMigration({ apply: true, quiet: true, bossmodeDir: boss });
-    const md1 = readFileSync(join(boss, "members", "mem_test_a", "member.md"), "utf-8");
+    const md1 = readFileSync(join(boss, "members", "mem_test_a", "memory", "persona.md"), "utf-8");
     const r2 = runIdentityMigration({ apply: true, quiet: true, bossmodeDir: boss });
     expect(r2.skipped).toBe(true);
     expect(r2.reason).toBe("already_clean");
-    expect(readFileSync(join(boss, "members", "mem_test_a", "member.md"), "utf-8")).toBe(md1);
+    expect(readFileSync(join(boss, "members", "mem_test_a", "memory", "persona.md"), "utf-8")).toBe(md1);
   });
 
   it("runIdentityMigrationOnStartup applies dirty then skips clean", async () => {

@@ -1,9 +1,8 @@
-// Schema + migration bookkeeping for the SQLite projection (0.19.1 S1).
+// Schema and migration bookkeeping for durable member storage and rebuildable indexes.
 //
 // Migrations are append-only and idempotent: each has a stable id recorded in
 // schema_migrations. runMigrations applies any not-yet-applied migrations in
-// order. Since the DB is a rebuildable projection, "migration" here is just
-// schema creation — there is no destructive user-data migration.
+// order. Member rows are authoritative and must never be removed by index rebuilds.
 import type { BossmodeDb } from "./sqlite.js";
 import { logger } from "../../foundation/logger.js";
 
@@ -72,6 +71,25 @@ CREATE TABLE IF NOT EXISTS ingest_watermark (
 );
 `,
   },
+  {
+    id: "member-storage-v1",
+    up: `
+CREATE TABLE members (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  name_key TEXT NOT NULL UNIQUE,
+  title TEXT,
+  agent_template TEXT NOT NULL,
+  global_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE projection_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`,
+  },
 ];
 
 function ensureBookkeeping(db: BossmodeDb): void {
@@ -95,6 +113,12 @@ export function runMigrations(db: BossmodeDb): void {
     if (applied.has(m.id)) continue;
     db.transaction((tx) => {
       tx.exec(m.up);
+      // The old release treated an existing projection DB as initialized. Keep
+      // its data; adding authoritative members must not trigger a destructive
+      // startup rebuild. A genuinely new DB has no pre-existing migration ID.
+      if (m.id === "member-storage-v1" && applied.has("sqlite-projection-v1")) {
+        tx.run("INSERT INTO projection_state (key, value) VALUES (?, ?)", "backfill-complete", String(Date.now()));
+      }
       tx.run("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)", m.id, Date.now());
     });
     logger.info("db", "applied migration", { id: m.id });

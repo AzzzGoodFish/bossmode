@@ -5,6 +5,7 @@
  * Contract §7.
  */
 import { existsSync, readdirSync, readFileSync, statSync, copyFileSync, mkdirSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { join, basename } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { createMember, type MemberRecord } from "./member-registry.js";
@@ -32,6 +33,22 @@ function readJsonIfExists<T>(path: string): T | null {
   } catch {
     return null;
   }
+}
+
+/** Explicit archive formats, never a fallback for active member storage. */
+function archivePersona(full: string): { body: string; title?: string } {
+  const plain = join(full, "persona.md");
+  if (existsSync(plain)) return { body: readFileSync(plain, "utf8") };
+  const profile = join(full, "member.md");
+  if (existsSync(profile)) {
+    const raw = readFileSync(profile, "utf8");
+    const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
+    if (!match) return { body: raw };
+    const meta = parseYaml(match[1]);
+    return { body: match[2], ...(typeof meta?.title === "string" ? { title: meta.title } : {}) };
+  }
+  const legacy = join(full, "memory", "persona.md");
+  return { body: existsSync(legacy) ? readFileSync(legacy, "utf8") : "" };
 }
 
 /**
@@ -96,11 +113,11 @@ export function listArchives(): ArchiveListItem[] {
         join(full, "member.json"),
       );
       if (!memberJson?.name) continue;
-      const personaPath = join(full, "memory", "persona.md");
+      const persona = archivePersona(full);
       items.push({
         name: memberJson.name,
         template: memberJson.agentTemplate || "general",
-        hasPersona: existsSync(personaPath) && statSync(personaPath).size > 0,
+        hasPersona: Boolean(persona.body.trim()),
         roomScopes: [],
         archivePath,
         credentialHint: memberJson.global?.credentialId ?? null,
@@ -131,14 +148,12 @@ export function importMemberFromArchive(opts: {
   let template = opts.agentTemplate || "general";
   let cred = opts.credentialId ?? null;
 
-  const firedPersona = join(full, "memory", "persona.md");
-  if (existsSync(firedPersona)) {
-    persona = readFileSync(firedPersona, "utf-8");
-    const mj = readJsonIfExists<{ agentTemplate?: string; global?: { credentialId?: string | null } }>(
-      join(full, "member.json"),
-    );
-    if (mj?.agentTemplate) template = opts.agentTemplate || mj.agentTemplate;
-    if (cred == null && mj?.global?.credentialId) cred = mj.global.credentialId;
+  const archived = readJsonIfExists<Partial<MemberRecord>>(join(full, "member.json"));
+  const profile = archivePersona(full);
+  if (archived) {
+    persona = profile.body;
+    if (archived.agentTemplate) template = opts.agentTemplate || archived.agentTemplate;
+    if (cred == null && archived.global?.credentialId) cred = archived.global.credentialId;
   } else {
     // legacy archive: prefer manifest.principlesPath (absolute path into archive snapshot),
     // else scan rooms/*/memory/members for matching name principles.
@@ -163,6 +178,11 @@ export function importMemberFromArchive(opts: {
     name: opts.name,
     agentTemplate: template,
     credentialId: cred,
+    title: archived?.title ?? profile.title,
+    model: archived?.global?.model,
+    thinkingLevel: archived?.global?.thinkingLevel,
+    skills: archived?.global?.skills,
+    mcpServers: archived?.global?.mcpServers,
   });
   ensureMemorySkeleton(rec.id);
   if (persona.trim()) {

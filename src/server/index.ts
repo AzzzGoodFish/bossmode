@@ -1,3 +1,4 @@
+import { ensureMemberStorageReady } from "../workspace/member-storage-startup.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -21,7 +22,7 @@ import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-mi
 import { runIdentityMigrationOnStartup } from "../workspace/identity-migration.js";
 import { runMemberAssetsMigrationOnStartup } from "../workspace/member-assets-migration.js";
 import { runRoomAttachmentsMigrationOnStartup } from "../workspace/room-attachments-migration.js";
-import { initProjection } from "../workspace/db/projection.js";
+import { initProjection, waitForProjectionInitialization } from "../workspace/db/projection.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
 import { sweepInterruptedBackgroundTasks } from "../engine/background-task-store.js";
@@ -58,9 +59,10 @@ export interface ServerOptions {
   port: number;
 }
 
-export function startServer(opts: ServerOptions): Promise<void> {
+export async function startServer(opts: ServerOptions): Promise<void> {
   // Ensure dirs + seed builtin team files on first run
   ensureBossmodeDir();
+  ensureMemberStorageReady();
   seedBuiltinAssets();
 
   // Knowledge: migrate legacy JSON-entry KBs to filesystem-markdown layout (idempotent)
@@ -153,10 +155,11 @@ export function startServer(opts: ServerOptions): Promise<void> {
     logger.error("server", "summary-removal-v1 migration failed", { error: String(err) });
   }
 
-  // Initialize the SQLite projection (0.19.1). Non-blocking: a fresh DB
-  // backfills in the background; failure never blocks the server (file-only).
+  // Reconstruct a genuinely fresh projection before rekeying files or accepting
+  // live writes. Existing projections are retained through the member migration.
   try {
     initProjection();
+    await waitForProjectionInitialization();
   } catch (err) {
     logger.error("server", "projection init failed", { error: String(err) });
   }

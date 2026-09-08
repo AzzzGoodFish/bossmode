@@ -2581,14 +2581,14 @@ export async function activateDmMember(memberId: string): Promise<void> {
     let birthBlank = false;
     try {
       const { readMemberProfile, isBlankPersona } = await import("../workspace/member-profile.js");
-      birthBlank = isBlankPersona(readMemberProfile(memberId, rec.name));
+      birthBlank = isBlankPersona(readMemberProfile(memberId));
     } catch { /* profile module optional in tests */ }
 
     let prompt: string;
     if (transcript) {
       prompt = `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message with the chat tool.`;
     } else if (birthBlank) {
-      prompt = `You are in a private chat with the user. You just came online with a blank persona (your member.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, use the edit tool on your member.md body (the ## Persona section — create it if missing) to record what you learned.`;
+      prompt = `You are in a private chat with the user. You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.`;
     } else {
       prompt = `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     }

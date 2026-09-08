@@ -20,6 +20,9 @@ vi.mock("../../src/workspace/room-store.js", () => ({
   setCursor: (roomId: string, agentName: string, cursor: string | null) => setCursorMock(roomId, agentName, cursor),
 }));
 
+vi.mock("../../src/workspace/member-storage-startup.js", () => ({ ensureMemberStorageReady: vi.fn() }));
+vi.mock("../../src/workspace/db/projection.js", () => ({ initProjection: vi.fn(), waitForProjectionInitialization: vi.fn(async () => {}) }));
+
 vi.mock("../../src/knowledge/migration.js", () => ({ runKnowledgeMigration: vi.fn() }));
 vi.mock("../../src/engine/agent-manager.js", () => ({
   initAgentManager: vi.fn(),

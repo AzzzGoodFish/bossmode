@@ -55,7 +55,7 @@ function optionalModel(value: unknown): string | undefined {
 function templatesGone(res: import("node:http").ServerResponse): void {
   sendJson(res, 410, {
     error: "gone",
-    message: "Agent templates API retired — members own their identity via member.md",
+    message: "Agent templates API retired — members own their identity via persona.md",
   });
 }
 

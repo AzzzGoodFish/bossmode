@@ -1,16 +1,5 @@
-// Projection lifecycle: open the DB, decide backfill vs catch-up, expose status.
-//
-// Startup policy (spec v1):
-//   - DB missing  → create schema, kick async backfill; status = "running"
-//                   until done, then "ready". APIs may return partial data.
-//   - DB present   → open (migrations apply), status = "ready". Incremental
-//                   catch-up for files newer than their watermark is handled by
-//                   the live write path (S2/S3). Recovery: delete bossmode.db
-//                   and restart → the missing-DB path rebuilds automatically.
-//
-// The projection is best-effort: if node:sqlite is unavailable the whole layer
-// disables and the product keeps working on files alone.
-import { existsSync } from "node:fs";
+// Projection lifecycle. Only projection tables may be rebuilt; members are authoritative.
+// Initialization is tracked in SQLite rather than inferred from database file existence.
 import { BossmodeDb, getDbPath, isDbAvailable, openDb } from "./sqlite.js";
 import { backfillAll, type BackfillProgress } from "./backfill.js";
 import { logger } from "../../foundation/logger.js";
@@ -23,6 +12,11 @@ interface ProjectionState {
   progress: BackfillProgress | null;
   error: string | null;
 }
+
+let initialization: Promise<void> = Promise.resolve();
+
+/** Startup awaits file reconstruction before event rekeying or live writes. */
+export function waitForProjectionInitialization(): Promise<void> { return initialization; }
 
 const state: ProjectionState = {
   db: null,
@@ -50,7 +44,6 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
     return null;
   }
 
-  const fresh = !existsSync(path);
   let db: BossmodeDb;
   try {
     db = openDb(path);
@@ -62,11 +55,13 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
   }
   state.db = db;
 
-  if (fresh) {
+  const initialized = db.get("SELECT value FROM projection_state WHERE key = ?", "backfill-complete");
+  if (!initialized) {
     state.status = "running";
     // Fire and forget; never block startup.
-    void backfillAll(db)
+    initialization = backfillAll(db)
       .then((progress) => {
+        db.run("INSERT OR REPLACE INTO projection_state (key, value) VALUES (?, ?)", "backfill-complete", String(Date.now()));
         state.progress = progress;
         state.status = "ready";
       })
@@ -85,17 +80,15 @@ export function initProjection(path: string = getDbPath()): BossmodeDb | null {
   return db;
 }
 
-/**
- * Synchronous full rebuild from files (internal helper; used by tests and the
- * missing-DB startup path's recovery semantics). Not exposed as a CLI command —
- * the projection self-heals: delete bossmode.db and restart to rebuild.
- */
+/** Rebuild projection tables only. Never removes authoritative members. */
 export async function rebuildProjection(path: string = getDbPath()): Promise<BackfillProgress> {
   if (!isDbAvailable()) {
     throw new Error("node:sqlite is unavailable; cannot rebuild projection");
   }
   const db = openDb(path);
+  db.run("DELETE FROM projection_state WHERE key = ?", "backfill-complete");
   const progress = await backfillAll(db);
+  db.run("INSERT OR REPLACE INTO projection_state (key, value) VALUES (?, ?)", "backfill-complete", String(Date.now()));
   state.db = db;
   state.progress = progress;
   state.status = "ready";

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe("member birth skeleton", () => {
-  it("createMember writes member.md frontmatter skeleton and skills dir", async () => {
+  it("createMember writes an empty persona.md and skills dir", async () => {
     const { createMember } = await import("../../src/workspace/member-registry.js");
     const { memberProfilePath, sharedUserMemoryDir, sharedProjectsMemoryDir } = await import(
       "../../src/workspace/member-profile.js"
@@ -33,7 +33,8 @@ describe("member birth skeleton", () => {
     const path = memberProfilePath(m.id);
     expect(existsSync(path)).toBe(true);
     const raw = readFileSync(path, "utf-8");
-    expect(raw).toMatch(/^---\nname: nova\n---\n/);
+    expect(raw).toBe("");
+    expect(path).toMatch(/persona\.md$/);
     expect(raw).not.toMatch(/## Persona/); // empty body at birth
     expect(existsSync(join(tmpDir, "members", m.id, "skills"))).toBe(true);
     expect(existsSync(sharedUserMemoryDir())).toBe(true);
@@ -49,44 +50,22 @@ describe("member birth skeleton", () => {
     expect(allocateUniqueMemberName("New Member")).toBe("New Member 3");
   });
 
-  it("updateMemberProfileFrontmatter writes title (description retired) and preserves body", async () => {
-    const { createMember } = await import("../../src/workspace/member-registry.js");
-    const {
-      updateMemberProfileFrontmatter,
-      readMemberProfile,
-      memberProfilePath,
-    } = await import("../../src/workspace/member-profile.js");
+  it("database identity updates leave all persona Markdown untouched", async () => {
+    const { createMember, getMember, updateMemberIdentity } = await import("../../src/workspace/member-registry.js");
+    const { readMemberProfile, memberProfilePath, formatMemberPromptSegment } = await import("../../src/workspace/member-profile.js");
     const { writeFileSync } = await import("node:fs");
-
     const m = createMember({ name: "nova" });
-    writeFileSync(
-      memberProfilePath(m.id),
-      "---\nname: nova\n---\n\n## Persona\nI ship carefully.\n",
-      "utf-8",
-    );
-
-    updateMemberProfileFrontmatter(m.id, { title: "Architect" }, m.name);
-    let p = readMemberProfile(m.id, m.name);
-    expect(p.frontmatter.title).toBe("Architect");
-    expect(p.body).toContain("## Persona");
-    expect(p.body).toContain("I ship carefully.");
-
-    // Clear title; body still intact.
-    updateMemberProfileFrontmatter(m.id, { title: "" }, m.name);
-    p = readMemberProfile(m.id, m.name);
-    expect(p.frontmatter.title).toBeUndefined();
-    expect(p.body).toContain("I ship carefully.");
-
-    // Legacy description line in an existing file is dropped on next write.
-    writeFileSync(
-      memberProfilePath(m.id),
-      "---\nname: nova\ntitle: T\ndescription: stale\n---\n\nBody.\n",
-      "utf-8",
-    );
-    updateMemberProfileFrontmatter(m.id, { title: "T2" }, m.name);
-    p = readMemberProfile(m.id, m.name);
-    expect(p.frontmatter.title).toBe("T2");
-    expect(p.frontmatter.description).toBeUndefined();
-    expect(readFileSync(memberProfilePath(m.id), "utf-8")).not.toMatch(/description:/);
+    const raw = "\uFEFF---\nname: not-identity\ntitle: not-title\n---\n\nArbitrary Markdown.\n\n";
+    writeFileSync(memberProfilePath(m.id), raw, "utf-8");
+    updateMemberIdentity(m.id, { name: "new-nova", title: "Engineer" });
+    expect(getMember(m.id)).toMatchObject({ name: "new-nova", title: "Engineer" });
+    const profile = readMemberProfile(m.id);
+    expect(profile.body).toBe(raw);
+    expect(profile.raw).toBe(raw);
+    expect(profile).not.toHaveProperty("frontmatter");
+    expect(formatMemberPromptSegment(profile, "new-nova")).toBe(`# Member\n\nI am new-nova.\n\n${raw}`);
+    updateMemberIdentity(m.id, { title: "" });
+    expect(getMember(m.id)?.title).toBeUndefined();
+    expect(readFileSync(memberProfilePath(m.id), "utf-8")).toBe(raw);
   });
 });

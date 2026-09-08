@@ -1,5 +1,5 @@
 /**
- * Member card field: title via member.md frontmatter.
+ * Member card field: title via the authoritative database.
  * description retired (batch-5): never written, never returned, legacy lines ignored.
  */
 import { describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ async function login(port: number): Promise<string> {
 }
 
 describe("member card field title (description retired)", () => {
-  it("PATCH persists title to frontmatter; GET returns it; empty clears", async () => {
+  it("PATCH persists title to database; GET returns it; empty clears", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
 
@@ -43,10 +43,12 @@ describe("member card field title (description retired)", () => {
     expect(JSON.parse(got.body).member.description).toBeUndefined();
 
     const onDisk = readFileSync(
-      join(getTestBossmodeDir(), "members", memberId, "member.md"),
+      join(getTestBossmodeDir(), "members", memberId, "persona.md"),
       "utf-8",
     );
-    expect(onDisk).toMatch(/title: Architect/);
+    expect(onDisk).toBe("");
+    const { getMember } = await import("../../src/workspace/member-registry.js");
+    expect(getMember(memberId)?.title).toBe("Architect");
     expect(onDisk).not.toMatch(/description:/);
 
     const cleared = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
@@ -82,14 +84,14 @@ describe("member card field title (description retired)", () => {
     expect(JSON.parse(patched.body).member.description).toBeUndefined();
 
     const onDisk = readFileSync(
-      join(getTestBossmodeDir(), "members", memberId, "member.md"),
+      join(getTestBossmodeDir(), "members", memberId, "persona.md"),
       "utf-8",
     );
     expect(onDisk).not.toMatch(/description:/);
 
     const profile = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/profile`, { token });
     const body = JSON.parse(profile.body);
-    expect(body.frontmatter.description).toBeUndefined();
+    expect(body.frontmatter).toBeUndefined();
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, {
       token,
@@ -98,7 +100,7 @@ describe("member card field title (description retired)", () => {
     await new Promise<void>((resolve) => ts.server.close(() => resolve()));
   });
 
-  it("legacy description lines in existing member.md are ignored by the parse layer", async () => {
+  it("YAML-looking persona is literal content and cannot override database identity", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
 
@@ -109,27 +111,28 @@ describe("member card field title (description retired)", () => {
     const memberId = JSON.parse(created.body).member.memberId as string;
     const { writeFileSync } = await import("node:fs");
     writeFileSync(
-      join(getTestBossmodeDir(), "members", memberId, "member.md"),
+      join(getTestBossmodeDir(), "members", memberId, "persona.md"),
       "---\nname: legacy-bot\ntitle: Old\ndescription: stale blurb\n---\n\n## Persona\nBody.\n",
       "utf-8",
     );
 
     const got = await jsonRequest(ts.port, "GET", `/api/members/${memberId}`, { token });
     const member = JSON.parse(got.body).member;
-    expect(member.title).toBe("Old");
+    expect(member.title).toBeNull();
     expect(member.description).toBeUndefined();
 
-    // Next write drops the legacy line (write layer never emits description).
+    // A title change never rewrites or parses persona text.
     await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
       token,
       body: { title: "New" },
     });
     const onDisk = readFileSync(
-      join(getTestBossmodeDir(), "members", memberId, "member.md"),
+      join(getTestBossmodeDir(), "members", memberId, "persona.md"),
       "utf-8",
     );
-    expect(onDisk).toMatch(/title: New/);
-    expect(onDisk).not.toMatch(/description:/);
+    expect(onDisk).toContain("title: Old");
+    expect(onDisk).toContain("description: stale blurb");
+    expect(onDisk).not.toContain("title: New");
     expect(onDisk).toContain("## Persona");
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, {

@@ -177,7 +177,7 @@ export interface MemberInfo {
   id: string;
   name: string;
   agent: string;
-  /** member.md frontmatter title — the card field that replaces the template label. */
+  /** database title — the card field that replaces the template label. */
   title?: string | null;
   sourceAgent?: string;
   roomId?: string;
@@ -1461,7 +1461,7 @@ export interface ContactEntry {
   memberId: string;
   name: string;
   agentTemplate: string;
-  /** member.md frontmatter title — the card field that replaces the template chip. */
+  /** database title — the card field that replaces the template chip. */
   title?: string | null;
   status: "idle" | "working" | "error";
   activeScopes: string[];
@@ -1488,18 +1488,18 @@ export interface MemberDetail {
   memberId: string;
   name: string;
   agentTemplate: string;
-  /** member.md frontmatter (batch-1 identity rework): card field, editable in settings. */
+  /** database (batch-1 identity rework): card field, editable in settings. */
   title?: string;
   global?: MemberGlobalConfig;
   createdAt?: number;
   updatedAt?: number;
 }
 
-/** member.md read outlet (batch-2 §2.2 + architect 2026-08-26): the persona
+/** persona.md read outlet (batch-2 §2.2 + architect 2026-08-26): the persona
  * file is the panel's single memory asset. Write endpoints answer 410. */
 export interface MemberProfileDoc {
   path: string;
-  frontmatter: { name: string; title?: string };
+  exists: boolean;
   body: string;
   charCount: number;
   overBudget: boolean;

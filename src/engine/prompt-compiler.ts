@@ -45,7 +45,7 @@ export interface CompiledMemberPrompt {
   manifestHash: string;
   /** Contract fingerprint: sha1 of code-owned parts (Communication + env kind). */
   contractFingerprint: string;
-  /** member.md over 4000 chars — panel may surface this. */
+  /** persona.md over 4000 chars — panel may surface this. */
   profileOverBudget?: boolean;
 }
 
@@ -205,7 +205,7 @@ function buildEnvironmentSegment(args: {
   }
 
   lines.push(
-    `- Your profile: ${profilePath} — this file IS your persona. Its \`## Persona\` section holds who you are and how you work; when the user's feedback teaches you something lasting, use the edit tool to grow that section yourself.`,
+    `- Your profile: ${profilePath} — this file IS your persona. It is free-form Markdown with no frontmatter or required sections. When the user's feedback teaches you something lasting, update this file with the edit tool.`,
   );
 
   const catalog = buildSkillCatalog(args.memberId, args.contextWindowTokens);
@@ -235,7 +235,7 @@ function buildEnvironmentSegment(args: {
 
   if (archiveNonEmpty(archivePath)) {
     lines.push(
-      `- Legacy notes from the old system: ${archivePath}/. When relevant, read them and fold what is still true into your member.md or the shared memory dirs; remove each file once folded.`,
+      `- Legacy notes from the old system: ${archivePath}/. When relevant, read them and fold what is still true into your persona.md or the shared memory dirs; remove each file once folded.`,
     );
   }
 
@@ -270,7 +270,7 @@ export function compileMemberPromptForScope(args: {
     throw new Error("room required for room/topic scope compile");
   }
 
-  const profile = readMemberProfile(args.memberId, args.memberName);
+  const profile = readMemberProfile(args.memberId);
   const memberSeg = formatMemberPromptSegment(profile, args.memberName);
   const communicationSeg = COMMUNICATION_SEGMENT;
   const environmentSeg = buildEnvironmentSegment({

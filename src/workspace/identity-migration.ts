@@ -93,29 +93,6 @@ function safeSlug(name: string): string {
   return s || "room";
 }
 
-function normalizePersonaBlob(text: string): string {
-  return String(text || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/^##\s+Persona\s*$/gim, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function memberAlreadyHasPersonaContent(memberMdText: string, personaContent: string): boolean {
-  const needle = normalizePersonaBlob(personaContent);
-  if (!needle) return false;
-  return normalizePersonaBlob(memberMdText).includes(needle);
-}
-
-function parseFrontmatter(raw: string): { fm: string; body: string } {
-  if (!raw.startsWith("---")) return { fm: "", body: raw };
-  const end = raw.indexOf("\n---", 3);
-  if (end < 0) return { fm: "", body: raw };
-  const close = end + 4;
-  const after = raw.slice(close).replace(/^\n/, "");
-  return { fm: raw.slice(0, close), body: after };
-}
-
 /**
  * Data-driven: any leftover legacy asset means migration still needed.
  * Marker is log-only (F1).
@@ -123,8 +100,6 @@ function parseFrontmatter(raw: string): { fm: string; body: string } {
 export function needsIdentityMigration(bossmodeDir: string = getBossmodeDir()): boolean {
   const membersRoot = join(bossmodeDir, "members");
   for (const id of listDirs(membersRoot)) {
-    const persona = join(membersRoot, id, "memory", "persona.md");
-    if (existsSync(persona) && readText(persona).trim()) return true;
     const scopes = join(membersRoot, id, "memory", "scopes");
     if (existsSync(scopes)) {
       for (const scope of listDirs(scopes)) {
@@ -312,68 +287,7 @@ export function runIdentityMigration(opts: RunIdentityMigrationOpts = {}): Ident
       }
     }
 
-    // ── 2. persona → member.md + archive persona.md ──
-    {
-      const step = "2-persona-merge";
-      const membersRoot = join(boss, "members");
-      for (const id of listDirs(membersRoot)) {
-        if (!id.startsWith("mem_") && !id.startsWith("rm_")) continue;
-        const personaPath = join(membersRoot, id, "memory", "persona.md");
-        const memberMd = join(membersRoot, id, "member.md");
-        if (!existsSync(personaPath)) {
-          record({ step, op: "skip", from: personaPath, note: "no persona.md" });
-          continue;
-        }
-        const personaRaw = readText(personaPath).trim();
-        if (!personaRaw) {
-          record({ step, op: "skip", from: personaPath, note: "empty persona" });
-          continue;
-        }
-        const { body: personaBody } = parseFrontmatter(personaRaw);
-        const personaContent = personaBody.trim() || personaRaw;
-        const existing = existsSync(memberMd) ? readText(memberMd) : "";
-        const alreadyFolded = Boolean(existing && memberAlreadyHasPersonaContent(existing, personaContent));
-
-        if (!alreadyFolded) {
-          let fmBlock = `---\nname: ${id}\n---\n`;
-          let bodyRest = "";
-          if (existing) {
-            const parsed = parseFrontmatter(existing);
-            if (parsed.fm) fmBlock = parsed.fm.endsWith("\n") ? parsed.fm : `${parsed.fm}\n`;
-            bodyRest = parsed.body.replace(/^##\s+Persona\s*\n[\s\S]*?(?=^##\s|$)/m, "").trim();
-          } else {
-            const mj = join(membersRoot, id, "member.json");
-            if (existsSync(mj)) {
-              try {
-                const rec = JSON.parse(readText(mj)) as { name?: string };
-                if (rec.name) fmBlock = `---\nname: ${rec.name}\n---\n`;
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-          const parts = [fmBlock.trimEnd(), "", "## Persona", "", personaContent];
-          if (bodyRest) parts.push("", bodyRest);
-          const next = `${parts.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
-          record({ step, op: "write", from: personaPath, to: memberMd, note: `chars=${next.length}` });
-          if (apply) {
-            ensureDir(dirname(memberMd));
-            writeFileSync(memberMd, next, "utf-8");
-          }
-        } else {
-          record({
-            step,
-            op: "skip",
-            from: personaPath,
-            to: memberMd,
-            note: "member.md already contains persona body",
-          });
-        }
-
-        const archivePersona = join(membersRoot, id, "archive", "persona.md");
-        copyOrMoveFile(personaPath, archivePersona, step, true);
-      }
-    }
+    // Persona conversion is handled exclusively by the offline member-storage migration.
 
     // ── 3. archive member principles/mainline ──
     {
