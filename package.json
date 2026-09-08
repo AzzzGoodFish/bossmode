@@ -26,6 +26,7 @@
     "scripts/migrate-identity-memory-v1.mjs",
     "scripts/migrate-member-assets-v6.mjs",
     "scripts/migrate-member-sessions-v1.mjs",
+    "scripts/check-package-inputs.mjs",
     "vendor/pi-mcp-adapter/*.ts",
     "!vendor/pi-mcp-adapter/*.test.ts",
     "!vendor/pi-mcp-adapter/vitest.config.ts",
@@ -44,7 +45,8 @@
     "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs"
+    "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
+    "prepack": "node scripts/check-package-inputs.mjs ."
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.1",
