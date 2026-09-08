@@ -2301,7 +2301,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId, { type: "system", text: message }, { memberId, agentName });
   if (ref) {
     const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
-    const statusEvent = { type: "agent:status" as const, roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" };
+    const statusEvent = { type: "agent:status" as const, roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     if (ref.kind === "dm") broadcastToAgentSubscribers(eventScope, agentName, statusEvent);
     else broadcastToRoom(eventScope, statusEvent);
   }
