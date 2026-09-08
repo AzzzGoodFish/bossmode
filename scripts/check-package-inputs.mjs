@@ -17,4 +17,3 @@ if (missing.length > 0) {
   console.error("Initialize the pinned adapter first: git submodule update --init vendor/pi-mcp-adapter");
   process.exit(1);
 }
-
