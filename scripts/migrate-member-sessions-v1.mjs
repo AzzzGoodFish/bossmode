@@ -111,6 +111,7 @@ function finish(exitCode, extra = {}) {
   process.exit(exitCode);
 }
 function parseRecovery() {
+  if (lstatSync(recoveryPath).isSymbolicLink()) throw new Error("recovery material may not be a symlink");
   const material = JSON.parse(readFileSync(recoveryPath, "utf8"));
   if (material?.format !== "member-session-recovery/v1"
       || !["prepared", "recovering", "complete", "recovered"].includes(material.state)
@@ -118,7 +119,10 @@ function parseRecovery() {
   return material;
 }
 function writeRecovery(material) {
-  mkdirSync(dirname(recoveryPath), { recursive: true });
+  const migrationDir = dirname(recoveryPath);
+  if (existsSync(migrationDir) && lstatSync(migrationDir).isSymbolicLink()) throw new Error("migration directory may not be a symlink");
+  mkdirSync(migrationDir, { recursive: true });
+  if (realpathSync(migrationDir) !== migrationDir) throw new Error("migration directory escapes bossmode root");
   const temp = `${recoveryPath}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(material, null, 2) + "\n");
   renameSync(temp, recoveryPath);
@@ -128,11 +132,20 @@ function validateRecoveryItem(item) {
       || !(typeof item.originalBase64 === "string" || item.originalBase64 === null)) {
     throw new Error("invalid recovery item");
   }
-  const rel = relative(root, resolve(item.path)).split("\\").join("/");
-  const match = /^members\/([^/]+)\/sessions\/current\.json$/.exec(rel);
-  if (!match || !memberIds.has(match[1])) throw new Error(`recovery path escapes known member current files: ${item.path}`);
+  if (typeof item.memberId !== "string" || !memberIds.has(item.memberId)) throw new Error("recovery item has unknown memberId");
+  const expected = join(root, "members", item.memberId, "sessions", "current.json");
+  if (resolve(item.path) !== expected) throw new Error(`recovery path does not belong to member ${item.memberId}: ${item.path}`);
+  const memberRoot = realpathSync(join(root, "members", item.memberId));
+  if (!memberRoot.startsWith(root + "/members/")) throw new Error(`member directory escapes root: ${item.memberId}`);
   const sessionsDir = dirname(item.path);
-  if (!realpathSync(sessionsDir).startsWith(root + "/members/")) throw new Error(`recovery path parent escapes root: ${item.path}`);
+  if (lstatSync(sessionsDir).isSymbolicLink() || realpathSync(sessionsDir) !== join(memberRoot, "sessions")) throw new Error(`recovery sessions path escapes member: ${item.path}`);
+  if (existsSync(item.path) && lstatSync(item.path).isSymbolicLink()) throw new Error(`recovery current path is symlink: ${item.path}`);
+}
+function restoreOriginalCurrent(item) {
+  if (item.originalBase64 === null) { rmSync(item.path, { force: true }); return; }
+  const temp = `${item.path}.${process.pid}.recover.tmp`;
+  writeFileSync(temp, Buffer.from(item.originalBase64, "base64"));
+  renameSync(temp, item.path);
 }
 if (recover) {
   if (!existsSync(recoveryPath)) error(recoveryPath, "recovery-material-missing", "run --apply first");
@@ -150,12 +163,7 @@ if (recover) {
         if (currentHash === originalHash) {
           emit({ kind: "recovered", path: item.path, status: "already-original" });
         } else if (currentHash === item.publishedSha256) {
-          if (original === null) rmSync(item.path, { force: true });
-          else {
-            const temp = `${item.path}.${process.pid}.recover.tmp`;
-            writeFileSync(temp, original);
-            renameSync(temp, item.path);
-          }
+          restoreOriginalCurrent(item);
           stats.writes++;
           emit({ kind: "recovered", path: item.path, status: "original-current-restored" });
         } else {
@@ -181,8 +189,23 @@ if (apply && existsSync(recoveryPath)) {
       conflict(recoveryPath, "unfinished-recovery", { state: material.state, requiredAction: "run --recover before any apply" });
       finish(2);
     }
-    emit({ kind: "apply-skipped", reason: "migration-already-settled", recoveryState: material.state });
-    finish(0);
+    if (material.state === "complete") {
+      emit({ kind: "apply-skipped", reason: "migration-already-settled", recoveryState: material.state });
+      finish(0);
+    }
+    const historyDir = join(root, "migrations", "member-sessions-v1-history");
+    if (existsSync(historyDir) && lstatSync(historyDir).isSymbolicLink()) throw new Error("recovery history directory may not be a symlink");
+    mkdirSync(historyDir, { recursive: true });
+    if (realpathSync(historyDir) !== historyDir) throw new Error("recovery history directory escapes bossmode root");
+    const materialBytes = readFileSync(recoveryPath);
+    const materialHash = createHash("sha256").update(materialBytes).digest("hex");
+    const historyPath = join(historyDir, `${String(material.recoveredAt || material.generatedAt).replace(/[^0-9A-Za-z.-]/g, "_")}-${materialHash.slice(0, 16)}.json`);
+    if (existsSync(historyPath)) {
+      if (sha256(historyPath) !== materialHash) throw new Error(`recovery history conflict: ${historyPath}`);
+      rmSync(recoveryPath);
+    } else renameSync(recoveryPath, historyPath);
+    stats.writes++;
+    emit({ kind: "recovery-archived", source: recoveryPath, historyPath, sha256: materialHash, priorState: material.state });
   } catch (cause) {
     error(recoveryPath, "invalid-recovery-material", String(cause));
     finish(1);
@@ -352,7 +375,7 @@ if (apply && stats.errors === 0 && stats.conflicts === 0) {
       mkdirSync(dirname(path), { recursive: true });
       const currentTemp = `${path}.${process.pid}.migration.tmp`;
       writeFileSync(currentTemp, JSON.stringify(merged, null, 2) + "\n");
-      recovery.currentBackups.push({ path, existed: original !== null, originalBase64: original?.toString("base64") ?? null, publishedSha256: sha256(currentTemp) });
+      recovery.currentBackups.push({ memberId, path, existed: original !== null, originalBase64: original?.toString("base64") ?? null, publishedSha256: sha256(currentTemp) });
     }
     recovery.copiedTargets = staged.map((item) => item.target);
     mkdirSync(dirname(recoveryPath), { recursive: true });
@@ -381,18 +404,19 @@ if (apply && stats.errors === 0 && stats.conflicts === 0) {
     for (const [path, original] of currentBackups) {
       try {
         rmSync(`${path}.${process.pid}.migration.tmp`, { force: true });
-        const published = recovery.currentBackups.find((item) => item.path === path)?.publishedSha256;
+        const recoveryItem = recovery.currentBackups.find((item) => item.path === path);
+        const published = recoveryItem?.publishedSha256;
         const currentHash = existsSync(path) ? sha256(path) : null;
         const originalHash = original ? createHash("sha256").update(original).digest("hex") : null;
         if (currentHash === published) {
-          if (original === null) rmSync(path, { force: true }); else writeFileSync(path, original);
+          restoreOriginalCurrent(recoveryItem);
         } else if (currentHash !== originalHash) {
           conflict(path, "rollback-current-changed", { currentSha256: currentHash, publishedSha256: published, originalSha256: originalHash });
         }
         if (injectedFailure === "publish-and-rollback") throw new Error("injected rollback failure");
       } catch (rollbackCause) { error(path, "rollback-failed", String(rollbackCause)); }
     }
-    emit({ kind: "recovery", status: stats.conflicts ? "manual-required" : "references-restored", recoveryPath, ...recovery });
+    emit({ kind: "recovery", status: stats.conflicts || stats.errors > 1 ? "manual-required" : "references-restored", recoveryPath, ...recovery });
   }
 } else if (apply && (stats.errors || stats.conflicts)) {
   emit({ kind: "apply-blocked", reason: "resolve every conflict/error before retry", writes: 0 });

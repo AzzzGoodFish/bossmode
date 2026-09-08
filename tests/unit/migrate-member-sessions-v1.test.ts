@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 const script = join(process.cwd(), "scripts/migrate-member-sessions-v1.mjs");
@@ -50,6 +50,11 @@ describe("member session migration", () => {
     expect(run("--recover").at(-1)).toMatchObject({ exitCode: 0 });
     expect(() => readFileSync(currentPath)).toThrow();
     expect(run("--recover").at(-1)).toMatchObject({ exitCode: 0 });
+    const reapplied = run("--apply");
+    expect(reapplied).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "recovery-archived", priorState: "recovered" })]));
+    expect(JSON.parse(readFileSync(currentPath, "utf8"))["room:room_a"].sessionId).toBe("sid");
+    expect(readdirSync(join(root, "migrations", "member-sessions-v1-history"))).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(root, "migrations", "member-sessions-v1-recovery.json"), "utf8")).state).toBe("complete");
 
     writeFileSync(currentPath, JSON.stringify({ "room:room_a": { runtime: "pi-sdk", sessionId: "later" } }));
     const blocked = spawnSync(process.execPath, [script, "--recover", "--bossmode-dir", root], { encoding: "utf8" });
