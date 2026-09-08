@@ -27,7 +27,7 @@ Listed in Environment. **ls / read on demand**; write back what should stick.
 
 Do not dump session noise here. Prefer short, durable notes.
 
-For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read memory. The session search commands and limits are in `scripts/session-search.mjs`; it is read-only and uses the member directory already provided in your environment.
+For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read memory. See [references/sessions.md](references/sessions.md) for complete read-only session search commands, pagination, and the operator-only migration procedure.
 
 **recall / memorize flow.** Use the parameter-free tools to work the shared memory from inside a conversation. The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file; your conversation and the background child follow the same method:
 
@@ -121,7 +121,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 ## Reload (apply asset changes)
 
 - After editing `member.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.
-- Conversation history is preserved — reload is not a reset. Reset (staff action) wipes the conversation; reload keeps it.
+- Conversation history is preserved — reload is not a reset. Reset (staff action) starts a new current session but preserves the prior SDK JSONL in your archive; reload keeps using the current session.
 - Mid-run: reload queues and applies when your current turn finishes.
 
 ## Tools and chat
