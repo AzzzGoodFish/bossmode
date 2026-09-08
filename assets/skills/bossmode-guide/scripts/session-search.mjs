@@ -124,7 +124,10 @@ if (action === "expand") {
   try { file = await realpath(resolve(root, requested)); } catch { fail("file not found"); }
   if (!safeRelative(file) || !statSync(file).isFile()) fail("file escapes member directory");
   const entries = [];
-  await scanFile(file, 0, (entry, line) => { entries.push({ ...entry, _line: line }); }, () => true);
+  const parseDiagnostics = [];
+  await scanFile(file, 0,
+    (entry, line) => { entries.push({ ...entry, _line: line }); },
+    (line) => { parseDiagnostics.push({ reason: "invalid-jsonl-record", line }); return true; });
   const byId = new Map(entries.filter((entry) => entry.id).map((entry) => [entry.id, entry]));
   const anchor = byId.get(entryId);
   if (!anchor) fail("entryId not found");
@@ -144,17 +147,41 @@ if (action === "expand") {
   const before = integer("--before", 3, 0, 1000);
   const after = integer("--after", 3, 0, 1000);
   const records = [
+    ...parseDiagnostics.map((diagnostic) => ({ relation: "diagnostic", diagnostic })),
+    ...(missingParent ? [{ relation: "diagnostic", diagnostic: { reason: "missing-parent", parentId: missingParent } }] : []),
     ...ancestors.slice(-(before + 1)).map((entry) => ({ relation: entry.id === entryId ? "anchor" : "ancestor", entry: scrub(entry) })),
     ...entries.filter((entry) => entry.parentId === entryId).slice(0, after).map((entry) => ({ relation: "direct-child", entry: scrub(entry) })),
   ];
   const cursor = decodeCursor();
-  let index = cursor?.action === "expand" && cursor.file === requested && cursor.entryId === entryId ? cursor.index : 0;
-  if (!Number.isInteger(index) || index < 0 || index > records.length) fail("invalid expand cursor");
-  if (missingParent) emit({ kind: "diagnostic", file: requested, entryId, reason: "missing-parent", parentId: missingParent }, 256);
-  for (; index < records.length; index++) {
-    if (!emit({ kind: "expand", file: requested, entryId, branch: true, ...records[index] }, 256)) break;
+  if (cursor && (cursor.action !== "expand" || cursor.file !== requested || cursor.entryId !== entryId || !Number.isInteger(cursor.index) || !Number.isInteger(cursor.offset))) fail("invalid expand cursor");
+  let index = cursor?.index || 0;
+  let offset = cursor?.offset || 0;
+  if (index < 0 || index > records.length || offset < 0) fail("invalid expand cursor");
+  while (index < records.length) {
+    const item = records[index];
+    if (item.diagnostic) {
+      const next = { action: "expand", file: requested, entryId, index: index + 1, offset: 0 };
+      const continuationBytes = Buffer.byteLength(JSON.stringify({ kind: "truncated", reason: "max-bytes", nextCursor: encodeCursor(next) })) + 2;
+      if (!emit({ kind: "diagnostic", file: requested, entryId, ...item.diagnostic }, continuationBytes)) break;
+      index++; offset = 0; continue;
+    }
+    const serialized = JSON.stringify(item.entry);
+    let chunkLength = Math.min(serialized.length - offset, 2048);
+    let emitted = false;
+    while (chunkLength > 0) {
+      const nextOffset = offset + chunkLength;
+      const next = nextOffset < serialized.length
+        ? { action: "expand", file: requested, entryId, index, offset: nextOffset }
+        : { action: "expand", file: requested, entryId, index: index + 1, offset: 0 };
+      const continuationBytes = Buffer.byteLength(JSON.stringify({ kind: "truncated", reason: "max-bytes", nextCursor: encodeCursor(next) })) + 2;
+      const row = { kind: "expand", file: requested, entryId, branch: true, relation: item.relation, entryOffset: offset, entryComplete: nextOffset >= serialized.length, entryChunk: serialized.slice(offset, nextOffset) };
+      if (emit(row, continuationBytes)) { offset = nextOffset; emitted = true; break; }
+      chunkLength = Math.floor(chunkLength / 2);
+    }
+    if (!emitted) break;
+    if (offset >= serialized.length) { index++; offset = 0; }
   }
-  if (index < records.length) emitContinuation({ action: "expand", file: requested, entryId, index }, "max-bytes");
+  if (index < records.length) emitContinuation({ action: "expand", file: requested, entryId, index, offset }, "max-bytes");
   process.exit(0);
 }
 
@@ -168,8 +195,9 @@ const roots = [resolve(root, "sessions")];
 if (has("--include-background")) roots.push(resolve(root, "background-tasks"));
 const files = (await Promise.all(roots.map(collectFiles))).flat().sort();
 const start = decodeCursor();
+if (start && (start.action !== action || typeof start.file !== "string" || !Number.isInteger(start.line) || start.line < 0)) fail("invalid list/search cursor");
 let count = 0;
-let last = start || { file: "", line: 0 };
+let last = start || { action, file: "", line: 0 };
 let diagnostics = 0;
 for (const file of files) {
   const relativeFile = safeRelative(file);
@@ -177,26 +205,47 @@ for (const file of files) {
   const scope = scopeFor(file);
   if (wantedScope && scope !== wantedScope) continue;
   const startLine = start?.file === relativeFile ? start.line : 0;
+  let fileSessionId;
+  try { const header = JSON.parse(readFileSync(file, "utf8").split("\n", 1)[0]); if (header?.type === "session") fileSessionId = header.id; } catch { /* reported by scan */ }
   await scanFile(file, startLine, (entry, line) => {
     const stamp = Date.parse(entry.timestamp || entry.message?.timestamp || "");
+    if (!Number.isFinite(stamp)) {
+      diagnostics++;
+      const position = { action, file: relativeFile, line };
+      const reserve = Buffer.byteLength(JSON.stringify({ kind: "truncated", reason: "max-bytes", nextCursor: encodeCursor(position) })) + 2;
+      if (!emit({ kind: "diagnostic", file: relativeFile, line, reason: "invalid-record-timestamp" }, reserve)) return false;
+      last = position;
+      return true;
+    }
     if (action === "list" && (entry.type !== "session" || stamp < from || stamp > to)) return true;
     if (action === "search" && (stamp < from || stamp > to || !searchableText(entry).includes(query))) return true;
-    const position = { file: relativeFile, line };
+    const position = { action, file: relativeFile, line };
+    const content = Array.isArray(entry.message?.content) ? entry.message.content : [];
+    const tool = content.find((item) => item && typeof item === "object" && (item.toolCallId || item.tool_use_id || item.type === "toolCall" || item.type === "tool_use" || item.type === "tool_result"));
     const record = {
       kind: action, file: relativeFile, scope,
-      sessionId: entry.type === "session" ? entry.id : undefined,
+      sessionId: entry.type === "session" ? entry.id : fileSessionId,
       entryId: entry.id, timestamp: entry.timestamp || entry.message?.timestamp,
-      role: entry.message?.role, parentId: entry.parentId, toolCallId: entry.toolCallId,
+      role: entry.message?.role, parentId: entry.parentId,
+      toolCallId: entry.toolCallId || entry.message?.toolCallId || tool?.toolCallId || tool?.tool_use_id || tool?.id,
       summary: searchableText(entry).slice(0, 500), branch: Boolean(entry.parentId),
     };
-    if (!emit(record, 256)) return false;
+    const continuation = { kind: "truncated", reason: "max-bytes", nextCursor: encodeCursor(position) };
+    const reserve = Buffer.byteLength(JSON.stringify(continuation)) + 2;
+    while (record.summary.length > 0 && output.bytes + Buffer.byteLength(JSON.stringify(record)) + 1 + reserve > maxBytes) {
+      record.summary = record.summary.slice(0, Math.floor(record.summary.length / 2));
+      record.summaryTruncated = true;
+    }
+    if (!emit(record, reserve)) return false;
     count++;
     last = position;
     return count < limit;
   }, (line) => {
     diagnostics++;
-    if (!emit({ kind: "diagnostic", file: relativeFile, line, reason: "invalid-jsonl-record" }, 256)) return false;
-    last = { file: relativeFile, line };
+    const position = { action, file: relativeFile, line };
+    const reserve = Buffer.byteLength(JSON.stringify({ kind: "truncated", reason: "max-bytes", nextCursor: encodeCursor(position) })) + 2;
+    if (!emit({ kind: "diagnostic", file: relativeFile, line, reason: "invalid-jsonl-record" }, reserve)) return false;
+    last = position;
     return true;
   });
   if (count >= limit || output.stopped) break;

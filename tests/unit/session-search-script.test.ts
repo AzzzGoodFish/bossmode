@@ -23,8 +23,8 @@ describe("session-search guide script", () => {
     const found = run("--member-dir", member, "search", "--text", "中文目标", "--from", "2026-09-08T00:00:00Z");
     expect(found[0]).toMatchObject({ file: "sessions/2026-09-07/rooms/room_a/one.jsonl", entryId: "hit", scope: "room:room_a" });
     const expanded = run("--member-dir", member, "expand", "--file", found[0].file, "--entry", "hit", "--before", "2");
-    expect(expanded.map((record: any) => record.entry.id)).toEqual(["s", "older", "hit"]);
-    expect(expanded.at(-1)).toMatchObject({ relation: "anchor", branch: true });
+    expect(expanded.map((record: any) => JSON.parse(record.entryChunk).id)).toEqual(["s", "older", "hit"]);
+    expect(expanded.at(-1)).toMatchObject({ relation: "anchor", branch: true, entryComplete: true });
   });
 
   it("uses the full DM scope and never searches or returns encrypted fields", () => {
@@ -32,11 +32,29 @@ describe("session-search guide script", () => {
     const member = join(root, "members", "mem_me");
     const file = join(member, "sessions", "2026-09-07", "dm", "one.jsonl");
     mkdirSync(join(file, ".."), { recursive: true });
-    writeFileSync(file, '{"type":"message","id":"e","timestamp":"2026-09-07T00:00:00Z","encrypted_content":"secret-needle","message":{"role":"assistant","content":[{"type":"text","text":"visible"}],"thinkingSignature":"hidden"}}\n');
+    writeFileSync(file, '{"type":"session","id":"sid","timestamp":"2026-09-07T00:00:00Z"}\n{"type":"message","id":"e","timestamp":"2026-09-07T00:00:01Z","encrypted_content":"secret-needle","message":{"role":"toolResult","content":[{"type":"tool_result","tool_use_id":"call-1","text":"visible"}],"thinkingSignature":"hidden"}}\n');
     expect(run("--member-dir", member, "search", "--text", "secret-needle", "--scope", "dm:mem_me")).toEqual([]);
     const visible = run("--member-dir", member, "search", "--text", "visible", "--scope", "dm:mem_me");
-    expect(visible[0].scope).toBe("dm:mem_me");
+    expect(visible[0]).toMatchObject({ scope: "dm:mem_me", sessionId: "sid", role: "toolResult", toolCallId: "call-1" });
     expect(JSON.stringify(visible)).not.toMatch(/thinkingSignature|encrypted_content|hidden|secret-needle/);
+  });
+
+  it("paginates an oversized expand entry with forward progress and reports bad lines", () => {
+    root = mkdtempSync(join(tmpdir(), "session-search-"));
+    const member = join(root, "members", "mem_me");
+    const file = join(member, "sessions", "2026-09-07", "rooms", "r", "one.jsonl");
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, [
+      '{"type":"session","id":"sid","timestamp":"2026-09-07T00:00:00Z"}',
+      "bad tail",
+      JSON.stringify({ type: "message", id: "huge", parentId: "sid", timestamp: "2026-09-07T00:01:00Z", message: { role: "assistant", content: "中".repeat(5000) } }),
+    ].join("\n") + "\n");
+    const first = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024");
+    expect(first.some((row: any) => row.kind === "diagnostic" && row.reason === "invalid-jsonl-record")).toBe(true);
+    const cursor = first.at(-1).nextCursor;
+    expect(cursor).toBeTruthy();
+    const second = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024", "--cursor", cursor);
+    expect(second.find((row: any) => row.kind === "expand")?.entryOffset).toBeGreaterThan(0);
   });
 
   it("always returns a usable cursor when the byte budget truncates output", () => {
