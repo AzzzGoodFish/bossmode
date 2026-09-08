@@ -266,7 +266,7 @@ export function runRoomMemberMigration(): void {
     if (!existsSync(path)) continue;
     try {
       const room = readJson<Room | null>(path, null);
-      if (!room) continue;
+      if (!room || Array.isArray(room.globalMemberIds)) continue; // Current membership (including empty) is authoritative.
       let created = 0;
       if (!Array.isArray(room.roomMembers) || room.roomMembers.length === 0) {
         const names = Array.isArray(room.members) ? room.members : [];

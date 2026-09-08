@@ -1,3 +1,7 @@
+vi.mock("../src/workforce/room-member-resolver.js", () => ({
+  resolveRoomMember: vi.fn(),
+}));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock dependencies before importing agent-manager
@@ -9,9 +13,7 @@ vi.mock("../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn(),
 }));
 
-vi.mock("../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn(),
-}));
+
 
 vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => "/tmp/bossmode-test",

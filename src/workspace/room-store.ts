@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import type { CreateRoomMemberInput, Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
-import { getMemberByName } from "../workforce/member-store.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { getMember, renameMember } from "./member-registry.js";
 import { memberDir } from "./member-profile.js";
@@ -79,28 +78,18 @@ function cleanMemberConfig(config: RoomMemberConfig): RoomMemberConfig {
 }
 
 function buildRoomMemberRecord(roomId: string, memberName: string, override?: RoomMemberOverride, existingId?: string): RoomMemberRecord {
-  const legacyMember = getMemberByName(memberName);
   const now = Date.now();
-  const sourceAgent = legacyMember?.agent || memberName;
-  const config = cleanMemberConfig({
-    model: legacyMember?.model,
-    credentialId: legacyMember?.credentialId,
-    thinkingLevel: legacyMember?.thinkingLevel,
-    contextLimit: legacyMember?.contextLimit,
-    skills: legacyMember?.skills,
-    ...(override || {}),
-  });
+  // Legacy member config must already be materialized by the explicit migration.
+  const config = cleanMemberConfig(override || {});
   return {
     id: existingId || createRoomMemberId(),
     roomId,
     name: memberName,
-    sourceAgent,
-    sourceMemberId: legacyMember?.id,
-    avatar: legacyMember?.avatar,
+    sourceAgent: memberName,
     ...(Object.keys(config).length > 0 ? { config } : {}),
     createdAt: now,
     updatedAt: now,
-    migratedFrom: { memberName, memberId: legacyMember?.id },
+    migratedFrom: { memberName },
   };
 }
 
@@ -122,7 +111,7 @@ function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: stri
 
 export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
   // 0.20 G3 cutover: globalMemberIds is membership authority. Synthesize records with id=mem_*.
-  if (Array.isArray(room.globalMemberIds) && room.globalMemberIds.length > 0) {
+  if (Array.isArray(room.globalMemberIds)) {
     const out: RoomMemberRecord[] = [];
     for (const gid of room.globalMemberIds) {
       const g = getMember(gid);
@@ -136,7 +125,7 @@ export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
         name: g.name,
         sourceAgent: g.agentTemplate || "general",
         sourceMemberId: gid,
-        avatar: shadow?.avatar,
+        avatar: loadAgentDefinition(g.agentTemplate)?.avatar,
         // Config lives on global registry (effective-config); do not rehydrate shadow config.
         createdAt: shadow?.createdAt || g.createdAt,
         updatedAt: g.updatedAt,
@@ -440,6 +429,8 @@ export function getRoomMemberOverride(roomId: string, memberName: string): RoomM
   const room = getRoom(roomId);
   if (!room) return undefined;
   const member = findRoomMemberByNameInRoom(room, memberName);
+  // Current members have global DB settings, not room-local overrides.
+  if (member?.id.startsWith("mem_") || member?.sourceMemberId?.startsWith("mem_")) return undefined;
   if (member?.config) return member.config;
   return room.memberOverrides?.[memberName];
 }

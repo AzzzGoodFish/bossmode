@@ -29,19 +29,7 @@ import { mockPromptFn, mockSteerFn, resetMocks, setMockPromptFn, setMockIsWorkin
 import * as mockRuntimeModule from "../helpers/mock-runtime.js";
 
 // Mock member store to return mock members with "mock" runtime
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn().mockImplementation((name: string) => ({
-    id: name,
-    name,
-    type: "agent",
-    agent: name,
-    model: "mock-model",
-    runtime: "mock",
-    skills: [],
-    thinkingLevel: "off",
-  })),
-  loadMembers: vi.fn().mockReturnValue([]),
-}));
+
 
 // Mock agent definitions — returns valid agent defs
 vi.mock("../../src/workforce/agent-store.js", () => ({

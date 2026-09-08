@@ -1,3 +1,7 @@
+vi.mock("../../src/workforce/room-member-resolver.js", () => ({
+  resolveRoomMember: vi.fn(() => member),
+}));
+
 /**
  * Manual compaction as ONE conversation action (steer-removal §2/§3):
  * - busy before the first await → ordinary messages queue, never cancel
@@ -86,10 +90,7 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn(() => member),
-  saveMember: vi.fn((next: any) => { member = next; return next; }),
-}));
+
 
 vi.mock("../../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn((name: string) => ({ name, model: "anthropic/claude-a", description: name, systemPrompt: "test", skills: [], tags: [] })),

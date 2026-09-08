@@ -24,10 +24,14 @@ describe("token usage store", () => {
   it("aggregates message_end usage for a member across rooms", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const { getMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
+    const { createMember, renameMember } = await import("../../src/workspace/member-registry.js");
+    const current = createMember({ name: "developer" });
 
     const roomA = roomStore.createRoom("A", dir, drafts(["developer"]));
     const roomB = roomStore.createRoom("B", dir, drafts(["developer"]));
 
+    roomStore.stampGlobalMemberIds(roomA.id, [current.id]);
+    roomStore.stampGlobalMemberIds(roomB.id, [current.id]);
     const eventsA = join(roomStore.roomDir(roomA.id), "agent-events");
     const eventsB = join(roomStore.roomDir(roomB.id), "agent-events");
     mkdirSync(eventsA, { recursive: true });
@@ -42,7 +46,20 @@ describe("token usage store", () => {
       JSON.stringify({ type: "message_end" }),
     ].join("\n"));
 
-    expect(getMemberTokenUsage("developer")).toEqual({ totalTokens: 45 });
+    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 45 });
+    // Canonical copies win over old name-keyed files rather than double counting.
+    const { copyFileSync } = await import("node:fs");
+    for (const events of [eventsA, eventsB]) copyFileSync(join(events, "developer.jsonl"), join(events, `${current.id}.jsonl`));
+    const dm = join(dir, "rooms", `dm:${current.id}`, "agent-events");
+    const topic = join(dir, "rooms", roomA.id, "topics", "topic-a", "agent-events");
+    for (const events of [dm, topic]) {
+      mkdirSync(events, { recursive: true });
+      writeFileSync(join(events, `${current.id}.jsonl`), JSON.stringify({ type: "message_end", usage: { inputTokens: 5 } }) + "\n");
+      writeFileSync(join(events, "mem_other.jsonl"), JSON.stringify({ type: "message_end", usage: { inputTokens: 900 } }) + "\n");
+    }
+    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 55 });
+    renameMember(current.id, "renamed");
+    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 55 });
   });
 
   it("reads token usage by stable room member id", async () => {

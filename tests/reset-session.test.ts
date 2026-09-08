@@ -61,19 +61,7 @@ vi.mock("../src/workforce/agent-store.js", () => ({
   })),
 }));
 
-vi.mock("../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn(() => ({
-    id: "pm",
-    name: "pm",
-    type: "agent",
-    agent: "pm",
-    model: "mock-model",
-    credentialId: "cred-a",
-    runtime: "pi-cli",
-    skills: [],
-    thinkingLevel: "off",
-  })),
-}));
+
 
 vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => "/tmp/bossmode-test",
@@ -139,7 +127,7 @@ describe("resetAgentSession", () => {
     await shutdownAll();
     vi.clearAllMocks();
     sessionResumeEnabled = true;
-    mockRoom = { id: "room1", name: "Room 1", cwd: "/tmp", members: ["pm"], createdAt: Date.now() };
+    mockRoom = { id: "room1", name: "Room 1", cwd: "/tmp", members: ["pm"], roomMembers: [{ id: "pm", name: "pm", sourceAgent: "pm", config: { model: "mock-model", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1 }], createdAt: Date.now() };
     vi.mocked(sessionStore.getSessions).mockReturnValue({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } });
     mockHandle.destroy.mockClear();
     mockHandle.abort.mockClear();

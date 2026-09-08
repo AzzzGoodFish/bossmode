@@ -91,7 +91,7 @@ async function ensureRoutesRegistered(): Promise<void> {
 
 
   // Domain routes — dynamic import to avoid ESM hoisting issues
-  // 0.20 members/contacts/dm first so they shadow legacy workforce /api/members CRUD.
+  // Each domain owns its routes; workforce contains no duplicate member CRUD.
   await import("./members.js");
   await import("./conversations.js");
   await import("./workforce.js");

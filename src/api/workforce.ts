@@ -1,52 +1,25 @@
-// Workforce API routes — Agent, Skill, Member CRUD
+// Skills and member operational API routes. Member CRUD lives in members.ts.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import {
-  loadAgentDefinitions, loadAgentDefinitionsStrict, loadAgentDefinition, saveAgentDefinition,
-  deleteAgentDefinition, loadAgentTemplates, getAgentsDir,
+  loadAgentDefinitions, saveAgentDefinition, getAgentsDir,
 } from "../workforce/agent-store.js";
 import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
-import { loadMembers, getMember, saveMember, deleteMember } from "../workforce/member-store.js";
 import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
-import { getModelCredentialProfile, resolveCredentialProfileForModel } from "../engine/model-credentials.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
 import { readMemberStats } from "../workspace/member-stats-store.js";
-import { resolveMemberRef } from "../workspace/member-registry.js";
+import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-
-const ONLY_SUPPORTED_RUNTIME = "pi-cli";
-
-function validateCredentialMatchesModel(credentialId: unknown, model: string | undefined): string | undefined {
-  if (credentialId === undefined || credentialId === null || credentialId === "") return undefined;
-  if (typeof credentialId !== "string") throw new Error("credentialId must be a string");
-  if (!model) throw new Error("credentialId requires an explicit model override");
-  const credential = getModelCredentialProfile(credentialId);
-  if (!credential) throw new Error("Model credential profile not found");
-  if (!credential.enabled) throw new Error("Model credential profile is disabled");
-  resolveCredentialProfileForModel({ modelRef: model, credentialId });
-  // Explicit provider match (design §10): the ref's provider segment must equal
-  // the profile's providerSlug — model-id-only matching would accept a foreign
-  // provider that happens to serve the same id.
-  const provider = model.includes("/") ? model.split("/")[0] : "";
-  if (provider !== credential.providerSlug) {
-    throw new Error(`Credential "${credential.name}" (${credential.providerSlug}) does not serve model ${model}`);
-  }
-  return credentialId;
-}
-
-function optionalModel(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 // ── Agent / Templates API retired (identity batch 2.5) ──
 // Routes answer 410 so old clients fail loud; runtime still loads agents/*.md
@@ -149,91 +122,19 @@ addRoute("DELETE", "/api/skills/:name", async (_req, res, params) => {
   sendJson(res, 200, { ok: true });
 });
 
-// ── Member CRUD ──
-
-addRoute("GET", "/api/members", async (_req, res) => {
-  sendJson(res, 200, loadMembers());
-});
-
-addRoute("GET", "/api/members/:id", async (_req, res, params) => {
-  const member = getMember(params.id);
-  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
-  sendJson(res, 200, member);
-});
-
-addRoute("POST", "/api/members", async (req, res) => {
-  const body = (await parseBody(req)) as any;
-  if (!body.name) {
-    sendJson(res, 400, { error: "name is required" });
-    return;
-  }
-  const model = optionalModel(body.model);
-  let credentialId: string | undefined;
-  try {
-    credentialId = validateCredentialMatchesModel(body.credentialId, model);
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
-    return;
-  }
-  const member = saveMember({
-    name: body.name,
-    agent: body.agent || "",
-    model,
-    runtime: ONLY_SUPPORTED_RUNTIME,
-    thinkingLevel: body.thinkingLevel || "off",
-    avatar: body.avatar,
-    contextLimit: body.contextLimit,
-    credentialId,
-  });
-  sendJson(res, 200, member);
-});
-
-addRoute("PUT", "/api/members/:id", async (req, res, params) => {
-  const existing = getMember(params.id);
-  if (!existing) { sendJson(res, 404, { error: "Member not found" }); return; }
-  const body = (await parseBody(req)) as any;
-  // Single-path model switch (design-model-switch-single-path-v1 §7): the old
-  // model-configuration path is retired — model/credentialId/thinkingLevel are
-  // member-global and go through PATCH /api/members/:id only.
-  for (const key of ["model", "credentialId", "thinkingLevel"]) {
-    if (Object.prototype.hasOwnProperty.call(body, key)) {
-      sendJson(res, 400, { error: "model_config_is_global", message: `${key} is member-global — update it via PATCH /api/members/:id` });
-      return;
-    }
-  }
-  const member = saveMember({
-    id: params.id,
-    name: body.name ?? existing.name,
-    agent: body.agent ?? existing.agent,
-    model: existing.model,
-    runtime: ONLY_SUPPORTED_RUNTIME,
-    thinkingLevel: existing.thinkingLevel,
-    avatar: body.avatar ?? existing.avatar,
-    contextLimit: body.contextLimit ?? existing.contextLimit,
-    credentialId: existing.credentialId,
-  });
-  sendJson(res, 200, member);
-});
-
-addRoute("DELETE", "/api/members/:id", async (_req, res, params) => {
-  if (!deleteMember(params.id)) { sendJson(res, 404, { error: "Member not found" }); return; }
-  sendJson(res, 200, { ok: true });
-});
-
 addRoute("GET", "/api/members/:id/token-usage", async (req, res, params) => {
   const url = new URL(req.url || "", "http://localhost");
   const roomId = url.searchParams.get("roomId");
   if (roomId) {
     const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string } | null : undefined;
     const roomMember = resolveRoomMemberRef?.(roomId, params.id);
-    if (roomMember) {
-      sendJson(res, 200, getRoomMemberTokenUsage(roomId, roomMember.id));
-      return;
-    }
+    if (!roomMember) { sendJson(res, 404, { error: "Member not found in this room" }); return; }
+    sendJson(res, 200, getRoomMemberTokenUsage(roomId, roomMember.id));
+    return;
   }
   const member = getMember(params.id);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
-  sendJson(res, 200, getMemberTokenUsage(member.name));
+  sendJson(res, 200, getMemberTokenUsage(member.id));
 });
 
 /** Persistent per-member stats for this scope: turns, tool calls, active work
@@ -302,7 +203,7 @@ addRoute("GET", "/api/members/:id/events", async (req, res, params) => {
 addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {
   const member = getMember(params.id);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
-  const instances = getMemberInstances(member.name);
+  const instances = getMemberInstances(member.id);
   sendJson(res, 200, { instances });
 });
 
@@ -312,8 +213,7 @@ addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
   if (!roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
   const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string } | null : undefined;
   const roomMember = resolveRoomMemberRef?.(roomId, params.id);
-  const legacyMember = roomMember ? null : getMember(params.id);
-  const memberRef = roomMember?.id || legacyMember?.name;
+  const memberRef = roomMember?.id;
   if (!memberRef) { sendJson(res, 400, { error: "member and roomId required" }); return; }
   destroyInstance(roomId, memberRef);
 

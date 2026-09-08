@@ -44,12 +44,7 @@ vi.mock("../../src/workforce/skill-store.js", () => ({
   loadSkillTemplates: vi.fn(() => []),
 }));
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  loadMembers: vi.fn(() => []),
-  getMember: getMemberMock,
-  saveMember: vi.fn(),
-  deleteMember: vi.fn(() => true),
-}));
+
 
 vi.mock("../../src/engine/agent-manager.js", () => ({
   getMemberInstances: vi.fn(() => []),
@@ -62,6 +57,7 @@ vi.mock("../../src/communication/message-bus.js", () => ({
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   setCursor: (...args: any[]) => setCursorMock(...args),
+  resolveRoomMemberRef: (...args: any[]) => getMemberMock(...args),
 }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -105,8 +101,8 @@ describe("POST /api/members/:id/restart", () => {
 
     await handler({ url: "/api/members/m1/restart?roomId=room-1" } as any, {} as any, { id: "m1" });
 
-    expect(destroyInstanceMock).toHaveBeenCalledWith("room-1", "pm");
-    expect(setCursorMock).toHaveBeenCalledWith("room-1", "pm", "m-last");
+    expect(destroyInstanceMock).toHaveBeenCalledWith("room-1", "m1");
+    expect(setCursorMock).toHaveBeenCalledWith("room-1", "m1", "m-last");
     expect(latestMessageIdMock).toHaveBeenCalledWith("room-1");
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),

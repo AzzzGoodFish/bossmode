@@ -261,8 +261,6 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
 
   describe("Room member MCP access PATCH", () => {
     it("rejects thinkingLevel — member-global via PATCH /api/members/:id only", async () => {
-      const { saveMember } = await import("../../src/workforce/member-store.js");
-      saveMember({ name: "pm", agent: "pm", runtime: "test" });
 
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
@@ -289,8 +287,6 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
           badUrl: { url: "not a url" },
         },
       }, null, 2));
-      const { saveMember } = await import("../../src/workforce/member-store.js");
-      saveMember({ name: "pm", agent: "pm", runtime: "test" });
 
       const createRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,

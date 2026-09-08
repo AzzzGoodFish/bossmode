@@ -50,25 +50,20 @@ vi.mock("../../src/shared/config.js", () => ({
   readConfig: () => ({ runtime: { sessionResume: false }, defaults: {}, apiKeys: {} }),
 }));
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn((name: string) => ({
-    id: name, name, type: "agent", agent: state.sourceAgent,
-    model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off",
-  })),
-}));
+
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   getRoom: vi.fn(() => ({
     id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: 1,
-    roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }],
+    roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }],
   })),
   getCursors: vi.fn(() => ({ rm_dev: null })),
   setCursor: state.setCursor,
   resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) =>
     ref === "developer" || ref === "rm_dev"
-      ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }
+      ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }
       : null),
-  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }]),
+  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }]),
 }));
 
 vi.mock("../../src/workspace/session-store.js", () => ({
@@ -123,7 +118,7 @@ async function setup() {
   await shutdownAll();
   handle = new TestHandle();
   const runtime = {
-    name: "test",
+    name: "pi-cli",
     capabilities: { streaming: true, toolEvents: true, thinking: false, usage: false, dynamicModel: false, dynamicThinking: false, permissionControl: false, sessionResume: false },
     detect: vi.fn(async () => ({ available: true })),
     createAgent: vi.fn(async () => handle as any),

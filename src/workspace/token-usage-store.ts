@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { getRoomMembers, listRooms, roomDir } from "./room-store.js";
+import { getRoomsDir, roomDir, resolveRoomMemberRef } from "./room-store.js";
+import { resolveMemberEventFiles } from "./db/backfill.js";
 import { logger } from "../foundation/logger.js";
 
 export interface MemberTokenUsageSummary {
@@ -20,17 +21,18 @@ function usageTotal(usage: unknown): number {
     safeTokenNumber(u.cacheWrite);
 }
 
-function readUsageForRefs(roomId: string, refs: string[], logName: string): number {
+function readUsageForMember(roomId: string, memberId: string, dir = join(roomDir(roomId), "agent-events")): number {
   let totalTokens = 0;
-  for (const ref of Array.from(new Set(refs.filter(Boolean)))) {
-    const path = join(roomDir(roomId), "agent-events", `${ref}.jsonl`);
-    if (!existsSync(path)) continue;
+  // Reuse canonical file selection so id/name duplicate files are not counted twice.
+  for (const { memberId: owner, file } of resolveMemberEventFiles(roomId, dir).files) {
+    if (owner !== memberId) continue;
+    const path = join(dir, file);
 
     let content = "";
     try {
       content = readFileSync(path, "utf-8");
     } catch (err) {
-      logger.error("token-usage-store", "failed to read agent events", { roomId, memberName: logName, memberRef: ref, error: String(err) });
+      logger.error("token-usage-store", "failed to read agent events", { roomId, memberId, error: String(err) });
       continue;
     }
 
@@ -40,7 +42,7 @@ function readUsageForRefs(roomId: string, refs: string[], logName: string): numb
         const event = JSON.parse(line) as { type?: string; usage?: unknown };
         if (event.type === "message_end") totalTokens += usageTotal(event.usage);
       } catch (err) {
-        logger.error("token-usage-store", "failed to parse agent event", { roomId, memberName: logName, memberRef: ref, error: String(err) });
+        logger.error("token-usage-store", "failed to parse agent event", { roomId, memberId, error: String(err) });
       }
     }
   }
@@ -48,19 +50,24 @@ function readUsageForRefs(roomId: string, refs: string[], logName: string): numb
 }
 
 export function getRoomMemberTokenUsage(roomId: string, memberRef: string): MemberTokenUsageSummary {
-  const member = getRoomMembers(roomId).find((entry) => entry.id === memberRef || entry.name === memberRef);
-  const refs = member ? [member.id, member.name] : [memberRef];
-  return { totalTokens: readUsageForRefs(roomId, refs, member?.name || memberRef) };
+  const member = resolveRoomMemberRef(roomId, memberRef);
+  return { totalTokens: member ? readUsageForMember(roomId, member.id) : 0 };
 }
 
-export function getMemberTokenUsage(memberName: string): MemberTokenUsageSummary {
+function directories(path: string): string[] {
+  try { return readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+}
+
+/** Stable member identity across room, DM and nested topic event scopes. */
+export function getMemberTokenUsage(memberId: string): MemberTokenUsageSummary {
   let totalTokens = 0;
-
-  for (const room of listRooms()) {
-    const memberIds = getRoomMembers(room.id).filter((member) => member.name === memberName || member.sourceAgent === memberName || member.id === memberName).map((member) => member.id);
-    const refs = Array.from(new Set([memberName, ...memberIds]));
-    totalTokens += readUsageForRefs(room.id, refs, memberName);
+  for (const roomId of directories(getRoomsDir())) {
+    totalTokens += readUsageForMember(roomId, memberId);
+    const topics = join(roomDir(roomId), "topics");
+    for (const topicId of directories(topics)) {
+      totalTokens += readUsageForMember(roomId, memberId, join(topics, topicId, "agent-events"));
+    }
   }
-
   return { totalTokens };
 }

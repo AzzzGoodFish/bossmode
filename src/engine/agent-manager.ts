@@ -8,7 +8,6 @@ import { logger } from "../foundation/logger.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
-import { getMemberByName } from "../workforce/member-store.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir, readConfig } from "../shared/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
@@ -2203,9 +2202,9 @@ export function getMemberInstances(memberName: string): Array<{
   runtimeParams?: import("./runtime/types.js").AgentRuntimeParams;
 }> {
   const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("./runtime/types.js").AgentRuntimeParams }> = [];
-  for (const [key, instance] of instances) {
+  for (const instance of instances.values()) {
     if (instance.agentName === memberName || instance.memberId === memberName) {
-      const roomId = key.split(":")[0];
+      const roomId = instance.roomId;
       const room = roomStore.getRoom(roomId);
       const handle = instance.handle as any;
       result.push({

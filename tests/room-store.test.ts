@@ -233,6 +233,22 @@ describe("room-store", () => {
   });
 
   describe("roomMembers", () => {
+    it("derives legacy name-only records from room data without reading the old member file", () => {
+      writeFileSync(join(tempDir, "members.json"), JSON.stringify([
+        { id: "legacy-qa", name: "qa", agent: "developer", model: "retired-model", credentialId: "retired-credential", skills: ["retired-skill"] },
+      ]));
+      const room = roomStore.createRoom("legacy", "/tmp", drafts(["qa"]));
+      delete room.roomMembers;
+      room.memberOverrides = { qa: { model: "room-model" } };
+      const [member] = roomStore.getRoomMembersFromRoom(room);
+      expect(member).toMatchObject({ name: "qa", sourceAgent: "qa", config: { model: "room-model" } });
+      expect(member.sourceMemberId).toBeUndefined();
+      expect(member.config?.credentialId).toBeUndefined();
+      expect(member.config?.skills).toBeUndefined();
+      writeFileSync(join(tempDir, "members.json"), "invalid retired data");
+      expect(roomStore.getRoomMembersFromRoom(room)[0].config).toEqual({ model: "room-model" });
+    });
+
     it("renames a room-local member without changing member id", () => {
       const room = roomStore.createRoom("test", "/tmp", drafts(["qa", "developer"]));
       const before = roomStore.findRoomMemberByName(room.id, "qa")!;
@@ -282,10 +298,11 @@ describe("room-store", () => {
       if (!duplicate.ok) expect(duplicate.code).toBe("duplicate");
     });
 
-    it("does not inherit legacy global member config by new member name", async () => {
+    it("does not inherit legacy global member config by new member name", () => {
       writeAgent("developer");
-      const memberStore = await import("../src/workforce/member-store.js");
-      memberStore.saveMember({ name: "dev-a", agent: "qa", runtime: "pi-cli", model: "legacy-model", thinkingLevel: "high" });
+      writeFileSync(join(tempDir, "members.json"), JSON.stringify([
+        { id: "legacy-dev", name: "dev-a", agent: "qa", runtime: "pi-cli", model: "legacy-model", thinkingLevel: "high" },
+      ]));
       const room = roomStore.createRoom("test", "/tmp", drafts([]));
       const added = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
       expect(added.ok).toBe(true);

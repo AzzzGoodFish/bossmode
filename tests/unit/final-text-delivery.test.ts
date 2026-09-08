@@ -1,3 +1,7 @@
+vi.mock("../../src/workforce/room-member-resolver.js", () => ({
+  resolveRoomMember: vi.fn((_roomId: string, name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off" })),
+}));
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/workforce/agent-store.js", () => ({
@@ -45,9 +49,7 @@ vi.mock("../../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn((name: string) => ({ name, description: name, systemPrompt: `${name} prompt`, tags: [] })),
 }));
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn((name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off" })),
-}));
+
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer", "qa"], createdAt: 1, roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }, { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "qa" } }] })),

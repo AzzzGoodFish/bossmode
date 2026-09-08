@@ -83,7 +83,7 @@ describe("member-credential-binding-v1 migration", () => {
     expect(room.roomMembers[0].config).toBeUndefined();
   });
 
-  it("clears the legacy global members.json store the same way", async () => {
+  it("leaves retired global members.json untouched", async () => {
     mkdirSync(tempDir, { recursive: true });
     writeGlobalMembers([
       { id: "developer", name: "developer", type: "agent", agent: "developer", model: "claude-sonnet-4-6", thinkingLevel: "off" },
@@ -96,13 +96,13 @@ describe("member-credential-binding-v1 migration", () => {
     const members = JSON.parse(readFileSync(join(tempDir, "members.json"), "utf-8"));
     const developer = members.find((m: any) => m.id === "developer");
     const pm = members.find((m: any) => m.id === "pm");
-    expect(developer.model).toBeUndefined();
+    expect(developer.model).toBe("claude-sonnet-4-6");
     expect(developer.credentialId).toBeUndefined();
     expect(pm.model).toBe("anthropic/claude-opus-4-6");
     expect(pm.credentialId).toBe("cred-a");
   });
 
-  it("clears real historical legacy global data injected after an earlier clean-state run (does not trust a stale done flag)", async () => {
+  it("does not reactivate old global storage imported after a clean-state run", async () => {
     mkdirSync(tempDir, { recursive: true });
 
     const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
@@ -118,7 +118,7 @@ describe("member-credential-binding-v1 migration", () => {
     runMemberCredentialBindingMigration();
 
     const members = JSON.parse(readFileSync(join(tempDir, "members.json"), "utf-8"));
-    expect(members[0].model).toBeUndefined();
+    expect(members[0].model).toBe("goo73/fake");
     expect(members[0].credentialId).toBeUndefined();
     expect(members[0].name).toBe("harnessbot");
   });

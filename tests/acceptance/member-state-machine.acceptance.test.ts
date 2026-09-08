@@ -28,19 +28,7 @@ import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 // setupConfigMock must be called at module level (before server imports)
 setupConfigMock();
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn().mockImplementation((name: string) => ({
-    id: name,
-    name,
-    type: "agent",
-    agent: name,
-    model: "mock-model",
-    runtime: "mock",
-    skills: [],
-    thinkingLevel: "off",
-  })),
-  loadMembers: vi.fn().mockReturnValue([]),
-}));
+
 
 vi.mock("../../src/workforce/agent-store.js", () => ({
   loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({

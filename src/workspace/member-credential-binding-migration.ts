@@ -8,13 +8,9 @@ import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 import { getRoomsDir, roomDir } from "./room-store.js";
-import type { AgentMemberConfig, LegacyMemberConfig, Room, RoomMemberRecord } from "../shared/types.js";
+import type { Room, RoomMemberRecord } from "../shared/types.js";
 
 const MIGRATION_ID = "member-credential-binding-v1";
-
-function membersPath(): string {
-  return join(getBossmodeDir(), "members.json");
-}
 
 function migrationsRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
@@ -74,7 +70,7 @@ function clearRoomMemberConfig(member: RoomMemberRecord): boolean {
 function migrateRoom(roomId: string): number {
   const path = join(roomDir(roomId), "room.json");
   const room = readJson<Room | null>(path, null);
-  if (!room || !Array.isArray(room.roomMembers) || room.roomMembers.length === 0) return 0;
+  if (!room || Array.isArray(room.globalMemberIds) || !Array.isArray(room.roomMembers) || room.roomMembers.length === 0) return 0;
 
   let changed = 0;
   for (const member of room.roomMembers) {
@@ -87,40 +83,11 @@ function migrateRoom(roomId: string): number {
   return changed;
 }
 
-function migrateGlobalMembers(): number {
-  const path = membersPath();
-  const members = readJson<Array<LegacyMemberConfig | AgentMemberConfig>>(path, []);
-  if (!Array.isArray(members) || members.length === 0) return 0;
-
-  let changed = 0;
-  const next = members.map((member) => {
-    if (!needsClearing(member.model, member.credentialId)) return member;
-    changed += 1;
-    const { model: _model, credentialId: _credentialId, ...rest } = member;
-    return rest as AgentMemberConfig;
-  });
-  if (changed > 0) {
-    snapshotFile(path, "global-members");
-    writeJson(path, next);
-  }
-  return changed;
-}
-
 export function runMemberCredentialBindingMigration(): void {
   const marker = readMarker();
 
-  // Global members.json has no reliable "already migrated" signal: a fresh install
-  // can mark this done before any legacy data exists, and real legacy data can be
-  // restored/imported afterward. Re-derive correctness from the file's actual
-  // content every run instead of trusting a boolean flag; this is safe because
-  // clearing is idempotent (a clean file produces zero changes and no write).
-  try {
-    const changed = migrateGlobalMembers();
-    if (changed > 0) logger.info("member-credential-binding-migration", "cleared unconfigured global members", { changed });
-  } catch (err) {
-    logger.error("member-credential-binding-migration", "failed to migrate global members", { error: String(err) });
-  }
-
+  // Legacy configuration was materialized into room records by the preceding
+  // room migration. Never reread or rewrite the retired global registry.
   const roomsDir = getRoomsDir();
   if (!existsSync(roomsDir)) return;
 

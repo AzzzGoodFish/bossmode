@@ -1,3 +1,17 @@
+vi.mock("../../src/workforce/room-member-resolver.js", () => ({
+  resolveRoomMember: vi.fn(() => ({
+    id: "pm",
+    name: "pm",
+    type: "agent",
+    agent: "pm",
+    model: "sonnet",
+    credentialId: "cred-a",
+    runtime: "mock",
+    thinkingLevel: "off",
+    skills: [],
+  })),
+}));
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 
@@ -44,19 +58,7 @@ vi.mock("../../src/workforce/agent-store.js", () => ({
   })),
 }));
 
-vi.mock("../../src/workforce/member-store.js", () => ({
-  getMemberByName: vi.fn(() => ({
-    id: "pm",
-    name: "pm",
-    type: "agent",
-    agent: "pm",
-    model: "sonnet",
-    credentialId: "cred-a",
-    runtime: "mock",
-    thinkingLevel: "off",
-    skills: [],
-  })),
-}));
+
 
 vi.mock("../../src/workspace/room-store.js", () => ({
   getRoom: vi.fn(() => ({ id: "room1", name: "bossmode dev", cwd: "/tmp", members: ["pm"], createdAt: Date.now() })),
