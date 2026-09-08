@@ -51,10 +51,20 @@ describe("session-search guide script", () => {
     ].join("\n") + "\n");
     const first = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024");
     expect(first.some((row: any) => row.kind === "diagnostic" && row.reason === "invalid-jsonl-record")).toBe(true);
-    const cursor = first.at(-1).nextCursor;
-    expect(cursor).toBeTruthy();
-    const second = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024", "--cursor", cursor);
-    expect(second.find((row: any) => row.kind === "expand")?.entryOffset).toBeGreaterThan(0);
+    let page = first;
+    let cursor = page.at(-1).nextCursor;
+    const chunks = page.filter((row: any) => row.kind === "expand" && row.relation === "anchor").map((row: any) => row.entryChunk);
+    const seen = new Set<string>();
+    for (let pages = 0; cursor && pages < 100; pages++) {
+      expect(seen.has(cursor)).toBe(false);
+      seen.add(cursor);
+      page = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024", "--cursor", cursor);
+      chunks.push(...page.filter((row: any) => row.kind === "expand" && row.relation === "anchor").map((row: any) => row.entryChunk));
+      cursor = page.at(-1)?.kind === "truncated" ? page.at(-1).nextCursor : undefined;
+    }
+    expect(cursor).toBeUndefined();
+    const restored = JSON.parse(chunks.join(""));
+    expect(restored).toMatchObject({ id: "huge", message: { content: "中".repeat(5000) } });
   });
 
   it("always returns a usable cursor when the byte budget truncates output", () => {
