@@ -13,12 +13,13 @@ function fixture() {
   const memberId = "mem_123";
   mkdirSync(join(root, "members", memberId), { recursive: true });
   mkdirSync(join(root, "rooms", "room_a"), { recursive: true });
-  const source = join(root, "legacy.jsonl");
+  const source = join(root, "pi-agent", "runtime", "room_a", memberId, "sessions", "legacy.jsonl");
+  mkdirSync(join(source, ".."), { recursive: true });
   writeFileSync(source, '{"type":"session","id":"sid","timestamp":"2026-09-07T03:00:00Z"}\n{"type":"message","id":"e"}\n');
   writeFileSync(join(root, "rooms", "room_a", "sessions.json"), JSON.stringify({ [memberId]: { runtime: "pi-sdk", sessionId: "sid", sessionFile: source } }));
   return { memberId, source };
 }
-function run(mode: "--dry-run" | "--apply") {
+function run(mode: "--dry-run" | "--apply" | "--recover") {
   return execFileSync(process.execPath, [script, mode, "--bossmode-dir", root], { encoding: "utf8" }).trim().split("\n").map(JSON.parse);
 }
 describe("member session migration", () => {
@@ -35,11 +36,70 @@ describe("member session migration", () => {
     const current = JSON.parse(readFileSync(join(root, "members", memberId, "sessions", "current.json"), "utf8"));
     expect(current["room:room_a"].sessionFile).toBe("sessions/2026-09-07/rooms/room_a/legacy.jsonl");
     expect(run("--apply").at(-1)).toMatchObject({ exitCode: 0, skippedIdentical: 1 });
+    const recovery = JSON.parse(readFileSync(join(root, "migrations", "member-sessions-v1-recovery.json"), "utf8"));
+    expect(recovery).toMatchObject({ format: "member-session-recovery/v1", state: "complete" });
+  });
+
+  it("uses persisted recovery material and refuses to overwrite later current data", () => {
+    const { memberId } = fixture();
+    run("--apply");
+    const currentPath = join(root, "members", memberId, "sessions", "current.json");
+    expect(run("--recover").at(-1)).toMatchObject({ exitCode: 0 });
+    expect(() => readFileSync(currentPath)).toThrow();
+
+    run("--apply");
+    writeFileSync(currentPath, JSON.stringify({ "room:room_a": { runtime: "pi-sdk", sessionId: "later" } }));
+    const blocked = spawnSync(process.execPath, [script, "--recover", "--bossmode-dir", root], { encoding: "utf8" });
+    expect(blocked.status).toBe(2);
+    expect(blocked.stdout).toContain("recovery-current-changed");
+  });
+
+  it("does not overwrite a current session created after migration", () => {
+    const { memberId } = fixture();
+    run("--apply");
+    const currentPath = join(root, "members", memberId, "sessions", "current.json");
+    const later = { "room:room_a": { runtime: "pi-sdk", sessionId: "later", sessionFile: "sessions/2026-09-08/rooms/room_a/later.jsonl" } };
+    writeFileSync(currentPath, JSON.stringify(later));
+    const result = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8" });
+    expect(result.status).toBe(2);
+    expect(JSON.parse(readFileSync(currentPath, "utf8"))).toEqual(later);
+    expect(result.stdout).toContain("current-session-changed");
+  });
+
+  it("leaves no reference on copy failure and recovers after an interrupted publish", () => {
+    const { memberId } = fixture();
+    const failed = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8", env: { ...process.env, BOSSMODE_MIGRATION_TEST_FAIL_AT: "after-copy" } });
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toContain("apply-failed");
+    expect(() => readFileSync(join(root, "members", memberId, "sessions", "current.json"))).toThrow();
+
+    const interrupted = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8", env: { ...process.env, BOSSMODE_MIGRATION_TEST_FAIL_AT: "after-first-current-publish" } });
+    expect(interrupted.status).toBe(86);
+    const material = JSON.parse(readFileSync(join(root, "migrations", "member-sessions-v1-recovery.json"), "utf8"));
+    expect(material.state).toBe("prepared");
+    expect(run("--recover").at(-1)).toMatchObject({ exitCode: 0 });
+    expect(() => readFileSync(join(root, "members", memberId, "sessions", "current.json"))).toThrow();
+  });
+
+  it("archives legacy member DM files without guessing a current session", () => {
+    root = mkdtempSync(join(tmpdir(), "session-migration-"));
+    const memberId = "mem_dm";
+    mkdirSync(join(root, "members", memberId), { recursive: true });
+    const legacy = join(root, "pi-agent", "runtime", "members", memberId, "dm", "sessions", "dm.jsonl");
+    mkdirSync(join(legacy, ".."), { recursive: true });
+    writeFileSync(legacy, '{"type":"session","id":"dm-sid","timestamp":"2026-09-06T23:00:00Z"}\n');
+    const result = run("--apply");
+    expect(result.at(-1).exitCode).toBe(0);
+    expect(result.find((row: any) => row.kind === "plan")).toMatchObject({ scopeId: `dm:${memberId}`, publishCurrent: false, referenceChange: null });
+    expect(readFileSync(join(root, "members", memberId, "sessions", "2026-09-06", "dm", "dm.jsonl"), "utf8")).toBe(readFileSync(legacy, "utf8"));
+    expect(() => readFileSync(join(root, "members", memberId, "sessions", "current.json"))).toThrow();
   });
 
   it("reports every unresolved owner and performs no migration writes", () => {
     const { source } = fixture();
-    writeFileSync(join(root, "orphan.jsonl"), '{"type":"session","id":"orphan","timestamp":"2026-09-07T00:00:00Z"}\n');
+    const orphan = join(root, "pi-agent", "runtime", "orphan", "sessions", "orphan.jsonl");
+    mkdirSync(join(orphan, ".."), { recursive: true });
+    writeFileSync(orphan, '{"type":"session","id":"orphan","timestamp":"2026-09-07T00:00:00Z"}\n');
     const refs = join(root, "rooms", "room_a", "sessions.json");
     writeFileSync(refs, JSON.stringify({ missing_member: { runtime: "pi-sdk", sessionFile: source } }));
     const result = spawnSync(process.execPath, [script, "--apply", "--bossmode-dir", root], { encoding: "utf8" });
