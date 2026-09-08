@@ -221,6 +221,20 @@ describe("resetAgentSession", () => {
     });
   });
 
+  it.each([
+    ["dm:mem_worker", "mem_worker"],
+    ["topic:topic_a", "rm_worker"],
+  ])("preserves the full %s scope for non-room reset state and events", (scopeId, memberId) => {
+    vi.mocked(sessionStore.getSessions).mockReturnValue({ [memberId]: { runtime: "pi-cli", sessionId: "saved" } });
+
+    resetAgentSession(scopeId, memberId);
+
+    expect(sessionStore.clearSession).toHaveBeenCalledWith(scopeId, memberId, "pi-cli");
+    expect(roomStore.setCursor).not.toHaveBeenCalled();
+    expect(appendEventToDisk).toHaveBeenCalledWith(scopeId, memberId, expect.objectContaining({ type: "system" }));
+    expect(broadcastToRoom).toHaveBeenCalledWith(scopeId, expect.objectContaining({ type: "agent:status", roomId: scopeId, status: "inactive" }));
+  });
+
   it("deletes legacy name-key session and cursor entries when resetting a migrated member", () => {
     mockRoom = {
       id: "room1",

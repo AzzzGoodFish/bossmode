@@ -2014,7 +2014,7 @@ export function getAgentEventHistory(roomId: string, memberRef: string): AgentHi
 }
 
 function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHistoryEvent): void {
-  const member = roomId.startsWith("dm:") ? null : resolveRoomMember(roomId, memberRef);
+  const member = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? null : resolveRoomMember(roomId, memberRef);
   // Prefer live instance identity (covers dm: scope where room lookup fails).
   const keyHint = instanceKey(roomId, member?.id || memberRef);
   const instance = instances.get(keyHint)
@@ -2275,10 +2275,10 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const ref = parseScopeId(scopeId);
   const resolved = ref?.kind === "room" ? resolveRoomMember(ref.roomId, memberRef) : undefined;
   const memberId = resolved?.id || memberRef;
-  const agentName = resolved?.name || memberRef;
   const sessions = sessionStore.getSessions(scopeId, memberId);
   const key = instanceKey(scopeId, memberId);
   const instance = instances.get(key);
+  const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
   const runtime = sessions[memberId]?.runtime || instance?.handle.runtimeName || "pi-cli";
 
   destroyInstance(scopeId, memberId);
@@ -2286,14 +2286,17 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   sessionStore.clearSession(scopeId, memberId, runtime);
   clearRuntimeStateEntry(scopeId, memberId);
   if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
-  if (memberId !== agentName) {
+  if (ref?.kind === "room" && memberId !== agentName) {
     sessionStore.deleteSessionEntry(scopeId, agentName);
-    if (ref?.kind === "room") roomStore.deleteCursor(ref.roomId, agentName);
+    roomStore.deleteCursor(ref.roomId, agentName);
   }
 
   const message = "Session reset. Next activation will start fresh.";
   emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId, { type: "system", text: message });
-  if (ref?.kind === "room") broadcastToRoom(ref.roomId, { type: "agent:status", roomId: ref.roomId, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" });
+  if (ref) {
+    const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
+    broadcastToRoom(eventScope, { type: "agent:status", roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" });
+  }
   return { ok: true, message };
 }
 
