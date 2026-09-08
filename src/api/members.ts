@@ -28,7 +28,7 @@ import {
   getLatestDmSeq,
 } from "../workspace/dm-message-store.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
-import { memberExtensionsDir } from "../workspace/member-profile.js";
+import { listMemberExtensions } from "../workspace/member-extensions.js";
 import { listMemberSkills } from "../engine/skill-catalog.js";
 import { activeWorkspaceRoot, listWorkspaces } from "../workspace/workspace-registry.js";
 import { readMemberSshPublicKey } from "../workspace/ssh-keygen.js";
@@ -718,7 +718,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
 /** Batch 6 §4 read outlet: member-owned asset inventory (designer's Assets tab).
  * mcpServers come from the member's own mcp.json (toolCount only when the
  * availability cache has one — counting tools requires a live connection);
- * extensions/skills are directory entries under the member's folder. */
+ * extensions use the runtime discovery rules; skills come from the member folder. */
 addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
   const m = resolveMemberRef(params.id);
   if (!m) {
@@ -738,15 +738,7 @@ addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
     toolCount: typeof cache[name]?.toolCount === "number" ? cache[name].toolCount : null,
   }));
 
-  const { readdirSync, existsSync } = await import("node:fs");
-  const extDir = memberExtensionsDir(m.id);
-  // Extensions: only real extension entries, not npm install artifacts.
-  // node_modules / package.json / package-lock.json are created by `npm install`
-  // inside an extension folder and must not inflate the count.
-  const NPM_ARTIFACTS = new Set(["node_modules", "package.json", "package-lock.json"]);
-  const extensions = existsSync(extDir)
-    ? readdirSync(extDir).filter((e) => !e.startsWith(".") && !NPM_ARTIFACTS.has(e)).sort()
-    : [];
+  const extensions = listMemberExtensions(m.id);
 
   const skills = listMemberSkills(m.id)
     .filter((s) => !s.platform)
