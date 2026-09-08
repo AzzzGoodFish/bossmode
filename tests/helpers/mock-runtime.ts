@@ -75,6 +75,12 @@ export class MockAgentHandle implements AgentHandle {
     return Promise.resolve();
   }
 
+  destroy(): void {
+    this.listeners.clear();
+    const index = liveHandles.indexOf(this);
+    if (index >= 0) liveHandles.splice(index, 1);
+  }
+
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

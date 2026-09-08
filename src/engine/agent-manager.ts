@@ -2013,14 +2013,20 @@ export function getAgentEventHistory(roomId: string, memberRef: string): AgentHi
   return loadEventsFromDisk(roomId, member?.id || memberRef);
 }
 
-function emitAgentLocalEvent(roomId: string, memberRef: string, event: AgentHistoryEvent): void {
-  const member = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? null : resolveRoomMember(roomId, memberRef);
-  // Prefer live instance identity (covers dm: scope where room lookup fails).
+function emitAgentLocalEvent(
+  roomId: string,
+  memberRef: string,
+  event: AgentHistoryEvent,
+  identity?: { memberId: string; agentName: string },
+): void {
+  const scopedMember = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? memberRecordToConfig(memberRef) : null;
+  const member = scopedMember ?? resolveRoomMember(roomId, memberRef);
+  // Prefer live instance identity, then the global member record for DM/topic.
   const keyHint = instanceKey(roomId, member?.id || memberRef);
   const instance = instances.get(keyHint)
     || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
-  const memberId = member?.id || instance?.memberId || memberRef;
-  const agentName = member?.name || instance?.agentName || memberRef;
+  const memberId = identity?.memberId || member?.id || instance?.memberId || memberRef;
+  const agentName = identity?.agentName || member?.name || instance?.agentName || memberRef;
   // Stamp once so disk + WS share identity (same rule as event-handler, rc.4).
   const stamped = typeof (event as { ts?: number }).ts === "number" ? event : { ...event, ts: Date.now() };
   if (instance) instance.eventBuffer.push(stamped);
@@ -2292,10 +2298,12 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   }
 
   const message = "Session reset. Next activation will start fresh.";
-  emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId, { type: "system", text: message });
+  emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId, { type: "system", text: message }, { memberId, agentName });
   if (ref) {
     const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
-    broadcastToRoom(eventScope, { type: "agent:status", roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" });
+    const statusEvent = { type: "agent:status" as const, roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" };
+    if (ref.kind === "dm") broadcastToAgentSubscribers(eventScope, agentName, statusEvent);
+    else broadcastToRoom(eventScope, statusEvent);
   }
   return { ok: true, message };
 }

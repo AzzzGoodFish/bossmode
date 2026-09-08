@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom } from "../helpers/test-server.js";
+import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
@@ -233,6 +233,31 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
 
   // ── Reset Session ──
 
+  describe("DM reset through the conversation API", () => {
+    it("delivers reset event/status under the member name and activates again", async () => {
+      const created = await jsonRequest(ts.port, "POST", "/api/members", {
+        token, body: { name: "dm-reset-member", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID },
+      });
+      expect(created.status).toBe(200);
+      const payload = JSON.parse(created.body);
+      const member = { id: payload.member.memberId, name: payload.member.name };
+      const scopeId = `dm:${member.id}`;
+      const ws = await createWsClient(ts.wsUrl, token);
+      ws.send({ type: "subscribe:agent", roomId: scopeId, agent: member.name, memberId: member.id });
+
+      const first = await jsonRequest(ts.port, "POST", `/api/dm/${member.id}/messages`, { token, body: { text: "first" } });
+      expect(first.status).toBe(200);
+      const reset = await jsonRequest(ts.port, "POST", `/api/conversations/${encodeURIComponent(scopeId)}/reset-session`, { token, body: {} });
+      expect(reset.status).toBe(200);
+      await ws.waitFor((event: any) => event.type === "agent:event" && event.roomId === scopeId && event.agent === member.name && event.memberId === member.id && event.event?.text?.startsWith("Session reset"));
+      await ws.waitFor((event: any) => event.type === "agent:status" && event.roomId === scopeId && event.agent === member.name && event.memberId === member.id && event.status === "inactive");
+
+      const second = await jsonRequest(ts.port, "POST", `/api/dm/${member.id}/messages`, { token, body: { text: "second" } });
+      expect(second.status).toBe(200);
+      await ws.close();
+    });
+  });
+
   describe("Reset Session", () => {
     it("clears session metadata, resets cursor to null, and writes a system event", async () => {
       const room = await createRoom("reset-session-test", ["pm"]);
@@ -240,9 +265,11 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       mkdirSync(roomDir, { recursive: true });
       const pmMemberId = room.roomMembers?.find((member) => member.name === "pm")?.id || "pm";
       const memberSessions = join(getTestBossmodeDir(), "members", pmMemberId, "sessions");
-      mkdirSync(memberSessions, { recursive: true });
+      const archiveDir = join(memberSessions, "2026-09-08", "rooms", room.id);
+      mkdirSync(archiveDir, { recursive: true });
+      writeFileSync(join(archiveDir, "session.jsonl"), "{}\n");
       writeFileSync(join(memberSessions, "current.json"), JSON.stringify({
-        [`room:${room.id}`]: { runtime: "mock", sessionId: "session-123", sessionFile: "/tmp/session.json" },
+        [`room:${room.id}`]: { runtime: "mock", sessionId: "session-123", sessionFile: `sessions/2026-09-08/rooms/${room.id}/session.jsonl` },
       }, null, 2));
       writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ [pmMemberId]: "msg-123", pm: "legacy-msg" }, null, 2));
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });

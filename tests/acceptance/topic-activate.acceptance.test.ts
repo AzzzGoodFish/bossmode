@@ -107,6 +107,24 @@ describe("Acceptance: topic @ activates topic instance (P0)", () => {
     expect(leaked).toHaveLength(0);
   });
 
+  it("resets and reactivates a topic through the scope conversation API", async () => {
+    const room = JSON.parse((await jsonRequest(ts.port, "POST", "/api/rooms", {
+      token, body: { name: "topic-reset", cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
+    })).body);
+    await configureMockMembersForRoom(room.id, ["pm"]);
+    const memberId = room.roomMembers.find((member: any) => member.name === "pm").id;
+    const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "topic reset anchor" } })).body);
+    const { topic } = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, {
+      token, body: { title: "reset-topic", anchorMessageId: anchor.id, seedMode: "fresh" },
+    })).body);
+    const scopeId = `topic:${topic.id}`;
+    expect((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/messages`, { token, body: { content: "@pm first" } })).status).toBe(200);
+    const reset = await jsonRequest(ts.port, "POST", `/api/conversations/${encodeURIComponent(scopeId)}/reset-session?memberId=${encodeURIComponent(memberId)}`, { token, body: {} });
+    expect(reset.status).toBe(200);
+    expect(JSON.parse(reset.body).scopeId).toBe(scopeId);
+    expect((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/messages`, { token, body: { content: "@pm second" } })).status).toBe(200);
+  });
+
   it("topic activate prompt includes trigger body and reply quote", async () => {
     const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,

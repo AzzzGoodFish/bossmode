@@ -232,7 +232,9 @@ describe("resetAgentSession", () => {
     expect(sessionStore.clearSession).toHaveBeenCalledWith(scopeId, memberId, "pi-cli");
     expect(roomStore.setCursor).not.toHaveBeenCalled();
     expect(appendEventToDisk).toHaveBeenCalledWith(scopeId, memberId, expect.objectContaining({ type: "system" }));
-    expect(broadcastToRoom).toHaveBeenCalledWith(scopeId, expect.objectContaining({ type: "agent:status", roomId: scopeId, status: "inactive" }));
+    const status = expect.objectContaining({ type: "agent:status", roomId: scopeId, status: "inactive" });
+    if (scopeId.startsWith("dm:")) expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scopeId, expect.any(String), status);
+    else expect(broadcastToRoom).toHaveBeenCalledWith(scopeId, status);
   });
 
   it("deletes legacy name-key session and cursor entries when resetting a migrated member", () => {
