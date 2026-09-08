@@ -37,6 +37,7 @@ import {
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
   type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
   type ContextUsageData, type MemberSystemPromptDoc, type MemberAssets,
+  type MemberExtensionAsset,
 } from "../api/client";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -421,7 +422,11 @@ function AssetsTab({ member, scope, liveStatus }: {
         )}
       </AssetSection>
 
-      <AssetSection title="Pi extensions" count={assets ? String(assets.extensions.length) : undefined}>
+      <AssetSection
+        title="Pi extensions"
+        info="Discovered on disk — what Pi can load, not a load-success list."
+        count={assets ? String(assets.extensions.length) : undefined}
+      >
         {assets === null && !assetsFailed && <div className={assetEmptyClass}>Loading…</div>}
         {assetsFailed && <div className={assetEmptyClass}>Couldn’t load this member’s extensions.</div>}
         {assets && assets.extensions.length === 0 ? (
@@ -431,13 +436,7 @@ function AssetsTab({ member, scope, liveStatus }: {
           </div>
         ) : (
           <>
-            <div>
-              {assets?.extensions.map((ext) => (
-                <div key={ext.name} className={assetRowClass}>
-                  <span className="font-mono text-[12px] font-medium text-ink-1 truncate">{ext.name}</span>
-                </div>
-              ))}
-            </div>
+            <MemberExtensionRows extensions={assets?.extensions ?? []} />
             <div className={assetFooterClass} title={`${home}/extensions/`}>{home}/extensions/</div>
           </>
         )}
@@ -465,6 +464,94 @@ function AssetsTab({ member, scope, liveStatus }: {
       </AssetSection>
 
       <SystemPromptSection member={member} scope={scope} />
+    </div>
+  );
+}
+
+/** The member's Pi extensions inventory (ext-inventory-ui, backend contract
+ * 2026-09-08): one row per discovered package/script — name + source + path.
+ * Symlinks show the resolved target; multi-entry packages expand to list entry
+ * files; broken items say so in red (issues come from the backend verbatim).
+ * Discovery ≠ load success; the section info tooltip says that. Rows are keyed
+ * by source+path — names need not be unique. */
+function shortenAssetPath(p: string): string {
+  const i = p.indexOf("/.bossmode/");
+  return i > 0 ? `~${p.slice(i)}` : p;
+}
+
+function MemberExtensionRows({ extensions }: { extensions: MemberExtensionAsset[] }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [copyState, setCopyState] = useState<{ key: string; ok: boolean } | null>(null);
+
+  const copyPath = async (key: string, full: string) => {
+    const ok = await copyText(full);
+    setCopyState({ key, ok });
+    window.setTimeout(() => setCopyState(null), 1400);
+  };
+
+  return (
+    <div>
+      {extensions.map((ext) => {
+        const key = `${ext.source}:${ext.path}`;
+        const displayPath = shortenAssetPath(ext.path);
+        const displayReal = ext.realPath ? shortenAssetPath(ext.realPath) : null;
+        const multi = ext.entryPoints.length > 1;
+        const expanded = !!open[key];
+        const copied = copyState?.key === key && copyState.ok;
+        const failed = copyState?.key === key && !copyState.ok;
+        return (
+          <div key={key} className="border-b border-line-soft last:border-b-0">
+            <div className="group flex items-center gap-2.5 px-0.5 py-2">
+              <span className="font-mono text-[12px] font-medium text-ink-1 truncate shrink-0 max-w-[34%]">{ext.name}</span>
+              <span className={`text-[10px] uppercase tracking-wide shrink-0 ${ext.source === "builtin" ? "text-accent-ink" : "text-ink-4"}`}>
+                {ext.source === "builtin" ? "built-in" : "member"}
+              </span>
+              {multi && (
+                <button
+                  type="button"
+                  onClick={() => setOpen((o) => ({ ...o, [key]: !expanded }))}
+                  aria-expanded={expanded}
+                  className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10.5px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 cursor-pointer shrink-0"
+                >
+                  <ChevronRight size={10} className={`transition-transform ${expanded ? "rotate-90" : ""}`} />
+                  {ext.entryPoints.length} entries
+                </button>
+              )}
+              <span
+                className="ml-auto min-w-0 max-w-[46%] truncate font-mono text-[10.5px] text-ink-4 text-right"
+                title={ext.realPath ? `${ext.path} → ${ext.realPath}` : ext.path}
+              >
+                {displayPath}{displayReal && <span className="opacity-75"> → {displayReal}</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => void copyPath(key, ext.path)}
+                title={failed ? "Copy failed — clipboard unavailable" : "Copy the full path"}
+                className={`shrink-0 ${assetActionClass} transition-opacity ${copied || failed ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              >
+                {copied ? <Check size={11} className="text-onair" /> : failed ? <X size={11} className="text-blocked" /> : <Copy size={11} />}
+                {copied ? "Copied" : failed ? "Failed" : "Copy"}
+              </button>
+            </div>
+            {multi && expanded && (
+              <div className="pb-1.5">
+                {ext.entryPoints.map((ep) => (
+                  <div key={ep} className="flex items-center gap-2 pl-[18px] pr-0.5 py-0.5 font-mono text-[10.5px] text-ink-3">
+                    <span className="truncate">{ep.startsWith(ext.path + "/") ? ep.slice(ext.path.length + 1) : shortenAssetPath(ep)}</span>
+                    <span className="text-[9.5px] text-ink-4 shrink-0">entry</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {ext.issues.map((issue, i) => (
+              <div key={i} className="flex items-center gap-1.5 pl-[18px] pr-0.5 pb-2 text-[11px] text-blocked">
+                <AlertTriangle size={11} className="shrink-0" />
+                <span>{shortenAssetPath(issue)}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
