@@ -63,7 +63,7 @@ describe("member birth skeleton", () => {
     expect(profile.body).toBe(raw);
     expect(profile.raw).toBe(raw);
     expect(profile).not.toHaveProperty("frontmatter");
-    expect(formatMemberPromptSegment(profile, "new-nova")).toBe(`# Member\n\nI am new-nova.\n\n${raw}`);
+    expect(formatMemberPromptSegment(profile, "new-nova")).toBe(`# Member\n\nI am new-nova.\n\n${raw.trim()}`);
     updateMemberIdentity(m.id, { title: "" });
     expect(getMember(m.id)?.title).toBeUndefined();
     expect(readFileSync(memberProfilePath(m.id), "utf-8")).toBe(raw);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
@@ -144,8 +144,33 @@ describe("prompt compiler (three-segment)", () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     const section = compiled.sections.find((s) => s.id === "member")!.content;
-    expect(section).toBe(`# Member\n\nI am qa.\n\n${raw}`);
+    expect(section).toBe(`# Member\n\nI am qa.\n\n${raw.trim()}`);
     expect(compiled.fullPrompt).not.toContain("I am DisplayQA.");
+  });
+
+  it.each([
+    ["\nBody only.\n", "Body only."],
+    [" \t\r\n# Title\r\n\r\n  Indented body.\r\n\t ", "# Title\r\n\r\n  Indented body."],
+    ["\uFEFF\n---\nname: not-identity\n---\n\nLiteral Markdown.\n", "---\nname: not-identity\n---\n\nLiteral Markdown."],
+    [" \t\r\n\uFEFF", ""],
+    ["", ""],
+  ])("normalizes only the prompt boundary across room, DM and topic (%j)", async (raw, body) => {
+    const path = join(tmpDir, "members", "rm_qa", "persona.md");
+    writeFileSync(path, raw, "utf-8");
+    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const { readMemberProfile } = await import("../../src/workspace/member-profile.js");
+    const expected = `# Member\n\nI am qa.${body ? `\n\n${body}` : ""}`;
+    for (const scopeId of ["room:room-a", "dm:rm_qa", "topic:topic_x"] as const) {
+      const compiled = compileMemberPromptForScope({
+        scopeId, memberId: "rm_qa", memberName: "qa", agentDef,
+        ...(scopeId.startsWith("dm:") ? {} : { room: room() }), docsRoot: "/docs",
+      });
+      expect(Buffer.from(compiled.sections.find((s) => s.id === "member")!.content)).toEqual(Buffer.from(expected));
+    }
+    // Reads and compilation do not trim or otherwise rewrite the file.
+    expect(readMemberProfile("rm_qa").body).toBe(raw);
+    expect(readMemberProfile("rm_qa").raw).toBe(raw);
+    expect(readFileSync(path, "utf-8")).toBe(raw);
   });
 
   it("marks profileOverBudget when persona.md exceeds 4000 chars without truncating", async () => {

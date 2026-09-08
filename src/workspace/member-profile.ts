@@ -83,7 +83,10 @@ export function readMemberProfile(memberId: string): MemberProfile {
 /** Identity is supplied by the registry, never parsed from persona text. */
 export function formatMemberPromptSegment(profile: MemberProfile, currentName: string): string {
   const identity = `# Member\n\nI am ${currentName}.`;
-  return profile.body ? `${identity}\n\n${profile.body}` : identity;
+  // Match the previous prompt boundary without changing stored Markdown or
+  // interpreting any of its content as metadata.
+  const body = profile.body.trim();
+  return body ? `${identity}\n\n${body}` : identity;
 }
 
 export function isBlankPersona(profile: MemberProfile): boolean {
