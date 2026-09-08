@@ -82,6 +82,17 @@ function validateLegacySource(file) {
   if (!allowedRuntime && !allowedTopic) throw new Error("legacy session source is outside known SDK session roots");
   return real;
 }
+function validateTarget(target, memberId) {
+  const memberRoot = realpathSync(join(root, "members", memberId));
+  const rel = relative(memberRoot, resolve(target));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("target escapes member directory");
+  let cursor = memberRoot;
+  for (const part of rel.split("/").slice(0, -1)) {
+    cursor = join(cursor, part);
+    if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) throw new Error(`target ancestor is symlink: ${cursor}`);
+  }
+  if (existsSync(target) && lstatSync(target).isSymbolicLink()) throw new Error(`target is symlink: ${target}`);
+}
 function readHeader(file) {
   const firstLine = readFileSync(file, "utf8").split("\n", 1)[0];
   const header = JSON.parse(firstLine);
@@ -95,30 +106,91 @@ emit({
   kind: "header", format: "member-session-migration/v1", mode: dryRun ? "dry-run" : apply ? "apply" : "recover",
   writes: apply || recover, generatedAt: new Date().toISOString(), serviceRequirement: "stopped",
 });
-if (recover) {
-  if (!existsSync(recoveryPath)) error(recoveryPath, "recovery-material-missing", "run --apply first");
-  else {
-    try {
-      const material = JSON.parse(readFileSync(recoveryPath, "utf8"));
-      for (const item of material.currentBackups || []) {
-        const currentHash = existsSync(item.path) ? sha256(item.path) : null;
-        if (currentHash !== item.publishedSha256) {
-          conflict(item.path, "recovery-current-changed", { expectedPublishedSha256: item.publishedSha256, currentSha256: currentHash });
-          continue;
-        }
-        if (item.originalBase64 === null) rmSync(item.path, { force: true });
-        else writeFileSync(item.path, Buffer.from(item.originalBase64, "base64"));
-        stats.writes++;
-        emit({ kind: "recovered", path: item.path, status: "original-current-restored" });
-      }
-    } catch (cause) { error(recoveryPath, "recovery-failed", String(cause)); }
-  }
-  const exitCode = stats.errors ? 1 : stats.conflicts ? 2 : 0;
-  emit({ kind: "summary", ...stats, exitCode });
+function finish(exitCode, extra = {}) {
+  emit({ kind: "summary", ...stats, ...extra, exitCode });
   const text = report.map((record) => JSON.stringify(record)).join("\n") + "\n";
   if (outputFile) writeFileSync(outputFile, text); else process.stdout.write(text);
   process.exit(exitCode);
 }
+function parseRecovery() {
+  const material = JSON.parse(readFileSync(recoveryPath, "utf8"));
+  if (material?.format !== "member-session-recovery/v1"
+      || !["prepared", "recovering", "complete", "recovered"].includes(material.state)
+      || !Array.isArray(material.currentBackups)) throw new Error("invalid recovery format/state");
+  return material;
+}
+function writeRecovery(material) {
+  mkdirSync(dirname(recoveryPath), { recursive: true });
+  const temp = `${recoveryPath}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify(material, null, 2) + "\n");
+  renameSync(temp, recoveryPath);
+}
+function validateRecoveryItem(item) {
+  if (!item || typeof item.path !== "string" || typeof item.publishedSha256 !== "string"
+      || !(typeof item.originalBase64 === "string" || item.originalBase64 === null)) {
+    throw new Error("invalid recovery item");
+  }
+  const rel = relative(root, resolve(item.path)).split("\\").join("/");
+  const match = /^members\/([^/]+)\/sessions\/current\.json$/.exec(rel);
+  if (!match || !memberIds.has(match[1])) throw new Error(`recovery path escapes known member current files: ${item.path}`);
+  const sessionsDir = dirname(item.path);
+  if (!realpathSync(sessionsDir).startsWith(root + "/members/")) throw new Error(`recovery path parent escapes root: ${item.path}`);
+}
+if (recover) {
+  if (!existsSync(recoveryPath)) error(recoveryPath, "recovery-material-missing", "run --apply first");
+  else {
+    try {
+      const material = parseRecovery();
+      for (const item of material.currentBackups) validateRecoveryItem(item);
+      material.state = "recovering";
+      writeRecovery(material);
+      let restored = 0;
+      for (const item of material.currentBackups) {
+        const currentHash = existsSync(item.path) ? sha256(item.path) : null;
+        const original = item.originalBase64 === null ? null : Buffer.from(item.originalBase64, "base64");
+        const originalHash = original === null ? null : createHash("sha256").update(original).digest("hex");
+        if (currentHash === originalHash) {
+          emit({ kind: "recovered", path: item.path, status: "already-original" });
+        } else if (currentHash === item.publishedSha256) {
+          if (original === null) rmSync(item.path, { force: true });
+          else {
+            const temp = `${item.path}.${process.pid}.recover.tmp`;
+            writeFileSync(temp, original);
+            renameSync(temp, item.path);
+          }
+          stats.writes++;
+          emit({ kind: "recovered", path: item.path, status: "original-current-restored" });
+        } else {
+          conflict(item.path, "recovery-current-changed", { expectedPublishedSha256: item.publishedSha256, originalSha256: originalHash, currentSha256: currentHash });
+        }
+        restored++;
+        if (injectedFailure === "after-first-recovery-item" && restored === 1) process.exit(87);
+      }
+      if (!stats.conflicts && !stats.errors) {
+        material.state = "recovered";
+        material.recoveredAt = new Date().toISOString();
+        writeRecovery(material);
+        stats.writes++;
+      }
+    } catch (cause) { error(recoveryPath, "recovery-failed", String(cause)); }
+  }
+  finish(stats.errors ? 1 : stats.conflicts ? 2 : 0);
+}
+if (apply && existsSync(recoveryPath)) {
+  try {
+    const material = parseRecovery();
+    if (material.state === "prepared" || material.state === "recovering") {
+      conflict(recoveryPath, "unfinished-recovery", { state: material.state, requiredAction: "run --recover before any apply" });
+      finish(2);
+    }
+    emit({ kind: "apply-skipped", reason: "migration-already-settled", recoveryState: material.state });
+    finish(0);
+  } catch (cause) {
+    error(recoveryPath, "invalid-recovery-material", String(cause));
+    finish(1);
+  }
+}
+
 for (const referenceFile of await walk(join(root, "rooms"))) {
   if (!referenceFile.endsWith("/sessions.json")) continue;
   let references;
@@ -148,10 +220,17 @@ for (const referenceFile of await walk(join(root, "rooms"))) {
     const day = new Date(header.timestamp).toISOString().slice(0, 10);
     const targetRelative = join("members", memberId, "sessions", day, targetScope, session.sessionFile.split("/").at(-1));
     const target = join(root, targetRelative);
-    const sourceHash = sha256(session.sessionFile);
+    let sourceHash;
+    let targetState;
+    let sourceSize;
+    try {
+      validateTarget(target, memberId);
+      sourceHash = sha256(session.sessionFile);
+      sourceSize = statSync(session.sessionFile).size;
+      targetState = existsSync(target) ? (sha256(target) === sourceHash ? "identical" : "different") : "absent";
+    } catch (cause) { error(session.sessionFile, "session-read-failed", String(cause)); continue; }
     const sessionId = session.sessionId || header.id;
     if (!checkDuplicate(session.sessionFile, sessionId, sourceHash, scopeId)) continue;
-    const targetState = existsSync(target) ? (sha256(target) === sourceHash ? "identical" : "different") : "absent";
     if (targetState === "different") { conflict(target, "target-exists-different-content", { source: session.sessionFile, scopeId, memberId }); continue; }
     if (targetState === "identical") stats.skippedIdentical++;
     const newSession = { ...session, sessionId, sessionFile: relative(join(root, "members", memberId), target) };
@@ -166,7 +245,7 @@ for (const referenceFile of await walk(join(root, "rooms"))) {
         }
       } catch (cause) { error(currentPath, "invalid-current-json", String(cause)); continue; }
     }
-    const plan = { source: session.sessionFile, target, targetRelative, memberId, scopeId, sessionId, size: statSync(session.sessionFile).size, sha256: sourceHash, targetState, newSession, publishCurrent: true };
+    const plan = { source: session.sessionFile, target, targetRelative, memberId, scopeId, sessionId, size: sourceSize, sha256: sourceHash, targetState, newSession, publishCurrent: true };
     plans.push(plan);
     stats.planned++;
     emit({ kind: "plan", ...plan, referenceChange: {
@@ -183,23 +262,54 @@ for (const memberId of memberIds) {
     if (!source.endsWith(".jsonl")) continue;
     referenced.add(resolve(source));
     let header;
-    try { header = readHeader(source); }
-    catch (cause) { conflict(source, "missing-header-date", { scopeId: `dm:${memberId}`, memberId, detail: String(cause) }); continue; }
-    const sourceHash = sha256(source);
+    let sourceHash;
+    try { validateLegacySource(source); header = readHeader(source); sourceHash = sha256(source); }
+    catch (cause) { error(source, "dm-session-read-failed", String(cause)); continue; }
     if (!checkDuplicate(source, header.id, sourceHash, `dm:${memberId}`)) continue;
     const day = new Date(header.timestamp).toISOString().slice(0, 10);
     const targetRelative = join("members", memberId, "sessions", day, "dm", source.split("/").at(-1));
     const target = join(root, targetRelative);
-    const targetState = existsSync(target) ? (sha256(target) === sourceHash ? "identical" : "different") : "absent";
+    let targetState;
+    let sourceSize;
+    try {
+      validateTarget(target, memberId);
+      sourceSize = statSync(source).size;
+      targetState = existsSync(target) ? (sha256(target) === sourceHash ? "identical" : "different") : "absent";
+    } catch (cause) { error(source, "dm-session-target-read-failed", String(cause)); continue; }
     if (targetState === "different") { conflict(target, "target-exists-different-content", { source, scopeId: `dm:${memberId}`, memberId }); continue; }
     if (targetState === "identical") stats.skippedIdentical++;
-    const plan = { source, target, targetRelative, memberId, scopeId: `dm:${memberId}`, sessionId: header.id, size: statSync(source).size, sha256: sourceHash, targetState, publishCurrent: false };
+    const plan = { source, target, targetRelative, memberId, scopeId: `dm:${memberId}`, sessionId: header.id, size: sourceSize, sha256: sourceHash, targetState, publishCurrent: false };
     plans.push(plan);
     stats.planned++;
     emit({ kind: "plan", ...plan, referenceChange: null, status: targetState === "identical" ? "already-copied" : "ready", currentStatus: "historical-only-no-legacy-current-reference" });
   }
 }
-const orphanRoots = [join(root, "pi-agent", "runtime"), join(root, "rooms")];
+// Reset room histories have no current reference, but their runtime path carries a known room/member mapping.
+const runtimeRoot = join(root, "pi-agent", "runtime");
+for (const source of await walk(runtimeRoot)) {
+  if (!source.endsWith(".jsonl") || referenced.has(resolve(source))) continue;
+  const match = /^([^/]+)\/([^/]+)\/sessions\/(.+\.jsonl)$/.exec(relative(runtimeRoot, source).split("\\").join("/"));
+  if (!match || match[1] === "members" || !memberIds.has(match[2]) || !existsSync(join(root, "rooms", match[1]))) continue;
+  const [, roomId, memberId] = match;
+  referenced.add(resolve(source));
+  try {
+    validateLegacySource(source);
+    const header = readHeader(source);
+    const sourceHash = sha256(source);
+    if (!checkDuplicate(source, header.id, sourceHash, `room:${roomId}`)) continue;
+    const day = new Date(header.timestamp).toISOString().slice(0, 10);
+    const targetRelative = join("members", memberId, "sessions", day, "rooms", roomId, source.split("/").at(-1));
+    const target = join(root, targetRelative);
+    validateTarget(target, memberId);
+    const targetState = existsSync(target) ? (sha256(target) === sourceHash ? "identical" : "different") : "absent";
+    if (targetState === "different") { conflict(target, "target-exists-different-content", { source, scopeId: `room:${roomId}`, memberId }); continue; }
+    if (targetState === "identical") stats.skippedIdentical++;
+    const plan = { source, target, targetRelative, memberId, scopeId: `room:${roomId}`, sessionId: header.id, size: statSync(source).size, sha256: sourceHash, targetState, publishCurrent: false };
+    plans.push(plan); stats.planned++;
+    emit({ kind: "plan", ...plan, referenceChange: null, status: targetState === "identical" ? "already-copied" : "ready", currentStatus: "historical-only-no-legacy-current-reference" });
+  } catch (cause) { error(source, "room-history-read-failed", String(cause)); }
+}
+const orphanRoots = [runtimeRoot, join(root, "rooms")];
 for (const orphanRoot of orphanRoots) for (const file of await walk(orphanRoot)) {
   if (!file.endsWith(".jsonl") || !file.includes("/sessions/") || referenced.has(resolve(file))) continue;
   try { readHeader(file); }
@@ -243,12 +353,14 @@ if (apply && stats.errors === 0 && stats.conflicts === 0) {
       writeFileSync(currentTemp, JSON.stringify(merged, null, 2) + "\n");
       recovery.currentBackups.push({ path, existed: original !== null, originalBase64: original?.toString("base64") ?? null, publishedSha256: sha256(currentTemp) });
     }
+    recovery.copiedTargets = staged.map((item) => item.target);
     mkdirSync(dirname(recoveryPath), { recursive: true });
     const recoveryTemp = `${recoveryPath}.${process.pid}.tmp`;
     writeFileSync(recoveryTemp, JSON.stringify({ format: "member-session-recovery/v1", state: "prepared", generatedAt: new Date().toISOString(), ...recovery }, null, 2) + "\n");
     renameSync(recoveryTemp, recoveryPath);
     stats.writes++;
     for (const item of staged) { renameSync(item.temp, item.target); recovery.copiedTargets.push(item.target); stats.writes++; }
+    if (injectedFailure === "publish-current" || injectedFailure === "publish-and-rollback") throw new Error("injected current publish failure");
     let publishedCurrents = 0;
     for (const path of currentBackups.keys()) {
       renameSync(`${path}.${process.pid}.migration.tmp`, path);
@@ -276,7 +388,7 @@ if (apply && stats.errors === 0 && stats.conflicts === 0) {
         } else if (currentHash !== originalHash) {
           conflict(path, "rollback-current-changed", { currentSha256: currentHash, publishedSha256: published, originalSha256: originalHash });
         }
-        if (injectedFailure === "rollback") throw new Error("injected rollback failure");
+        if (injectedFailure === "publish-and-rollback") throw new Error("injected rollback failure");
       } catch (rollbackCause) { error(path, "rollback-failed", String(rollbackCause)); }
     }
     emit({ kind: "recovery", status: stats.conflicts ? "manual-required" : "references-restored", recoveryPath, ...recovery });
