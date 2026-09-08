@@ -113,7 +113,7 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
 
   it("forks a real session file into the topic sessions dir", async () => {
     const { SessionManager } = await import("@earendil-works/pi-coding-agent");
-    const roomSessDir = join(state.dir, "rooms", "roomA", "sessions");
+    const roomSessDir = join(state.dir, "members", "rm_dev", "sessions", "2026-09-08", "rooms", "roomA");
     mkdirSync(roomSessDir, { recursive: true });
     const src = SessionManager.create(state.dir, roomSessDir);
     src.appendMessage({ role: "user", content: [{ type: "text", text: "anchor: investigate flaky test" }] } as any);

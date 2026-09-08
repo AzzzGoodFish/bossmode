@@ -324,12 +324,12 @@ describe("manual compaction conversation action", () => {
     await manager.activateAgent("room", "pm");
     const roomHandle = handles[0];
 
-    const dmBuilt = await manager.buildMemberAgentSession("pm", "dm:mem-dm");
+    const dmBuilt = await manager.buildMemberAgentSession("pm", "dm:pm");
     const topicBuilt = await manager.buildMemberAgentSession("pm", "topic:mem-topic");
-    expect(dmBuilt?.scopeId).toBe("dm:mem-dm");
+    expect(dmBuilt?.scopeId).toBe("dm:pm");
     expect(topicBuilt?.scopeId).toBe("topic:mem-topic");
 
-    const dmResult = await manager.compactMember("dm:mem-dm", "pm");
+    const dmResult = await manager.compactMember("dm:pm", "pm");
     const topicResult = await manager.compactMember("topic:mem-topic", "pm");
     expect(dmResult).toEqual({ ok: true, action: "compacted" });
     expect(topicResult).toEqual({ ok: true, action: "compacted" });
