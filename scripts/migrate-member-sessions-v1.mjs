@@ -383,7 +383,7 @@ if (apply && stats.errors === 0 && stats.conflicts === 0) {
     writeFileSync(recoveryTemp, JSON.stringify({ format: "member-session-recovery/v1", state: "prepared", generatedAt: new Date().toISOString(), ...recovery }, null, 2) + "\n");
     renameSync(recoveryTemp, recoveryPath);
     stats.writes++;
-    for (const item of staged) { renameSync(item.temp, item.target); recovery.copiedTargets.push(item.target); stats.writes++; }
+    for (const item of staged) { renameSync(item.temp, item.target); stats.writes++; }
     if (injectedFailure === "publish-current" || injectedFailure === "publish-and-rollback") throw new Error("injected current publish failure");
     let publishedCurrents = 0;
     for (const path of currentBackups.keys()) {
