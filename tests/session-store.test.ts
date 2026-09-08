@@ -51,6 +51,16 @@ describe("session-store", () => {
     expect(() => sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli" })).toThrow(/Invalid member session current.json/);
   });
 
+  it("rejects wrong-scope and missing current session files", () => {
+    const roomFile = join(tempDir, "members", "rm_pm", "sessions", "2026-09-07", "rooms", "room_a", "one.jsonl");
+    mkdirSync(join(roomFile, ".."), { recursive: true });
+    writeFileSync(roomFile, "{}\n");
+    expect(() => sessionStore.saveSession("topic:topic_a", "rm_pm", { runtime: "pi-sdk", sessionFile: roomFile })).toThrow(/outside the topic:topic_a archive/);
+    const currentDir = join(tempDir, "members", "rm_pm", "sessions");
+    writeFileSync(join(currentDir, "current.json"), JSON.stringify({ "room:room_a": { runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/rooms/room_a/missing.jsonl" } }));
+    expect(() => sessionStore.getCurrentSession("rm_pm", "room:room_a")).toThrow(/is missing/);
+  });
+
   it("keeps member scope references independent", () => {
     sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli", sessionId: "room" });
     sessionStore.saveSession("dm:rm_pm", "rm_pm", { runtime: "pi-cli", sessionId: "dm" });
