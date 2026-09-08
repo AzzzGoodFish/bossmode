@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 /**
  * ContactsPage — member directory (0.20 member-global model).
  *
@@ -29,6 +30,7 @@ export function ContactsPage({ onOpenDm, onOpenImport }: {
   onOpenDm: (memberId: string) => void;
   onOpenImport?: () => void;
 }) {
+  const profileRevision = useMemberProfileRevision();
   const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
   const [roomNames, setRoomNames] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export function ContactsPage({ onOpenDm, onOpenImport }: {
       .then((rooms: Room[]) => { if (!cancelled) setRoomNames(new Map(rooms.map((r) => [r.id, r.name]))); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [profileRevision]);
 
   const members = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Crown, Loader2, Trash2, UserPlus, X } from "lucide-react";
 import { Sheet } from "./Sheet";
@@ -91,6 +92,18 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     getContacts().then((r) => setContacts(r.contacts)).catch(() => {});
     void loadPrinciples();
   }, [open, room, toast, loadPrinciples]);
+
+  const profileRevision = useMemberProfileRevision();
+  useEffect(() => {
+    if (!open || !profileRevision) return;
+    let active = true;
+    Promise.all([getRoomMembers(room.id), getContacts()]).then(([ms, cs]) => {
+      if (!active) return;
+      setMembers(ms);
+      setContacts(cs.contacts);
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [open, room.id, profileRevision]);
 
   const refreshMembers = useCallback(async () => {
     const fresh = await getRoomMembers(room.id);

@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useCallback } from "react";
 import { LayoutGrid, List, Plus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority } from "../api/client";
@@ -27,7 +28,8 @@ export function TasksTab({ roomId, members, onOpenTaskDetail }: TasksTabProps) {
     listRoomTasks(roomId).then(setTasks).catch(console.error).finally(() => setLoading(false));
   }, [roomId]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  const profileRevision = useMemberProfileRevision();
+  useEffect(() => { refresh(); }, [refresh, profileRevision]);
 
   useEffect(() => { localStorage.setItem(VIEW_KEY, view); }, [view]);
 

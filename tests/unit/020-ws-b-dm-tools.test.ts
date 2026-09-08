@@ -45,7 +45,7 @@ describe("020 WS-B DM tools", () => {
 
   it("list_members returns global registry", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const result = await handleToolCallback("list_members", "", "pm", {}) as any;
@@ -60,12 +60,12 @@ describe("020 WS-B DM tools", () => {
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
 
-    const result = await handleToolCallback("create_room", "", "pm", {
+    const result = await handleToolCallback("create_room", `dm:${pm.id}`, pm.id, {
       name: "Project X",
       cwd: dir,
       memberIds: [dev.id],
       principles: "# Project X\nShip it.\n",
-    }) as any;
+    }, { memberId: pm.id }) as any;
 
     expect(result.ok).toBe(true);
     expect(result.roomId).toBeTruthy();
@@ -86,28 +86,28 @@ describe("020 WS-B DM tools", () => {
 
   it("edit_room any room member can rename (leader gate retired)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
 
-    const created = await handleToolCallback("create_room", "", "pm", {
+    const created = await handleToolCallback("create_room", `dm:${pm.id}`, pm.id, {
       name: "R1",
       cwd: dir,
       memberIds: [dev.id],
-    }) as any;
+    }, { memberId: pm.id }) as any;
     expect(created.ok).toBe(true);
 
-    const ok = await handleToolCallback("edit_room", created.roomId, "developer", {
+    const ok = await handleToolCallback("edit_room", created.roomId, dev.id, {
       roomId: created.roomId,
       name: "R1-renamed",
-    }) as any;
+    }, { memberId: dev.id }) as any;
     expect(ok.ok).toBe(true);
     expect(ok.name).toBe("R1-renamed");
   });
 
   it("DM tool assembly has create_room and no wait; room has wait and no create_room", async () => {
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
-    const dm = createBossmodeSdkTools({ roomId: "", agentName: "pm", roomMembers: ["pm"], scopeKind: "dm" });
+    const dm = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: "", scopeKind: "dm" });
     const names = dm.map((t) => t.name);
     expect(names).toContain("create_room");
     expect(names).toContain("list_members");
@@ -117,7 +117,7 @@ describe("020 WS-B DM tools", () => {
     expect(names).not.toContain("write_memory");
     expect(names).not.toContain("create_task");
 
-    const room = createBossmodeSdkTools({ roomId: "r1", agentName: "pm", roomMembers: ["pm", "qa"], scopeKind: "room" });
+    const room = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: "r1", scopeKind: "room" });
     const roomNames = room.map((t) => t.name);
     expect(roomNames).toContain("wait");
     expect(roomNames).toContain("create_task");

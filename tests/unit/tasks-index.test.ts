@@ -69,6 +69,16 @@ describe("tasks-index (S3)", () => {
     expect((t3 as Record<string, unknown>).comments).toBeUndefined();
   });
 
+  it("hydrates the room context for historical payloads without roomId", async () => {
+    await openFreshDb();
+    const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
+    const { roomId: _roomId, ...legacy } = task("legacy", { assignee: "developer" });
+    syncRoomTasks("room-a", [legacy as Task]);
+    expect(queryRoomTasks("room-a", { assignee: "developer" })!.tasks).toMatchObject([
+      { id: "legacy", roomId: "room-a", assignee: "developer", commentCount: 0 },
+    ]);
+  });
+
   it("filters by status and assignee", async () => {
     await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");

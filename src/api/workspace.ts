@@ -9,13 +9,12 @@ import * as roomStore from "../workspace/room-store.js";
 import * as memberRegistry from "../workspace/member-registry.js";
 import { clearCurrentSession, clearCurrentSessions } from "../workspace/session-store.js";
 import * as messageStore from "../workspace/message-store.js";
-import * as taskStore from "../workspace/task-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
 import * as topicStore from "../workspace/topic-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
-import { destroyInstance, getAgentEventHistory, getMemberBusyState, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
 
@@ -134,13 +133,6 @@ addRoute("POST", "/api/rooms", async (req, res) => {
       const seen = new Set<string>();
       const unique = globals.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
 
-      const { loadAgentDefinition } = await import("../workforce/agent-store.js");
-      const drafts: CreateRoomMemberInput[] = unique.map((m) => {
-        const preferred = (m.agentTemplate || "general").trim() || "general";
-        const agent = loadAgentDefinition(preferred) ? preferred : (loadAgentDefinition("general") ? "general" : preferred);
-        return { agent, name: m.name };
-      });
-
       let leaderGlobalId =
         typeof body.leaderMemberId === "string" && body.leaderMemberId.trim()
           ? body.leaderMemberId.trim()
@@ -149,24 +141,12 @@ addRoute("POST", "/api/rooms", async (req, res) => {
         sendJson(res, 400, { error: "leader_not_in_members", message: "leaderMemberId must be one of memberIds" });
         return;
       }
-      const leaderName = leaderGlobalId
-        ? unique.find((m) => m.id === leaderGlobalId)!.name
-        : unique[0]?.name;
+      // Existing DB identities bind directly by ID, with no room-local name validation.
+      const room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
+        docsPath: body.docsPath,
+      });
 
-      // createRoom works with zero members (user manual room) — no team package is materialized.
-      let room;
-      if (drafts.length === 0) {
-        room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
-          docsPath: body.docsPath,
-        });
-      } else {
-        room = roomStore.createRoom(body.name, body.cwd, drafts, body.ruleDocs, {
-          promptLeaderMemberName: leaderName,
-          docsPath: body.docsPath,
-        });
-      }
-
-      // Dual-write globalMemberIds (+ leader global id)
+      // Persist stable membership and leader IDs
       const globalIds = unique.map((m) => m.id);
       if (!leaderGlobalId && unique[0]) leaderGlobalId = unique[0].id;
       roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId || null);
@@ -651,29 +631,12 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
     return;
   }
 
-  let currentMemberRef = roomMember.id;
-  const result: Record<string, unknown> = {};
   if (hasName) {
-    if (typeof body.name !== "string") {
-      sendJson(res, 400, { error: "name must be a string" });
-      return;
-    }
-    const busy = getMemberBusyState(params.id, roomMember.id);
-    if (busy.busy) {
-      sendJson(res, 409, { error: `Cannot rename a busy member (${busy.reason || "busy"}). Stop or wait for it to become idle first.` });
-      return;
-    }
-    const oldName = roomMember.name;
-    const renamed = roomStore.renameRoomMember(params.id, roomMember.id, body.name);
-    if (!renamed.ok) {
-      sendJson(res, renamed.code === "duplicate" ? 409 : 400, { error: renamed.error });
-      return;
-    }
-    currentMemberRef = renamed.member.id;
-    destroyInstance(params.id, renamed.member.id);
-    result.renamed = true;
-    result.taskReferencesUpdated = taskStore.renameParticipant(params.id, { memberId: renamed.member.id, oldName, newName: renamed.member.name });
+    sendJson(res, 400, { error: "member_profile_is_global", message: "name is member-global — update it via PATCH /api/members/:id" });
+    return;
   }
+  const currentMemberRef = roomMember.id;
+  const result: Record<string, unknown> = {};
 
   if (hasMcpServers || hasExtensions) {
     const roomPatch: { mcpServers?: string[] | null; extensions?: string[] | null } = {};

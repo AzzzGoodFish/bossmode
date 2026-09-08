@@ -50,32 +50,32 @@ const BACKGROUND_FORBIDDEN_TOOLS = new Set([
   "background_start",
   "recall",
   "memorize",
-]);;
+]);
 
 export function createBossmodeSdkTools(opts: {
   roomId: string;
-  agentName: string;
-  roomMembers: string[];
+  memberId: string;
   /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
   scopeKind?: "dm" | "room";
   /** "background" = background task child session: same tool declarations, but
    *  scope-posting and background-start tools are rejected at execution time. */
   execution?: "live" | "background";
 }): ToolDefinition[] {
+  if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
   const scopeKind = opts.scopeKind || "room";
   const call = async (tool: string, params: Record<string, any>) => {
     if (opts.execution === "background" && BACKGROUND_FORBIDDEN_TOOLS.has(tool)) {
       throw new Error(`tool "${tool}" is not available inside a background task; finish the task and return the result as your final text`);
     }
     const { handleToolCallback } = await import("../tools.js");
-    return handleToolCallback(tool, opts.roomId, opts.agentName, params, { execution: opts.execution });
+    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, execution: opts.execution });
   };
 
   const tools: ToolDefinition[] = [
     defineTool({
       name: "chat",
       label: "Chat",
-      description: buildChatToolDescription(opts.roomMembers.filter((m) => m !== opts.agentName).join(", ")),
+      description: buildChatToolDescription(),
       parameters: Type.Object({
         message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
         attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
@@ -87,6 +87,21 @@ export function createBossmodeSdkTools(opts: {
         if (data?.ok === false) throw new Error(data.error || "Chat failed");
         const note = data?.note ? `\n${data.note}` : "";
         return textResult("Message sent to room." + note);
+      },
+    }),
+    defineTool({
+      name: "update_profile",
+      label: "Update Profile",
+      description: "Update your own member name or title. At least one field is required. An empty title clears it. Returns the committed profile and whether it changed.",
+      parameters: Type.Object({
+        name: Type.Optional(Type.String({ description: "New member name." })),
+        title: Type.Optional(Type.String({ description: "New member title; an empty string clears it." })),
+      }, { additionalProperties: false }),
+      execute: async (_id, params) => {
+        const data = await call("update_profile", params as any) as any;
+        // Keep structured validation/conflict details visible in SDK errors.
+        if (data?.ok === false) throw new Error(JSON.stringify(data));
+        return textResult(JSON.stringify(data));
       },
     }),
     defineTool({

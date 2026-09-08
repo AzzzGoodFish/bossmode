@@ -73,8 +73,8 @@ describe("wait tool — gates + idle short-circuit", () => {
 
   it("assembly gate: all room members see wait; watch is gone", async () => {
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
-    const leaderTools = createBossmodeSdkTools({ roomId, agentName: "pm", roomMembers: ["pm", "qa", "developer"] });
-    const memberTools = createBossmodeSdkTools({ roomId, agentName: "qa", roomMembers: ["pm", "qa", "developer"] });
+    const leaderTools = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId });
+    const memberTools = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId });
     expect(leaderTools.some((t) => t.name === "wait")).toBe(true);
     expect(leaderTools.some((t) => t.name === "watch")).toBe(false);
     expect(memberTools.some((t) => t.name === "wait")).toBe(true);

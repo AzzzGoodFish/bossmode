@@ -1,3 +1,4 @@
+import { updateProfileForMember, InvalidProfileError } from "../engine/member-profile-update.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
@@ -10,7 +11,6 @@ import {
   getMember,
   createMember,
   updateMember,
-  updateMemberIdentity,
   fireMember,
   resolveMemberRef,
   getEffectiveConfig,
@@ -59,6 +59,7 @@ function publicMember(m: MemberRecord) {
 }
 
 function errCode(err: unknown): { status: number; error: string; message: string } {
+  if (err instanceof InvalidProfileError) return { status: 400, error: err.code, message: err.message };
   if (err instanceof MemberNameTakenError) {
     return { status: 409, error: "name_taken", message: err.message };
   }
@@ -67,6 +68,7 @@ function errCode(err: unknown): { status: number; error: string; message: string
   }
   const msg = String((err as any)?.message || err);
   if (msg === "confirm_required") return { status: 400, error: "confirm_required", message: "confirm: true required" };
+  if (msg === "reserved_member_name") return { status: 400, error: msg, message: "all, user and system are reserved for group mentions, the human user and system messages." };
   if (msg === "invalid_member_name") return { status: 400, error: "invalid_member_name", message: msg };
   if (msg === "scope_not_found") return { status: 400, error: "scope_not_found", message: msg };
   if (msg === "archive_not_found") return { status: 404, error: "archive_not_found", message: msg };
@@ -593,11 +595,12 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     }
 
     if (body.name !== undefined || body.title !== undefined) {
-      m = updateMemberIdentity(m.id, {
+      updateProfileForMember(m.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.title !== undefined ? { title: body.title === null ? "" : body.title } : {}),
       });
     }
+    m = getMember(m.id)!;
     // Non-model fields commit in ONE save, and only when there is something to
     // save — a pure model PATCH must not run a second record write after the
     // switch already committed (an unrelated write failure would wrongly fail

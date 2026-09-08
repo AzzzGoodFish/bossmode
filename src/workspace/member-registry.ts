@@ -90,6 +90,12 @@ function normalizeName(name: string | undefined | null): string {
   return String(name ?? "").trim();
 }
 
+function rejectReservedMemberName(name: string): void {
+  if (["all", "user", "system"].includes(name.toLowerCase())) {
+    throw new Error("reserved_member_name");
+  }
+}
+
 function isValidMemberName(name: string): boolean {
   // Display name: non-empty, no path separators, reasonable length.
   if (!name || name.length > 64) return false;
@@ -188,6 +194,7 @@ export function createMember(input: CreateMemberInput): MemberRecord {
   ensureMembersRoot();
   const rawName = normalizeName(input.name);
   const name = rawName ? rawName : allocateUniqueMemberName("New Member");
+  rejectReservedMemberName(name);
   if (!isValidMemberName(name)) throw new Error("invalid_member_name");
   if (findMemberByName(name)) throw new MemberNameTakenError(name);
 
@@ -233,6 +240,7 @@ export function updateMemberIdentity(id: string, patch: { name?: string; title?:
     const name = patch.name === undefined ? rec.name : normalizeName(patch.name);
     if ((patch.name !== undefined && typeof patch.name !== "string") || !isValidMemberName(name)) throw new Error("invalid_member_name");
     if (patch.title !== undefined && patch.title !== null && typeof patch.title !== "string") throw new Error("invalid_member_title");
+    if (patch.name !== undefined) rejectReservedMemberName(name);
     const title = patch.title === undefined ? rec.title : (patch.title?.trim() || undefined);
     if (name === rec.name && title === rec.title) return rec;
     rec.name = name;

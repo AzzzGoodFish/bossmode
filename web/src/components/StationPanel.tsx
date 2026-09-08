@@ -1,3 +1,4 @@
+import { useMemberProfileRevision, currentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
@@ -98,6 +99,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   const rosterRef = useRef<HTMLDivElement>(null);
   const rosterDragRef = useRef({ y: 0, h: 160 });
 
+  const profileRevision = useMemberProfileRevision();
   useEffect(() => {
     let active = true;
     getRoomMembers(roomId)
@@ -110,7 +112,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
       .catch(console.error);
     // Refetch after either view saves; ignore responses from older reads.
     return () => { active = false; };
-  }, [members, roomId, float.saveVersions]);
+  }, [members, roomId, float.saveVersions, profileRevision]);
 
   useEffect(() => {
     getConfiguredModels().then(setModels).catch(console.error);
@@ -123,6 +125,11 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
 
 
   const eventWatchId = activityScope || roomId;
+  const memberInfosRef = useRef(memberInfos);
+  memberInfosRef.current = memberInfos;
+  const subscriptionMembers = members.map((name) => ({ name, memberId: memberInfos[name]?.id }));
+  const subscriptionKey = JSON.stringify(subscriptionMembers);
+
 
   // A+ fusion feed (fish 2026-08-20): each member's raw activity stream, kept
   // per member and merged into turn blocks at render. Same visibility filter
@@ -150,14 +157,19 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
     ws.onopen = () => {
-      for (const name of members) ws.send(JSON.stringify({ type: "subscribe:agent", roomId: eventWatchId, agent: name }));
+      for (const { name, memberId } of subscriptionMembers) ws.send(JSON.stringify({ type: "subscribe:agent", roomId: eventWatchId, agent: name, memberId }));
     };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type !== "agent:event" || data.roomId !== eventWatchId || !members.includes(data.agent)) return;
+        if (data.type !== "agent:event" || data.roomId !== eventWatchId) return;
+        const subscribed = data.memberId
+          ? subscriptionMembers.some((m) => m.memberId === data.memberId)
+          : members.includes(data.agent);
+        if (!subscribed) return;
         const event = data.event as AgentEvent;
-        const agent = data.agent as string;
+        const agent = currentMemberName(data.memberId,
+          Object.values(memberInfosRef.current).find((m) => m.id === data.memberId)?.name ?? data.agent as string);
         // Streaming deltas feed the live-preview cards, not the event buffer.
         if (event.type === "message_start") {
           streamBufRef.current[agent] = { thinking: "", text: "", t0: typeof event.ts === "number" ? event.ts : Date.now() };
@@ -200,7 +212,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
       } catch {}
     };
     return () => ws.close();
-  }, [eventWatchId, members.join("\u0000")]);
+  }, [eventWatchId, subscriptionKey]);
 
   /** 60ms-batched mirror of streamBufRef → React state. */
   const scheduleStreamFlush = useCallback(() => {
@@ -221,7 +233,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
 
   // Member peek (Discord-style popout, fish 2026-09-02): roster row click
   // opens the card — glancing never leaves the conversation.
-  const [peek, setPeek] = useState<{ name: string; rect: DOMRect } | null>(null);
+  const [peek, setPeek] = useState<{ memberId: string; rect: DOMRect } | null>(null);
+  const peekMember = peek ? Object.values(memberInfos).find((m) => m.id === peek.memberId) : undefined;
   // Roster chip quick-config (fish 2026-09-04: "改回去吧" — the model/think
   // chips get their quick popover back). One click switches the member's
   // GLOBAL config (same write target as the float Settings tab); the deep
@@ -234,7 +247,8 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   }, []);
   const openPeek = (name: string, el: HTMLElement) => {
     closePops();
-    setPeek((prev) => prev?.name === name ? null : { name, rect: el.getBoundingClientRect() });
+    const memberId = memberInfos[name]?.id;
+    if (memberId) setPeek((prev) => prev?.memberId === memberId ? null : { memberId, rect: el.getBoundingClientRect() });
   };
   const openChipPop = (name: string, kind: "model" | "think", el: HTMLElement) => {
     setPeek(null);
@@ -586,13 +600,13 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
           </div>
         )}
       </div>
-      {peek && memberInfos[peek.name] && (
+      {peek && peekMember && (
         <MemberPeekCard
           anchor={peek.rect}
-          member={memberInfos[peek.name]}
-          status={agentStatus[peek.name] || "inactive"}
-          events={feedEvents[peek.name] || []}
-          stream={liveStreams[peek.name]}
+          member={peekMember}
+          status={agentStatus[peekMember.name] || "inactive"}
+          events={feedEvents[peekMember.name] || []}
+          stream={liveStreams[peekMember.name]}
           roomId={roomId}
           models={models}
           onClose={() => setPeek(null)}

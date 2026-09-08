@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -304,6 +305,7 @@ function SectionHead({ label, onLabelClick, active }: {
 
 /** Compact unified conversation list for the Chats panel domain. */
 function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; onNavigate: (p: ActivePage) => void }) {
+  const profileRevision = useMemberProfileRevision();
   const [chats, setChats] = useState<ChatEntry[] | null>(null);
   const [query, setQuery] = useState("");
   useEffect(() => {
@@ -312,7 +314,7 @@ function ChatsPanelList({ activePage, onNavigate }: { activePage: ActivePage; on
     load();
     const t = window.setInterval(load, 10_000);
     return () => { cancelled = true; window.clearInterval(t); };
-  }, []);
+  }, [profileRevision]);
   const sorted = useMemo(
     () => [...(chats ?? [])].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0)),
     [chats],

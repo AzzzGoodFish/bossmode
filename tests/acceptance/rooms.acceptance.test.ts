@@ -153,27 +153,29 @@ describe("Acceptance: Rooms & Messages (F3, F4, F5, F9, F17)", () => {
     });
 
     it("keeps prompt leader stable when the leader member is renamed", async () => {
-      const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-        token,
-        body: { name: "rename-leader-room", cwd: "/tmp", members: roomMembers("pm", "qa"), promptLeaderMemberName: "pm" },
-      });
-      if (res.status === 501) return;
-      expect(res.status).toBe(200);
-      const room: Room = JSON.parse(res.body);
-      const leaderId = room.promptLeaderMemberId;
-      expect(leaderId).toBeTruthy();
+      const registry = await import("../../src/workspace/member-registry.js");
+      const rooms = await import("../../src/workspace/room-store.js");
+      const leader = registry.createMember({ name: "leader-rename-pm", agentTemplate: "pm" });
+      const peer = registry.createMember({ name: "leader-rename-qa", agentTemplate: "qa" });
+      const room = rooms.createRoom("rename-leader-room", undefined, []);
+      rooms.stampGlobalMemberIds(room.id, [leader.id, peer.id], leader.id);
+      const leaderId = leader.id;
 
-      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/pm`, {
+      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/members/${leaderId}`, {
         token,
-        body: { name: "lead" },
+        body: { name: "leader-renamed" },
       });
       expect(renameRes.status).toBe(200);
+      expect(JSON.parse(renameRes.body).member).toMatchObject({ memberId: leaderId, name: "leader-renamed" });
 
       const getRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
       expect(getRes.status).toBe(200);
       const updated: Room = JSON.parse(getRes.body);
       expect(updated.promptLeaderMemberId).toBe(leaderId);
-      expect(updated.roomMembers?.find((member) => member.id === leaderId)?.name).toBe("lead");
+      expect(updated.promptLeaderGlobalMemberId).toBe(leaderId);
+      expect(updated.globalMemberIds).toEqual([leaderId, peer.id]);
+      expect(updated.members).toEqual(["leader-renamed", peer.name]);
+      expect(rooms.getRoomMembersFromRoom(updated).find((member) => member.id === leaderId)?.name).toBe("leader-renamed");
     });
 
     // T2.4: Invalid cwd

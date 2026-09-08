@@ -7,6 +7,8 @@
 //
 // Best-effort: a DB failure logs and leaves tasks.json as the working source;
 // callers fall back to the file store.
+import { resolveRoomMemberRef } from "../room-store.js";
+import { toTaskListItem } from "../task-store.js";
 import { getProjectionDb } from "./projection.js";
 import { logger } from "../../foundation/logger.js";
 import type { Task, TaskListItem, TaskStatus } from "../../shared/types.js";
@@ -81,8 +83,17 @@ export function queryRoomTasks(roomId: string, query: TaskListQuery): TaskListRe
       params.push(query.status);
     }
     if (query.assignee) {
-      where.push("assignee = ?");
-      params.push(query.assignee);
+      const ref = query.assignee.trim();
+      const member = resolveRoomMemberRef(roomId, ref);
+      const memberId = member?.id ?? ref;
+      if (member?.id.startsWith("mem_")) {
+        where.push("json_extract(payload_json, '$.assigneeMemberId') = ?");
+        params.push(memberId);
+      } else {
+        where.push(`(json_extract(payload_json, '$.assigneeMemberId') = ? OR
+          (COALESCE(json_extract(payload_json, '$.assigneeMemberId'), '') = '' AND assignee = ?))`);
+        params.push(memberId, ref);
+      }
     }
     if (query.q && query.q.trim()) {
       where.push("title LIKE ?");
@@ -109,8 +120,7 @@ export function queryRoomTasks(roomId: string, query: TaskListQuery): TaskListRe
       if (!row.payload_json) continue;
       try {
         const task = JSON.parse(row.payload_json) as Task;
-        const { comments, ...rest } = task;
-        tasks.push({ ...rest, commentCount: comments?.length ?? 0 });
+        tasks.push(toTaskListItem({ ...task, roomId }));
       } catch {
         /* skip bad row */
       }

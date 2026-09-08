@@ -2,11 +2,12 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
 import { validateToken } from "../api/auth.js";
+import { findMemberByName } from "../workspace/member-registry.js";
 
 interface ClientState {
   ws: WebSocket;
   roomSubscriptions: Set<string>;
-  agentSubscriptions: Set<string>; // "roomId:agentName"
+  agentSubscriptions: Set<string>; // "scopeId:memberId"; names resolve only at command time
 }
 
 const clients = new Map<WebSocket, ClientState>();
@@ -63,11 +64,14 @@ function handleCommand(client: ClientState, cmd: WsClientCommand): void {
       client.roomSubscriptions.delete(cmd.roomId);
       break;
     case "subscribe:agent":
-      client.agentSubscriptions.add(`${cmd.roomId}:${cmd.agent}`);
+    case "unsubscribe:agent": {
+      const memberId = cmd.memberId || findMemberByName(cmd.agent)?.id;
+      if (!memberId) break;
+      const key = `${cmd.roomId}:${memberId}`;
+      if (cmd.type === "subscribe:agent") client.agentSubscriptions.add(key);
+      else client.agentSubscriptions.delete(key);
       break;
-    case "unsubscribe:agent":
-      client.agentSubscriptions.delete(`${cmd.roomId}:${cmd.agent}`);
-      break;
+    }
   }
 }
 
@@ -81,10 +85,24 @@ export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
 }
 
 export function broadcastToAgentSubscribers(roomId: string, agent: string, event: WsServerEvent): void {
-  const key = `${roomId}:${agent}`;
+  const memberId = "memberId" in event && event.memberId
+    ? event.memberId : findMemberByName(agent)?.id;
+  if (!memberId) return;
+  const key = `${roomId}:${memberId}`;
   const payload = JSON.stringify(event);
   for (const [, state] of clients) {
     if (state.agentSubscriptions.has(key) && state.ws.readyState === 1) {
+      try { state.ws.send(payload); } catch { clients.delete(state.ws); }
+    }
+  }
+}
+
+/** Current identity is global, including clients without any scope subscriptions. */
+export function broadcastMemberProfileChanged(profile: { memberId: string; name: string; title: string | null }): void {
+  const event: WsServerEvent = { type: "member:profile", ...profile };
+  const payload = JSON.stringify(event);
+  for (const [, state] of clients) {
+    if (state.ws.readyState === 1) {
       try { state.ws.send(payload); } catch { clients.delete(state.ws); }
     }
   }

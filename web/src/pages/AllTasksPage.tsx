@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useCallback } from "react";
 import { Search } from "lucide-react";
 import type { Task, TaskStatus } from "../api/client";
@@ -35,7 +36,8 @@ export function AllTasksPage({ onSelectTask, onOpenMobileSidebar }: AllTasksPage
       .finally(() => setLoading(false));
   }, [statusFilter, query]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  const profileRevision = useMemberProfileRevision();
+  useEffect(() => { refresh(); }, [refresh, profileRevision]);
 
   // Group by room
   const grouped = new Map<string, { roomName: string; tasks: Task[] }>();

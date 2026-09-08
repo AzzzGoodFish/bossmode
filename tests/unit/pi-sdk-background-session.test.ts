@@ -179,7 +179,7 @@ describe("PiSdkRuntime background session variant", () => {
     await new PiSdkRuntime().createAgent(baseOpts({
       background: { sessionDir: join(dir, "taskdir") },
     }));
-    expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ execution: "background" }));
+    expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ execution: "background", memberId: "pm" }));
   });
 
   it("removes each successfully cleaned background handle before the next task", async () => {

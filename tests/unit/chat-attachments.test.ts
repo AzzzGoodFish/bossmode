@@ -130,7 +130,10 @@ describe("chat attachment artifacts", () => {
     expect(result.error).toContain(missingPath);
     expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
 
-    const chatTool = createBossmodeSdkTools({ roomId: room.id, agentName: "developer", roomMembers: ["developer"] })[0];
+    const { createMember, findMemberByName } = await import("../../src/workspace/member-registry.js");
+    const caller = findMemberByName("developer") || createMember({ name: "developer" });
+    roomStore.stampGlobalMemberIds(room.id, [caller.id]);
+    const chatTool = createBossmodeSdkTools({ roomId: room.id, memberId: caller.id })[0];
     await expect(chatTool.execute("call-1", {
       message: "should not report sent",
       target: "room",

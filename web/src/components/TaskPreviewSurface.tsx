@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useEffect, useState } from "react";
 import { CheckSquare, ExternalLink, Loader2, Maximize2, MessageSquare, X } from "lucide-react";
 import type { Task } from "../api/client";
@@ -25,6 +26,7 @@ type LoadState =
   | { status: "error"; error: string };
 
 function useTaskLoad(roomId: string, taskId: string): LoadState {
+  const profileRevision = useMemberProfileRevision();
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +35,7 @@ function useTaskLoad(roomId: string, taskId: string): LoadState {
       .then((task) => { if (!cancelled) setLoad({ status: "ready", task }); })
       .catch((err: any) => { if (!cancelled) setLoad({ status: "error", error: String(err?.message || err) }); });
     return () => { cancelled = true; };
-  }, [roomId, taskId]);
+  }, [roomId, taskId, profileRevision]);
   return load;
 }
 

@@ -2,13 +2,15 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { getToken } from "../api/client";
 
 export type WsEvent =
+  | { type: "member:profile"; memberId: string; name: string; title: string | null }
   | { type: "room:message"; roomId: string; message: any }
-  | { type: "agent:status"; roomId: string; agent: string; status: string; stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean } }
-  | { type: "agent:event"; roomId: string; agent: string; event: unknown }
+  | { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: string; stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean } }
+  | { type: "agent:event"; roomId: string; agent: string; memberId?: string; event: unknown }
   | {
       type: "agent:context_usage";
       roomId: string;
       agent: string;
+      memberId?: string;
       usage: { totalTokens: number; rawMaxTokens: number; percentage: number; model: string } | null;
     };
 
@@ -113,14 +115,14 @@ export function useWebSocket({ onEvent }: UseWebSocketOptions = {}) {
   );
 
   const subscribeAgent = useCallback(
-    (roomId: string, agent: string) =>
-      send({ type: "subscribe:agent", roomId, agent }),
+    (roomId: string, agent: string, memberId?: string) =>
+      send({ type: "subscribe:agent", roomId, agent, memberId }),
     [send],
   );
 
   const unsubscribeAgent = useCallback(
-    (roomId: string, agent: string) =>
-      send({ type: "unsubscribe:agent", roomId, agent }),
+    (roomId: string, agent: string, memberId?: string) =>
+      send({ type: "unsubscribe:agent", roomId, agent, memberId }),
     [send],
   );
 

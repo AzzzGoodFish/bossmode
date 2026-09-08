@@ -1,3 +1,4 @@
+import { useMemberProfileRevision, getMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 /**
  * DmPage — direct-message conversation with a member (scope = dm).
  * The chat surface is the room chat language instantiated for one member:
@@ -67,14 +68,17 @@ export function DmPage({ memberId, onBack }: {
   }, []);
 
   const load = useCallback(async () => {
+    const revisionAtLoad = getMemberProfileRevision(memberId);
     try {
       const [m, msgs, sess] = await Promise.all([
         getMemberDetail(memberId),
         getDmMessages(memberId, { limit: PAGE_SIZE }),
         getDmSession(memberId).catch(() => null),
       ]);
-      setMember(m);
-      void refreshMemberInfo(m);
+      if (revisionAtLoad === getMemberProfileRevision(memberId)) {
+        setMember(m);
+        void refreshMemberInfo(m);
+      }
       setMessages(msgs.messages);
       setHasMore(msgs.messages.length >= PAGE_SIZE);
       setSession(sess);
@@ -85,6 +89,18 @@ export function DmPage({ memberId, onBack }: {
   }, [memberId, refreshMemberInfo]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const profileRevision = useMemberProfileRevision(memberId);
+  useEffect(() => {
+    if (!profileRevision) return;
+    let active = true;
+    getMemberDetail(memberId).then((detail) => {
+      if (!active) return;
+      setMember(detail);
+      void refreshMemberInfo(detail);
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [memberId, profileRevision, refreshMemberInfo]);
 
   // The no-model guidance card needs the model list without waiting for the panel.
   const noModel = !!memberInfo && !memberInfo.model;

@@ -1,3 +1,4 @@
+import { publishMemberProfileChanged, currentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -133,6 +134,10 @@ export function Layout({ onLogout, username }: LayoutProps) {
   const mainWsHandlerRef = useRef<((event: WsEvent) => void) | null>(null);
 
   const handleWsEvent = useCallback((event: WsEvent) => {
+    if (event.type === "member:profile") {
+      publishMemberProfileChanged(event);
+      setRefreshKey((key) => key + 1);
+    }
     const page = activePageRef.current;
     const selectedRoomId = page?.type === "room" ? page.id : null;
     const activeTabKey = activeTabKeyRef.current;
@@ -141,12 +146,12 @@ export function Layout({ onLogout, username }: LayoutProps) {
     mainWsHandlerRef.current?.(event);
 
     if (event.type === "agent:status") {
-      setRooms((prev) => patchRoomAgentStatus(prev, event.roomId, event.agent, event.status));
+      setRooms((prev) => patchRoomAgentStatus(prev, event.roomId, currentMemberName(event.memberId, event.agent), event.status));
       setLiveStatuses((prev) => {
         // WS events carry the bare room id; float scopes are `room:<id>` /
         // `dm:<memberId>` — normalize so both scopes hit the same key.
         const scopeId = event.roomId.includes(":") ? event.roomId : `room:${event.roomId}`;
-        const key = `${scopeId}:${event.agent}`;
+        const key = `${scopeId}:${event.memberId ?? event.agent}`;
         if (prev.get(key) === event.status) return prev;
         const next = new Map(prev);
         next.set(key, event.status);
@@ -188,7 +193,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
       const eventType = (event.event as any)?.type;
       if (!UNREAD_EVENT_TYPES.has(eventType)) return;
 
-      const agentName = event.agent;
+      const agentName = currentMemberName(event.memberId, event.agent);
       if (activeTabKey !== agentName) {
         // F2: Not viewing this agent → tab red dot
         setUnreadTabs((prev) => {

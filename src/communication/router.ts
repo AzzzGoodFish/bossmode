@@ -6,32 +6,34 @@ import { logger } from "../foundation/logger.js";
 import type { RoomMemberRecord } from "../shared/types.js";
 import { stripCodeSegments } from "../shared/mention-text.js";
 
-/** Parse @mentions from message content */
-export function parseMentions(content: string, roomMembers: string[]): string[] {
-  // Code is literal text, never a command — strip code segments first so
-  // `@name` inside backticks never activates (architect ruling 2026-08-04).
+/** Match literal current roster names, longest first (Unicode and spaces included). */
+function rosterMentions(content: string, names: string[], marker: "@" | "!"): string[] {
   const plain = stripCodeSegments(content);
-  const mentions: string[] = [];
-
-  if (/@all\b/.test(plain)) {
-    return ["all"];
+  const candidates = [...new Set(names)].filter(Boolean).sort((a, b) => b.length - a.length);
+  const result: string[] = [];
+  for (let i = 0; i < plain.length; i++) {
+    if (plain[i] !== marker) continue;
+    if (marker === "!" && i > 0 && /[\p{L}\p{N}_!]/u.test(plain[i - 1])) continue;
+    const name = candidates.find(name => {
+      // The marker must be outside code. A legal literal name may itself contain backticks.
+      if (!content.startsWith(name, i + 1)) return false;
+      const next = content[i + 1 + name.length];
+      return !next || !/[\p{L}\p{N}\p{M}_.-]/u.test(next);
+    });
+    if (name) { result.push(name); i += name.length; }
   }
+  return [...new Set(result)];
+}
 
-  const atPattern = /@([\w.-]+)/g;
-  let match;
-  while ((match = atPattern.exec(plain)) !== null) {
-    const name = match[1];
-    if (roomMembers.includes(name)) {
-      mentions.push(name);
-    }
-  }
-
-  return [...new Set(mentions)];
+/** Parse current exact @names; code segments are never commands. */
+export function parseMentions(content: string, roomMembers: string[]): string[] {
+  const found = rosterMentions(content, [...roomMembers, "all"], "@");
+  return found.includes("all") ? ["all"] : found;
 }
 
 export function parseMentionMemberIds(content: string, roomMembers: RoomMemberRecord[]): string[] {
-  if (/@all\b/.test(content)) return roomMembers.map((member) => member.id);
   const names = parseMentions(content, roomMembers.map((member) => member.name));
+  if (names.includes("all")) return roomMembers.map((member) => member.id);
   return names
     .map((name) => roomMembers.find((member) => member.name === name)?.id)
     .filter((id): id is string => Boolean(id));
@@ -47,17 +49,7 @@ export function parseMentionMemberIds(content: string, roomMembers: RoomMemberRe
  * supported (interrupting the whole room is not a thing).
  */
 export function parseUrgentMentions(content: string, roomMembers: string[]): string[] {
-  // Same code-segment stripping as @ — a backticked `!name` is documentation,
-  // not an interrupt (designer alignment blocker: high-cost misfire).
-  const plain = stripCodeSegments(content);
-  const pattern = /(?<![\w!])!([\w.-]+)/g;
-  const out: string[] = [];
-  let match;
-  while ((match = pattern.exec(plain)) !== null) {
-    const name = match[1];
-    if (roomMembers.includes(name)) out.push(name);
-  }
-  return [...new Set(out)];
+  return rosterMentions(content, roomMembers.filter(name => name !== "all"), "!");
 }
 
 export function parseUrgentMentionMemberIds(content: string, roomMembers: RoomMemberRecord[]): string[] {
@@ -74,6 +66,7 @@ export interface MentionActivationCtx {
    * Undefined/empty = FYI. User sender still always debts (activateAgent).
    */
   needResponse?: string[];
+  needResponseMemberIds?: string[];
   /** Message sender name ("user" for user posts). */
   senderName: string;
 }
@@ -94,6 +87,7 @@ export function initRouter(
     const ctx: MentionActivationCtx = {
       ...(needList && needList.length ? { needResponse: needList } : {}),
       ...(explicitFyi ? { needResponse: [] as string[] } : {}),
+      ...(Array.isArray(message.needResponseMemberIds) ? { needResponseMemberIds: message.needResponseMemberIds } : {}),
       senderName: message.sender,
     };
 

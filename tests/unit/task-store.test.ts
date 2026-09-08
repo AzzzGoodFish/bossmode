@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -187,32 +187,52 @@ describe("task-store", () => {
     expect(getTask("r16", task.id)!.comments).toHaveLength(1);
   });
 
-  it("stores member identity for assignees and subscribers and updates display names on rename", async () => {
-    const { createTask, getTask, renameParticipant } = await import("../../src/workspace/task-store.js");
-    ensureRoom("r17-member-ids");
-    const task = createTask("r17-member-ids", {
-      title: "Member ids",
-      createdBy: "pm",
-      assignee: "dev-a",
-      assigneeMemberId: "rm_dev_a",
-      subscribers: ["qa-a"],
-      subscriberMemberIds: ["rm_qa_a"],
+  it("projects stored room-member IDs on read without rewriting task history", async () => {
+    const { createTask, getTask, listTasks, listTaskSummaries, listAllTasks, addTaskComment } = await import("../../src/workspace/task-store.js");
+    const roomId = "r17-member-ids";
+    ensureRoom(roomId);
+    const roomPath = join(tmpDir, "rooms", roomId, "room.json");
+    const room = JSON.parse(readFileSync(roomPath, "utf-8"));
+    room.roomMembers = [
+      { id: "rm_pm", name: "pm" },
+      { id: "rm_dev_a", name: "dev-a" },
+      { id: "rm_qa_a", name: "qa-a" },
+    ];
+    writeFileSync(roomPath, JSON.stringify(room));
+    const task = createTask(roomId, {
+      title: "Member ids", createdBy: "pm", assignee: "dev-a", assigneeMemberId: "rm_dev_a",
+      subscribers: ["qa-a"], subscriberMemberIds: ["rm_qa_a"],
     });
-    expect(task.assigneeMemberId).toBe("rm_dev_a");
-    expect(task.subscriberMemberIds).toEqual(["rm_qa_a"]);
+    expect(task.subscriberMemberIds).toEqual(["rm_pm", "rm_qa_a"]);
+    addTaskComment(roomId, task.id, { author: "dev-a", content: "Old name is history" });
+    const taskPath = join(tmpDir, "rooms", roomId, "tasks.json");
+    const before = readFileSync(taskPath, "utf-8");
+    room.roomMembers[0].name = "lead";
+    room.roomMembers[1].name = "dev-ui";
+    room.roomMembers[2].name = "qa-browser";
+    writeFileSync(roomPath, JSON.stringify(room));
+    for (const projected of [getTask(roomId, task.id)!, listTasks(roomId)[0], listTaskSummaries(roomId)[0], listAllTasks().find((t) => t.id === task.id)!]) {
+      expect(projected.assignee).toBe("dev-ui");
+      expect(projected.subscribers).toEqual(["lead", "qa-browser"]);
+      expect(projected.createdBy).toBe("pm");
+    }
+    expect(getTask(roomId, task.id)!.comments![0].author).toBe("dev-a");
+    expect(readFileSync(taskPath, "utf-8")).toBe(before);
+  });
 
-    expect(renameParticipant("r17-member-ids", { memberId: "rm_dev_a", oldName: "dev-a", newName: "dev-ui" })).toBe(1);
-    expect(getTask("r17-member-ids", task.id)!.assignee).toBe("dev-ui");
-    expect(renameParticipant("r17-member-ids", { memberId: "rm_qa_a", oldName: "qa-a", newName: "qa-browser" })).toBe(1);
-    expect(getTask("r17-member-ids", task.id)!.subscribers).toEqual(["pm", "qa-browser"]);
+  it("does not fabricate creator IDs from a legacy name-only roster", async () => {
+    const { createTask } = await import("../../src/workspace/task-store.js");
+    ensureRoom("legacy-creator");
+    expect(createTask("legacy-creator", { title: "Legacy", createdBy: "pm" }).subscriberMemberIds).toEqual([]);
   });
 
   it("normalizes old task json without comments and subscribers", async () => {
     const { getTask, listTaskSummaries } = await import("../../src/workspace/task-store.js");
     ensureRoom("r17");
     const dir = join(tmpDir, "rooms", "r17");
-    writeFileSync(join(dir, "tasks.json"), JSON.stringify([{ id: "task-old", roomId: "r17", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 1, updatedAt: 1 }]), "utf-8");
+    writeFileSync(join(dir, "tasks.json"), JSON.stringify([{ id: "task-old", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 1, updatedAt: 1 }]), "utf-8");
     const task = getTask("r17", "task-old")!;
+    expect(task.roomId).toBe("r17");
     expect(task.comments).toEqual([]);
     expect(task.subscribers).toEqual([]);
     expect(listTaskSummaries("r17")[0].commentCount).toBe(0);

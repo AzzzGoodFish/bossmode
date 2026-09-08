@@ -1,3 +1,4 @@
+import { useMemberProfileRevision, currentMemberName } from "../hooks/useMemberProfileRevision";
 /**
  * Topic workspace (topic-threads v3, fish 2026-08-19 feedback on rc.5):
  *
@@ -46,7 +47,7 @@ function useTopicStream(roomId: string, topicId: string | null) {
   const [roomStatusByName, setRoomStatusByName] = useState<AgentStatusMap>({});
   const [contextUsage, setContextUsage] = useState<Record<string, ContextUsageData>>({});
   const scopeId = topicId ? `topic:${topicId}` : null;
-  const roomScope = `room:${roomId}`;
+  const roomScope = roomId;
 
   useEffect(() => {
     if (!topicId) return;
@@ -75,14 +76,14 @@ function useTopicStream(roomId: string, topicId: string | null) {
       if (event.type === "agent:status") {
         const status = event.status as AgentStatusMap[string];
         if (scopeId && event.roomId === scopeId) {
-          setTopicStatusByName((prev) => ({ ...prev, [event.agent]: status }));
+          setTopicStatusByName((prev) => ({ ...prev, [event.memberId ?? event.agent]: status }));
         }
         if (event.roomId === roomScope) {
-          setRoomStatusByName((prev) => ({ ...prev, [event.agent]: status }));
+          setRoomStatusByName((prev) => ({ ...prev, [event.memberId ?? event.agent]: status }));
         }
       }
       if (event.type === "agent:context_usage" && (event.roomId === roomScope || (scopeId && event.roomId === scopeId))) {
-        const name = (event as any).agent as string;
+        const name = currentMemberName(event.memberId, event.agent);
         const usage = (event as any).usage as ContextUsageData | undefined;
         if (name && usage) setContextUsage((prev) => ({ ...prev, [name]: usage }));
       }
@@ -161,6 +162,7 @@ export function TopicPage({
   const [ending, setEnding] = useState(false);
   const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("room");
+  const profileRevision = useMemberProfileRevision();
   const [memberInfos, setMemberInfos] = useState<MemberInfo[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const closed = topic?.status === "closed";
@@ -175,7 +177,7 @@ export function TopicPage({
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [roomId]);
+  }, [roomId, profileRevision]);
 
   const members = useMemo(() => memberInfos.map((m) => m.name), [memberInfos]);
 
@@ -211,7 +213,11 @@ export function TopicPage({
   }, [topicId, messages.length]);
 
   // Topic-scoped status wins (in-topic work), room scope fills the rest.
-  const agentStatus = useMemo(() => ({ ...roomStatusByName, ...topicStatusByName }), [roomStatusByName, topicStatusByName]);
+  const agentStatus = useMemo(() => Object.fromEntries(memberInfos.map((member) => [
+    member.name,
+    topicStatusByName[member.id] ?? topicStatusByName[member.name]
+      ?? roomStatusByName[member.id] ?? roomStatusByName[member.name] ?? "inactive",
+  ])), [memberInfos, roomStatusByName, topicStatusByName]);
 
   const anchorSeq = isDraft ? draft?.anchorSeq : topic?.anchorSeq;
   const anchorExcerpt = isDraft ? draft?.excerpt : topic?.anchorExcerpt;

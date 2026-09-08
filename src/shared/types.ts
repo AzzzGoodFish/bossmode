@@ -483,6 +483,8 @@ export interface RoomMessage {
    * Omitted/empty = FYI (no reply debt). User posts omit this; user @ always debts.
    */
   needResponse?: string[];
+  /** Stable reply-obligation targets, captured when the message is sent. */
+  needResponseMemberIds?: string[];
   /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */
   autoDelivered?: boolean;
   /**
@@ -650,6 +652,7 @@ export interface KnowledgeEventMeta {
 // -- WebSocket Events (server → client) --
 
 export type WsServerEvent =
+  | { type: "member:profile"; memberId: string; name: string; title: string | null }
   | { type: "room:message"; roomId: string; message: RoomMessage }
   | { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }
   | { type: "agent:event"; roomId: string; agent: string; memberId?: string; event: unknown }

@@ -17,6 +17,7 @@ const modelRegistryRefresh = vi.fn();
 const modelRegistryGetApiKeyAndHeaders = vi.fn(async () => ({ ok: true, apiKey: "sk-test" }));
 const createAgentSession = vi.fn();
 const resourceLoaderCtor = vi.fn();
+const toolsFactory = vi.fn();
 const sessionManagerCreate = vi.fn();
 const sessionManagerOpen = vi.fn();
 const settingsManagerCreate = vi.fn();
@@ -61,11 +62,11 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
 
 // Live customTools factory — sole source for "bossmode" classification (no static name whitelist).
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
-  createBossmodeSdkTools: () => [
+  createBossmodeSdkTools: (opts: any) => { toolsFactory(opts); return [
     { name: "query_room_messages" },
     { name: "wait" },
     { name: "create_task" },
-  ],
+  ]; },
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
@@ -407,6 +408,67 @@ describe("PiSdkRuntime", () => {
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
     expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
     expect(process.env.BOSSMODE_MCP_CONFIG_STRICT).toBe("1");
+  });
+
+  it("refreshes prompt sources with the supported API without reloading resources or resetting the session", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const opts = baseOpts({ member: { ...baseOpts().member, id: "mem-stable", name: "old-name" } });
+    const handle = await new PiSdkRuntime().createAgent(opts);
+    const session = (handle as any).session;
+    const loader = createAgentSession.mock.calls[0][0].resourceLoader;
+    const reload = vi.spyOn(loader, "reload");
+    activeToolNames = ["read", "query_room_messages", "web_search"];
+    const appends = ["new environment", "  "];
+    handle.refreshPrompt!({ agentPrompt: "  new identity  ", appendSystemPrompt: appends });
+    appends[0] = "caller mutation";
+
+    expect(loader.getSystemPrompt()).toBe("new identity");
+    expect(loader.getAppendSystemPrompt()).toEqual(["new environment"]);
+    expect(handle.runtimeParams!.systemPrompt).toBe("new identity\n\nnew environment");
+    expect(session.setActiveToolsByName).toHaveBeenLastCalledWith(["read", "query_room_messages", "web_search"]);
+    expect(reload).not.toHaveBeenCalled();
+    expect(session.reload).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(session.dispose).not.toHaveBeenCalled();
+    expect(sessionResetLeaf).not.toHaveBeenCalled();
+    expect(sessionBranch).not.toHaveBeenCalled();
+    expect(createAgentSession).toHaveBeenCalledTimes(1);
+    expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ memberId: "mem-stable" }));
+
+    // A subsequent explicit resource reload must replace the prompt override too.
+    await handle.reloadResources!({ roomId: opts.roomId, member: { ...opts.member, name: "new-name" }, agentPrompt: "reloaded identity", appendSystemPrompt: [], skillPaths: [] });
+    expect(loader.getSystemPrompt()).toBe("reloaded identity");
+    expect(loader.getAppendSystemPrompt()).toEqual([]);
+    expect(toolsFactory).toHaveBeenLastCalledWith(expect.objectContaining({ memberId: "mem-stable" }));
+  });
+
+  it.each(["isStreaming", "isCompacting"])("rejects prompt refresh while SDK %s without changing prompt sources", async (flag) => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const session = (handle as any).session;
+    const loader = createAgentSession.mock.calls[0][0].resourceLoader;
+    session[flag] = true;
+    expect(() => handle.refreshPrompt!({ agentPrompt: "unsafe", appendSystemPrompt: [] })).toThrow("idle pre-prompt boundary");
+    expect(loader.getSystemPrompt()).toBe("agent prompt");
+    expect(session.setActiveToolsByName).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
+  it("rejects prompt refresh during a handle run and permits it after settlement", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const session = (handle as any).session;
+    let finish!: () => void;
+    session.prompt.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const run = handle.prompt("current run");
+    expect(() => handle.refreshPrompt!({ agentPrompt: "unsafe", appendSystemPrompt: [] })).toThrow("idle pre-prompt boundary");
+    finish();
+    await run;
+    expect(() => handle.refreshPrompt!({ agentPrompt: "safe", appendSystemPrompt: [] })).not.toThrow();
+    expect(handle.runtimeParams!.systemPrompt).toBe("safe");
   });
 
   it("activates newly assigned MCP on reload without replacing the session", async () => {

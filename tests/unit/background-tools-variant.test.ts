@@ -15,13 +15,20 @@ vi.mock("../../src/engine/tools.js", () => ({
   }),
 }));
 
+import { handleToolCallback } from "../../src/engine/tools.js";
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 
-const COMMON = { roomId: "room:bgroom", agentName: "bgagent", roomMembers: ["bgagent", "other"] };
+const COMMON = { roomId: "room:bgroom", memberId: "mem-bgagent", agentName: "bgagent", roomMembers: ["bgagent", "other"] };
 
 describe("createBossmodeSdkTools execution=background", () => {
   const live = createBossmodeSdkTools(COMMON);
   const background = createBossmodeSdkTools({ ...COMMON, execution: "background" });
+
+  it("permits self profile updates in background with trusted member context", async () => {
+    const tool = background.find((t) => t.name === "update_profile")!;
+    await (tool.execute as any)("id", { title: "New title" });
+    expect(handleToolCallback).toHaveBeenLastCalledWith("update_profile", COMMON.roomId, COMMON.memberId, { title: "New title" }, { memberId: COMMON.memberId, execution: "background" });
+  });
 
   it("keeps tool declarations identical between live and background variants", () => {
     const shape = (tools: ReturnType<typeof createBossmodeSdkTools>) =>

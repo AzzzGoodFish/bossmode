@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import type { ContactEntry } from "../api/client";
@@ -20,6 +21,7 @@ interface AddMemberDialogProps {
  * Contacts first (New member), then invite here.
  */
 export function AddMemberDialog({ currentMemberIds, onAdd, onClose }: AddMemberDialogProps) {
+  const profileRevision = useMemberProfileRevision();
   const [contacts, setContacts] = useState<ContactEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -32,7 +34,7 @@ export function AddMemberDialog({ currentMemberIds, onAdd, onClose }: AddMemberD
         console.error("Failed to load contacts", err);
         setLoadError(userActionError("load contacts"));
       });
-  }, []);
+  }, [profileRevision]);
 
   const candidates = useMemo(() => {
     const inRoom = new Set(currentMemberIds);

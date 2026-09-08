@@ -2,7 +2,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { roomDir, listRooms } from "./room-store.js";
+import { roomDir, listRooms, getRoom, getRoomMembersFromRoom, resolveRoomMemberRef } from "./room-store.js";
+import { getMember } from "./member-registry.js";
 import { syncRoomTasks } from "./db/tasks-index.js";
 import type { Task, TaskStatus, TaskPriority, TaskComment, TaskListItem } from "../shared/types.js";
 
@@ -54,7 +55,7 @@ function readTasks(roomId: string): Task[] {
   try {
     const raw = readFileSync(p, "utf-8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(normalizeTask) : [];
+    return Array.isArray(parsed) ? parsed.map((task) => normalizeTask({ ...task, roomId })) : [];
   } catch {
     return [];
   }
@@ -70,21 +71,57 @@ function writeTasks(roomId: string, tasks: Task[]): void {
   syncRoomTasks(roomId, normalized);
 }
 
+/** Current participant labels are a read projection; stored names remain snapshots. */
+export function presentTaskParticipants(task: Task): Task {
+  const normalized = normalizeTask(task);
+  if (!normalized.assigneeMemberId && !normalized.subscriberMemberIds?.length) return normalized;
+  const room = getRoom(task.roomId);
+  // Do not treat synthesized IDs from legacy members: string[] as stable identity.
+  const members = room && (Array.isArray(room.globalMemberIds) || Array.isArray(room.roomMembers))
+    ? getRoomMembersFromRoom(room) : [];
+  const currentName = (id: string): string =>
+    (id.startsWith("mem_") ? getMember(id)?.name : undefined)
+    ?? members.find((member) => member.id === id)?.name
+    ?? id;
+  return {
+    ...normalized,
+    assignee: normalized.assigneeMemberId ? currentName(normalized.assigneeMemberId) : normalized.assignee,
+    // The two historical arrays are not positional pairs. Once IDs exist they
+    // are authority; merging old labels would reintroduce renamed identities.
+    // "user" is the non-member creator, not a member name snapshot.
+    subscribers: normalized.subscriberMemberIds?.length
+      ? uniqueStrings([
+        ...(normalized.subscribers?.includes("user") ? ["user"] : []),
+        ...normalized.subscriberMemberIds.map(currentName),
+      ])
+      : normalized.subscribers,
+  };
+}
+
+/** ID-backed tasks never match an old name snapshot, including after name reuse. */
+export function taskMatchesAssignee(roomId: string, task: Pick<Task, "assignee" | "assigneeMemberId">, ref: string): boolean {
+  const value = ref.trim();
+  const member = resolveRoomMemberRef(roomId, value);
+  if (!task.assigneeMemberId) return !member?.id.startsWith("mem_") && task.assignee === value;
+  return task.assigneeMemberId === (member?.id ?? value);
+}
+
 export function toTaskListItem(task: Task): TaskListItem {
-  const { comments: _comments, ...rest } = normalizeTask(task);
+  const { comments: _comments, ...rest } = presentTaskParticipants(task);
   return { ...rest, commentCount: _comments?.length ?? 0 };
 }
 
 export function listTasks(roomId: string): Task[] {
-  return readTasks(roomId);
+  return readTasks(roomId).map(presentTaskParticipants);
 }
 
 export function listTaskSummaries(roomId: string): TaskListItem[] {
-  return listTasks(roomId).map(toTaskListItem);
+  return readTasks(roomId).map(toTaskListItem);
 }
 
 export function getTask(roomId: string, taskId: string): Task | null {
-  return readTasks(roomId).find((t) => t.id === taskId) ?? null;
+  const task = readTasks(roomId).find((t) => t.id === taskId);
+  return task ? presentTaskParticipants(task) : null;
 }
 
 export function createTask(
@@ -92,6 +129,10 @@ export function createTask(
   input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; assigneeMemberId?: string; description?: string; references?: string[]; subscribers?: string[]; subscriberMemberIds?: string[] },
 ): Task {
   const now = Date.now();
+  const room = getRoom(roomId);
+  const creator = room && (Array.isArray(room.globalMemberIds) || Array.isArray(room.roomMembers))
+    ? getRoomMembersFromRoom(room).find((member) => member.name === input.createdBy)
+    : undefined;
   const task: Task = {
     id: `task-${randomUUID().slice(0, 8)}`,
     roomId,
@@ -103,7 +144,7 @@ export function createTask(
     description: input.description,
     references: input.references,
     subscribers: uniqueStrings([input.createdBy, ...(input.subscribers ?? [])]),
-    subscriberMemberIds: uniqueStrings(input.subscriberMemberIds),
+    subscriberMemberIds: uniqueStrings([creator?.id, ...(input.subscriberMemberIds ?? [])]),
     comments: [],
     createdBy: input.createdBy,
     createdAt: now,
@@ -112,13 +153,13 @@ export function createTask(
   const tasks = readTasks(roomId);
   tasks.push(task);
   writeTasks(roomId, tasks);
-  return task;
+  return presentTaskParticipants(task);
 }
 
 export function updateTask(
   roomId: string,
   taskId: string,
-  patch: Partial<Pick<Task, "title" | "status" | "priority" | "assignee" | "assigneeMemberId" | "description" | "references" | "subscribers" | "subscriberMemberIds">>,
+  patch: Partial<Pick<Task, "title" | "status" | "priority" | "description" | "references" | "subscribers" | "subscriberMemberIds">> & { assignee?: string | null; assigneeMemberId?: string | null },
 ): Task | null {
   const tasks = readTasks(roomId);
   const idx = tasks.findIndex((t) => t.id === taskId);
@@ -128,10 +169,15 @@ export function updateTask(
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) cleanPatch[k] = k === "subscribers" || k === "subscriberMemberIds" ? uniqueStrings(v as unknown[]) : v;
   }
+  // Explicit clearing removes both identity fields; omitted/undefined fields leave them alone.
+  if (patch.assignee === null || patch.assigneeMemberId === null) {
+    cleanPatch.assignee = undefined;
+    cleanPatch.assigneeMemberId = undefined;
+  }
   const updated: Task = normalizeTask({ ...tasks[idx], ...cleanPatch, updatedAt: Date.now() });
   tasks[idx] = updated;
   writeTasks(roomId, tasks);
-  return updated;
+  return presentTaskParticipants(updated);
 }
 
 
@@ -162,7 +208,7 @@ export function addTaskComment(
   };
   tasks[idx] = updated;
   writeTasks(roomId, tasks);
-  return { task: updated, comment };
+  return { task: presentTaskParticipants(updated), comment };
 }
 
 export function deleteTask(roomId: string, taskId: string): boolean {
@@ -173,33 +219,6 @@ export function deleteTask(roomId: string, taskId: string): boolean {
   return true;
 }
 
-export function renameParticipant(roomId: string, input: { memberId: string; oldName: string; newName: string }): number {
-  const tasks = readTasks(roomId);
-  let changed = 0;
-  const next = tasks.map((raw) => {
-    const task = normalizeTask(raw);
-    let didChange = false;
-    const assigneeMatches = task.assigneeMemberId === input.memberId || (!task.assigneeMemberId && task.assignee === input.oldName);
-    let updated: Task = task;
-    if (assigneeMatches && task.assignee !== input.newName) {
-      updated = { ...updated, assignee: input.newName };
-      didChange = true;
-    }
-    const subscribers = task.subscribers || [];
-    if (subscribers.includes(input.oldName)) {
-      updated = { ...updated, subscribers: subscribers.map((name) => name === input.oldName ? input.newName : name) };
-      didChange = true;
-    }
-    if (didChange) {
-      changed += 1;
-      updated = { ...updated, updatedAt: Date.now() };
-    }
-    return updated;
-  });
-  if (changed > 0) writeTasks(roomId, next);
-  return changed;
-}
-
 export interface TaskWithRoomName extends TaskListItem {
   roomName: string;
 }
@@ -208,7 +227,7 @@ export function listAllTasks(opts: { status?: TaskStatus; query?: string } = {})
   const rooms = listRooms();
   const result: TaskWithRoomName[] = [];
   for (const room of rooms) {
-    const tasks = listTasks(room.id);
+    const tasks = readTasks(room.id);
     for (const t of tasks) {
       if (opts.status && t.status !== opts.status) continue;
       if (opts.query && !t.title.toLowerCase().includes(opts.query.toLowerCase())) continue;

@@ -140,7 +140,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
 
     // SDK tool surface exposes chat (first tool) with need_response param.
-    const chatTool = createBossmodeSdkTools({ roomId: room.id, agentName: "pm", roomMembers: ["pm"] })[0];
+    const chatTool = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: room.id })[0];
     expect(chatTool.name).toBe("chat");
     expect(JSON.stringify(chatTool.parameters)).toContain("need_response");
     // artifacts param removed from chat tool.

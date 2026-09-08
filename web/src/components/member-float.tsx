@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 /**
  * member-float.tsx — the member detail FLOAT (fish 2026-09-02: "give details a float window, not a full page" + "drop the old full-page config page"). The depth ladder is
  * now fully Discord-shaped:
@@ -107,6 +108,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
     getAvailableModels().then(setModels).catch(() => {});
   }, [memberId]);
 
+  const profileRevision = useMemberProfileRevision(memberId);
   const saveVersion = saveVersions[memberId];
   useEffect(() => {
     let active = true;
@@ -115,7 +117,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
       .catch((e) => { if (active) setLoadError(String(e?.message || e)); });
     // A read started before a save must not replace the saved record later.
     return () => { active = false; };
-  }, [saveVersion, memberId]);
+  }, [saveVersion, memberId, profileRevision]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -144,7 +146,9 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
     }
   };
 
-  const liveStatus = scope && member ? liveStatuses?.get(`${scope.scopeId}:${member.name}`) : undefined;
+  const liveStatus = scope && member
+    ? liveStatuses?.get(`${scope.scopeId}:${member.memberId}`) ?? liveStatuses?.get(`${scope.scopeId}:${member.name}`)
+    : undefined;
   const effectiveStatus = liveStatus ?? scope?.status;
   const hasActivityTab = !!scope;
 
@@ -200,6 +204,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
                 <ActivityTab
                   roomId={scope.kind === "dm" ? scope.scopeId : scope.scopeId.replace(/^room:/, "")}
                   agentName={member.name}
+                  memberId={member.memberId}
                   dmScope={scope.kind === "dm" ? { scopeId: scope.scopeId, memberId: member.memberId } : undefined}
                 />
               </div>

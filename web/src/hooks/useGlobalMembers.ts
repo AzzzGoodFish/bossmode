@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "./useMemberProfileRevision";
 /**
  * useGlobalMembers — contacts as a memberId → ContactEntry map (0.20).
  *
@@ -8,6 +9,7 @@ import { useEffect, useState } from "react";
 import { getContacts, type ContactEntry } from "../api/client";
 
 export function useGlobalMembers(): Map<string, ContactEntry> {
+  const profileRevision = useMemberProfileRevision();
   const [map, setMap] = useState<Map<string, ContactEntry>>(new Map());
   useEffect(() => {
     let cancelled = false;
@@ -18,6 +20,6 @@ export function useGlobalMembers(): Map<string, ContactEntry> {
     load();
     const t = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(t); };
-  }, []);
+  }, [profileRevision]);
   return map;
 }

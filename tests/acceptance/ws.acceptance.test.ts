@@ -29,6 +29,15 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     if (ts) await closeTestServer(ts);
   });
 
+  async function createAgentScope(name: string) {
+    const registry = await import("../../src/workspace/member-registry.js");
+    const rooms = await import("../../src/workspace/room-store.js");
+    const member = registry.createMember({ name, agentTemplate: "pm" });
+    const room = rooms.createRoom(name, undefined, []);
+    rooms.stampGlobalMemberIds(room.id, [member.id], member.id);
+    return { member, room };
+  }
+
   it("connects with valid token", async () => {
     const client = await createWsClient(ts.wsUrl, token);
     expect(client.ws.readyState).toBe(WebSocket.OPEN);
@@ -66,8 +75,9 @@ describe("Acceptance: WebSocket Infrastructure", () => {
   });
 
   it("subscribes to agent private channel", async () => {
+    const { member, room } = await createAgentScope("ws-private-member");
     const client = await createWsClient(ts.wsUrl, token);
-    client.send({ type: "subscribe:agent", roomId: "test-room-1", agent: "pm" });
+    client.send({ type: "subscribe:agent", roomId: room.id, agent: member.name, memberId: member.id });
 
     await new Promise((r) => setTimeout(r, 50));
     expect(client.ws.readyState).toBe(WebSocket.OPEN);
@@ -128,18 +138,20 @@ describe("Acceptance: WebSocket Infrastructure", () => {
   });
 
   it("agent:event reaches agent subscriber only", async () => {
+    const { member, room } = await createAgentScope("ws-event-member");
     const agentClient = await createWsClient(ts.wsUrl, token);
     const roomOnlyClient = await createWsClient(ts.wsUrl, token);
 
-    agentClient.send({ type: "subscribe:agent", roomId: "agent-test", agent: "pm" });
-    roomOnlyClient.send({ type: "subscribe:room", roomId: "agent-test" });
+    agentClient.send({ type: "subscribe:agent", roomId: room.id, agent: member.name, memberId: member.id });
+    roomOnlyClient.send({ type: "subscribe:room", roomId: room.id });
     await new Promise((r) => setTimeout(r, 50));
 
     const { broadcastToAgentSubscribers } = await import("../../src/communication/ws.js");
-    broadcastToAgentSubscribers("agent-test", "pm", {
+    broadcastToAgentSubscribers(room.id, member.name, {
       type: "agent:event",
-      roomId: "agent-test",
-      agent: "pm",
+      roomId: room.id,
+      agent: member.name,
+      memberId: member.id,
       event: { text: "thinking..." },
     });
 
@@ -148,7 +160,10 @@ describe("Acceptance: WebSocket Infrastructure", () => {
       (e) => e.type === "agent:event",
       2000,
     );
-    expect(received.type).toBe("agent:event");
+    expect(received).toMatchObject({
+      type: "agent:event", roomId: room.id, agent: member.name, memberId: member.id,
+      event: { text: "thinking..." },
+    });
 
     // Room-only subscriber should NOT receive agent:event
     await new Promise((r) => setTimeout(r, 200));

@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 /**
  * ChatsPage — unified conversation list (0.20 landing view).
  *
@@ -14,6 +15,7 @@ export function ChatsPage({ onOpenDm, onOpenRoom }: {
   onOpenDm: (memberId: string) => void;
   onOpenRoom: (roomId: string) => void;
 }) {
+  const profileRevision = useMemberProfileRevision();
   const [chats, setChats] = useState<ChatEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +29,7 @@ export function ChatsPage({ onOpenDm, onOpenRoom }: {
     load();
     const t = window.setInterval(load, 10_000);
     return () => { cancelled = true; window.clearInterval(t); };
-  }, []);
+  }, [profileRevision]);
 
   const sorted = useMemo(() => {
     return [...(chats ?? [])].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));

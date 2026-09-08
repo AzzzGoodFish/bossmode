@@ -20,6 +20,7 @@
 // flips status to idle — waiter must learn it was an error exit with no output, not a
 // normal completion. Transient provider retries keep status working and do not wake wait.
 
+import { getMember } from "../workspace/member-registry.js";
 import { onMessage } from "../communication/message-bus.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -154,6 +155,8 @@ export function waitForMember(args: {
     targetStatus,
   } = args;
 
+  const currentTargetName = () => targetMemberId.startsWith("mem_") ? getMember(targetMemberId)?.name || targetName : targetName;
+
   if (waiterMemberId === targetMemberId) {
     return Promise.resolve({ ok: false, error: "Cannot wait on yourself" });
   }
@@ -168,8 +171,8 @@ export function waitForMember(args: {
     return Promise.resolve({
       ok: true,
       reason: "idle",
-      target: targetName,
-      detail: `${targetName} is already idle — speak to them directly.`,
+      target: currentTargetName(),
+      detail: `${currentTargetName()} is already idle — speak to them directly.`,
     });
   }
 
@@ -199,16 +202,16 @@ export function waitForMember(args: {
       // Waiter was @-mentioned (by anyone including user).
       // Do NOT abort — the @ message interrupts the working member itself;
       // settle wait one tick later so the tool result lands before the new turn.
-      const mentioned =
-        (message.mentionMemberIds && message.mentionMemberIds.includes(waiterMemberId)) ||
-        (Array.isArray(message.mentions) && message.mentions.includes(waiterName));
+      const mentioned = Array.isArray(message.mentionMemberIds)
+        ? message.mentionMemberIds.includes(waiterMemberId)
+        : !waiterMemberId.startsWith("mem_") && Array.isArray(message.mentions) && message.mentions.includes(waiterName);
       if (mentioned && message.senderMemberId !== waiterMemberId) {
         const sender = message.sender || "someone";
         setTimeout(() => {
           finish({
             ok: true,
             reason: "mention_interrupt",
-            target: targetName,
+            target: currentTargetName(),
             detail: `Wait interrupted — you were mentioned by ${sender}. The mention was delivered via the normal activation path; continue from that message.`,
           });
         }, 0);
@@ -221,9 +224,9 @@ export function waitForMember(args: {
       finish({
         ok: true,
         reason: "message",
-        target: targetName,
+        target: currentTargetName(),
         message: message.content,
-        detail: `${targetName} posted a message.`,
+        detail: `${currentTargetName()} posted a message.`,
       });
     });
 
@@ -234,16 +237,16 @@ export function waitForMember(args: {
         finish({
           ok: true,
           reason: "error",
-          target: targetName,
-          detail: `${targetName}'s last turn ended with an error (${errText}). No output produced — verify status before continuing.`,
+          target: currentTargetName(),
+          detail: `${currentTargetName()}'s last turn ended with an error (${errText}). No output produced — verify status before continuing.`,
         });
         return;
       }
       finish({
         ok: true,
         reason: "idle",
-        target: targetName,
-        detail: `${targetName} became idle.`,
+        target: currentTargetName(),
+        detail: `${currentTargetName()} became idle.`,
       });
     };
     (wait as any)._idleCb = onIdle;
@@ -260,8 +263,8 @@ export function waitForMember(args: {
       finish({
         ok: true,
         reason: "timeout",
-        target: targetName,
-        detail: `Timed out after ${timeoutMin} minute${timeoutMin === 1 ? "" : "s"} waiting on ${targetName}. No event occurred.`,
+        target: currentTargetName(),
+        detail: `Timed out after ${timeoutMin} minute${timeoutMin === 1 ? "" : "s"} waiting on ${currentTargetName()}. No event occurred.`,
       });
     }, timeoutMin * 60_000);
     if (typeof wait.timer === "object" && wait.timer && "unref" in wait.timer) {
@@ -272,7 +275,7 @@ export function waitForMember(args: {
     logger.info("wait", "started", {
       roomId,
       waiter: waiterName,
-      target: targetName,
+      target: currentTargetName(),
       timeoutMin,
       targetStatus,
     });

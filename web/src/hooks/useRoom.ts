@@ -1,3 +1,4 @@
+import { useMemberProfileRevision, currentMemberName, getMemberProfileRevision } from "./useMemberProfileRevision";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Room, RoomMessage, ContextUsageData } from "../api/client";
 import {
@@ -70,21 +71,44 @@ export function useRoom(roomId: string | null) {
 
     setLoading(true);
 
+    const revisionAtLoad = getMemberProfileRevision();
+    let active = true;
     Promise.all([getRoom(roomId), getMessages(roomId, { limit: PAGE_SIZE })])
       .then(([r, msgs]) => {
-        setRoom(r);
+        if (!active) return;
+        if (revisionAtLoad === getMemberProfileRevision()) {
+          setRoom(r);
+          const status: AgentStatusMap = {};
+          for (const m of r.members) status[m] = (r.agentStatuses?.[m] as AgentStatusMap[string]) || "inactive";
+          setAgentStatus(status);
+        }
         setMessages(msgs);
         setHasMore(msgs.length >= PAGE_SIZE);
-        const status: AgentStatusMap = {};
-        for (const m of r.members) status[m] = (r.agentStatuses?.[m] as AgentStatusMap[string]) || "inactive";
-        setAgentStatus(status);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (active) setLoading(false); });
 
     // Report read position — clears the user-cursor unread badge (contract v1.3).
     postConversationRead(`room:${roomId}`).catch(() => {});
+    return () => { active = false; };
   }, [roomId]);
+
+  const profileRevision = useMemberProfileRevision();
+  useEffect(() => {
+    if (!roomId || !profileRevision) return;
+    let active = true;
+    // Identity refresh must not reload the message window or leave history view.
+    getRoom(roomId).then((r) => {
+      if (!active) return;
+      setRoom(r);
+      const status: AgentStatusMap = {};
+      for (const name of r.members) status[name] = (r.agentStatuses?.[name] as AgentStatusMap[string]) || "inactive";
+      setAgentStatus(status);
+      setContextUsage({});
+      unsupportedAgents.current.clear();
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [roomId, profileRevision]);
 
   // Follow the read cursor while viewing: realtime appends (not history browsing)
   // re-report (debounced) so the chats-list unread badge stays in sync —
@@ -184,7 +208,7 @@ export function useRoom(roomId: string | null) {
         const newStatus = event.status as "inactive" | "idle" | "working";
         setAgentStatus((prev) => ({
           ...prev,
-          [event.agent]: newStatus,
+          [currentMemberName(event.memberId, event.agent)]: newStatus,
         }));
       }
 
@@ -192,7 +216,7 @@ export function useRoom(roomId: string | null) {
         if (!event.usage) return;
         setContextUsage((prev) => ({
           ...prev,
-          [event.agent]: { supported: true, ...event.usage },
+          [currentMemberName(event.memberId, event.agent)]: { supported: true, ...event.usage },
         }));
       }
     },

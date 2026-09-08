@@ -96,7 +96,7 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
   const urgentMentions = parseUrgentMentions(message, names);
   const mentions = [...new Set([...atNames, ...urgentMentions])];
   const toIds = (list: string[]) => list.map((name) => byName.get(name)).filter((id): id is string => Boolean(id));
-  return { mentions, mentionMemberIds: toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
+  return { mentions, mentionMemberIds: mentions.includes("all") ? roomMembers.map(member => member.id) : toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
 }
 
 // -- Final-text fallback delivery (chat need_response debt turn) --
@@ -112,7 +112,7 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
 export function deliverMemberMessage(roomId: string, memberName: string, text: string, opts?: { autoDelivered?: boolean }): void {
   // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
   if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-    postMessage(roomId, memberName, text, [], opts?.autoDelivered ? { autoDelivered: true } : undefined);
+    postMessage(roomId, memberName, text, [], { senderMemberId: roomId.slice(3), ...(opts?.autoDelivered ? { autoDelivered: true } : {}) });
     logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, autoDelivered: opts?.autoDelivered === true });
     return;
   }
@@ -142,20 +142,23 @@ function resolveTaskAssignee(roomId: string, value: unknown): { name: string; me
 function resolveTaskSubscribers(roomId: string, values: unknown): { names: string[]; memberIds: string[] } | undefined {
   if (!Array.isArray(values)) return undefined;
   const members: Array<{ id: string; name: string }> = [];
+  let includesUser = false;
   for (const value of values) {
     const raw = String(value ?? "").trim();
     if (!raw) continue;
+    if (raw === "user") {
+      includesUser = true;
+      continue;
+    }
     const member = roomStore.resolveRoomMemberRef(roomId, raw);
     if (!member) throw new Error(`Subscriber is not a room member: ${raw}`);
     if (!members.some((entry) => entry.id === member.id)) members.push(member);
   }
-  return { names: members.map((member) => member.name), memberIds: members.map((member) => member.id) };
+  return { names: [...(includesUser ? ["user"] : []), ...members.map((member) => member.name)], memberIds: members.map((member) => member.id) };
 }
 
 function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): boolean {
-  const member = roomStore.resolveRoomMemberRef(roomId, assigneeRef);
-  if (member) return task.assigneeMemberId === member.id || (!task.assigneeMemberId && task.assignee === member.name);
-  return task.assignee === assigneeRef;
+  return taskStore.taskMatchesAssignee(roomId, task, assigneeRef);
 }
 
 function messageMeta(meta: {
@@ -168,6 +171,7 @@ function messageMeta(meta: {
   urgentMentionMemberIds?: string[];
   mentions?: string[];
   needResponse?: string[];
+  needResponseMemberIds?: string[];
   autoDelivered?: boolean;
   replyTo?: { seq: number; messageId: string };
 }) {
@@ -179,6 +183,7 @@ function messageMeta(meta: {
     urgentMentions?: string[];
     urgentMentionMemberIds?: string[];
     needResponse?: string[];
+  needResponseMemberIds?: string[];
     autoDelivered?: boolean;
     replyTo?: { seq: number; messageId: string };
   } = {};
@@ -189,6 +194,7 @@ function messageMeta(meta: {
   if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
   if (meta.urgentMentionMemberIds?.length) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
   if (meta.needResponse?.length) out.needResponse = meta.needResponse;
+  if (meta.needResponseMemberIds?.length) out.needResponseMemberIds = meta.needResponseMemberIds;
   if (meta.autoDelivered) out.autoDelivered = true;
   if (meta.replyTo) out.replyTo = meta.replyTo;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -310,6 +316,8 @@ function resolveCallerMemberId(roomId: string, agentName: string): string {
 }
 
 export interface ToolExecutionContext {
+  /** Trusted runtime-owned caller identity, never taken from tool arguments. */
+  memberId?: string;
   /** "background" = background task child session: same tool implementations,
    *  but side effects that belong to the LIVE member conversation are
    *  suppressed — history queries must not advance the member's unread
@@ -324,9 +332,35 @@ export async function handleToolCallback(
   params: Record<string, any>,
   context?: ToolExecutionContext,
 ): Promise<unknown> {
-  logger.info("callback", "tool-callback", { tool, room: roomId, agent: agentName });
+  const actorRef = context?.memberId || agentName;
+  const boundActor = () => {
+    if (!context?.memberId) return null;
+    // Historical room-template IDs keep their existing room-local tools. They
+    // never fall back from a missing global ID or acquire a DB profile by name.
+    const actor = context.memberId.startsWith("mem_") ? getMember(context.memberId) : resolveMemoryActor(roomId, context.memberId);
+    return actor?.id === context.memberId ? actor : null;
+  };
+  if (context?.memberId) {
+    if (!boundActor()) return { ok: false, error: "Member not found", code: "not_found" };
+    if (context.memberId.startsWith("mem_")) {
+      try { assertMemberScopeAccess(context.memberId, toolScopeId(roomId)); }
+      catch (error) { return { ok: false, error: (error as Error).message, code: "scope_access_denied" }; }
+    }
+  }
+  const actorName = () => context?.memberId ? boundActor()?.name || (() => { throw new Error("Calling member no longer exists"); })() : agentName;
+  logger.info("callback", "tool-callback", { tool, room: roomId, agent: actorName() });
 
   switch (tool) {
+    case "update_profile": {
+      if (!context?.memberId?.startsWith("mem_")) return { ok: false, error: "A trusted database member ID is required to update a profile", code: "invalid_caller" };
+      const { updateProfileForMember } = await import("./member-profile-update.js");
+      try { return { ok: true, ...updateProfileForMember(context.memberId, params) }; }
+      catch (error) {
+        const e = error as Error & { code?: string };
+        const known = ["invalid_profile", "name_taken", "not_found"].includes(e.code || "");
+        return { ok: false, code: known ? e.code : "persistence_failed", error: known ? e.message : "Profile could not be saved. No identity change was committed." };
+      }
+    }
     case "chat": {
       // 2026-09-04 pm order / designer incident: a model deep in a full context
       // sent chat with an empty string twice and the tool happily posted both.
@@ -336,6 +370,20 @@ export async function handleToolCallback(
       if (!message.trim() && !hasAttachments) {
         return { ok: false, error: "message must be a non-empty string — re-send your chat message with the text included" };
       }
+
+      // Resolve target IDs before attachment IO; names may be reused while it awaits.
+      const rosterId = resolveChatScopeRoomId(roomId) || roomId;
+      const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
+      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
+      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, actorRef) : undefined;
+      const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
+      const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
+
+      const parsedNeed = roomId.startsWith("dm:") ? { ok: true as const, names: [] as string[] } : parseNeedResponseParam(params?.need_response, roomMembers, mentions, mentionMemberIds);
+      if (!parsedNeed.ok) return { ok: false, error: parsedNeed.error };
+      const needResponse = parsedNeed.names;
+      const needResponseMemberIds = roomMembers.filter((m: { id: string; name: string }) => needResponse.includes(m.name)).map((m: { id: string }) => m.id);
+
 
       const attachments: RoomMessageAttachment[] = [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
@@ -376,27 +424,17 @@ export async function handleToolCallback(
           attachments,
           replyTo,
         });
-        postMessage(roomId, agentName, message, [], dmMeta || {});
+        postMessage(roomId, actorName(), message, [], { ...dmMeta, senderMemberId: actorRef });
         const hasNeed = Array.isArray(params?.need_response) && params.need_response.length > 0;
         return { ok: true, ...(hasNeed ? { note: "no @target — need_response ignored" } : {}) };
       }
 
-      const rosterId = resolveChatScopeRoomId(roomId) || roomId;
-      const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
-      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, agentName) : undefined;
-      const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
-      const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
-
-      const parsedNeed = parseNeedResponseParam(params?.need_response, roomMembers, mentions, mentionMemberIds);
-      if (!parsedNeed.ok) return { ok: false, error: parsedNeed.error };
-      const needResponse = parsedNeed.names;
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: agentName, mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse, replyTo });
-      if (meta) postMessage(roomId, agentName, message, mentions, meta);
-      else postMessage(roomId, agentName, message, mentions);
+      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: actorName(), mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse, needResponseMemberIds, replyTo });
+      if (meta) postMessage(roomId, actorName(), message, mentions, meta);
+      else postMessage(roomId, actorName(), message, mentions);
 
       if (Array.isArray(params?.need_response) && params.need_response.length > 0 && needResponse.length === 0) {
         return {
@@ -409,7 +447,7 @@ export async function handleToolCallback(
       return { ok: true };
     }
     case "query_room_messages": {
-      const qActor = resolveMemoryActor(roomId, agentName);
+      const qActor = resolveMemoryActor(roomId, actorRef);
       if (!qActor) return { ok: false, error: "Current member is not in this room" };
       const target = resolveReadTarget(roomId, qActor, params?.scope);
       if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>' or 'dm:<memberId>')" };
@@ -519,7 +557,7 @@ export async function handleToolCallback(
       const parentRoomId = resolveChatScopeRoomId(roomId) || roomId;
       const room = roomStore.getRoom(parentRoomId);
       if (!room) return { ok: false, error: "Room not found" };
-      const actor = resolveMemoryActor(roomId, agentName);
+      const actor = resolveMemoryActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const brief = String(params?.brief ?? "").trim();
       const seedMode = getTopicSeedMode();
@@ -589,7 +627,7 @@ export async function handleToolCallback(
         if (autoTopicRef && !references.includes(autoTopicRef)) references = [...references, autoTopicRef];
         const task = taskStore.createTask(taskRoomId, {
           title,
-          createdBy: agentName,
+          createdBy: actorName(),
           status: (params?.status as TaskStatus) || "todo",
           priority: (params?.priority as TaskPriority) || "P1",
           assignee: assignee?.name,
@@ -599,7 +637,7 @@ export async function handleToolCallback(
           subscribers: subscribers?.names,
           subscriberMemberIds: subscribers?.memberIds,
         });
-        emitTaskEvent(taskRoomId, "created", task, agentName);
+        emitTaskEvent(taskRoomId, "created", task, actorName());
         return { ok: true, taskId: task.id, title: task.title, status: task.status };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };
@@ -618,8 +656,8 @@ export async function handleToolCallback(
         if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
         if (params?.assignee !== undefined) {
           const assignee = resolveTaskAssignee(taskRoomId, params.assignee);
-          patch.assignee = assignee?.name;
-          patch.assigneeMemberId = assignee?.memberId;
+          patch.assignee = assignee?.name ?? null;
+          patch.assigneeMemberId = assignee?.memberId ?? null;
         }
         if (params?.description !== undefined) patch.description = String(params.description);
         if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
@@ -631,20 +669,20 @@ export async function handleToolCallback(
         const updated = taskStore.updateTask(taskRoomId, taskId, patch);
         if (!updated) return { ok: false, error: "Update failed" };
         const action = before.status !== updated.status ? "status_changed" : "updated";
-        emitTaskEvent(taskRoomId, action, updated, agentName);
+        emitTaskEvent(taskRoomId, action, updated, actorName());
         return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
       } catch (err: any) {
         return { ok: false, error: err.message || String(err) };
       }
     }
     case "list_scopes": {
-      const actor = resolveMemoryActor(roomId, agentName);
+      const actor = resolveMemoryActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const rooms = listRoomsForMember(actor.id).map((r) => ({ scope: `room:${r.id}`, name: r.name }));
       return { ok: true, scopes: [...rooms, { scope: `dm:${actor.id}`, name: "Direct message with user" }] };
     }
     case "list_tasks": {
-      const tActor = resolveMemoryActor(roomId, agentName);
+      const tActor = resolveMemoryActor(roomId, actorRef);
       if (!tActor) return { ok: false, error: "Current member is not in this room" };
       const tTarget = resolveReadTarget(roomId, tActor, params?.scope);
       if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
@@ -663,7 +701,7 @@ export async function handleToolCallback(
       }));
     }
     case "get_task": {
-      const gActor = resolveMemoryActor(roomId, agentName);
+      const gActor = resolveMemoryActor(roomId, actorRef);
       if (!gActor) return { ok: false, error: "Current member is not in this room" };
       const gTarget = resolveReadTarget(roomId, gActor, params?.scope);
       if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
@@ -682,9 +720,9 @@ export async function handleToolCallback(
       if (!taskId) return { ok: false, error: "taskId is required" };
       if (!comment.trim()) return { ok: false, error: "comment is required" };
       const commentRoomId = resolveChatScopeRoomId(roomId) || roomId;
-      const result = taskStore.addTaskComment(commentRoomId, taskId, { author: agentName, content: comment });
+      const result = taskStore.addTaskComment(commentRoomId, taskId, { author: actorName(), content: comment });
       if (!result) return { ok: false, error: `Task not found: ${taskId}` };
-      emitTaskEvent(commentRoomId, "commented", result.task, agentName, { commentId: result.comment.id });
+      emitTaskEvent(commentRoomId, "commented", result.task, actorName(), { commentId: result.comment.id });
       return { ok: true, taskId: result.task.id, commentId: result.comment.id };
     }
     case "member_status": {
@@ -702,7 +740,7 @@ export async function handleToolCallback(
     case "workspace_create":
     case "workspace_use":
     case "workspace_remove": {
-      const wsMemberId = resolveCallerMemberId(roomId, agentName);
+      const wsMemberId = resolveCallerMemberId(roomId, actorRef);
       const reg = await import("../workspace/workspace-registry.js");
       if (tool === "workspace_list") {
         const list = reg.listWorkspaces(wsMemberId);
@@ -736,7 +774,7 @@ export async function handleToolCallback(
     case "write":
     case "edit": {
       // Batch 7 P1: workspace-aware file tools (shadow pi built-ins by name).
-      const fileMemberId = resolveCallerMemberId(roomId, agentName);
+      const fileMemberId = resolveCallerMemberId(roomId, actorRef);
       const fileTools = await import("./tools/file-tools.js");
       if (tool === "read") return fileTools.workspaceReadTool(fileMemberId, params || {});
       if (tool === "write") return fileTools.workspaceWriteTool(fileMemberId, params || {});
@@ -750,7 +788,7 @@ export async function handleToolCallback(
     case "shell_close": {
       // Batch 7 P2: persistent shells — member-owned, cross-scope.
       const shell = await import("./shell-manager.js");
-      const shellMemberId = resolveCallerMemberId(roomId, agentName);
+      const shellMemberId = resolveCallerMemberId(roomId, actorRef);
       if (tool === "shell_create") {
         const result = await shell.createShell({
           memberId: shellMemberId,
@@ -800,7 +838,7 @@ export async function handleToolCallback(
       // Batch 6 §3: rebuild own session in the current scope, history kept.
       // roomId arrives scope-shaped ("dm:<id>" / "topic:<id>" / room id).
       const { reloadMemberSession } = await import("./agent-manager.js");
-      const reloadMemberId = resolveCallerMemberId(roomId, agentName);
+      const reloadMemberId = resolveCallerMemberId(roomId, actorRef);
       const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
       return {
         ok: true,
@@ -816,7 +854,7 @@ export async function handleToolCallback(
       // Roster from parent room; wait watches the current scope (topic instance if any).
       const waitRosterId = resolveChatScopeRoomId(roomId) || roomId;
       const room = roomStore.getRoom(waitRosterId);
-      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(waitRosterId, agentName) : undefined;
+      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(waitRosterId, actorRef) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
 
       const targetRef = String(params?.member || "").trim();
@@ -870,13 +908,12 @@ export async function handleToolCallback(
     case "create_room": {
       // DM tool: creator becomes leader; invite by global member id.
       const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
-      const creator = findMemberByName(agentName) || listMembers().find((m) => m.name === agentName);
-      if (!creator) return { ok: false, error: `Creator member not found: ${agentName}` };
+      const creator = getMember(actorRef);
+      if (!creator) return { ok: false, error: `Creator member not found: ${actorName()}` };
 
       const name = String(params?.name || "").trim();
       if (!name) return { ok: false, error: "name is required" };
       const cwd = String(params?.cwd || "").trim() || undefined; // Batch 7 P3: rooms no longer bind a cwd
-      const { existsSync } = await import("node:fs");
       if (cwd && !existsSync(cwd)) return { ok: false, error: `Directory does not exist: ${cwd}` };
 
       const inviteIds: string[] = Array.isArray(params?.memberIds)
@@ -890,21 +927,16 @@ export async function handleToolCallback(
         return m;
       });
 
-      const drafts = invitees.map((m) => ({
-        agent: m.agentTemplate || "general",
-        name: m.name,
-      }));
-
       let room;
       try {
-        room = roomStore.createRoom(name, cwd, drafts, undefined, {
-          promptLeaderMemberName: creator.name,
-        });
+        // DB members already have validated identities. Do not materialize
+        // room-local drafts with the retired ASCII-only name validation.
+        room = roomStore.createRoom(name, cwd, []);
       } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };
       }
 
-      // Cutover: stamp globalMemberIds + migrate leader to mem_* + drop roomMembers.
+      // Bind room membership and leadership directly to the existing DB IDs.
       roomStore.stampGlobalMemberIds(
         room.id,
         invitees.map((m) => m.id),
@@ -947,8 +979,8 @@ export async function handleToolCallback(
     }
     case "edit_room": {
       const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
-      const actorGlobal = findMemberByName(agentName) || listMembers().find((m) => m.name === agentName);
-      if (!actorGlobal) return { ok: false, error: `Member not found: ${agentName}` };
+      const actorGlobal = getMember(actorRef);
+      if (!actorGlobal) return { ok: false, error: `Member not found: ${actorName()}` };
 
       const rawTarget = String(params?.roomId || roomId || "").trim();
       const targetRoomId = resolveChatScopeRoomId(rawTarget) || rawTarget;
@@ -956,7 +988,7 @@ export async function handleToolCallback(
       const room = roomStore.getRoom(targetRoomId);
       if (!room) return { ok: false, error: "Room not found" };
 
-      const actorLocal = roomStore.resolveRoomMemberRef(targetRoomId, agentName);
+      const actorLocal = roomStore.resolveRoomMemberRef(targetRoomId, actorRef);
       if (!actorLocal) {
         return { ok: false, error: "not_room_member", message: "You must be a member of this room to edit it" };
       }
@@ -1015,7 +1047,7 @@ export async function handleToolCallback(
     case "background_start":
     case "recall":
     case "memorize": {
-      const actor = resolveBackgroundActor(roomId, agentName);
+      const actor = resolveBackgroundActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Member or scope not found" };
       const { startBackgroundTask } = await import("./background-task-runner.js");
       const kind = tool === "background_start" ? "generic" : tool === "recall" ? "recall" : "memorize";
@@ -1030,7 +1062,7 @@ export async function handleToolCallback(
       return { ok: true, taskId: result.taskId, status: result.status, note: "result is collected with background_wait" };
     }
     case "background_status": {
-      const actor = resolveBackgroundActor(roomId, agentName);
+      const actor = resolveBackgroundActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Member or scope not found" };
       const { listBackgroundTasks } = await import("./background-task-store.js");
       const tasks = listBackgroundTasks(actor.memberId)
@@ -1039,7 +1071,7 @@ export async function handleToolCallback(
       return { ok: true, tasks };
     }
     case "background_wait": {
-      const actor = resolveBackgroundActor(roomId, agentName);
+      const actor = resolveBackgroundActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Member or scope not found" };
       const { getBackgroundTask, whenTerminal, isTerminalBackgroundTaskStatus, registerBackgroundWaitSettle } = await import("./background-task-store.js");
       const taskId = String(params?.taskId ?? "").trim();
@@ -1079,7 +1111,7 @@ export async function handleToolCallback(
       }
     }
     case "background_cancel": {
-      const actor = resolveBackgroundActor(roomId, agentName);
+      const actor = resolveBackgroundActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Member or scope not found" };
       const { getBackgroundTask } = await import("./background-task-store.js");
       const taskId = String(params?.taskId ?? "").trim();

@@ -249,24 +249,16 @@ describe("room-store", () => {
       expect(roomStore.getRoomMembersFromRoom(room)[0].config).toEqual({ model: "room-model" });
     });
 
-    it("renames a room-local member without changing member id", () => {
-      const room = roomStore.createRoom("test", "/tmp", drafts(["qa", "developer"]));
-      const before = roomStore.findRoomMemberByName(room.id, "qa")!;
-      const result = roomStore.renameRoomMember(room.id, before.id, "qa-browser");
-      expect(result.ok).toBe(true);
-      const after = roomStore.findRoomMemberByName(room.id, "qa-browser")!;
-      expect(after.id).toBe(before.id);
-      expect(roomStore.getRoom(room.id)!.members).toEqual(["qa-browser", "developer"]);
-      expect(roomStore.findRoomMemberByName(room.id, "qa")).toBeNull();
+    it("derives renamed global members from the DB without changing room member IDs", async () => {
+      const registry = await import("../src/workspace/member-registry.js");
+      const member = registry.createMember({ name: "qa-before" });
+      const room = roomStore.createRoom("test", "/tmp", []);
+      roomStore.stampGlobalMemberIds(room.id, [member.id]);
+      registry.renameMember(member.id, "qa-after");
+      expect(roomStore.getRoomMembers(room.id)).toMatchObject([{ id: member.id, name: "qa-after" }]);
+      expect(roomStore.findRoomMemberByName(room.id, "qa-before")).toBeNull();
     });
 
-    it("rejects duplicate member name inside one room", () => {
-      const room = roomStore.createRoom("test", "/tmp", drafts(["qa", "developer"]));
-      const dev = roomStore.findRoomMemberByName(room.id, "developer")!;
-      const result = roomStore.renameRoomMember(room.id, dev.id, "qa");
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("duplicate");
-    });
   });
 
   describe("addRoomMemberFromAgent", () => {

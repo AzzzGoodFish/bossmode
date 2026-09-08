@@ -392,36 +392,48 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
     });
 
     it("tasks bind to room member id and display name follows rename", async () => {
-      const room = await createRoom("t26-task-member-id", ["pm"]);
-      await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
-        token,
-        body: { agent: "developer", name: "dev-a" },
-      });
-      const roomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
-      const member = JSON.parse(roomRes.body).roomMembers.find((entry: any) => entry.name === "dev-a");
+      const registry = await import("../../src/workspace/member-registry.js");
+      const rooms = await import("../../src/workspace/room-store.js");
+      const creator = registry.createMember({ name: "task-id-creator", agentTemplate: "pm" });
+      const member = registry.createMember({ name: "task-id-developer", agentTemplate: "developer" });
+      const room = rooms.createRoom("t26-task-member-id", undefined, []);
+      rooms.stampGlobalMemberIds(room.id, [creator.id, member.id], creator.id);
 
       const createTaskRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/tasks`, {
         token,
-        body: { title: "Implement UI", createdBy: "pm", assignee: "dev-a", subscribers: ["dev-a"] },
+        body: { title: "Implement UI", createdBy: creator.name, assignee: member.name, subscribers: [member.name] },
       });
       expect(createTaskRes.status).toBe(200);
       const createdTask = JSON.parse(createTaskRes.body);
-      expect(createdTask.assignee).toBe("dev-a");
+      expect(createdTask.assignee).toBe(member.name);
       expect(createdTask.assigneeMemberId).toBe(member.id);
-      expect(createdTask.subscriberMemberIds).toEqual([member.id]);
-
-      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/rooms/${room.id}/members/dev-a`, {
+      expect(createdTask.subscriberMemberIds).toEqual([creator.id, member.id]);
+      const commentRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/tasks/${createdTask.id}/comments`, {
         token,
-        body: { name: "dev-ui" },
+        body: { author: member.name, comment: "Started implementation" },
+      });
+      expect(commentRes.status).toBe(200);
+      const historicalTask = JSON.parse(commentRes.body);
+
+      const renameRes = await jsonRequest(ts.port, "PATCH", `/api/members/${member.id}`, {
+        token,
+        body: { name: "task-id-ui" },
       });
       expect(renameRes.status).toBe(200);
+      expect(JSON.parse(renameRes.body).member).toMatchObject({ memberId: member.id, name: "task-id-ui" });
 
       const taskRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/tasks/${createdTask.id}`, { token });
       expect(taskRes.status).toBe(200);
       const renamedTask = JSON.parse(taskRes.body);
-      expect(renamedTask.assignee).toBe("dev-ui");
+      expect(renamedTask.id).toBe(createdTask.id);
+      expect(renamedTask.assignee).toBe("task-id-ui");
       expect(renamedTask.assigneeMemberId).toBe(member.id);
-      expect(renamedTask.subscribers).toEqual(["pm", "dev-ui"]);
+      expect(renamedTask.subscribers).toEqual([creator.name, "task-id-ui"]);
+      expect(renamedTask.subscriberMemberIds).toEqual([creator.id, member.id]);
+      expect(renamedTask.createdBy).toBe(creator.name);
+      expect(renamedTask.comments).toEqual(historicalTask.comments);
+      expect(renamedTask.comments[0]).toMatchObject({ author: member.name, content: "Started implementation" });
+      expect(renamedTask.updatedAt).toBe(historicalTask.updatedAt);
     });
 
     it("new member cursor set to latest message ID", async () => {

@@ -1,3 +1,4 @@
+import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ArrowLeft, Trash2, ChevronDown, User, Circle, CircleDot, CheckCircle2, AlertCircle, AlertOctagon, Minus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority, TaskComment } from "../api/client";
@@ -45,13 +46,42 @@ function Avatar({ name, size = 18 }: { name: string; size?: number }) {
   );
 }
 
+interface ParticipantOption { id: string; name: string }
+
+// Never infer historical task identity from a current name: it may have been reused.
+// ID metadata is authoritative. An ID-shaped display name is still only a label.
+export function taskParticipantSelection(task: Pick<Task, "assignee" | "assigneeMemberId" | "subscribers" | "subscriberMemberIds">) {
+  const assignee = task.assigneeMemberId || "";
+  const rawSubscribers = task.subscribers ?? [];
+  return {
+    assignee,
+    subscribers: [...new Set([
+      ...(task.subscriberMemberIds ?? []),
+      ...rawSubscribers.filter((ref) => ref === "user"),
+    ])],
+    legacyAssignee: assignee ? "" : task.assignee || "",
+    legacySubscribers: task.subscriberMemberIds?.length ? [] : [...new Set(rawSubscribers.filter((ref) => ref !== "user"))],
+  };
+}
+
+export function taskParticipantPatch(assignee: string, subscribers: string[], assigneeDirty: boolean, subscribersDirty: boolean) {
+  return {
+    ...(assigneeDirty ? { assignee: assignee || null } : {}),
+    ...(subscribersDirty ? { subscribers } : {}),
+  };
+}
+
+function participantLabel(id: string, members: ParticipantOption[]): string {
+  return members.find((member) => member.id === id)?.name ?? id;
+}
+
 export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: TaskDetailPageProps) {
   const { toast, confirm } = useDialog();
   const isCreate = !taskId;
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(!isCreate);
   const [roomName, setRoomName] = useState("");
-  const [roomMembers, setRoomMembers] = useState<string[]>([]);
+  const [roomMembers, setRoomMembers] = useState<ParticipantOption[]>([]);
 
   // Form state — single editable mode (always-editable detail form)
   const [title, setTitle] = useState("");
@@ -62,27 +92,41 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
   const [priority, setPriority] = useState<TaskPriority>("P1");
   const [assignee, setAssignee] = useState<string>("");
   const [subscribers, setSubscribers] = useState<string[]>([]);
+  const [assigneeDirty, setAssigneeDirty] = useState(false);
+  const [subscribersDirty, setSubscribersDirty] = useState(false);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [commenting, setCommenting] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Auto-grow textarea
-
+  const profileRevision = useMemberProfileRevision();
+  const historicalParticipants = useMemo(() => taskParticipantSelection(task ?? {}), [task]);
+  const assigneeLabel = assignee ? participantLabel(assignee, roomMembers)
+    : !assigneeDirty ? historicalParticipants.legacyAssignee : "";
+  const subscriberOptions = useMemo(() => [
+    { id: "user", name: "user" },
+    ...roomMembers,
+    ...subscribers.filter((id) => id !== "user" && !roomMembers.some((member) => member.id === id))
+      .map((id) => ({ id, name: id })),
+  ], [roomMembers, subscribers]);
 
   // Load room (for name + members) and task
   useEffect(() => {
+    let active = true;
     // 0.20: member names from globalMemberIds + contacts (roomMembers removal — G3 debt ②)
     Promise.all([getRoom(roomId), getContacts()])
       .then(([r, c]) => {
+        if (!active) return;
         setRoomName(r.name);
         const byId = new Map(c.contacts.map((m) => [m.memberId, m.name]));
-        const names = (r.globalMemberIds?.length ? r.globalMemberIds.map((id) => byId.get(id) ?? id) : r.members);
-        setRoomMembers(names);
+        // Only the authoritative room IDs become selectable values. A profile
+        // refresh changes labels, never the selections (including while pending).
+        setRoomMembers((r.globalMemberIds ?? []).map((id) => ({ id, name: byId.get(id) ?? id })));
       })
       .catch(() => {});
-  }, [roomId]);
+    return () => { active = false; };
+  }, [roomId, profileRevision]);
 
   useEffect(() => {
     if (isCreate) { setLoading(false); return; }
@@ -95,8 +139,12 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
         setReferences(found.references || []);
         setStatus(found.status);
         setPriority(found.priority);
-        setAssignee(found.assignee || "");
-        setSubscribers(found.subscribers || []);
+        const participants = taskParticipantSelection(found);
+        setAssignee(participants.assignee);
+        setSubscribers(participants.subscribers);
+        setAssigneeDirty(false);
+        setSubscribersDirty(false);
+        setDirty(false);
         setComments(found.comments || []);
       })
       .catch((err) => { console.error("Failed to load task", err); toast(userActionError("load this task"), "error"); })
@@ -121,15 +169,19 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
       } else {
         await updateTask(roomId, taskId, {
           title: title.trim(), status, priority,
-          assignee: assignee || undefined, description: description || undefined,
+          description: description || undefined,
           references,
-          subscribers,
+          ...taskParticipantPatch(assignee, subscribers, assigneeDirty, subscribersDirty),
           updatedBy: "user",
         });
         const latest = await getTask(roomId, taskId);
         setTask(latest);
         setComments(latest.comments || []);
-        setSubscribers(latest.subscribers || []);
+        const participants = taskParticipantSelection(latest);
+        setAssignee(participants.assignee);
+        setSubscribers(participants.subscribers);
+        setAssigneeDirty(false);
+        setSubscribersDirty(false);
         setDirty(false);
         toast("Task saved", "success");
       }
@@ -221,10 +273,10 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
                 <span className={`w-1.5 h-1.5 rounded-full ${priorityMeta.dot}`} />
                 {priorityMeta.label}
               </span>
-              {assignee && (
+              {assigneeLabel && (
                 <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] text-ink-2 bg-surface-2">
-                  <Avatar name={assignee} size={14} />
-                  {assignee}
+                  <Avatar name={assigneeLabel} size={14} />
+                  {assigneeLabel}
                 </span>
               )}
             </div>
@@ -400,17 +452,22 @@ export function TaskDetailPage({ roomId, taskId, onBack, onOpenMobileSidebar }: 
               <MetaRow label="Assignee">
                 <AssigneePicker
                   value={assignee}
+                  label={assigneeLabel}
                   members={roomMembers}
-                  onChange={(v) => { setAssignee(v); markDirty(); }}
+                  onChange={(v) => { setAssignee(v); setAssigneeDirty(true); markDirty(); }}
                 />
               </MetaRow>
 
               <MetaRow label="Subscribers">
                 <SubscribersPicker
                   value={subscribers}
-                  members={roomMembers}
-                  onChange={(v) => { setSubscribers(v); markDirty(); }}
+                  historicalNames={subscribersDirty ? [] : historicalParticipants.legacySubscribers}
+                  members={subscriberOptions}
+                  onChange={(v) => { setSubscribers(v); setSubscribersDirty(true); markDirty(); }}
                 />
+                {historicalParticipants.legacySubscribers.length > 0 && (
+                  <p className="px-2 mt-1 text-xs text-ink-4">Changing subscribers replaces historical names with your selected members.</p>
+                )}
               </MetaRow>
 
               {!isCreate && task && (
@@ -497,8 +554,8 @@ function ChipPicker<T extends string>({
 }
 
 function AssigneePicker({
-  value, members, onChange,
-}: { value: string; members: string[]; onChange: (v: string) => void }) {
+  value, label, members, onChange,
+}: { value: string; label: string; members: ParticipantOption[]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -514,10 +571,10 @@ function AssigneePicker({
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-surface-2 cursor-pointer text-ink-2 ${open ? "bg-surface-2" : ""}`}
       >
-        {value ? (
+        {label ? (
           <>
-            <Avatar name={value} size={18} />
-            <span className="flex-1 text-left">{value}</span>
+            <Avatar name={label} size={18} />
+            <span className="flex-1 text-left">{label}</span>
           </>
         ) : (
           <>
@@ -534,7 +591,7 @@ function AssigneePicker({
           <button
             type="button"
             onClick={() => { onChange(""); setOpen(false); }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-3 hover:bg-surface-2 cursor-pointer ${!value ? "bg-surface-2/60" : ""}`}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-3 hover:bg-surface-2 cursor-pointer ${!label ? "bg-surface-2/60" : ""}`}
           >
             <div className="w-[18px] h-[18px] rounded-full border border-dashed border-line" />
             <span className="flex-1 text-left">Unassigned</span>
@@ -544,14 +601,14 @@ function AssigneePicker({
           )}
           {members.map((m) => (
             <button
-              key={m}
+              key={m.id}
               type="button"
-              onClick={() => { onChange(m); setOpen(false); }}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-2 hover:bg-surface-2 cursor-pointer ${value === m ? "bg-surface-2/60" : ""}`}
+              onClick={() => { onChange(m.id); setOpen(false); }}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-2 hover:bg-surface-2 cursor-pointer ${value === m.id ? "bg-surface-2/60" : ""}`}
             >
-              <Avatar name={m} size={18} />
-              <span className="flex-1 text-left">{m}</span>
-              {value === m && <span className="text-[10px] text-ink-4">✓</span>}
+              <Avatar name={m.name} size={18} />
+              <span className="flex-1 text-left">{m.name}</span>
+              {value === m.id && <span className="text-[10px] text-ink-4">✓</span>}
             </button>
           ))}
         </div>
@@ -561,11 +618,12 @@ function AssigneePicker({
 }
 
 function SubscribersPicker({
-  value, members, onChange,
-}: { value: string[]; members: string[]; onChange: (v: string[]) => void }) {
+  value, historicalNames, members, onChange,
+}: { value: string[]; historicalNames: string[]; members: ParticipantOption[]; onChange: (v: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const selected = new Set(value);
+  const labels = [...value.map((id) => participantLabel(id, members)), ...historicalNames];
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
@@ -583,7 +641,7 @@ function SubscribersPicker({
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-surface-2 cursor-pointer text-ink-2 ${open ? "bg-surface-2" : ""}`}
       >
-        <span className="flex-1 text-left truncate">{value.length > 0 ? value.join(", ") : "No subscribers"}</span>
+        <span className="flex-1 text-left truncate">{labels.length > 0 ? labels.join(", ") : "No subscribers"}</span>
         <ChevronDown size={12} className="text-ink-4" />
       </button>
       {open && (
@@ -591,14 +649,14 @@ function SubscribersPicker({
           {members.length === 0 && <div className="px-2 py-2 text-xs text-ink-4 italic">No members in this room</div>}
           {members.map((m) => (
             <button
-              key={m}
+              key={m.id}
               type="button"
-              onClick={() => toggle(m)}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-2 hover:bg-surface-2 cursor-pointer ${selected.has(m) ? "bg-surface-2/60" : ""}`}
+              onClick={() => toggle(m.id)}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-ink-2 hover:bg-surface-2 cursor-pointer ${selected.has(m.id) ? "bg-surface-2/60" : ""}`}
             >
-              <Avatar name={m} size={18} />
-              <span className="flex-1 text-left">{m}</span>
-              {selected.has(m) && <span className="text-[10px] text-ink-4">✓</span>}
+              <Avatar name={m.name} size={18} />
+              <span className="flex-1 text-left">{m.name}</span>
+              {selected.has(m.id) && <span className="text-[10px] text-ink-4">✓</span>}
             </button>
           ))}
         </div>

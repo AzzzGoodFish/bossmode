@@ -17,9 +17,10 @@ type FilterMode = "all" | "tools" | "replies";
  * - Only the event stream scrolls. Infinite scroll-up + scroll anchoring apply to
  *   that stream container alone.
  */
-export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
+export function ActivityTab({ roomId, agentName, memberId, dmScope, activityScope }: {
   roomId: string;
   agentName: string;
+  memberId?: string;
   /** 0.20 flagship ②: when set, activity reads/watches the dm scope — events
    * come from the members-shaped route and the WS subscription targets the
    * synthetic dm:<memberId> room the DM instance emits on. */
@@ -43,20 +44,23 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
   // scrollTop assignment; real wheel gestures were fine, but a ref is cheap insurance).
   const loadingOlderRef = useRef(false);
 
+  const scoped = activityScope || dmScope;
+  const historyScopeId = scoped?.scopeId;
+  const historyMemberRef = scoped?.memberId || memberId || agentName;
+
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const scoped = activityScope || dmScope;
-      const result = scoped
-        ? await getMemberScopedActivityEvents(scoped.memberId, scoped.scopeId, PAGE_SIZE)
-        : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE);
+      const result = historyScopeId
+        ? await getMemberScopedActivityEvents(historyMemberRef, historyScopeId, PAGE_SIZE)
+        : await getMemberActivityEvents(roomId, historyMemberRef, PAGE_SIZE);
       setEvents(result.events as AgentEvent[]);
       setHasMore(result.hasMore);
       setBeforeSeq(result.nextBeforeSeq ?? undefined);
     } finally {
       setLoading(false);
     }
-  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId, activityScope?.memberId]);
+  }, [roomId, historyScopeId, historyMemberRef]);
 
   useEffect(() => { scrolledToLatestRef.current = false; void loadInitial(); }, [loadInitial]);
 
@@ -74,17 +78,18 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
     const watchRoomId = activityScope?.scopeId || (dmScope ? `dm:${dmScope.memberId}` : roomId);
-    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: agentName }));
+    const watchMemberId = activityScope?.memberId || dmScope?.memberId || memberId;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: historyMemberRef, memberId: watchMemberId }));
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === "agent:event" && data.roomId === watchRoomId && data.agent === agentName) {
+        if (data.type === "agent:event" && data.roomId === watchRoomId && (watchMemberId && data.memberId ? data.memberId === watchMemberId : data.agent === historyMemberRef)) {
           setEvents((prev) => [...prev, data.event as AgentEvent]);
         }
       } catch {}
     };
     return () => ws.close();
-  }, [roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId]);
+  }, [roomId, historyScopeId, historyMemberRef]);
 
   const loadOlder = useCallback(async () => {
     if (!hasMore || beforeSeq === undefined || loadingOlderRef.current) return;
@@ -94,10 +99,9 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
     const prevScrollHeight = el?.scrollHeight ?? 0;
     const prevScrollTop = el?.scrollTop ?? 0;
     try {
-      const scoped = activityScope || dmScope;
-      const result = scoped
-        ? await getMemberScopedActivityEvents(scoped.memberId, scoped.scopeId, PAGE_SIZE, beforeSeq)
-        : await getMemberActivityEvents(roomId, agentName, PAGE_SIZE, beforeSeq);
+      const result = historyScopeId
+        ? await getMemberScopedActivityEvents(historyMemberRef, historyScopeId, PAGE_SIZE, beforeSeq)
+        : await getMemberActivityEvents(roomId, historyMemberRef, PAGE_SIZE, beforeSeq);
       setEvents((prev) => [...result.events as AgentEvent[], ...prev]);
       setHasMore(result.hasMore);
       setBeforeSeq(result.nextBeforeSeq ?? undefined);
@@ -111,7 +115,7 @@ export function ActivityTab({ roomId, agentName, dmScope, activityScope }: {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore, beforeSeq, roomId, agentName, dmScope?.scopeId, dmScope?.memberId, activityScope?.scopeId, activityScope?.memberId]);
+  }, [hasMore, beforeSeq, roomId, historyScopeId, historyMemberRef]);
 
   // Infinite scroll: scrolling near the top of the event-stream container
   // auto-loads earlier activity (same pattern as chat apps like Slack/Telegram).

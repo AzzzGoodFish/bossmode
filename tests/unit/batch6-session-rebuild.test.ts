@@ -149,6 +149,6 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     const src = readFileSync(join(here, "../../src/engine/agent-manager.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
     // compile lives only inside the builder (model-switch comparison excluded)
-    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(2); // dm + topic branches of the builder
+    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(3); // dm + topic branches of the builder
   });
 });

@@ -21,7 +21,7 @@ import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/w
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { listRoomsForMember } from "../workspace/scope-access.js";
-import { getMember, getEffectiveConfig, applyMemberConfigPatch } from "../workspace/member-registry.js";
+import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
 import { deliverMemberMessage, loadScopeMessages } from "./tools.js";
@@ -94,12 +94,17 @@ function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string
 
 /** Last visible message that mentions this member (the @/! that fired the
  * activation); -1 when nothing mentions (steer/system activations). */
-function lastMentionTriggerIndex(messages: RoomMessage[], memberName: string): number {
+function isOwnMessage(message: RoomMessage, memberId: string, memberName: string): boolean {
+  return message.senderMemberId !== undefined ? message.senderMemberId === memberId
+    : !memberId.startsWith("mem_") && message.sender === memberName;
+}
+
+function lastMentionTriggerIndex(messages: RoomMessage[], memberName: string, memberId: string): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    const mentions = (m as { mentions?: string[] }).mentions ?? [];
-    const urgent = (m as { urgentMentions?: string[] }).urgentMentions ?? [];
-    if (mentions.includes(memberName) || urgent.includes(memberName)) return i;
+    const message = messages[i];
+    if (Array.isArray(message.mentionMemberIds) || Array.isArray(message.urgentMentionMemberIds)) {
+      if (message.mentionMemberIds?.includes(memberId) || message.urgentMentionMemberIds?.includes(memberId)) return i;
+    } else if (!memberId.startsWith("mem_") && (message.mentions?.includes(memberName) || message.urgentMentions?.includes(memberName))) return i;
   }
   return -1;
 }
@@ -177,6 +182,7 @@ interface AgentInstance {
   status: AgentStatus;
   dispatchState: DispatchState;
   promptInFlight: boolean;
+  profilePromptDirty?: boolean;
   queuedInputs: string[];
   pendingThinkingSwitch?: PendingThinkingSwitch;
   pendingCredentialRefresh?: PendingCredentialRefresh;
@@ -305,6 +311,8 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
   const out: ScopeId[] = [];
   for (const inst of instances.values()) {
     if (inst.status !== "working" && inst.dispatchState === "idle") continue;
+    if (inst.memberId === globalMemberId) { out.push(inst.scopeId); continue; }
+    if (inst.memberId.startsWith("mem_")) continue;
     // Match by global id (DM) or by sourceMemberId / name for room locals
     if (inst.scopeId.startsWith("dm:")) {
       if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) {
@@ -467,6 +475,50 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
   }
 }
 
+let profileRevision = 0;
+
+/** Publication after a committed DB identity update. Never resets an active handle. */
+export function notifyMemberProfileChanged(member: MemberRecord): void {
+  profileRevision += 1;
+  for (const instance of instances.values()) {
+    if (!instance.memberId.startsWith("mem_")) continue;
+    if (instance.memberId === member.id) {
+      instance.agentName = member.name;
+      instance.sessionSources.member.name = member.name;
+      instance.sessionSources.member.title = member.title;
+    }
+    // Environment includes current roster names, including other active members.
+    instance.profilePromptDirty = true;
+  }
+}
+
+function currentRuntimeName(memberId: string, initialName: string): string {
+  if (!memberId.startsWith("mem_")) return initialName;
+  const member = getMember(memberId);
+  if (!member) throw new Error(`Member no longer exists: ${memberId}`);
+  return member.name;
+}
+
+function refreshProfileSources(instance: AgentInstance): void {
+  if (!instance.profilePromptDirty) return;
+  const member = getMember(instance.memberId);
+  if (!member) throw new Error(`Member no longer exists: ${instance.memberId}`);
+  const ref = parseScopeId(instance.scopeId)!;
+  const parentId = ref.kind === "topic" ? resolveTopicRoomId(ref.topicId) : ref.kind === "room" ? ref.roomId : undefined;
+  const room = parentId ? roomStore.getRoom(parentId) : null;
+  const agentDef = loadAgentDefinition(member.agentTemplate) || { name: member.agentTemplate, description: "", systemPrompt: "", tags: [], skills: [] };
+  const compiled = compileMemberPromptForScope({
+    scopeId: instance.scopeId, memberId: member.id, memberName: member.name,
+    agentDef, room, docsRoot: join(getBossmodeDir(), "memory", "projects"),
+    ...(ref.kind === "topic" && parentId ? { topicTitle: getTopic(parentId, ref.topicId)?.title } : {}),
+  });
+  instance.agentName = member.name;
+  instance.sessionSources.member.name = member.name;
+  instance.sessionSources.member.title = member.title;
+  instance.sessionSources.compiled = compiled;
+  instance.sessionSources.roomMembers = room ? roomStore.getRoomMembers(room.id).map(m => m.name) : [member.name];
+}
+
 async function runPrompt(
   instance: AgentInstance,
   message: string,
@@ -492,6 +544,12 @@ async function runPrompt(
     });
   }
   try {
+    if (instance.profilePromptDirty) {
+      refreshProfileSources(instance);
+      if (!instance.handle.refreshPrompt) throw new Error("Runtime cannot refresh member identity without resetting the session.");
+      instance.handle.refreshPrompt(instance.sessionSources.compiled);
+      instance.profilePromptDirty = false;
+    }
     await instance.handle.prompt(message);
     instance.promptInFlight = false;
     await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
@@ -829,6 +887,7 @@ export interface BuildSessionOpts {
 }
 
 export async function buildMemberAgentSession(memberId: string, scopeId: string, _opts: BuildSessionOpts = {}): Promise<AgentInstance | null> {
+  const creationProfileRevision = profileRevision;
   const ref = parseScopeId(scopeId);
   if (!ref) {
     logger.error("agent", "buildMemberAgentSession: invalid scope", { scopeId, memberId });
@@ -925,18 +984,18 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       logLabel = "dmAgentCreated";
       errLabel = "dm";
       const dmKey = key;
-      const dmMemberName = member.name;
+      const dmMemberName = () => currentRuntimeName(memberId, member.name);
       callbacks = {
         onChat: async (message: string) => {
           // Single egress: scope-routed postMessage writes the member-owned DM
           // store, broadcasts to dm:<id> subscribers, and notifies listeners.
-          postMessage(dmScopeId, dmMemberName, message);
+          postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
           const active = instances.get(dmKey);
           if (active) clearPendingChatReply(active, "callback:chat-dm");
         },
         onMention: async (_target: string, message: string) => {
           // DM has no @ routing — treat as normal chat.
-          postMessage(dmScopeId, dmMemberName, message);
+          postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
           const active = instances.get(dmKey);
           if (active) clearPendingChatReply(active, "callback:mention-dm");
         },
@@ -1018,25 +1077,25 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       logLabel = "agentCreated";
       errLabel = "room";
       const roomKey = key;
-      const roomMemberName = member.name;
+      const roomMemberName = () => currentRuntimeName(memberId, member.name);
       onSessionChanged = (session) => {
         sessionStore.saveSession(ref.roomId, memberId, {
           runtime: member.runtime,
           sessionId: session.sessionId,
           sessionFile: session.sessionFile,
         });
-        logger.info("agent", "sessionSaved", { member: roomMemberName, memberId, sessionId: session.sessionId, sessionFile: session.sessionFile });
+        logger.info("agent", "sessionSaved", { member: roomMemberName(), memberId, sessionId: session.sessionId, sessionFile: session.sessionFile });
       };
       callbacks = {
         onChat: async (message: string) => {
-          postMessage(ref.roomId, roomMemberName, message, [], { senderMemberId: memberId });
+          postMessage(ref.roomId, roomMemberName(), message, [], { senderMemberId: memberId });
           const active = instances.get(roomKey);
           if (active) clearPendingChatReply(active, "callback:chat");
         },
         onMention: async (targetMember: string, message: string) => {
           // Mention activation is handled by router listener via message-bus.
           const target = roomStore.resolveRoomMemberRef(ref.roomId, targetMember);
-          postMessage(ref.roomId, roomMemberName, message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+          postMessage(ref.roomId, roomMemberName(), message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
           const active = instances.get(roomKey);
           if (active) clearPendingChatReply(active, "callback:mention");
         },
@@ -1101,7 +1160,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       logLabel = "topicAgentCreated";
       errLabel = "topic";
       const topicKey = key;
-      const topicMemberName = member.name;
+      const topicMemberName = () => currentRuntimeName(memberId, member.name);
       const topicScopeId = scopeId;
 
       // Batch 2: prefix-fork the room session when seedMode=fork (degrades to fresh).
@@ -1147,13 +1206,14 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       };
       callbacks = {
         onChat: async (message: string) => {
-          postMessage(topicScopeId, topicMemberName, message);
+          postMessage(topicScopeId, topicMemberName(), message, [], { senderMemberId: memberId });
           const active = instances.get(topicKey);
           if (active) clearPendingChatReply(active, "callback:chat-topic");
         },
         onMention: async (target: string, message: string) => {
           // Mentions inside a topic stay in the topic scope.
-          postMessage(topicScopeId, topicMemberName, message, [target]);
+          const targetMember = roomStore.resolveRoomMemberRef(parentRoomId, target);
+          postMessage(topicScopeId, topicMemberName(), message, [target], { senderMemberId: memberId, mentionMemberIds: targetMember ? [targetMember.id] : [] });
           const active = instances.get(topicKey);
           if (active) clearPendingChatReply(active, "callback:mention-topic");
         },
@@ -1186,7 +1246,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         scopeId: scopeId.startsWith("room:") ? scopeId : scopeId,
         roomId: keyRoomId,
         memberId,
-        agentName: member.name,
+        agentName: currentRuntimeName(memberId, member.name),
+        profilePromptDirty: memberId.startsWith("mem_") && creationProfileRevision !== profileRevision,
         sourceAgent: member.agent,
         status: "idle",
         dispatchState: "idle",
@@ -1229,7 +1290,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         pendingReload: null,
       };
 
-      wireInstanceEvents(instance, key, keyRoomId, member.name, memberId);
+      wireInstanceEvents(instance, key, keyRoomId, memberId);
 
       instances.set(key, instance);
       return instance;
@@ -1317,27 +1378,25 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
 // -- Activation --
 
-export async function activateAgent(roomId: string, memberRef: string, ctx?: { needResponse?: string[]; senderName?: string }): Promise<void> {
-  // Reply-debt semantics (fish 2026-08-10):
-  // - user @ always owes a reply (mapped as all mentioned internally)
-  // - member @ owes only when this member's name is in need_response string[]
-  // - omit need_response = FYI (activated, no debt, no fallback)
-  // - system/absent ctx keeps debt on activation
+type ReplyContext = { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string };
+
+function replyObligation(memberId: string, memberName: string, ctx?: ReplyContext) {
   const isUser = ctx?.senderName === "user";
+  const listed = ctx?.needResponseMemberIds !== undefined
+    ? ctx.needResponseMemberIds.includes(memberId)
+    : (ctx?.needResponse || []).some(name => name === memberName || name === memberId);
+  const explicitFyi = isUser && Array.isArray(ctx?.needResponse) && ctx.needResponse.length === 0;
+  const replyDebt = !explicitFyi && (isUser || !ctx || listed);
+  const banner = replyDebt ? (isUser || !ctx
+    ? "[REPLY EXPECTED] Respond using the chat tool."
+    : `[REPLY EXPECTED] ${ctx.senderName} expects your reply — respond with the chat tool.`) : undefined;
+  return { replyDebt, banner };
+}
+
+export async function activateAgent(roomId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
   const member = resolveRoomMember(roomId, memberRef);
-  const memberName = member?.name || memberRef;
-  const memberId = member?.id || memberRef;
-  const list = Array.isArray(ctx?.needResponse) ? ctx!.needResponse! : [];
-  const listed = list.some((n) => n === memberName || n === memberId || n === memberRef);
-  // Explicit empty need_response on a user message = FYI (topic-close notice).
-  const explicitFyi = isUser && !!ctx && Array.isArray(ctx.needResponse) && ctx.needResponse.length === 0;
-  const replyDebt = explicitFyi ? false : (isUser || !ctx ? true : listed);
-  const banner = ctx && replyDebt
-    ? isUser
-      ? "[REPLY EXPECTED] Respond using the chat tool."
-      : `[REPLY EXPECTED] ${ctx.senderName} expects your reply — respond with the chat tool.`
-    : undefined;
-  return activateAgentInternal(roomId, memberRef, { source: "room_mention", replyDebt, trigger: "activate", banner });
+  const obligation = replyObligation(member?.id || memberRef, member?.name || memberRef, ctx);
+  return activateAgentInternal(roomId, member?.id || memberRef, { source: "room_mention", ...obligation, trigger: "activate" });
 }
 
 async function activateAgentInternal(
@@ -1378,7 +1437,7 @@ async function activateAgentInternalContinue(
   opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
 ): Promise<void> {
   const cursors = roomStore.getCursors(roomId);
-  const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
+  const lastCursor = cursors[memberId] ?? (memberId.startsWith("mem_") ? null : cursors[memberName]) ?? null;
   const allNewMessages = getMessagesSince(roomId, lastCursor);
   if (allNewMessages.length === 0) return;
 
@@ -1397,12 +1456,12 @@ async function activateAgentInternalContinue(
   // (last one mentioning this member, else the newest) is injected in full;
   // everything between the delivery cursor and the trigger compresses into a
   // one-line unread hint the member may read via query_room_messages.
-  const triggerIdx = lastMentionTriggerIndex(visibleMessages, memberName);
+  const triggerIdx = lastMentionTriggerIndex(visibleMessages, memberName, memberId);
   const triggerIndex = triggerIdx >= 0 ? triggerIdx : visibleMessages.length - 1;
   const trigger = visibleMessages[triggerIndex];
   // A member's own messages are never unread to itself (QA 2026-08-06): exclude
   // them from the backlog so the hint does not ring forever with self-replies.
-  const backlog = visibleMessages.slice(0, triggerIndex).filter((m) => m.sender !== memberName);
+  const backlog = visibleMessages.slice(0, triggerIndex).filter((m) => !isOwnMessage(m, memberId, memberName));
   const truncated = backlog.length > contextLimit;
   const backlogLimited = truncated ? backlog.slice(-contextLimit) : backlog;
   const unreadHint = buildUnreadBacklogHint(backlogLimited, truncated
@@ -1423,7 +1482,7 @@ async function activateAgentInternalContinue(
   let cursorTarget: RoomMessage = trigger;
   let lastSelfIdx = -1;
   for (let i = allNewMessages.length - 1; i >= 0; i--) {
-    if (allNewMessages[i].sender === memberName) {
+    if (isOwnMessage(allNewMessages[i], memberId, memberName)) {
       lastSelfIdx = i;
       break;
     }
@@ -1481,7 +1540,7 @@ async function activateAgentInternalContinue(
 
 // -- @all broadcast --
 
-export async function activateAll(roomId: string, ctx?: { needResponse?: string[]; senderName?: string }): Promise<void> {
+export async function activateAll(roomId: string, ctx?: { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string }): Promise<void> {
   const room = roomStore.getRoom(roomId);
   if (!room) return;
   const activations = roomStore.getRoomMembers(roomId).map((member) => {
@@ -1717,7 +1776,9 @@ export async function switchMemberThinkingLevel(memberId: string, thinkingLevel:
 
 /** Read-only live-instance lookup by scope (batch 6 reload surface + tests). */
 export function getAgentInstanceForScope(scopeId: string, memberId: string): AgentInstance | null {
-  return instances.get(instanceKey(scopeId, memberId)) ?? null;
+  const instance = instances.get(instanceKey(scopeId, memberId)) ?? null;
+  if (instance?.profilePromptDirty) refreshProfileSources(instance);
+  return instance;
 }
 
 export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
@@ -2383,10 +2444,10 @@ function wireInstanceEvents(
   instance: AgentInstance,
   key: string,
   roomId: string,
-  memberName: string,
   memberId: string,
 ): void {
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
+    const memberName = instance.agentName;
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
     // A successful chat call settles the reply debt — the fallback only fires
     // when the debt is still pending at settlement (no chat was called).
@@ -2565,7 +2626,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
   if (!instance) return;
 
   const scopeId = instance.scopeId;
-  setActivationSource(scopeId, member.name, "private_instruction");
+  setActivationSource(scopeId, memberId, "private_instruction");
 
   try {
     const recent = readAllDmMessages(memberId).filter((m) => !isSystemNoticeHiddenFromMembers(m)).slice(-40);
@@ -2616,7 +2677,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
       });
     });
   } finally {
-    clearActivationSource(scopeId, member.name);
+    clearActivationSource(scopeId, memberId);
   }
 }
 
@@ -2662,7 +2723,7 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
  * Activate a room member inside a topic (batch 1: fresh seed + guide message).
  * Does not touch the parent room instance.
  */
-export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string): Promise<void> {
+export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
   const {
     getTopic,
     addTopicParticipant,
@@ -2689,13 +2750,13 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
   const scopeId = instance.scopeId;
   const roomName = roomStore.getRoom(parentRoomId)?.name || parentRoomId;
   const cursors = getTopicCursors(parentRoomId, topicId);
-  const lastCursor = cursors[memberId] ?? cursors[memberName] ?? null;
+  const lastCursor = cursors[memberId] ?? (memberId.startsWith("mem_") ? null : cursors[memberName]) ?? null;
   const allNew = getTopicMessagesSince(parentRoomId, topicId, lastCursor);
   const visible = filterAgentVisibleMessages(allNew, memberName);
 
   let formattedTrigger = "";
   if (visible.length > 0) {
-    const triggerIdx = lastMentionTriggerIndex(visible, memberName);
+    const triggerIdx = lastMentionTriggerIndex(visible, memberName, memberId);
     const trigger = visible[triggerIdx >= 0 ? triggerIdx : visible.length - 1];
     formattedTrigger = formatMessagesForAgent(scopeId, [trigger], memberName, roomName);
     setTopicCursor(parentRoomId, topicId, memberId, trigger.id);
@@ -2704,7 +2765,7 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
     if (latest) setTopicCursor(parentRoomId, topicId, memberId, latest);
   }
 
-  setActivationSource(scopeId, memberName, "room_mention");
+  setActivationSource(scopeId, memberId, "room_mention");
   try {
     const guide =
       topic.guideText
@@ -2719,9 +2780,10 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
     const prompt = [
       guide,
       formattedTrigger,
-      `[REPLY EXPECTED] You were mentioned in this topic. Respond with the chat tool in this topic scope.`,
+      replyObligation(memberId, memberName, ctx).banner,
     ].filter(Boolean).join("\n\n");
 
+    if (replyObligation(memberId, memberName, ctx).replyDebt) markPendingChatReply(instance, "topic-activate");
     if (instance.compacting) {
       queueInput(instance, prompt, "message-during-compaction");
       return;
@@ -2737,7 +2799,6 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
       queueInput(instance, prompt, "topic-activate");
       return;
     }
-    markPendingChatReply(instance, "topic-activate");
     await runPrompt(instance, prompt, "activate", (err) => {
       logger.error("agent", "topic prompt failed", {
         memberId,
@@ -2746,7 +2807,7 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
       });
     });
   } finally {
-    clearActivationSource(scopeId, memberName);
+    clearActivationSource(scopeId, memberId);
   }
 }
 
@@ -2779,9 +2840,9 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
   return { ok: true, action: instance.status === "working" ? "interrupted" : "activated" };
 }
 
-async function activateAllTopicMembers(parentRoomId: string, topicId: string): Promise<void> {
+async function activateAllTopicMembers(parentRoomId: string, topicId: string, ctx?: ReplyContext): Promise<void> {
   for (const m of roomStore.getRoomMembers(parentRoomId)) {
-    await activateTopicMember(parentRoomId, topicId, m.id);
+    await activateTopicMember(parentRoomId, topicId, m.id, ctx);
   }
 }
 
@@ -2793,7 +2854,7 @@ export function wireMentionRouter(): () => void {
         const topicId = scopeId.slice("topic:".length);
         const parent = resolveTopicParent(topicId);
         if (!parent) return;
-        activateTopicMember(parent, topicId, memberRef).catch((err) => {
+        activateTopicMember(parent, topicId, memberRef, ctx).catch((err) => {
           logger.error("router", "topic activate failed", { topicId, member: memberRef, error: String(err) });
         });
         return;
@@ -2807,7 +2868,7 @@ export function wireMentionRouter(): () => void {
         const topicId = scopeId.slice("topic:".length);
         const parent = resolveTopicParent(topicId);
         if (!parent) return;
-        activateAllTopicMembers(parent, topicId).catch((err) => {
+        activateAllTopicMembers(parent, topicId, ctx).catch((err) => {
           logger.error("router", "topic activateAll failed", { topicId, error: String(err) });
         });
         return;

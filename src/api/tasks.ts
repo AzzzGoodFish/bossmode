@@ -27,14 +27,19 @@ function resolveTaskAssignee(roomId: string, value: unknown): { name: string; me
 function resolveTaskSubscribers(roomId: string, values: unknown): { names: string[]; memberIds: string[] } | undefined {
   if (!Array.isArray(values)) return undefined;
   const members: RoomMemberRecord[] = [];
+  let includesUser = false;
   for (const value of values) {
     const raw = String(value ?? "").trim();
     if (!raw) continue;
+    if (raw === "user") {
+      includesUser = true;
+      continue;
+    }
     const member = roomStore.resolveRoomMemberRef(roomId, raw);
     if (!member) throw new Error(`Subscriber is not a room member: ${raw}`);
     if (!members.some((entry) => entry.id === member.id)) members.push(member);
   }
-  return { names: members.map((member) => member.name), memberIds: members.map((member) => member.id) };
+  return { names: [...(includesUser ? ["user"] : []), ...members.map((member) => member.name)], memberIds: members.map((member) => member.id) };
 }
 
 /** Emit a structured task_event system message + ws broadcast. */
@@ -125,7 +130,7 @@ addRoute("GET", "/api/rooms/:id/tasks", async (req, res, params) => {
     // Fallback: filter the file-backed list in memory.
     let items = taskStore.listTaskSummaries(params.id);
     if (status) items = items.filter((t) => t.status === status);
-    if (assignee) items = items.filter((t) => t.assignee === assignee);
+    if (assignee) items = items.filter((t) => taskStore.taskMatchesAssignee(params.id, t, assignee));
     if (q) items = items.filter((t) => t.title.toLowerCase().includes(q.toLowerCase()));
     const total = items.length;
     if (offset) items = items.slice(offset);
@@ -182,8 +187,8 @@ addRoute("PATCH", "/api/rooms/:id/tasks/:taskId", async (req, res, params) => {
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assignee !== undefined) {
       const assignee = resolveTaskAssignee(params.id, body.assignee);
-      patch.assignee = assignee?.name;
-      patch.assigneeMemberId = assignee?.memberId;
+      patch.assignee = assignee?.name ?? null;
+      patch.assigneeMemberId = assignee?.memberId ?? null;
     }
     if (body.description !== undefined) patch.description = String(body.description);
     if (body.references !== undefined) patch.references = Array.isArray(body.references) ? body.references.map(String) : [];

@@ -140,6 +140,8 @@ export interface AgentHandle {
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
   reloadResources?(opts: ReloadAgentResourcesOpts): Promise<void>;
+  /** Refresh only prompt metadata at the next safe pre-prompt boundary. */
+  refreshPrompt?(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void;
   /** Active tools currently exposed to the model (session-live). */
   getActiveTools?(): MemberActiveToolInfo[];
 }

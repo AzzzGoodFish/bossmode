@@ -46,6 +46,31 @@ export function resolvePiSystemPromptSources(args: {
 }
 
 
+/** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
+export class BossmodeResourceLoader extends DefaultResourceLoader {
+  private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
+
+  constructor(
+    options: ConstructorParameters<typeof DefaultResourceLoader>[0],
+    sources: ReturnType<typeof resolvePiSystemPromptSources>,
+  ) {
+    super(options);
+    this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
+  }
+
+  setPromptSources(sources: ReturnType<typeof resolvePiSystemPromptSources>): void {
+    this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
+  }
+
+  override getSystemPrompt(): string | undefined {
+    return this.promptSources.systemPrompt;
+  }
+
+  override getAppendSystemPrompt(): string[] {
+    return [...this.promptSources.appendSystemPrompt];
+  }
+}
+
 /** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
 function classifyToolSource(
   name: string,
@@ -371,7 +396,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private session: AgentSession,
     private modelRegistry: ModelRegistry,
     private credentials: ModelCredentialBinding,
-    private resourceLoader: DefaultResourceLoader,
+    private resourceLoader: BossmodeResourceLoader,
     private settingsManager: SettingsManager,
     private baseExtensionPaths: string[],
     private baseToolNames: string[],
@@ -768,6 +793,20 @@ export class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
+  /** Called by the owner at the idle boundary before the next prompt. */
+  refreshPrompt(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void {
+    if (this.destroyed) throw new Error("Runtime instance is destroyed");
+    if (this.currentRun || this.watchdogTurn || this.manualCompactionOutcome || this.session.isStreaming || this.session.isCompacting) {
+      throw new Error("Prompt refresh requires an idle pre-prompt boundary");
+    }
+    const sources = resolvePiSystemPromptSources(opts);
+    this.resourceLoader.setPromptSources(sources);
+    // Supported SDK API rebuilds its base prompt from the resource loader.
+    // Retain the exact active tools, session history, resources, and credentials.
+    this.session.setActiveToolsByName(this.session.getActiveToolNames());
+    this.runtimeParams.systemPrompt = [sources.systemPrompt, ...sources.appendSystemPrompt].filter(Boolean).join("\n\n");
+  }
+
   async reloadResources(opts: ReloadAgentResourcesOpts): Promise<void> {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     await this.waitForIdle();
@@ -788,8 +827,7 @@ export class PiSdkAgentHandle implements AgentHandle {
       agentPrompt: opts.agentPrompt,
       appendSystemPrompt: appendBase,
     });
-    loader.systemPromptSource = promptSources.systemPrompt;
-    loader.appendSystemPromptSource = promptSources.appendSystemPrompt;
+    this.resourceLoader.setPromptSources(promptSources);
     loader.additionalSkillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
     loader.additionalExtensionPaths = activeExtensionPaths;
 
@@ -814,11 +852,10 @@ export class PiSdkAgentHandle implements AgentHandle {
       memberId: this.toolAssembly.memberId ?? opts.member.id,
     };
     const customTools = createBossmodeSdkTools({
-      roomId: opts.roomId,
-      agentName: opts.member.name,
-      roomMembers: this.toolAssembly.roomMembers,
-      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-    });
+    roomId: opts.roomId,
+    memberId: opts.member.id,
+    scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room"
+});
     this.bossmodeToolNames = new Set(customTools.map((t) => t.name));
     if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
       throw new Error("Runtime cannot verify active tools after reload.");
@@ -1000,7 +1037,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const managedExtensions = [...memberAssets.extensions];
     const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
     const activeExtensionPaths = [...extensionPaths, mcpSettings.adapterPath!];
-    const resourceLoader = new DefaultResourceLoader({
+    const resourceLoader = new BossmodeResourceLoader({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
       settingsManager,
@@ -1010,7 +1047,7 @@ export class PiSdkRuntime implements AgentRuntime {
       additionalExtensionPaths: activeExtensionPaths,
       systemPrompt: promptSources.systemPrompt,
       appendSystemPrompt,
-    });
+    }, promptSources);
     await resourceLoader.reload();
     // DefaultResourceLoader.reload() reloads SettingsManager and clears its
     // in-memory overrides. Apply runtime transport afterwards, immediately
@@ -1018,12 +1055,11 @@ export class PiSdkRuntime implements AgentRuntime {
     const transportSettings = applyRuntimeTransportSettings(settingsManager);
 
     const customTools = createBossmodeSdkTools({
-      roomId: opts.roomId,
-      agentName: opts.member.name,
-      roomMembers: opts.roomMembers,
-      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-      execution: opts.background ? "background" : "live",
-    });
+    roomId: opts.roomId,
+    memberId: opts.member.id,
+    scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
+    execution: opts.background ? "background" : "live"
+});
     const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
     // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
     // when tools is provided it becomes a lifetime allowlist and strips extension
