@@ -1,6 +1,6 @@
 // Backfill framework: rebuild the SQLite projection from file authority (S1).
 //
-// Streams each room's agent-events *.jsonl and tasks.json into the projection
+// Reads room/DM and nested topic agent-events *.jsonl plus room tasks.json into the projection
 // tables. Two properties matter most:
 //
 //  1. DEDUP (spec, fish-approved): a member can have BOTH a legacy name-keyed
@@ -13,11 +13,11 @@
 //  2. IDEMPOTENT + BATCHED: PRIMARY-KEY upserts make re-runs safe; lines are
 //     processed in batches so a huge room does not block the event loop.
 //
-// This S1 module lays token_usage_daily rows with model="unknown" (S2 stamps
-// real model on the live write path) and activity_events rows with byte
+// This module preserves stamped usage models (legacy events use "unknown")
+// and lays activity_events rows with byte
 // offsets (S3 uses offsets for O(1) line fetch). It is intentionally the single
 // place that knows the file layout + dedup so S2/S3 build on it, not beside it.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { BossmodeDb } from "./sqlite.js";
@@ -68,21 +68,31 @@ function utcDate(tsMs: number): string {
   return new Date(tsMs).toISOString().slice(0, 10);
 }
 
+// Missing optional source directories are normal. Other filesystem failures
+// must abort the rebuild rather than certify an incomplete projection.
+function listSourceDirectory(dir: string) {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+}
+
 /**
- * Resolve which event files to ingest for a room, applying the dedup rule.
- * Returns a list of { memberId, file, isNameKeyed } plus a count of skipped
- * name-keyed files (for observability / tests).
+ * Resolve event files using the owning room's members and the dedup rule.
+ * Topics supply their nested events directory but retain the parent roomId
+ * for name-to-id mapping. Returns chosen files and a skipped-name count.
  */
-export function resolveMemberEventFiles(roomId: string): {
+export function resolveMemberEventFiles(roomId: string, dir = join(roomDir(roomId), "agent-events")): {
   files: Array<{ memberId: string; file: string }>;
   skippedNameKeyed: number;
 } {
-  const dir = join(roomDir(roomId), "agent-events");
-  if (!existsSync(dir)) return { files: [], skippedNameKeyed: 0 };
-
   const present = new Set(
-    readdirSync(dir).filter((f) => f.endsWith(".jsonl") && !f.endsWith(".stats.json")),
+    listSourceDirectory(dir).map((entry) => entry.name)
+      .filter((f) => f.endsWith(".jsonl") && !f.endsWith(".stats.json")),
   );
+  if (present.size === 0) return { files: [], skippedNameKeyed: 0 };
 
   const room = getRoom(roomId);
   const members = room ? deriveRoomMembers(room) : [];
@@ -239,10 +249,16 @@ async function backfillMemberFile(
 
 function backfillRoomTasks(db: BossmodeDb, roomId: string, progress: BackfillProgress): void {
   const tasksPath = join(roomDir(roomId), "tasks.json");
-  if (!existsSync(tasksPath)) return;
+  let content: string;
+  try {
+    content = readFileSync(tasksPath, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(tasksPath, "utf-8"));
+    raw = JSON.parse(content);
   } catch {
     return;
   }
@@ -293,7 +309,6 @@ export async function backfillAll(db: BossmodeDb): Promise<BackfillProgress> {
     skippedNameKeyedFiles: 0,
   };
   const roomsDir = getRoomsDir();
-  if (!existsSync(roomsDir)) return progress;
 
   // A full backfill is authoritative from files. token_usage_daily uses additive
   // upserts (correct for the live incremental write path), so re-running on a
@@ -308,31 +323,34 @@ export async function backfillAll(db: BossmodeDb): Promise<BackfillProgress> {
 
   let roomIds: string[] = [];
   try {
-    roomIds = readdirSync(roomsDir, { withFileTypes: true })
+    roomIds = listSourceDirectory(roomsDir)
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
   } catch (err) {
     logger.error("db", "backfill failed to list rooms", { error: String(err) });
-    return progress;
+    throw err;
   }
 
   for (const roomId of roomIds) {
     try {
-      const { files, skippedNameKeyed } = resolveMemberEventFiles(roomId);
-      progress.skippedNameKeyedFiles += skippedNameKeyed;
-      for (const { memberId, file } of files) {
-        await backfillMemberFile(
-          db,
-          roomId,
-          memberId,
-          join(roomDir(roomId), "agent-events", file),
-          progress,
-        );
+      const backfillEvents = async (scopeId: string, eventsDir: string) => {
+        const { files, skippedNameKeyed } = resolveMemberEventFiles(roomId, eventsDir);
+        progress.skippedNameKeyedFiles += skippedNameKeyed;
+        for (const { memberId, file } of files) {
+          await backfillMemberFile(db, scopeId, memberId, join(eventsDir, file), progress);
+        }
+      };
+      await backfillEvents(roomId, join(roomDir(roomId), "agent-events"));
+      const topicsDir = join(roomDir(roomId), "topics");
+      for (const topic of listSourceDirectory(topicsDir)) {
+        if (!topic.isDirectory()) continue;
+        await backfillEvents(`topic:${topic.name}`, join(topicsDir, topic.name, "agent-events"));
       }
       backfillRoomTasks(db, roomId, progress);
       progress.rooms += 1;
     } catch (err) {
       logger.error("db", "backfill failed for room", { roomId, error: String(err) });
+      throw err;
     }
     // Yield between rooms so a large workspace does not stall the loop.
     await new Promise((r) => setImmediate(r));
