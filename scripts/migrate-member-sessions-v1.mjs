@@ -72,14 +72,12 @@ function checkDuplicate(source, sessionId, sourceHash, scopeId) {
   seenSessionIds.set(sessionId, { source, sha256: sourceHash });
   return true;
 }
-function validateLegacySource(file) {
-  const runtimeRoot = join(root, "pi-agent", "runtime");
+function validateLegacySource(file, expectedSessionRoot) {
   const absolute = resolve(file);
   if (lstatSync(absolute).isSymbolicLink()) throw new Error("legacy session source may not be a symlink");
   const real = realpathSync(absolute);
-  const allowedRuntime = existsSync(runtimeRoot) && real.startsWith(realpathSync(runtimeRoot) + "/");
-  const allowedTopic = real.startsWith(join(root, "rooms") + "/") && real.includes("/topics/") && real.includes("/sessions/");
-  if (!allowedRuntime && !allowedTopic) throw new Error("legacy session source is outside known SDK session roots");
+  const expected = realpathSync(expectedSessionRoot);
+  if (!real.startsWith(expected + "/")) throw new Error("legacy session source is outside its known scope session root");
   return real;
 }
 function validateTarget(target, memberId) {
@@ -211,7 +209,10 @@ for (const referenceFile of await walk(join(root, "rooms"))) {
       continue;
     }
     let header;
-    try { validateLegacySource(session.sessionFile); header = readHeader(session.sessionFile); }
+    const expectedSourceRoot = topicId
+      ? join(root, "rooms", roomId, "topics", topicId, "sessions")
+      : join(root, "pi-agent", "runtime", roomId, memberId, "sessions");
+    try { validateLegacySource(session.sessionFile, expectedSourceRoot); header = readHeader(session.sessionFile); }
     catch (cause) { conflict(session.sessionFile, "invalid-session-source", { scopeId, memberId, detail: String(cause) }); continue; }
     if (session.sessionId && session.sessionId !== header.id) {
       conflict(session.sessionFile, "session-id-header-mismatch", { scopeId, memberId, referenceSessionId: session.sessionId, headerSessionId: header.id });
@@ -263,7 +264,7 @@ for (const memberId of memberIds) {
     referenced.add(resolve(source));
     let header;
     let sourceHash;
-    try { validateLegacySource(source); header = readHeader(source); sourceHash = sha256(source); }
+    try { validateLegacySource(source, join(root, "pi-agent", "runtime", "members", memberId, "dm", "sessions")); header = readHeader(source); sourceHash = sha256(source); }
     catch (cause) { error(source, "dm-session-read-failed", String(cause)); continue; }
     if (!checkDuplicate(source, header.id, sourceHash, `dm:${memberId}`)) continue;
     const day = new Date(header.timestamp).toISOString().slice(0, 10);
@@ -293,7 +294,7 @@ for (const source of await walk(runtimeRoot)) {
   const [, roomId, memberId] = match;
   referenced.add(resolve(source));
   try {
-    validateLegacySource(source);
+    validateLegacySource(source, join(runtimeRoot, roomId, memberId, "sessions"));
     const header = readHeader(source);
     const sourceHash = sha256(source);
     if (!checkDuplicate(source, header.id, sourceHash, `room:${roomId}`)) continue;
