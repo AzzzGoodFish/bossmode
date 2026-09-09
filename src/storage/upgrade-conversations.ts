@@ -23,7 +23,10 @@ export function ensureImportedScope(db:Database,input:string,roomHint?:string):s
  return id;
 }
 /** Full source order is retained, including non-activity events. Imports never emit outbox work. */
-export async function importLegacyConversations(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[]):Promise<Set<string>>{
+export async function importLegacyConversations(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],options:{
+ /** Caller supplies verified source-generation/identity evidence, not a current-name lookup. */
+ eventOwner?:(entry:LegacySourceEntry)=>{ownerKey:string;memberId:string|null};
+}={}):Promise<Set<string>>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();
  const check=(e:LegacySourceEntry)=>{if(!ctx.sourceFiles.includes(e.path))throw new Error(`Unsnapshotted conversation source: ${e.path}`);};
  const read=(e:LegacySourceEntry)=>{check(e);return readLegacyJson(ctx.sourceRoot,e);};
@@ -65,7 +68,12 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
    if(!e.memberId)throw new Error("DM cursor has no member ID");writeDmMemberCursor(ctx.db,e.memberId,read(e) as any,Math.trunc(e.mtimeMs));
   }else if(e.kind!=="derived-event-stats"){
    const prefix=`legacy:${createHash("sha256").update(e.path).digest("hex")}`;
-   const owner=e.ownerKey;const memberId=owner&&ctx.db.get("SELECT id FROM members WHERE id=?",owner)?owner:null;
+   // A filename, even one equal to a current member ID, is not identity evidence.
+   // Unresolved labels must not collide with a current actor's event/statistics key.
+   const identity=e.kind==="agent-events"?options.eventOwner?.(e):undefined;
+   const owner=identity?.ownerKey??(e.ownerKey?`legacy-unresolved:${e.ownerKey}`:undefined);
+   const memberId=identity?.memberId??null;
+   if(memberId!==null&&!ctx.db.get("SELECT id FROM members WHERE id=?",memberId))throw new Error("Unknown imported event member ID");
    const archiveTs=e.kind==="message-archive"?Number(e.archiveTimestamp):null;
    if(e.kind==="message-archive"&&!Number.isSafeInteger(archiveTs))throw new Error("Invalid archive timestamp");
    let batch:Array<{ordinal:number;value:unknown}>=[];let bytes=0;

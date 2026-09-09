@@ -53,6 +53,12 @@ it("retains original nonblank event order, unknown event kinds and archived mess
  expect(ctx.db.all<{seq:number;member_id:null;payload_json:string}>("SELECT seq,member_id,payload_json FROM agent_events ORDER BY seq").map(r=>({seq:r.seq,memberId:r.member_id,event:JSON.parse(r.payload_json)}))).toEqual(events.map((event,i)=>({seq:i+1,memberId:null,event})));
  expect(readArchivedMessages(room.id,123,ctx.db)).toEqual([message]);expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
 });
+it("does not turn an ID-shaped event filename into a current member identity",async()=>{
+ const {ctx,entries}=setup({"rooms/room-one/agent-events/mem_one.jsonl":JSON.stringify({type:"agent_end",ts:2})+"\n"});
+ ctx.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_one','new-label','new-label','general','{}',1,1)");
+ await importLegacyConversations(ctx,entries);
+ expect(ctx.db.get("SELECT owner_key,member_id FROM agent_events")).toEqual({owner_key:"legacy-unresolved:mem_one",member_id:null});
+});
 it("rejects path ownership mismatches",async()=>{
  const {ctx,entries}=setup({"rooms/room-one/room.json":JSON.stringify({...room,id:"other"})});
  await expect(importLegacyConversations(ctx,entries)).rejects.toThrow("ownership mismatch");
