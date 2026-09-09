@@ -8,6 +8,13 @@ CREATE TABLE storage_meta (
   key TEXT NOT NULL PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE storage_upgrade_files (
+  path TEXT NOT NULL PRIMARY KEY,
+  backup_path TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  retire INTEGER NOT NULL CHECK (retire IN (0,1)),
+  retired_at INTEGER
+);
 CREATE TABLE scopes (
   id TEXT NOT NULL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('room', 'dm', 'topic')),

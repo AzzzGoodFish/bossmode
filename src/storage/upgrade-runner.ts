@@ -21,11 +21,12 @@ export interface UpgradeImportContext {
   /** New allowed file bodies only; existing different content is never overwritten. */
   stageAsset(relativePath: string, bytes: Uint8Array): void;
 }
+export interface UpgradeSource { path: string; retire: boolean; }
 export interface UpgradeOptions {
   root: string;
   formatVersion: number;
   migrations: readonly StorageMigration[];
-  collectLegacySources(root: string): Promise<readonly string[]>;
+  collectLegacySources(root: string): Promise<readonly UpgradeSource[]>;
   importData(context: UpgradeImportContext): Promise<void>;
   validate(context: UpgradeImportContext): Promise<void>;
   onProgress?(progress: UpgradeProgress): void;
@@ -36,7 +37,7 @@ export interface UpgradeOptions {
 }
 export interface UpgradeResult { db: Database; migrated: boolean; backupDirectory?: string; warnings: string[]; }
 interface Authority { format: number; schema: string; }
-interface SourceRecord { path: string; backup_path: string; hash: string; }
+interface SourceRecord { path: string; backup_path: string; hash: string; retire: number; }
 interface PreparedAsset { path: string; staged: string; hash: string; }
 const authorityKey = "core-authority";
 
@@ -107,7 +108,7 @@ function quarantineStage(root: string, stage: string): void {
 }
 
 async function retireSources(root: string, db: Database, warnings: string[], report: (p: UpgradeProgress) => void): Promise<void> {
-  const rows = db.all<SourceRecord>("SELECT path, backup_path, hash FROM storage_upgrade_files WHERE retired_at IS NULL ORDER BY path");
+  const rows = db.all<SourceRecord>("SELECT path, backup_path, hash, retire FROM storage_upgrade_files WHERE retire=1 AND retired_at IS NULL ORDER BY path");
   let completed = 0;
   for (const record of rows) {
     try {
@@ -172,10 +173,13 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     ensurePrivateDirectory(backupDirectory); syncDirectory(root);
     const sourceRoot = join(backupDirectory, "files");
     ensurePrivateDirectory(sourceRoot);
-    const sourceFiles = previous ? [] : [...new Set(await options.collectLegacySources(root))].sort();
+    const inventory = previous ? [] : [...await options.collectLegacySources(root)].sort((a,b) => a.path.localeCompare(b.path));
+    if (new Set(inventory.map(source => source.path)).size !== inventory.length || inventory.some(source => typeof source.retire !== "boolean")) throw new Error("Invalid or duplicate legacy source inventory");
+    const sourceFiles = inventory.map(source => source.path);
     const records: SourceRecord[] = [];
     report({ phase: "backing-up", completed: 0, total: sourceFiles.length });
-    for (const name of sourceFiles) {
+    for (const entry of inventory) {
+      const name = entry.path;
       const source = managedPath(root, name);
       // Coordinator artifacts/database are never ordinary legacy sources.
       if (/^(?:bossmode\.db(?:-|$)|bossmode\.pid$|upgrades\/|backups\/)/.test(name)) throw new Error("Invalid legacy source inventory");
@@ -183,7 +187,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
       const hash = await hashFile(source);
       copyDurably(source, destination);
       if (await hashFile(destination) !== hash || await hashFile(source) !== hash) throw new Error(`Source changed during backup: ${name}`);
-      records.push({ path: name, backup_path: relative(root, destination), hash });
+      records.push({ path: name, backup_path: relative(root, destination), hash, retire: Number(entry.retire) });
       report({ phase: "backing-up", completed: records.length, total: sourceFiles.length });
     }
     let previousDatabase: string | undefined;
@@ -197,9 +201,8 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
 
     db = openDatabase(stage);
     applyStorageMigrations(db, options.migrations);
-    db.exec("CREATE TABLE IF NOT EXISTS storage_upgrade_files (path TEXT NOT NULL PRIMARY KEY, backup_path TEXT NOT NULL, hash TEXT NOT NULL, retired_at INTEGER)");
     db.transaction(tx => {
-      for (const row of records) tx.run("INSERT INTO storage_upgrade_files(path,backup_path,hash) VALUES(?,?,?)", row.path, row.backup_path, row.hash);
+      for (const row of records) tx.run("INSERT INTO storage_upgrade_files(path,backup_path,hash,retire) VALUES(?,?,?,?)", row.path, row.backup_path, row.hash, row.retire);
     });
     const prepared: PreparedAsset[] = [];
     const context: UpgradeImportContext = {
@@ -209,7 +212,11 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
         const live = managedPath(root, name);
         if (!/^(?:members|rooms|memory|agents)\/.+\.md$/.test(name) || sourceFiles.includes(name)) throw new Error("Generated asset must be a retained Markdown body, not application storage");
         const hash = createHash("sha256").update(bytes).digest("hex");
-        if (prepared.some(asset => asset.path === name)) throw new Error("Duplicate generated asset path");
+        const existing = prepared.find(asset => asset.path === name);
+        if (existing) {
+          if (existing.hash !== hash) throw new Error("Conflicting generated asset path");
+          return;
+        }
         const staged = managedPath(backupDirectory, "assets/" + name);
         writeDurably(staged, bytes);
         prepared.push({ path: relative(root, live), staged, hash });

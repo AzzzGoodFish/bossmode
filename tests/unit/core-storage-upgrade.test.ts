@@ -14,7 +14,7 @@ function options(overrides: Partial<UpgradeOptions> = {}): UpgradeOptions {
   return {
     root, formatVersion: 1,
     migrations: [baseStorageMigration, { id: "fixture-v1", sql: "CREATE TABLE records (id TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)" }],
-    collectLegacySources: async () => ["config.json"],
+    collectLegacySources: async () => [{path:"config.json",retire:true}],
     importData: async ({ db, sourceRoot, legacy }) => {
       if (legacy) {
         const value = JSON.parse(readFileSync(join(sourceRoot, "config.json"), "utf8"));
@@ -104,11 +104,11 @@ describe("ordinary startup storage upgrade coordinator", () => {
     expect(existsSync(join(root, "bossmode.db"))).toBe(false);
   });
   it("rejects traversal and symlink source inventory", async () => {
-    await expect(run({ collectLegacySources: async () => ["dir/../config.json"] })).rejects.toThrow("canonical");
+    await expect(run({ collectLegacySources: async () => [{path:"dir/../config.json",retire:true}] })).rejects.toThrow("canonical");
     symlinkSync("config.json", join(root, "linked.json"));
-    await expect(run({ collectLegacySources: async () => ["linked.json"] })).rejects.toThrow("symlink");
+    await expect(run({ collectLegacySources: async () => [{path:"linked.json",retire:true}] })).rejects.toThrow("symlink");
     symlinkSync("missing", join(root, "broken.json"));
-    await expect(run({ collectLegacySources: async () => ["broken.json"] })).rejects.toThrow("symlink");
+    await expect(run({ collectLegacySources: async () => [{path:"broken.json",retire:true}] })).rejects.toThrow("symlink");
   });
   it("keeps the upgrade lease through application activation", async () => {
     await run({ activate: async () => { await expect(run()).rejects.toThrow("lease"); } });
@@ -154,6 +154,23 @@ describe("ordinary startup storage upgrade coordinator", () => {
     const live = new DatabaseSync(join(root, "bossmode.db"), {readOnly:true});
     try { expect(live.prepare("SELECT value FROM storage_meta WHERE key='core-authority'").get()!.value).toBe(marker); }
     finally { live.close(); }
+  });
+
+  it("backs up retained body inputs without retiring them, and reuses identical staged snapshots", async () => {
+    source("members/mem_one/persona.md", "current body");
+    const defaults = options();
+    const result = await run({
+      collectLegacySources: async () => [{path:"config.json",retire:true},{path:"members/mem_one/persona.md",retire:false}],
+      importData: async ctx => {
+        await defaults.importData(ctx);
+        expect(readFileSync(join(ctx.sourceRoot,"members/mem_one/persona.md"),"utf8")).toBe("current body");
+        ctx.stageAsset("members/mem_one/history/revision.md",Buffer.from("same snapshot"));
+        ctx.stageAsset("members/mem_one/history/revision.md",Buffer.from("same snapshot"));
+      },
+    });
+    expect(result.warnings).toEqual([]);
+    expect(readFileSync(join(root,"members/mem_one/persona.md"),"utf8")).toBe("current body");
+    expect(existsSync(join(root,"config.json"))).toBe(false);
   });
 
 });
