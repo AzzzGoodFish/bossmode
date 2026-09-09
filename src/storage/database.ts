@@ -37,6 +37,12 @@ export class Database {
     else this.observeCommit(callback);
   }
 
+  /** File preparation/async services must not run inside an ambient SQL transaction. */
+  assertOutsideTransaction(): void {
+    this.assertOpen();
+    if (this.connection.isTransaction) throw new Error("Operation requires no enclosing database transaction");
+  }
+
   private observeCommit(callback: () => void): void {
     const report = (error: unknown) => { try { this.onPostCommitError(error); } catch { /* Commit already succeeded. */ } };
     try {

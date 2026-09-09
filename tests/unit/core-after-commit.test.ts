@@ -59,3 +59,9 @@ it("rejects registration through an expired transaction context",()=>{
  db.transaction(tx=>{saved=tx;});
  expect(()=>saved!.afterCommit(()=>{})).toThrow("expired");
 });
+
+it("rejects file/async service boundaries inside tracked or raw SQL transactions",()=>{
+ expect(()=>db.assertOutsideTransaction()).not.toThrow();
+ db.transaction(tx=>expect(()=>tx.assertOutsideTransaction()).toThrow("no enclosing"));
+ db.exec("BEGIN");try{expect(()=>db.assertOutsideTransaction()).toThrow("no enclosing");}finally{db.exec("ROLLBACK");}
+});
