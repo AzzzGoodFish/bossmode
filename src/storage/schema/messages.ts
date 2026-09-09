@@ -95,3 +95,14 @@ CREATE TABLE member_statistics (
 );
 `,
 };
+
+/** Append after the existing registered migration history; never rewrite v1. */
+export const eventSourceMigration: StorageMigration = {
+  id: "core-event-source-v1",
+  sql: `
+CREATE TABLE event_source_receipts (
+  event_id TEXT PRIMARY KEY REFERENCES agent_events(id) ON DELETE CASCADE,
+  input_fingerprint TEXT NOT NULL
+);
+`,
+};

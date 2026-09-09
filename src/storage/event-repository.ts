@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getDatabase, type Database } from "./database.js";
 import type { UsageDelta } from "../workspace/db/token-rollup.js";
 import type { MemberStats } from "../workspace/member-stats-store.js";
@@ -69,6 +69,46 @@ export function appendAgentEvent(scopeId: string,owner: EventOwner,event: EventP
     insertEvent(db,fact,true,owner.label);
     return fact;
   });
+}
+/** Fingerprint the source JSON before timestamps, limits or stream/model enrichment.
+ * Object key order is not input identity; absent fields and explicit values are.
+ */
+function sourceFingerprint(event: EventPayload): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") return Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)]),
+    );
+    return value;
+  };
+  return createHash("sha256").update(JSON.stringify(canonical(JSON.parse(JSON.stringify(event))))).digest("hex");
+}
+/** Live replay validates original input, then returns the immutable enriched fact.
+ * Never derive an old replay from the current stream/model. Facts without a source
+ * receipt (e.g. imports) cannot prove source identity and fail closed here.
+ */
+export function appendSourceAgentEvent(
+  scopeId: string, owner: EventOwner, source: EventPayload, eventId: string,
+  materialize: () => EventPayload,
+): { fact: EventFact; inserted: boolean } {
+  const fingerprint = sourceFingerprint(source);
+  return getDatabase().transaction(db => {
+    const previous = readAgentEvent(eventId, db);
+    if (previous) {
+      const receipt = db.get<{input_fingerprint: string}>("SELECT input_fingerprint FROM event_source_receipts WHERE event_id=?", eventId);
+      if (previous.scopeId !== scopeId || previous.ownerKey !== owner.ownerKey || previous.memberId !== owner.memberId || receipt?.input_fingerprint !== fingerprint) {
+        throw new Error(`Conflicting event identity: ${eventId}`);
+      }
+      return { fact: previous, inserted: false };
+    }
+    const fact = appendAgentEvent(scopeId, owner, materialize(), eventId);
+    db.run("INSERT INTO event_source_receipts VALUES(?,?)", eventId, fingerprint);
+    return { fact, inserted: true };
+  });
+}
+/** A scalar existence check for provisional stream boundaries, including this transaction's facts. */
+export function hasAgentEvent(id: string): boolean {
+  return !!getDatabase().get("SELECT 1 FROM agent_events WHERE id=?", id);
 }
 export function readAgentEvent(id: string,db = getDatabase()): EventFact | null {
   const row = db.get<EventRow>("SELECT * FROM agent_events WHERE id=?",id);

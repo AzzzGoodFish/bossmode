@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { openDatabase, bindDatabase, applyStorageMigrations, getDatabase, type Database } from "../src/storage/database.js";
 import { baseStorageMigration } from "../src/storage/base-schema.js";
-import { messagesMigration } from "../src/storage/schema/messages.js";
+import { messagesMigration, eventSourceMigration } from "../src/storage/schema/messages.js";
 import { archiveMessagesInTransaction, readArchivedMessages, importArchivedMessage, appendMessage, appendMessageInTransaction, importMessage, importMessageNextSequence, readMessages, pageMessages, messagesSince, patchMessage, searchMessageFacts, replaceMessages, writeMemberCursor, readMemberCursor } from "../src/storage/message-repository.js";
 import { appendAgentEvent, importAgentEvent, readAgentEvents, pageActivity, readStats, memberTokenTotal, rebuildEventAggregates, pageAgentEvents } from "../src/storage/event-repository.js";
 import { recordDailyUsage } from "../src/workspace/db/token-rollup.js";
@@ -26,7 +26,7 @@ const flush = () => new Promise<void>(resolve => queueMicrotask(resolve));
 beforeEach(() => {
   root = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!,"core-messages-"));
   db = openDatabase(join(root,"test.sqlite"));
-  applyStorageMigrations(db,[baseStorageMigration,messagesMigration]); bindDatabase(db);
+  applyStorageMigrations(db,[baseStorageMigration,messagesMigration,eventSourceMigration]); bindDatabase(db);
   db.run("INSERT INTO scopes VALUES('room','room','room',NULL),('dm:mem_old','dm',NULL,'mem_old'),('topic:t','topic','room',NULL)");
   vi.clearAllMocks();
 });
@@ -151,7 +151,7 @@ describe("complete event authority and aggregate identity",() => {
   it("replaces only C's obsolete projection tables on staging, never members or unrelated tables",() => {
     const staged = openDatabase(join(root,"stage.sqlite"));
     staged.exec("CREATE TABLE members(id TEXT); INSERT INTO members VALUES('historical-member'); CREATE TABLE activity_events(byte_offset INTEGER); CREATE TABLE token_usage_daily(old TEXT); CREATE TABLE unrelated(id TEXT); INSERT INTO unrelated VALUES('kept');");
-    applyStorageMigrations(staged,[baseStorageMigration,messagesMigration]);
+    applyStorageMigrations(staged,[baseStorageMigration,messagesMigration,eventSourceMigration]);
     expect(staged.get<{id:string}>("SELECT id FROM members")!.id).toBe("historical-member");
     expect(staged.get("SELECT 1 FROM unrelated")).toBeDefined(); staged.close();
   });
