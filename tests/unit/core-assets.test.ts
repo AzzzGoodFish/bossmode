@@ -1,6 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { dirname, join } from "node:path";
+
+// Keep real filesystem IO; expose only a mockable module surface for failure injection.
+vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof import("node:fs")>() }));
 
 // The npm launcher sets BOSSMODE_DIR before any application import. No real knowledge inputs.
 const root = process.env.BOSSMODE_DIR!;
@@ -49,6 +53,7 @@ beforeEach(() => {
   db = ready();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   db.close();
   for (const entry of readdirSync(root)) if (entry !== ".bossmode-test-sandbox") rmSync(join(root, entry), { force: true, recursive: true });
   mkdirSync(join(root, "knowledge"), { recursive: true });
@@ -209,6 +214,83 @@ it("does not commit history if snapshot/current preparation fails", () => {
   mkdirSync(join(root, roomPath));
   expect(() => saveDocument(roomIdentity, "x", actor, { reason: "r", operation: "write" })).toThrow("Invalid document asset");
   expect(listDocumentHistory(db, roomPath)).toEqual([]);
+});
+
+describe("snapshot retry durability", () => {
+  for (const failure of ["link", "mkdir"] as const) {
+    it(`syncs matching snapshots and the data-root directory chain before history after failed ${failure}`, () => {
+      const content = "retry exact bytes\r\n😀";
+      const snapshot = join(root, documentSnapshotPath(roomPath, documentContentMeta(content).contentHash));
+      // Fail deep in the chain, leaving both existing ancestors and the new entry visible.
+      const createdDirectory = dirname(dirname(snapshot));
+      const required = [snapshot];
+      for (let path = dirname(snapshot); ; path = dirname(path)) {
+        required.push(path);
+        if (path === root) break;
+      }
+      const events: string[] = [];
+      const descriptors = new Map<number, string>();
+      const realOpen = fs.openSync, realSync = fs.fsyncSync, realLink = fs.linkSync, realMkdir = fs.mkdirSync;
+      let failSync: string | undefined;
+      vi.spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
+        const fd = realOpen(path, flags, mode);
+        descriptors.set(fd, String(path));
+        return fd;
+      });
+      const link = vi.spyOn(fs, "linkSync").mockImplementation((existing, path) => {
+        realLink(existing, path);
+        if (failure === "link" && String(path) === snapshot) failSync = dirname(snapshot);
+      });
+      const mkdir = vi.spyOn(fs, "mkdirSync").mockImplementation(((path: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+        const result = realMkdir(path, options);
+        if (failure === "mkdir" && String(path) === createdDirectory) failSync = dirname(createdDirectory);
+        return result;
+      }) as typeof fs.mkdirSync);
+      const sync = vi.spyOn(fs, "fsyncSync").mockImplementation(fd => {
+        const path = descriptors.get(fd)!;
+        if (path === failSync) throw new Error(`injected ${failure} parent fsync failure`);
+        realSync(fd);
+        events.push(path);
+      });
+      const chmod = vi.spyOn(fs, "chmodSync");
+      const transaction = db.transaction.bind(db);
+      vi.spyOn(db, "transaction").mockImplementation(fn => {
+        // All required successful fsyncs must precede even the history transaction's BEGIN.
+        for (const path of required) expect(events, `missing fsync: ${path}`).toContain(path);
+        expect(events).not.toContain(dirname(root));
+        events.push("history begin");
+        const result = transaction(fn);
+        events.push("history committed");
+        return result;
+      });
+      const save = () => saveDocument(roomIdentity, content, user, { operation: "write", reason: "retry" });
+      expect(save).toThrow(`injected ${failure} parent fsync failure`);
+      expect(listDocumentHistory(db, roomPath)).toEqual([]);
+      expect(getDocument(db, roomPath)).toBeUndefined();
+      expect(existsSync(failure === "link" ? snapshot : createdDirectory)).toBe(true);
+
+      // An identical retry must not mistake the leftover visible entry for a durable one.
+      events.length = 0;
+      failSync = undefined;
+      link.mockImplementation(realLink);
+      mkdir.mockImplementation(realMkdir);
+      expect(save().revision).toBe(1);
+      expect(events.at(-1)).toBe("history committed");
+      expect(listDocumentHistory(db, roomPath)).toHaveLength(1);
+      expect(readFileSync(snapshot)).toEqual(Buffer.from(content));
+      expect(chmod).not.toHaveBeenCalled();
+
+      // Existing matching paths must still fail closed if their file or any ancestor cannot sync.
+      for (const failingPath of required) {
+        events.length = 0;
+        failSync = failingPath;
+        expect(save).toThrow(`injected ${failure} parent fsync failure`);
+        expect(events).not.toContain("history begin");
+        expect(listDocumentHistory(db, roomPath)).toHaveLength(1);
+      }
+      expect(sync).toHaveBeenCalled();
+    });
+  }
 });
 
 it("rejects symlink/traversal assets without modifying the target", () => {

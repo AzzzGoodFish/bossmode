@@ -19,7 +19,7 @@ export function readDocumentMeta(identity: DocumentIdentity): PrinciplesMeta | u
   return record?.meta;
 }
 
-function syncDirectory(path: string): void {
+function syncPath(path: string): void {
   const fd = openSync(path, "r");
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
@@ -36,13 +36,16 @@ function assetPath(relativePath: string): string {
       // lstat also detects dangling symlinks, unlike existsSync.
       try { if (lstatSync(path).isSymbolicLink()) throw new Error(`Document asset is a symlink: ${path}`); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if (i < parts.length - 1) { mkdirSync(path); syncDirectory(parent); }
+      if (i < parts.length - 1) mkdirSync(path);
     } else {
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || (i < parts.length - 1 ? !stat.isDirectory() : !stat.isFile())) {
         throw new Error(`Invalid document asset file: ${path}`);
       }
     }
+    // Visible directories may survive a failed mkdir/parent-fsync attempt. Re-sync
+    // every containing entry on retries, stopping at the existing Bossmode data root.
+    if (i < parts.length - 1) syncPath(parent);
   }
   return path;
 }
@@ -58,13 +61,16 @@ function prepareTemporary(path: string, bytes: Uint8Array): string {
 
 function replaceBody(path: string, bytes: Uint8Array): void {
   const temp = prepareTemporary(path, bytes);
-  try { renameSync(temp, path); syncDirectory(dirname(path)); }
+  try { renameSync(temp, path); syncPath(dirname(path)); }
   finally { rmSync(temp, { force: true }); }
 }
 
 function retainSnapshot(path: string, bytes: Buffer): void {
   if (existsSync(path)) {
     if (!readFileSync(path).equals(bytes)) throw new Error(`Document snapshot content conflict: ${path}`);
+    // A previous link may be visible even though its directory fsync failed.
+    syncPath(path);
+    syncPath(dirname(path));
     return;
   }
   const temp = prepareTemporary(path, bytes);
@@ -74,7 +80,9 @@ function retainSnapshot(path: string, bytes: Buffer): void {
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST" || !readFileSync(path).equals(bytes)) throw error;
     }
-    syncDirectory(dirname(path));
+    // Also sync the existing inode when an identical snapshot won the exclusive link.
+    syncPath(path);
+    syncPath(dirname(path));
   } finally { rmSync(temp, { force: true }); }
 }
 
@@ -114,7 +122,7 @@ export function saveDocument(identity: DocumentIdentity, content: string,
       const now = getDocument(db, identity.path);
       if ((now?.meta.revision ?? 0) === expectedRevision && existsSync(current) && readFileSync(current).equals(bytes)) {
         if (before) replaceBody(current, before);
-        else { rmSync(current); syncDirectory(dirname(current)); }
+        else { rmSync(current); syncPath(dirname(current)); }
       }
     } catch (restoreError) {
       throw new AggregateError([error, restoreError], "Document save failed; current body restoration also failed");
