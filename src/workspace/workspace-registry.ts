@@ -100,24 +100,26 @@ export function createWorkspace(memberId: string, args: CreateWorkspaceArgs): Cr
   if (!args.host || !args.user) {
     return { ok: false, error: "host and user are required for an ssh workspace." };
   }
-  const reg = readWorkspaces(memberId);
-  if (reg.workspaces.some((w) => w.id === args.id)) {
-    return { ok: false, error: `Workspace id already exists: ${args.id}` };
-  }
-  const workspace: SshWorkspace = {
-    id: args.id,
-    kind: "ssh",
-    description: args.description?.trim() || `ssh ${args.user}@${args.host}`,
-    host: args.host,
-    port: args.port && args.port > 0 ? args.port : 22,
-    user: args.user,
-    keyPath: args.keyPath?.trim() || join(memberDir(memberId), "ssh", "id_ed25519"),
-    root: args.root?.trim() || ".",
-    builtin: false,
-  };
-  const next = { active: reg.active, workspaces: [...reg.workspaces, workspace] };
-  writeWorkspaces(memberId, next);
-  return { ok: true, workspace };
+  return getDatabase().transaction(() => {
+    const reg = readWorkspaces(memberId);
+    if (reg.workspaces.some((w) => w.id === args.id)) {
+      return { ok: false, error: `Workspace id already exists: ${args.id}` };
+    }
+    const workspace: SshWorkspace = {
+      id: args.id,
+      kind: "ssh",
+      description: args.description?.trim() || `ssh ${args.user}@${args.host}`,
+      host: args.host,
+      port: args.port && args.port > 0 ? args.port : 22,
+      user: args.user,
+      keyPath: args.keyPath?.trim() || join(memberDir(memberId), "ssh", "id_ed25519"),
+      root: args.root?.trim() || ".",
+      builtin: false,
+    };
+    const next = { active: reg.active, workspaces: [...reg.workspaces, workspace] };
+    writeWorkspaces(memberId, next);
+    return { ok: true, workspace };
+  });
 }
 
 export type RemoveWorkspaceResult = { ok: true } | { ok: false; error: string };
@@ -126,25 +128,29 @@ export function removeWorkspace(memberId: string, id: string): RemoveWorkspaceRe
   if (id === "original") {
     return { ok: false, error: "The builtin original workspace cannot be removed." };
   }
-  const reg = readWorkspaces(memberId);
-  const exists = reg.workspaces.some((w) => w.id === id);
-  if (!exists) {
-    return { ok: false, error: `Workspace not found: ${id}` };
-  }
-  const workspaces = reg.workspaces.filter((w) => w.id !== id);
-  const active = reg.active === id ? "original" : reg.active;
-  writeWorkspaces(memberId, { active, workspaces });
-  return { ok: true };
+  return getDatabase().transaction(() => {
+    const reg = readWorkspaces(memberId);
+    const exists = reg.workspaces.some((w) => w.id === id);
+    if (!exists) {
+      return { ok: false, error: `Workspace not found: ${id}` };
+    }
+    const workspaces = reg.workspaces.filter((w) => w.id !== id);
+    const active = reg.active === id ? "original" : reg.active;
+    writeWorkspaces(memberId, { active, workspaces });
+    return { ok: true };
+  });
 }
 
 export function useWorkspace(memberId: string, id: string): { ok: true; active: string; workspace: WorkspaceEntry } | { ok: false; error: string } {
-  const reg = readWorkspaces(memberId);
-  const target = reg.workspaces.find((w) => w.id === id);
-  if (!target) {
-    return { ok: false, error: `Workspace not found: ${id}. Use workspace_list to see what exists.` };
-  }
-  writeWorkspaces(memberId, { active: id, workspaces: reg.workspaces });
-  return { ok: true, active: id, workspace: target };
+  return getDatabase().transaction(() => {
+    const reg = readWorkspaces(memberId);
+    const target = reg.workspaces.find((w) => w.id === id);
+    if (!target) {
+      return { ok: false, error: `Workspace not found: ${id}. Use workspace_list to see what exists.` };
+    }
+    writeWorkspaces(memberId, { active: id, workspaces: reg.workspaces });
+    return { ok: true, active: id, workspace: target };
+  });
 }
 
 /** Ssh connectivity check (P2 shells use the live connection; P1 validates
@@ -165,7 +171,9 @@ export function workspaceRootOf(w: WorkspaceEntry): string {
 
 /** Default workspace root for fresh members is the member's own folder. */
 export function ensureDefaultRegistry(memberId: string): void {
-  if (!repository().read(memberId)) {
-    writeWorkspaces(memberId, { active: "original", workspaces: [originalWorkspace(memberId)] });
-  }
+  getDatabase().transaction(() => {
+    if (!repository().read(memberId)) {
+      writeWorkspaces(memberId, { active: "original", workspaces: [originalWorkspace(memberId)] });
+    }
+  });
 }

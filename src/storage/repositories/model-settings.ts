@@ -11,6 +11,13 @@ export class ModelCredentialsRepository {
     return this.db.get<{value:number}>("SELECT value FROM credential_revision WHERE id=1")!.value;
   }
   revision(id: string): number | null { return this.db.get<{revision: number}>("SELECT revision FROM model_profiles WHERE id=?", id)?.revision ?? null; }
+  /** Profile identity, secret and revision from one short synchronous snapshot. */
+  snapshot(id: string): { profile: ModelCredentialProfile | null; revision: number | null } {
+    return this.db.transaction(() => ({
+      profile: this.read().profiles.find(p => p.id === id) ?? null,
+      revision: this.revision(id),
+    }));
+  }
   read(): CredentialImport {
     return { profiles: this.db.all<any>("SELECT * FROM model_profiles ORDER BY position").map(r => {
       const secret = this.db.get<any>("SELECT * FROM model_secrets WHERE profile_id=?", r.id);

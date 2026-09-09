@@ -82,10 +82,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Classify credential flags without treating ordinary positional/option values as secrets. */
+function credentialArgument(value: unknown): { flag: string; secret?: string } | null {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^(-{1,2}[^=\s]+)(?:=([\s\S]*))?$/);
+  if (!match) return null;
+  const flag = match[1].replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  const secretFlag = /(?:^|[-_])(?:api[-_]?key|private[-_]?key|access[-_]?key|token|secret|password|passwd|authorization|bearer|credentials?)$/.test(flag);
+  return secretFlag ? { flag: match[1], secret: match[2] } : null;
+}
+
+function mapArgumentSecrets(args: unknown[], replace: (secret: string) => string): unknown[] {
+  let secretNext = false;
+  return args.map(arg => {
+    if (secretNext) {
+      secretNext = false;
+      return typeof arg === "string" ? replace(arg) : arg;
+    }
+    const credential = credentialArgument(arg);
+    if (!credential) return arg;
+    if (credential.secret !== undefined) return `${credential.flag}=${replace(credential.secret)}`;
+    secretNext = true;
+    return arg;
+  });
+}
+
 function redactValue(value: unknown, key?: string): unknown {
   if (key && SECRET_OBJECT_KEYS.has(key)) return MCP_REDACTED_VALUE;
   if (key && SECRET_KEY_RE.test(key)) return MCP_REDACTED_VALUE;
-  if (Array.isArray(value)) return value.map((item) => redactValue(item));
+  if (Array.isArray(value)) return (key === "args" ? mapArgumentSecrets(value, () => MCP_REDACTED_VALUE) : value).map((item) => redactValue(item));
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
@@ -102,6 +127,9 @@ export function redactMcpConfig(config: unknown): unknown {
 
 export function restoreRedactedMcpConfig(submitted: unknown, existing: unknown): unknown {
   if (submitted === MCP_REDACTED_VALUE && existing !== undefined) return existing;
+  const submittedArg = credentialArgument(submitted);
+  const existingArg = credentialArgument(existing);
+  if (submittedArg?.secret === MCP_REDACTED_VALUE && existingArg?.flag === submittedArg.flag) return existing;
   if (Array.isArray(submitted)) {
     const existingArray = Array.isArray(existing) ? existing : [];
     return submitted.map((item, index) => restoreRedactedMcpConfig(item, existingArray[index]));
@@ -252,7 +280,10 @@ export function writeScopedMcpConfig(args: { roomId: string; memberId?: string; 
 
 function collectSecretLiterals(value: unknown, key?: string, out: string[] = []): string[] {
   if (typeof value === "string" && key && (SECRET_KEY_RE.test(key) || SECRET_OBJECT_KEYS.has(key))) out.push(value);
-  if (Array.isArray(value)) value.forEach((item) => collectSecretLiterals(item, key, out));
+  if (Array.isArray(value)) {
+    if (key === "args") mapArgumentSecrets(value, secret => { out.push(secret); return secret; });
+    value.forEach((item) => collectSecretLiterals(item, key, out));
+  }
   else if (isRecord(value)) {
     for (const [childKey, childValue] of Object.entries(value)) collectSecretLiterals(childValue, key && SECRET_OBJECT_KEYS.has(key) ? key : childKey, out);
   }
@@ -261,7 +292,7 @@ function collectSecretLiterals(value: unknown, key?: string, out: string[] = [])
 
 export function sanitizeMcpError(error: unknown, serverConfig?: unknown): string {
   let text = error instanceof Error ? error.message : String(error ?? "Unknown MCP error");
-  for (const secret of collectSecretLiterals(serverConfig)) {
+  for (const secret of collectSecretLiterals(serverConfig).sort((a, b) => b.length - a.length)) {
     if (secret) text = text.split(secret).join(MCP_REDACTED_VALUE);
   }
   text = text.replace(/Bearer\s+[^\s,;]+/gi, `Bearer ${MCP_REDACTED_VALUE}`);

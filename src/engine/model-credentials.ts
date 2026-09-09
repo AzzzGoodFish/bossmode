@@ -105,6 +105,7 @@ type ModelDiscoveredMetadata = {
 
 type OAuthLoginJob = OAuthLoginJobPublic & {
   profileInput: ModelCredentialProfileInput & { id?: string };
+  profileRevision: number | null;
   inputWaiter?: OAuthInputWaiter;
   abortController: AbortController;
   ready: Promise<void>;
@@ -347,8 +348,7 @@ class ProfileCredentialStore implements CredentialStore {
     await previous;
     try {
       const repo = credentialRepository();
-      const profile = getModelCredentialProfile(this.profileId);
-      const revision = repo.revision(this.profileId);
+      const { profile, revision } = repo.snapshot(this.profileId);
       const current = profile?.enabled && profile.providerSlug === this.providerSlug ? authEntry(profile) as Credential | undefined : undefined;
       const next = await fn(current);
       if (revision === null) return this.read(providerId);
@@ -499,40 +499,42 @@ function resolveApiKeyForSave(valid: ModelCredentialProfileInput, existing?: Mod
 }
 
 export function saveModelCredentialProfile(input: ModelCredentialProfileInput & { id?: string }): PublicModelCredentialProfile {
-  const profiles = loadModelCredentialProfiles();
-  const existing = input.id ? profiles.find((p) => p.id === input.id) : undefined;
-  const valid = validateInput(input, existing);
-  const allowsDuplicateProvider = valid.profileKind === "builtin_provider";
-  const duplicate = profiles.find((p) => p.providerSlug === valid.providerSlug && p.id !== input.id && (!allowsDuplicateProvider || (p.profileKind ?? "custom_endpoint") !== "builtin_provider"));
-  if (duplicate) throw new Error(`Provider slug already exists: ${valid.providerSlug}`);
-  const ts = now();
-  const profile: ModelCredentialProfile = {
-    id: input.id || randomUUID().slice(0, 8),
-    profileKind: valid.profileKind,
-    name: valid.name,
-    providerSlug: valid.providerSlug,
-    protocol: valid.protocol,
-    baseUrl: valid.baseUrl,
-    authType: valid.authType,
-    apiKey: valid.authType === "api_key" ? resolveApiKeyForSave(valid, existing) : undefined,
-    oauthProviderId: valid.authType === "oauth" ? valid.oauthProviderId : undefined,
-    oauthCredentials: valid.authType === "oauth" ? (valid.oauthCredentials ?? existing?.oauthCredentials) : undefined,
-    requestProfile: valid.requestProfile,
-    authHeader: valid.authHeader,
-    headers: valid.headers ?? existing?.headers,
-    enabled: valid.enabled ?? existing?.enabled ?? true,
-    isDefault: valid.isDefault ?? existing?.isDefault ?? false,
-    models: valid.models,
-    modelCustomizations: valid.modelCustomizations,
-    createdAt: existing?.createdAt ?? ts,
-    updatedAt: ts,
-  };
-  const replaced = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
-  const next = profile.isDefault
-    ? replaced.map((p) => p.id !== profile.id && p.providerSlug === profile.providerSlug ? { ...p, isDefault: false } : p)
-    : replaced;
-  writeStore(next);
-  return sanitizeProfile(profile);
+  return getDatabase().transaction(() => {
+    const profiles = loadModelCredentialProfiles();
+    const existing = input.id ? profiles.find((p) => p.id === input.id) : undefined;
+    const valid = validateInput(input, existing);
+    const allowsDuplicateProvider = valid.profileKind === "builtin_provider";
+    const duplicate = profiles.find((p) => p.providerSlug === valid.providerSlug && p.id !== input.id && (!allowsDuplicateProvider || (p.profileKind ?? "custom_endpoint") !== "builtin_provider"));
+    if (duplicate) throw new Error(`Provider slug already exists: ${valid.providerSlug}`);
+    const ts = now();
+    const profile: ModelCredentialProfile = {
+      id: input.id || randomUUID().slice(0, 8),
+      profileKind: valid.profileKind,
+      name: valid.name,
+      providerSlug: valid.providerSlug,
+      protocol: valid.protocol,
+      baseUrl: valid.baseUrl,
+      authType: valid.authType,
+      apiKey: valid.authType === "api_key" ? resolveApiKeyForSave(valid, existing) : undefined,
+      oauthProviderId: valid.authType === "oauth" ? valid.oauthProviderId : undefined,
+      oauthCredentials: valid.authType === "oauth" ? (valid.oauthCredentials ?? existing?.oauthCredentials) : undefined,
+      requestProfile: valid.requestProfile,
+      authHeader: valid.authHeader,
+      headers: valid.headers ?? existing?.headers,
+      enabled: valid.enabled ?? existing?.enabled ?? true,
+      isDefault: valid.isDefault ?? existing?.isDefault ?? false,
+      models: valid.models,
+      modelCustomizations: valid.modelCustomizations,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
+    };
+    const replaced = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
+    const next = profile.isDefault
+      ? replaced.map((p) => p.id !== profile.id && p.providerSlug === profile.providerSlug ? { ...p, isDefault: false } : p)
+      : replaced;
+    writeStore(next);
+    return sanitizeProfile(profile);
+  });
 }
 
 function nextBuiltinProfileName(providerSlug: string, displayName: string): string {
@@ -547,36 +549,40 @@ function nextBuiltinProfileName(providerSlug: string, displayName: string): stri
 }
 
 export function connectBuiltinProviderApiKey(input: ConnectApiKeyRequest): PublicModelCredentialProfile {
-  const providerSlug = input.providerSlug?.trim();
-  validateSlug(providerSlug || "");
-  if (!input.apiKey?.trim()) throw new Error("apiKey is required");
-  const provider = getBuiltinProvider(providerSlug);
-  if (!provider) throw new Error(`Unsupported built-in provider: ${providerSlug}`);
-  if (!provider.authModes.includes("api_key")) throw new Error(`Provider ${providerSlug} does not support API key auth`);
+  return getDatabase().transaction(() => {
+    const providerSlug = input.providerSlug?.trim();
+    validateSlug(providerSlug || "");
+    if (!input.apiKey?.trim()) throw new Error("apiKey is required");
+    const provider = getBuiltinProvider(providerSlug);
+    if (!provider) throw new Error(`Unsupported built-in provider: ${providerSlug}`);
+    if (!provider.authModes.includes("api_key")) throw new Error(`Provider ${providerSlug} does not support API key auth`);
 
-  const baseUrlOverride = normalizeOptionalBaseUrl(input.baseUrlOverride);
-  const hasExistingSameProviderProfile = loadModelCredentialProfiles().some((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
-  return saveModelCredentialProfile({
-    profileKind: "builtin_provider",
-    name: input.name?.trim() || nextBuiltinProfileName(providerSlug, provider.displayName),
-    providerSlug,
-    protocol: protocolForBuiltinProvider(providerSlug),
-    baseUrl: baseUrlForBuiltinProvider(providerSlug, baseUrlOverride),
-    authType: "api_key",
-    apiKey: input.apiKey,
-    requestProfile: "standard",
-    enabled: true,
-    isDefault: input.isDefault ?? !hasExistingSameProviderProfile,
-    models: modelsForBuiltinProvider(providerSlug, baseUrlOverride),
+    const baseUrlOverride = normalizeOptionalBaseUrl(input.baseUrlOverride);
+    const hasExistingSameProviderProfile = loadModelCredentialProfiles().some((p) => p.providerSlug === providerSlug && (p.profileKind ?? "custom_endpoint") === "builtin_provider");
+    return saveModelCredentialProfile({
+      profileKind: "builtin_provider",
+      name: input.name?.trim() || nextBuiltinProfileName(providerSlug, provider.displayName),
+      providerSlug,
+      protocol: protocolForBuiltinProvider(providerSlug),
+      baseUrl: baseUrlForBuiltinProvider(providerSlug, baseUrlOverride),
+      authType: "api_key",
+      apiKey: input.apiKey,
+      requestProfile: "standard",
+      enabled: true,
+      isDefault: input.isDefault ?? !hasExistingSameProviderProfile,
+      models: modelsForBuiltinProvider(providerSlug, baseUrlOverride),
+    });
   });
 }
 
 export function deleteModelCredentialProfile(id: string): boolean {
-  const profiles = loadModelCredentialProfiles();
-  const next = profiles.filter((p) => p.id !== id);
-  if (next.length === profiles.length) return false;
-  writeStore(next);
-  return true;
+  return getDatabase().transaction(() => {
+    const profiles = loadModelCredentialProfiles();
+    const next = profiles.filter((p) => p.id !== id);
+    if (next.length === profiles.length) return false;
+    writeStore(next);
+    return true;
+  });
 }
 
 function createDeferred(): { promise: Promise<void>; resolve: () => void } {
@@ -741,13 +747,18 @@ function startOAuthLogin(job: OAuthLoginJob): void {
     },
   }).then((credentials) => {
     if (job.status === "cancelled") return;
-    const saved = saveModelCredentialProfile({
-      ...job.profileInput,
-      id: job.profileId,
-      authType: "oauth",
-      oauthProviderId: job.providerId,
-      oauthCredentials: sanitizeOAuthCredentials(credentials),
-      apiKey: undefined,
+    const saved = getDatabase().transaction(() => {
+      if (job.profileId && credentialRepository().revision(job.profileId) !== job.profileRevision) {
+        throw new Error("Model credential profile changed or was deleted during OAuth login. Start login again.");
+      }
+      return saveModelCredentialProfile({
+        ...job.profileInput,
+        id: job.profileId,
+        authType: "oauth",
+        oauthProviderId: job.providerId,
+        oauthCredentials: sanitizeOAuthCredentials(credentials),
+        apiKey: undefined,
+      });
     });
     job.status = "completed";
     job.profileId = saved.id;
@@ -771,6 +782,8 @@ function startOAuthLogin(job: OAuthLoginJob): void {
 }
 
 function createOAuthLoginJob(providerId: string, profileInput: ModelCredentialProfileInput & { id?: string }, profileId?: string): OAuthLoginJob {
+  const profileRevision = profileId ? credentialRepository().revision(profileId) : null;
+  if (profileId && profileRevision === null) throw new Error("profile not found");
   const nowTs = now();
   const ready = createDeferred();
   const job: OAuthLoginJob = {
@@ -782,12 +795,12 @@ function createOAuthLoginJob(providerId: string, profileInput: ModelCredentialPr
     createdAt: nowTs,
     updatedAt: nowTs,
     profileInput,
+    profileRevision,
     abortController: new AbortController(),
     ready: ready.promise,
     resolveReady: ready.resolve,
   };
   oauthJobs.set(job.id, job);
-  startOAuthLogin(job);
   return job;
 }
 
@@ -796,9 +809,12 @@ export async function startNativeOAuthConnection(input: StartOAuthConnectionRequ
   for (const forbidden of ["profile", "baseUrl", "protocol", "models", "authType"] as const) {
     if (raw[forbidden] !== undefined) throw new Error(`OAuth connection accepts only providerId, profileId, name, and requestProfile; unexpected ${forbidden}`);
   }
-  const { providerId, profileInput, profileId } = buildNativeOAuthProfileInput(input);
-  validateInput(profileInput, profileId ? getModelCredentialProfile(profileId) || undefined : undefined, { allowIncompleteOAuth: true });
-  const job = createOAuthLoginJob(providerId, profileInput, profileId);
+  const job = getDatabase().transaction(() => {
+    const { providerId, profileInput, profileId } = buildNativeOAuthProfileInput(input);
+    validateInput(profileInput, profileId ? getModelCredentialProfile(profileId) || undefined : undefined, { allowIncompleteOAuth: true });
+    return createOAuthLoginJob(providerId, profileInput, profileId);
+  });
+  startOAuthLogin(job);
   await Promise.race([job.ready, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
   return sanitizeOAuthJob(job);
 }
@@ -808,19 +824,22 @@ export async function startOAuthLoginJob(input: { profileId?: string; profile?: 
     return startNativeOAuthConnection({ providerId: input.providerId || "", profileId: input.profileId, name: input.name });
   }
 
-  const existing = input.profileId ? getModelCredentialProfile(input.profileId) : null;
-  const profileInput = {
-    ...(existing || {}),
-    ...(input.profile || {}),
-    id: input.profileId,
-    authType: "oauth" as const,
-    oauthProviderId: input.providerId || input.profile?.oauthProviderId || existing?.oauthProviderId,
-    apiKey: undefined,
-    oauthCredentials: undefined,
-  } as ModelCredentialProfileInput & { id?: string };
-  const providerId = validateOAuthProvider(profileInput.oauthProviderId);
-  validateInput(profileInput, existing || undefined, { allowIncompleteOAuth: true });
-  const job = createOAuthLoginJob(providerId, profileInput, input.profileId);
+  const job = getDatabase().transaction(() => {
+    const existing = input.profileId ? getModelCredentialProfile(input.profileId) : null;
+    const profileInput = {
+      ...(existing || {}),
+      ...(input.profile || {}),
+      id: input.profileId,
+      authType: "oauth" as const,
+      oauthProviderId: input.providerId || input.profile?.oauthProviderId || existing?.oauthProviderId,
+      apiKey: undefined,
+      oauthCredentials: undefined,
+    } as ModelCredentialProfileInput & { id?: string };
+    const providerId = validateOAuthProvider(profileInput.oauthProviderId);
+    validateInput(profileInput, existing || undefined, { allowIncompleteOAuth: true });
+    return createOAuthLoginJob(providerId, profileInput, input.profileId);
+  });
+  startOAuthLogin(job);
   await Promise.race([job.ready, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
   return sanitizeOAuthJob(job);
 }
@@ -1594,10 +1613,12 @@ export function normalizeLegacyCredentialImport(store: ModelCredentialStore, cat
 }
 
 function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }): ModelCredentialProfile[] {
-  const store = readStore();
-  const profiles = store.profiles.map(refreshBuiltinProviderProfile);
-  if (options.persist && profiles.some((p, i) => p !== store.profiles[i])) writeStore(profiles, store.migrations);
-  return profiles;
+  return getDatabase().transaction(() => {
+    const store = readStore();
+    const profiles = store.profiles.map(refreshBuiltinProviderProfile);
+    if (options.persist && profiles.some((p, i) => p !== store.profiles[i])) writeStore(profiles, store.migrations);
+    return profiles;
+  });
 }
 
 export interface RefreshModelCredentialProfileResult {
@@ -1619,12 +1640,15 @@ export async function refreshModelCredentialProfileModels(id: string): Promise<R
   if (!isBuiltinProviderProfile(existing)) throw new Error("Only built-in provider profiles can refresh models from catalog");
 
   const catalog = await refreshPiCatalogFromNetwork();
-  const profiles = refreshBuiltinProviderProfilesFromStore({ persist: false });
-  const profile = profiles.find((p) => p.id === id);
-  if (!profile) throw new Error("Model credential profile not found");
-  const refreshed = refreshBuiltinProviderProfile(profile);
-  const next = profiles.map((p) => p.id === id ? refreshed : p);
-  writeStore(next);
+  const refreshed = getDatabase().transaction(() => {
+    const profiles = refreshBuiltinProviderProfilesFromStore({ persist: false });
+    const profile = profiles.find((p) => p.id === id);
+    if (!profile) throw new Error("Model credential profile not found");
+    const refreshed = refreshBuiltinProviderProfile(profile);
+    const next = profiles.map((p) => p.id === id ? refreshed : p);
+    writeStore(next);
+    return refreshed;
+  });
   const status = getCatalogStatus();
   let catalogMessage: string | undefined;
   if (catalog.error) {
