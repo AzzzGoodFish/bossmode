@@ -3,23 +3,11 @@
  * 激活带背 log 提示 → member 用 query_room_messages 读到即清 → 下轮激活提示消失。
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { mockPromptFn, resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: inject hybrid (two-activation chain)", () => {
   let ts: TestServer;

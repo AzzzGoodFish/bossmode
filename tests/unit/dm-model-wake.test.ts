@@ -3,9 +3,9 @@
  * Changing an already-set model must NOT re-trigger.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestServer, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { createTestServer, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 const activateDmMember = vi.fn(async () => {});
 

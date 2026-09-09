@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { closeTestServer, createTestServer, getTestBossmodeDir, httpRequest, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { closeTestServer, createTestServer, getTestBossmodeDir, httpRequest, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
 const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function login(port: number): Promise<string> {
   const res = await jsonRequest(port, "POST", "/api/auth/login", { body: { username: "testuser", password: "testpass" } });

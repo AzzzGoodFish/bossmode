@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTestServer, closeTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupConfigMock, type TestServer } from "../helpers/test-server.js";
+import { createTestServer, closeTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace, type TestServer } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function setupRoomWithActivatedMember(name: string): Promise<{ ts: TestServer; token: string; roomId: string; memberId: string; scopeId: string }> {
   const ts = await createTestServer();

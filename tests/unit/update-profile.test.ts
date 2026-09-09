@@ -2,16 +2,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { setupConfigMock, getTestBossmodeDir } from "../helpers/test-server.js";
-setupConfigMock();
+import { setupTestWorkspace, getTestBossmodeDir, getTestWorkspace } from "../helpers/test-server.js";
+setupTestWorkspace();
 
 async function fixture() {
   const registry = await import("../../src/workspace/member-registry.js");
   const rooms = await import("../../src/workspace/room-store.js");
-  const { waitForProjectionInitialization } = await import("../../src/workspace/db/projection.js");
   const suffix = randomUUID().slice(0, 8);
   const own = registry.createMember({ name: `Self-${suffix}`, title: "Before" });
-  await waitForProjectionInitialization();
   const peer = registry.createMember({ name: `Peer-${suffix}` });
   const room = rooms.createRoom(`Room-${suffix}`, undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
@@ -34,8 +32,7 @@ describe("self-only update_profile", () => {
     expect(f.registry.getMember(f.own.id)!.updatedAt).toBe(saved.updatedAt);
     expect(await f.call("update_profile", { title: "" })).toMatchObject({ name, title: null, changed: true });
     expect(readFileSync(path, "utf8")).toBe(bytes);
-    const { resetDbCache } = await import("../../src/workspace/db/sqlite.js");
-    resetDbCache();
+    getTestWorkspace().reopen();
     expect(f.registry.getMember(f.own.id)).toMatchObject({ name });
     expect(f.registry.getMember(f.own.id)!.title).toBeUndefined();
   });
@@ -58,7 +55,7 @@ describe("self-only update_profile", () => {
   it("keeps room/DM/topic and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
     const f = await fixture();
     const { createTopic } = await import("../../src/workspace/topic-store.js");
-    const topic = createTopic({ roomId: f.room.id, title: "Identity", createdBy: f.own.id } as any);
+    const topic = createTopic({ roomId: f.room.id, title: "Identity", createdBy: f.own.id, anchorMessageId: "anchor" });
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
     const { loadScopeMessages, handleToolCallback } = await import("../../src/engine/tools.js");
     const scopes = [f.room.id, `dm:${f.own.id}`, `topic:${topic.id}`];
@@ -89,10 +86,10 @@ describe("self-only update_profile", () => {
 
   it("rolls back both fields when SQLite rejects the write, and one contender wins a collision", async () => {
     const f = await fixture();
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    openDb().exec("CREATE TEMP TRIGGER fail_profile BEFORE UPDATE ON members BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
+    const { getDatabase } = await import("../../src/storage/database.js");
+    getDatabase().exec("CREATE TEMP TRIGGER fail_profile BEFORE UPDATE ON members BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
     try { expect(await f.call("update_profile", { name: "failed-name", title: "failed-title" })).toMatchObject({ ok: false, code: "persistence_failed" }); }
-    finally { openDb().exec("DROP TRIGGER fail_profile"); }
+    finally { getDatabase().exec("DROP TRIGGER fail_profile"); }
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     const target = `Collision-${randomUUID()}`;
     const { handleToolCallback } = await import("../../src/engine/tools.js");

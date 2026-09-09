@@ -10,32 +10,19 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import type { Room } from "../../src/shared/types.js";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
-  configureMockMembersForRoom,
+  createMockRoom,
 } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 
 import { resetMocks, setMockPromptFn, mockAbortFn, mockSteerFn } from "../helpers/mock-runtime.js";
 
-setupConfigMock();
-
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM", skills: [], tags: [] },
-    { name: "qa", model: "mock-model", description: "QA", skills: [], tags: [] },
-  ]),
-}));
+setupTestWorkspace();
 
 describe("Acceptance: urgent ! interrupt", () => {
   let ts: TestServer;
@@ -56,14 +43,7 @@ describe("Acceptance: urgent ! interrupt", () => {
   });
 
   async function createRoom(name: string, members: string[]): Promise<Room> {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
-    });
-    expect(res.status).toBe(200);
-    const room = JSON.parse(res.body);
-    await configureMockMembersForRoom(room.id, members);
-    return room;
+    return createMockRoom(ts.port, token, name, members);
   }
 
   async function sendMessage(roomId: string, content: string) {

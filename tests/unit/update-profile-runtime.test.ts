@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { setupConfigMock } from "../helpers/test-server.js";
+import { setupTestWorkspace } from "../helpers/test-server.js";
 import { MockAgentHandle } from "../helpers/mock-runtime.js";
-setupConfigMock();
+setupTestWorkspace();
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
@@ -17,7 +17,7 @@ it("renames a running member across room/DM/topic without abort; next prompt ref
   const peer = reg.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const room = roomStore.createRoom("Runtime identity", undefined, []);
   roomStore.stampGlobalMemberIds(room.id, [own.id, peer.id]);
-  const topic = topics.createTopic({ roomId: room.id, title: "Runtime topic", createdBy: own.name, seedMode: "fresh" } as any);
+  const topic = topics.createTopic({ roomId: room.id, title: "Runtime topic", createdBy: own.name, seedMode: "fresh", anchorMessageId: "anchor" });
   const started = deferred(), release = deferred();
   const built: Array<{ opts: any; handle: any }> = [];
   let hold = true;
@@ -104,7 +104,7 @@ it.each(["room", "topic"])("keeps queued %s trigger and cursor on IDs when the o
   const peer = reg.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
   const room = rooms.createRoom("Queued identity", undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
-  const topic = topics.createTopic({ roomId: room.id, title: "Queued topic", createdBy: own.name, seedMode: "fresh" } as any);
+  const topic = topics.createTopic({ roomId: room.id, title: "Queued topic", createdBy: own.name, seedMode: "fresh", anchorMessageId: "anchor" });
   const scope = kind === "room" ? room.id : `topic:${topic.id}`;
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any;

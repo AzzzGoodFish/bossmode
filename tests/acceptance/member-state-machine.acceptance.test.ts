@@ -13,37 +13,20 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
-  configureMockMembersForRoom,
+  createMockRoom,
 } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 
 import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
-// setupConfigMock must be called at module level (before server imports)
-setupConfigMock();
-
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name,
-    model: "claude-sonnet-4-20250514",
-    description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`,
-    skills: [],
-    tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "claude-sonnet-4-20250514", description: "PM", skills: [], tags: [] },
-    { name: "developer", model: "claude-sonnet-4-20250514", description: "Dev", skills: [], tags: [] },
-  ]),
-}));
+// setupTestWorkspace must be called at module level (before server imports)
+setupTestWorkspace();
 
 describe("Acceptance: Member State Machine (0.8.7)", () => {
   let ts: TestServer;
@@ -66,14 +49,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   async function createRoom(name: string, members: string[] = ["pm"]): Promise<Room> {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
-    });
-    expect(res.status).toBe(200);
-    const room = JSON.parse(res.body);
-    await configureMockMembersForRoom(room.id, members);
-    return room;
+    return createMockRoom(ts.port, token, name, members);
   }
 
   async function sendMessage(roomId: string, content: string): Promise<RoomMessage> {

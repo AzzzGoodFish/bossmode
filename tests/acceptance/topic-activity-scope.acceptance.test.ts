@@ -3,31 +3,19 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
-  configureMockMembersForRoom,
+  createMockRoom,
   MOCK_MEMBER_MODEL,
   MOCK_MEMBER_CREDENTIAL_ID,
 } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { resetMocks } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: topic activity scope", () => {
   let ts: TestServer;
@@ -49,13 +37,7 @@ describe("Acceptance: topic activity scope", () => {
   });
 
   it("unactivated topic events are empty; after @ only topic events appear; room history stays in the room", async () => {
-    const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name: "act-scope", cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
-    });
-    expect(roomRes.status).toBe(200);
-    const room = JSON.parse(roomRes.body);
-    await configureMockMembersForRoom(room.id, ["pm"]);
+    const room = await createMockRoom(ts.port, token, "act-scope", ["pm"]);
 
     await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
       token, body: { content: "@pm room only work" },

@@ -1,7 +1,7 @@
 import { it, expect } from "vitest";
 import { WebSocket } from "ws";
-import { createTestServer, closeTestServer, setupConfigMock, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
-setupConfigMock();
+import { createTestServer, closeTestServer, setupTestWorkspace, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+setupTestWorkspace();
 
 it("global PATCH publishes committed profile to authenticated clients and rejects the old room rename path", async () => {
   const server = await createTestServer();

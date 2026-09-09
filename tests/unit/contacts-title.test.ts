@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createTestServer, getTestBossmodeDir, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { createTestServer, getTestBossmodeDir, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function login(port: number): Promise<string> {
   const res = await jsonRequest(port, "POST", "/api/auth/login", {

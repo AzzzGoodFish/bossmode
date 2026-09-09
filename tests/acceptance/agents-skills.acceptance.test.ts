@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 
 // Mock pi-mono (required by imports but not exercised in CRUD tests)
@@ -32,7 +32,7 @@ vi.mock("@mariozechner/pi-agent-core", () => ({
 vi.mock("@mariozechner/pi-ai", () => ({ getModel: vi.fn().mockReturnValue({ id: "mock" }) }));
 vi.mock("@mariozechner/pi-coding-agent", () => ({ createCodingTools: vi.fn().mockReturnValue([]) }));
 
-setupConfigMock();
+setupTestWorkspace();
 
 // Unique name generator to avoid cross-test conflicts
 let _counter = 0;
@@ -70,139 +70,6 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     const tagsYaml = tags.length > 0 ? `[${tags.join(", ")}]` : "[]";
     return `---\nname: ${name}\ndescription: "${desc}"\ntags: ${tagsYaml}\n---\n\n# ${name}\n\nSkill content for ${name}.`;
   }
-
-  // ══════════════════════════════════════════
-  // Agent CRUD
-  // ══════════════════════════════════════════
-
-  describe.skip("T1.1: Agent list (templates retired)", () => {
-    it("returns 500 instead of fake empty when the Agent authority is unreadable, then recovers", async () => {
-      const agentsDir = join(getTestBossmodeDir(), "agents");
-      const backup = `${agentsDir}-backup`;
-      renameSync(agentsDir, backup);
-      writeFileSync(agentsDir, "not a directory", "utf8");
-      try {
-        const failed = await jsonRequest(ts.port, "GET", "/api/agents", { token });
-        expect(failed.status).toBe(500);
-        expect(JSON.parse(failed.body).error).toBe("Couldn’t load Agent templates");
-      } finally {
-        unlinkSync(agentsDir);
-        renameSync(backup, agentsDir);
-      }
-      const recovered = await jsonRequest(ts.port, "GET", "/api/agents", { token });
-      expect(recovered.status).toBe(200);
-      expect(Array.isArray(JSON.parse(recovered.body))).toBe(true);
-    });
-
-    it("returns 500 rather than a partial list when one Agent file is invalid", async () => {
-      const invalidPath = join(getTestBossmodeDir(), "agents", "invalid-authority.md");
-      writeFileSync(invalidPath, "---\nname: [unterminated\n---\nbad", "utf8");
-      try {
-        const failed = await jsonRequest(ts.port, "GET", "/api/agents", { token });
-        expect(failed.status).toBe(500);
-      } finally {
-        unlinkSync(invalidPath);
-      }
-      expect((await jsonRequest(ts.port, "GET", "/api/agents", { token })).status).toBe(200);
-    });
-
-    it("GET /api/agents returns agents with skills/tags", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/agents", { token });
-      expect(res.status).toBe(200);
-      const agents = JSON.parse(res.body);
-      expect(Array.isArray(agents)).toBe(true);
-      // Each agent should have name, description, model, skills, tags (no systemPrompt in list)
-      if (agents.length > 0) {
-        const a = agents[0];
-        expect(a.name).toBeDefined();
-        expect(a.description).toBeDefined();
-        expect(Array.isArray(a.skills)).toBe(true);
-        expect(Array.isArray(a.tags)).toBe(true);
-        expect(a.systemPrompt).toBeUndefined(); // not in list
-      }
-    });
-  });
-
-  describe.skip("T1.2: Agent create (templates retired)", () => {
-    it("POST /api/agents creates agent from markdown", async () => {
-      const name = uid("create-agent");
-      const content = agentMd(name, { description: "A test agent", tags: ["test"] });
-      const res = await jsonRequest(ts.port, "POST", "/api/agents", {
-        token,
-        body: { name, content },
-      });
-      expect(res.status).toBe(200);
-      const agent = JSON.parse(res.body);
-      expect(agent.name).toBe(name);
-      expect(agent.description).toBe("A test agent");
-      expect(agent.tags).toContain("test");
-    });
-  });
-
-  describe.skip("T1.3: Agent detail + edit (templates retired)", () => {
-    let detailName: string;
-
-    it("GET /api/agents/:name returns full definition with systemPrompt", async () => {
-      detailName = uid("detail-agent");
-      const content = agentMd(detailName, { description: "Detail test" });
-      await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name: detailName, content } });
-
-      const res = await jsonRequest(ts.port, "GET", `/api/agents/${detailName}`, { token });
-      expect(res.status).toBe(200);
-      const agent = JSON.parse(res.body);
-      expect(agent.name).toBe(detailName);
-      expect(agent.systemPrompt).toContain(`You are ${detailName}`);
-    });
-
-    it("PUT /api/agents/:name updates agent", async () => {
-      const updatedContent = agentMd(detailName, { description: "Updated description", tags: ["updated"] });
-      const res = await jsonRequest(ts.port, "PUT", `/api/agents/${detailName}`, {
-        token,
-        body: { content: updatedContent },
-      });
-      expect(res.status).toBe(200);
-
-      const getRes = await jsonRequest(ts.port, "GET", `/api/agents/${detailName}`, { token });
-      const agent = JSON.parse(getRes.body);
-      expect(agent.description).toBe("Updated description");
-      expect(agent.tags).toContain("updated");
-    });
-  });
-
-  describe.skip("T1.4: Agent delete (templates retired)", () => {
-    it("DELETE /api/agents/:name removes agent", async () => {
-      const name = uid("delete-agent");
-      const content = agentMd(name);
-      await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name, content } });
-
-      const delRes = await jsonRequest(ts.port, "DELETE", `/api/agents/${name}`, { token });
-      expect(delRes.status).toBe(200);
-
-      const getRes = await jsonRequest(ts.port, "GET", `/api/agents/${name}`, { token });
-      expect(getRes.status).toBe(404);
-    });
-  });
-
-  describe.skip("T1.11: Agent name conflict (retired)", () => {
-    it("POST /api/agents with duplicate name returns 409", async () => {
-      const name = uid("dupe-agent");
-      const content = agentMd(name);
-      await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name, content } });
-
-      const res = await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name, content } });
-      expect(res.status).toBe(409);
-    });
-  });
-
-  describe.skip("T1.7: Agent templates (retired)", () => {
-    it("GET /api/agents/templates returns template list", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/agents/templates", { token });
-      expect(res.status).toBe(200);
-      const templates = JSON.parse(res.body);
-      expect(Array.isArray(templates)).toBe(true);
-      // Should have prebuilt templates (PM, Architect, Developer, QA, Designer)
-    });
-  });
 
   // ══════════════════════════════════════════
   // Skill CRUD
@@ -265,91 +132,12 @@ describe("Acceptance: Agent & Skill CRUD (v2 Phase 1a)", () => {
     });
   });
 
-  describe.skip("T2.4: Skill bind to agent (templates retired)", () => {
-    it("creating agent with skills list binds skills", async () => {
-      const sName = uid("bind-skill");
-      await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
-
-      const aName = uid("skilled-agent");
-      const content = agentMd(aName, { skills: [sName] });
-      const res = await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name: aName, content } });
-      expect(res.status).toBe(200);
-
-      const getRes = await jsonRequest(ts.port, "GET", `/api/agents/${aName}`, { token });
-      const agent = JSON.parse(getRes.body);
-      expect(agent.skills).toContain(sName);
-    });
-  });
-
-  describe.skip("T2.5: Skill unbind (templates retired)", () => {
-    it("updating agent with empty skills removes binding", async () => {
-      const sName = uid("unbind-skill");
-      await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
-
-      const aName = uid("unbind-agent");
-      await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name: aName, content: agentMd(aName, { skills: [sName] }) } });
-
-      // Unbind by updating with empty skills
-      const updatedContent = agentMd(aName, { skills: [] });
-      const res = await jsonRequest(ts.port, "PUT", `/api/agents/${aName}`, { token, body: { content: updatedContent } });
-      expect(res.status).toBe(200);
-
-      const getRes = await jsonRequest(ts.port, "GET", `/api/agents/${aName}`, { token });
-      const agent = JSON.parse(getRes.body);
-      expect(agent.skills).toEqual([]);
-    });
-  });
-
   describe("T2.7: Skill templates", () => {
     it("GET /api/skills/templates returns template list", async () => {
       const res = await jsonRequest(ts.port, "GET", "/api/skills/templates", { token });
       expect(res.status).toBe(200);
       const templates = JSON.parse(res.body);
       expect(Array.isArray(templates)).toBe(true);
-    });
-  });
-
-  describe.skip("T2.8: Skill delete with agent references (templates retired)", () => {
-    it("DELETE /api/skills/:name removes skill and unbinds from agents", async () => {
-      const sName = uid("del-skill");
-      await jsonRequest(ts.port, "POST", "/api/skills", { token, body: { name: sName, content: skillMd(sName) } });
-
-      const aName = uid("ref-agent");
-      await jsonRequest(ts.port, "POST", "/api/agents", { token, body: { name: aName, content: agentMd(aName, { skills: [sName] }) } });
-
-      // Delete the skill
-      const delRes = await jsonRequest(ts.port, "DELETE", `/api/skills/${sName}`, { token });
-      expect(delRes.status).toBe(200);
-
-      // Verify skill gone
-      const skillRes = await jsonRequest(ts.port, "GET", `/api/skills/${sName}`, { token });
-      expect(skillRes.status).toBe(404);
-
-      // Verify agent's skills list no longer references it
-      const agentRes = await jsonRequest(ts.port, "GET", `/api/agents/${aName}`, { token });
-      const agent = JSON.parse(agentRes.body);
-      expect(agent.skills).not.toContain(sName);
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // Edge cases
-  // ══════════════════════════════════════════
-
-  describe.skip("Edge: nonexistent resources (agent routes retired)", () => {
-    it("GET /api/agents/nonexistent returns 404", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/agents/no-such-agent", { token });
-      expect(res.status).toBe(404);
-    });
-
-    it("GET /api/skills/nonexistent returns 404", async () => {
-      const res = await jsonRequest(ts.port, "GET", "/api/skills/no-such-skill", { token });
-      expect(res.status).toBe(404);
-    });
-
-    it("DELETE /api/agents/nonexistent returns 404", async () => {
-      const res = await jsonRequest(ts.port, "DELETE", "/api/agents/no-such-agent", { token });
-      expect(res.status).toBe(404);
     });
   });
 });

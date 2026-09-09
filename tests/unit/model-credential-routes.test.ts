@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { createTestServer, closeTestServer, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { createTestServer, closeTestServer, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function login(port: number): Promise<string> {
   const res = await jsonRequest(port, "POST", "/api/auth/login", { body: { username: "testuser", password: "testpass" } });

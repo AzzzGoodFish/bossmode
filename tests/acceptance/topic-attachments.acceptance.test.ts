@@ -2,23 +2,11 @@
  * Topic attachments: persist on POST messages + first-message create, never land in the room stream.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, httpRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, httpRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { resetMocks } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: topic attachments", () => {
   let ts: TestServer;

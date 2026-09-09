@@ -3,9 +3,9 @@
  * no compat routes, no Task linear fields, no sync dispatch.
  */
 import { describe, expect, it } from "vitest";
-import { createTestServer, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { createTestServer, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function login(port: number): Promise<string> {
   const res = await jsonRequest(port, "POST", "/api/auth/login", {

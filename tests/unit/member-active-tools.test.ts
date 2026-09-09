@@ -5,10 +5,10 @@ import {
   getTestBossmodeDir,
   jsonRequest,
   loginAndGetToken,
-  setupConfigMock,
+  setupTestWorkspace,
 } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 function drafts(names: string[]) {
   return names.map((name) => ({ agent: name === "dev" ? "developer" : name, name }));
@@ -22,7 +22,6 @@ describe("member active tools", () => {
   });
 
   it("returns empty session when member has no running instance", async () => {
-    vi.resetModules();
     const roomStore = await import("../../src/workspace/room-store.js");
     const agentManager = await import("../../src/engine/agent-manager.js");
     const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), drafts(["pm"]));

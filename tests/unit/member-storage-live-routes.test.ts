@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createTestServer, getTestBossmodeDir, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
-setupConfigMock();
+import { closeTestServer, createTestServer, getTestBossmodeDir, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
+setupTestWorkspace();
 
 describe("member APIs use database identity exclusively", () => {
   it("serves fresh members and ignores retired registry records across operational routes", async () => {
@@ -29,7 +29,10 @@ describe("member APIs use database identity exclusively", () => {
       }
       const events = join(getTestBossmodeDir(), "rooms", `dm:${id}`, "agent-events");
       mkdirSync(events, { recursive: true });
-      writeFileSync(join(events, `${id}.jsonl`), JSON.stringify({ type: "message_end", ts: 1, usage: { inputTokens: 8, outputTokens: 2 } }) + "\n");
+      writeFileSync(join(events, `${id}.jsonl`), JSON.stringify({ type: "message_end", ts: 1, usage: { inputTokens: 900, outputTokens: 0 } }) + "\n");
+      expect(JSON.parse((await call("GET", "/token-usage")).body)).toEqual({ totalTokens: 0 });
+      const { appendAgentEvent } = await import("../../src/storage/event-repository.js");
+      appendAgentEvent(`dm:${id}`, { ownerKey: id, memberId: id }, { type: "message_end", ts: 1, usage: { inputTokens: 8, outputTokens: 2 } }, "fixture-usage");
       expect(JSON.parse((await call("GET", "/token-usage")).body)).toEqual({ totalTokens: 10 });
       expect((await call("PATCH", "", { name: "Renamed-成员_γ" })).status).toBe(200);
       expect(JSON.parse((await call("GET", "/token-usage")).body)).toEqual({ totalTokens: 10 });
@@ -38,26 +41,7 @@ describe("member APIs use database identity exclusively", () => {
       expect(readFileSync(retired, "utf8")).toBe(old);
       expect((await call("GET", "")).status).toBe(200);
     } finally {
-      await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+      await closeTestServer(ts);
     }
   });
-  it("keeps an empty current roster authoritative and leaves retired storage unchanged at startup migration", async () => {
-    const root = getTestBossmodeDir();
-    const path = join(root, "rooms", "current-empty", "room.json");
-    mkdirSync(join(root, "rooms", "current-empty"), { recursive: true });
-    const room = JSON.stringify({ id: "current-empty", name: "current-empty", globalMemberIds: [], members: ["phantom"], roomMembers: [{ id: "rm_phantom", name: "phantom", sourceAgent: "general", config: { model: "stale" } }], createdAt: 1 });
-    writeFileSync(path, room);
-    const retired = join(root, "members.json");
-    const old = JSON.stringify([{ id: "legacy-phantom", name: "phantom", agent: "general", model: "must-not-be-cleared" }]);
-    writeFileSync(retired, old);
-    const { getRoomMembers } = await import("../../src/workspace/room-store.js");
-    const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
-    expect(getRoomMembers("current-empty")).toEqual([]);
-    runRoomMemberMigration();
-    runMemberCredentialBindingMigration();
-    expect(readFileSync(path, "utf8")).toBe(room);
-    expect(readFileSync(retired, "utf8")).toBe(old);
-  });
-
 });

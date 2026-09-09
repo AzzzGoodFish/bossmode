@@ -1,21 +1,8 @@
-/**
- * 0.20 flagship ② — unified member panel scope-addressed APIs (acceptance).
- *
- * The DM panel is the room's MemberConfigPanel fed by members-shaped routes
- * with a scope parameter (?scope=room:<id>|dm:<memberId>). These tests pin:
- * - GET /api/members/:id/stats?scope= — reads the scope's stats artifact
- * - GET /api/members/:id/events?scope= — reads the scope's event stream
- * - GET /api/members/:id/memory?layer&scope= — rich payload (revision/hash/
- *   budget header/parsed) matching the room members routes
- * - Model config is single-path (design-model-switch-single-path-v1): the
- *   /config route is deleted; PATCH /api/members/:id is the only entry.
- *   unifiedModel fields go global, otherwise the scope override
- */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
@@ -26,21 +13,9 @@ import type { TestServer } from "../helpers/test-server.js";
 
 import { resetMocks } from "../helpers/mock-runtime.js";
 
+setupTestWorkspace();
 
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
-
-describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
+describe("Authenticated member panel scope APIs", () => {
   let ts: TestServer;
   let token: string;
 
@@ -65,78 +40,51 @@ describe("Acceptance: panel scope-addressed APIs (0.20 flagship ②)", () => {
     });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    return { memberId: body.member?.memberId || body.memberId || body.member?.id, name };
+    expect(typeof body.member.memberId).toBe("string");
+    return { memberId: body.member.memberId, name };
   }
 
-  it("stats route reads the dm scope artifact (rooms/dm:<id>/agent-events)", async () => {
-    const { memberId } = await createMember("statsdm");
-    const dir = getTestBossmodeDir();
-    const eventsDir = join(dir, "rooms", `dm:${memberId}`, "agent-events");
-    mkdirSync(eventsDir, { recursive: true });
-    writeFileSync(
-      join(eventsDir, `${memberId}.stats.json`),
-      JSON.stringify({ turns: 7, toolCalls: 3, activeMs: 4200, tokens: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0 }, cost: 0.5 }),
-      "utf-8",
-    );
-
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats?scope=${encodeURIComponent(`dm:${memberId}`)}`, { token });
-    expect(res.status).toBe(200);
-    const stats = JSON.parse(res.body);
-    expect(stats.turns).toBe(7);
-    expect(stats.cost).toBe(0.5);
-  });
-
-  it("stats route reads the room scope artifact via scope=room:<id>", async () => {
-    const { memberId } = await createMember("statsroom");
-    const dir = getTestBossmodeDir();
-    const eventsDir = join(dir, "rooms", "room-xyz", "agent-events");
-    mkdirSync(eventsDir, { recursive: true });
-    writeFileSync(
-      join(eventsDir, `${memberId}.stats.json`),
-      JSON.stringify({ turns: 2, toolCalls: 1, activeMs: 100, tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, cost: 0.01 }),
-      "utf-8",
-    );
-
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats?scope=${encodeURIComponent("room:room-xyz")}`, { token });
-    expect(res.status).toBe(200);
-    expect(JSON.parse(res.body).turns).toBe(2);
-  });
-
-  it("events route pages the dm scope event stream", async () => {
-    const { memberId } = await createMember("eventsdm");
-    const dir = getTestBossmodeDir();
-    const eventsDir = join(dir, "rooms", `dm:${memberId}`, "agent-events");
-    mkdirSync(eventsDir, { recursive: true });
-    const events = [
-      { type: "user_steer", text: "hello", ts: 1000 },
-      { type: "agent_reply", text: "hi there", ts: 2000 },
-      { type: "system", text: "note", ts: 3000 },
+  it("serves scoped SQL stats and activity pages for room, DM and topic, ignoring old files", async () => {
+    const { memberId } = await createMember("panel-stats");
+    const created = await jsonRequest(ts.port, "POST", "/api/rooms", { token, body: { name: "Panel", memberIds: [memberId] } });
+    expect(created.status).toBe(200);
+    const room = JSON.parse(created.body);
+    const { createTopic } = await import("../../src/workspace/topic-store.js");
+    const topic = createTopic({ roomId: room.id, title: "Panel topic", anchorMessageId: "anchor", seedMode: "fresh" });
+    const { appendAgentEvent, readAgentEvents } = await import("../../src/storage/event-repository.js");
+    const scopes = [
+      { id: room.id, api: `room:${room.id}`, path: `rooms/${room.id}` },
+      { id: `dm:${memberId}`, api: `dm:${memberId}`, path: `rooms/dm:${memberId}` },
+      { id: `topic:${topic.id}`, api: `topic:${topic.id}`, path: `rooms/${room.id}/topics/${topic.id}` },
     ];
-    writeFileSync(join(eventsDir, `${memberId}.jsonl`), events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf-8");
-
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/events?scope=${encodeURIComponent(`dm:${memberId}`)}&limit=50`, { token });
-    expect(res.status).toBe(200);
-    const page = JSON.parse(res.body);
-    expect(Array.isArray(page.events)).toBe(true);
-    expect(page.events.length).toBe(3);
-    expect(page.events.some((e: any) => e.text === "hi there")).toBe(true);
-  });
-
-  it.skip("memory route principles/mainline retired", async () => {
-    const { memberId } = await createMember("memrich");
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/memory?layer=principles&scope=${encodeURIComponent(`dm:${memberId}`)}`, { token });
-    expect(res.status).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body).toHaveProperty("content");
-    expect(body).toHaveProperty("revision");
-    expect(body).toHaveProperty("contentHash");
-    expect(body).toHaveProperty("budgetHeader");
-    // Empty asset → starter template suggested (same contract as the room route)
-    expect(body.suggestedTemplate).toBeTruthy();
-
-    const main = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/memory?layer=mainline&scope=${encodeURIComponent(`dm:${memberId}`)}`, { token });
-    expect(main.status).toBe(200);
-    expect(JSON.parse(main.body)).toHaveProperty("parsed");
+    for (const [index, scope] of scopes.entries()) {
+      const value = index + 1;
+      const events = [
+        { type: "agent_start", ts: 100 },
+        { type: "message_end", ts: 200, usage: { inputTokens: value, outputTokens: value * 2, cost: value / 100 } },
+        { type: "agent_reply", ts: 300, text: `reply-${scope.id}` },
+        { type: "agent_end", ts: 400 },
+      ];
+      events.forEach((event, i) => appendAgentEvent(scope.id, { ownerKey: memberId, memberId }, event, `${scope.id}-${i}`));
+      const dir = join(getTestBossmodeDir(), scope.path, "agent-events");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${memberId}.stats.json`), "not-json");
+      writeFileSync(join(dir, `${memberId}.jsonl`), '{"type":"system","text":"poison"}\n');
+      const query = encodeURIComponent(scope.api);
+      const response = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats?scope=${query}`, { token });
+      expect(response.status, response.body).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({ turns: 1, cost: value / 100, tokens: { input: value, output: value * 2 } });
+      const result = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/events?scope=${query}&limit=2`, { token });
+      expect(result.status, result.body).toBe(200);
+      const page = JSON.parse(result.body);
+      expect(page).toMatchObject({ hasMore: true, nextBeforeSeq: 2 });
+      expect(page.events).toEqual([events[1], events[3]]);
+      const older = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/events?scope=${query}&limit=2&beforeSeq=${page.nextBeforeSeq}`, { token });
+      expect(older.status).toBe(200);
+      expect(JSON.parse(older.body)).toMatchObject({ events: [events[0]], hasMore: false, nextBeforeSeq: null });
+      // The activity filter must not discard the full non-activity event fact.
+      expect(readAgentEvents(scope.id, memberId)).toEqual(events);
+    }
   });
 
   it("model config is single-path: /config is gone, PATCH /:id writes global via the switch", async () => {

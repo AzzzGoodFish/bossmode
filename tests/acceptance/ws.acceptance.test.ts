@@ -9,12 +9,12 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import WebSocket from "ws";
-import { setupConfigMock, createTestServer, closeTestServer, loginAndGetToken } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { WsServerEvent } from "../../src/shared/types.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: WebSocket Infrastructure", () => {
   let ts: TestServer;

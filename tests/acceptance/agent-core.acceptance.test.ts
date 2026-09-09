@@ -18,7 +18,7 @@
  * is taken, cursors are updated, and WS events are emitted.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, configureMockMembersForRoom } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, createMockRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage, WsServerEvent } from "../../src/shared/types.js";
@@ -28,27 +28,7 @@ import type { Room, RoomMessage, WsServerEvent } from "../../src/shared/types.js
 import { mockPromptFn, mockSteerFn, resetMocks, setMockPromptFn, setMockIsWorking } from "../helpers/mock-runtime.js";
 import * as mockRuntimeModule from "../helpers/mock-runtime.js";
 
-// Mock member store to return mock members with "mock" runtime
-
-
-// Mock agent definitions — returns valid agent defs
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name,
-    model: "claude-sonnet-4-20250514",
-    description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`,
-    skills: [],
-    tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "claude-sonnet-4-20250514", description: "PM agent", skills: [], tags: [] },
-    { name: "architect", model: "claude-sonnet-4-20250514", description: "Architect agent", skills: [], tags: [] },
-    { name: "developer", model: "claude-sonnet-4-20250514", description: "Developer agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   let ts: TestServer;
@@ -70,14 +50,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
 
   // Helper: create room and return it
   async function createRoom(name: string, members: string[]): Promise<Room> {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
-    });
-    expect(res.status).toBe(200);
-    const room = JSON.parse(res.body);
-    await configureMockMembersForRoom(room.id, members);
-    return room;
+    return createMockRoom(ts.port, token, name, members);
   }
 
   // Helper: send message and return it
@@ -364,31 +337,30 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   // ── T2.6: Dynamic member addition + cursor ──
 
   describe("T2.6: Add member — cursor initialized to latest (F16)", () => {
-    it("adds multiple named room members from the same Agent", async () => {
-      const room = await createRoom("t26-same-agent", ["pm"]);
-
-      const addA = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
-        token,
-        body: { agent: "developer", name: "dev-a" },
-      });
-      const addB = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
-        token,
-        body: { agent: "developer", name: "dev-b" },
-      });
-      expect(addA.status).toBe(200);
-      expect(addB.status).toBe(200);
-
-      const updatedRoom = JSON.parse(addB.body);
-      expect(updatedRoom.members).toEqual(["pm", "dev-a", "dev-b"]);
-      const developers = updatedRoom.roomMembers.filter((member: any) => member.sourceAgent === "developer");
-      expect(developers.map((member: any) => member.name)).toEqual(["dev-a", "dev-b"]);
-      expect(new Set(developers.map((member: any) => member.id)).size).toBe(2);
-
-      const duplicate = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
-        token,
-        body: { agent: "developer", name: "dev-a" },
-      });
+    it("invites distinct global IDs from one template and excludes pre-invite history from activation", async () => {
+      const room = await createRoom("global-invite", ["pm"]);
+      const historical = `history-before-invite-${room.id}`;
+      await sendMessage(room.id, historical);
+      const ids: string[] = [];
+      for (const name of ["dev-a", "dev-b"]) {
+        const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: {
+          name, agentTemplate: "developer", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
+        } });
+        expect(created.status, created.body).toBe(200);
+        const id = JSON.parse(created.body).member.memberId;
+        ids.push(id);
+        const invited = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, { token, body: { memberId: id } });
+        expect(invited.status, invited.body).toBe(200);
+        expect(JSON.parse(invited.body).globalMemberIds).toContain(id);
+      }
+      expect(new Set(ids).size).toBe(2);
+      const duplicate = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, { token, body: { memberId: ids[0] } });
       expect(duplicate.status).toBe(409);
+      await sendMessage(room.id, "@dev-a look only at the new task");
+      await vi.waitFor(() => expect(mockPromptFn).toHaveBeenCalled());
+      const prompt = String(mockPromptFn.mock.calls.at(-1)![0]);
+      expect(prompt).toContain("look only at the new task");
+      expect(prompt).not.toContain(historical);
     });
 
     it("tasks bind to room member id and display name follows rename", async () => {
@@ -436,32 +408,7 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
       expect(renamedTask.updatedAt).toBe(historicalTask.updatedAt);
     });
 
-    it("new member cursor set to latest message ID", async () => {
-      const room = await createRoom("t26-test", ["pm"]);
 
-      // Add some messages
-      await sendMessage(room.id, "M1");
-      await sendMessage(room.id, "M2");
-      const m3 = await sendMessage(room.id, "M3");
-
-      // Add qa as new member
-      const addRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/members`, {
-        token,
-        body: { agent: "qa", name: "qa" },
-      });
-      expect(addRes.status).toBe(200);
-      const updatedRoom = JSON.parse(addRes.body);
-      expect(updatedRoom.members).toContain("qa");
-
-      // Now @qa — should NOT receive M1-M3 (joined after)
-      await sendMessage(room.id, "@qa run tests");
-      await new Promise((r) => setTimeout(r, 200));
-
-      // qa was activated — verify via status
-      const roomRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}`, { token });
-      const roomData = JSON.parse(roomRes.body);
-      expect(roomData.agentStatuses.qa).toBeDefined();
-    });
   });
 
   // ── Agent status query ──

@@ -5,9 +5,9 @@
  * Control: a normal API route stays 401 without a token.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, loginAndGetToken, getTestBossmodeDir, type TestServer } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, getTestBossmodeDir, type TestServer } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 let ts: TestServer;
 let token: string;

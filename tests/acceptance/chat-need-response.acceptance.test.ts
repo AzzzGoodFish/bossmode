@@ -7,24 +7,11 @@
  * ⑤ DM 同规则：用户消息带期待，裸文本兜底投递
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { mockPromptFn, resetMocks, setMockPromptFn, emitMockEvent } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-    { name: "qa", model: "mock-model", description: "QA agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: chat tool + need_response + final-text fallback", () => {
   let ts: TestServer;

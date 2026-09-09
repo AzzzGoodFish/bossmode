@@ -1,6 +1,6 @@
 import { it, expect, vi } from "vitest";
-import { setupConfigMock } from "../helpers/test-server.js";
-setupConfigMock();
+import { setupTestWorkspace } from "../helpers/test-server.js";
+setupTestWorkspace();
 const processAttachments = vi.hoisted(() => vi.fn());
 vi.mock("../../src/engine/agent-attachments.js", () => ({ processAgentAttachments: processAttachments }));
 

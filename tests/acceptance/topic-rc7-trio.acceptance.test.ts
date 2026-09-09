@@ -3,12 +3,13 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
-  configureMockMembersForRoom,
+  createMockRoom,
+  getTestWorkspace,
   MOCK_MEMBER_MODEL,
   MOCK_MEMBER_CREDENTIAL_ID,
 } from "../helpers/test-server.js";
@@ -17,19 +18,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: topic rc.7 trio", () => {
   let ts: TestServer;
@@ -51,14 +40,7 @@ describe("Acceptance: topic rc.7 trio", () => {
   });
 
   async function makeRoom(name: string) {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
-    });
-    expect(res.status).toBe(200);
-    const room = JSON.parse(res.body);
-    await configureMockMembersForRoom(room.id, ["pm"]);
-    return room;
+    return createMockRoom(ts.port, token, name, ["pm"]);
   }
 
   it("close FYIs participants with reply_to on the summary card and empty needResponse", async () => {
@@ -93,7 +75,8 @@ describe("Acceptance: topic rc.7 trio", () => {
     const roomArchiveFile = join(roomArchiveDir, "room.jsonl");
     writeFileSync(roomArchiveFile, '{"type":"session","id":"room-current","timestamp":"2026-09-08T00:00:00Z"}\n');
     saveCurrentSession(memberId, `room:${room.id}`, { runtime: "pi-sdk", sessionId: "room-current", sessionFile: roomArchiveFile });
-    const siblingId = "topic-sibling";
+    const { createTopic } = await import("../../src/workspace/topic-store.js");
+    const siblingId = createTopic({ roomId: room.id, title: "Sibling", anchorMessageId: "sibling-anchor", seedMode: "fresh" }).id;
     const siblingDir = mainSessionDirectory(memberId, `topic:${siblingId}`, new Date("2026-09-08T00:00:00Z"));
     mkdirSync(siblingDir, { recursive: true });
     const siblingFile = join(siblingDir, "sibling.jsonl");
@@ -144,16 +127,17 @@ describe("Acceptance: topic rc.7 trio", () => {
     const room = await makeRoom("close-cleanup-error");
     const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "anchor" } })).body);
     const { topic } = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, { token, body: { anchorMessageId: anchor.id } })).body);
-    const { mainSessionDirectory } = await import("../../src/workspace/member-session-paths.js");
-    const sessionDir = mainSessionDirectory(memberId, `topic:${topic.id}`, new Date("2026-09-08T00:00:00Z"));
-    mkdirSync(sessionDir, { recursive: true });
-    const currentPath = join(sessionDir, "..", "..", "..", "current.json");
-    writeFileSync(currentPath, "not-json\n");
-    const closed = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/close`, { token });
-    expect(closed.status).toBe(500);
-    expect(JSON.parse(closed.body)).toMatchObject({ error: "Topic closed but current-session cleanup was incomplete" });
-    expect(JSON.parse(closed.body).cleanupFailures).toEqual(expect.arrayContaining([expect.objectContaining({ target: memberId })]));
-    writeFileSync(currentPath, "{}\n");
+    const sessions = await import("../../src/workspace/session-store.js");
+    sessions.saveCurrentSession(memberId, `topic:${topic.id}`, { runtime: "mock", sessionId: "unclean" });
+    const db = getTestWorkspace().db;
+    db.exec(`CREATE TRIGGER refuse_session_cleanup BEFORE DELETE ON current_sessions WHEN OLD.scope_id='topic:${topic.id}' BEGIN SELECT RAISE(ABORT,'injected cleanup failure'); END`);
+    try {
+      const closed = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics/${topic.id}/close`, { token });
+      expect(closed.status).toBe(500);
+      expect(JSON.parse(closed.body)).toMatchObject({ error: "Topic closed but current-session cleanup was incomplete" });
+      expect(JSON.parse(closed.body).cleanupFailures).toEqual(expect.arrayContaining([expect.objectContaining({ target: memberId })]));
+      expect(sessions.getCurrentSession(memberId, `topic:${topic.id}`)?.sessionId).toBe("unclean");
+    } finally { db.exec("DROP TRIGGER refuse_session_cleanup"); }
   });
 
   it("member_status shows a working topic slice", async () => {

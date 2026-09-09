@@ -7,7 +7,7 @@
  *   - Tree + search endpoints
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 
 vi.mock("@mariozechner/pi-agent-core", () => ({
@@ -23,7 +23,7 @@ vi.mock("@mariozechner/pi-agent-core", () => ({
 vi.mock("@mariozechner/pi-ai", () => ({ getModel: vi.fn().mockReturnValue({ id: "mock" }) }));
 vi.mock("@mariozechner/pi-coding-agent", () => ({ createCodingTools: vi.fn().mockReturnValue([]) }));
 
-setupConfigMock();
+setupTestWorkspace();
 
 let _c = 0;
 function uid(prefix: string): string { return `${prefix}-${Date.now()}-${_c++}`; }

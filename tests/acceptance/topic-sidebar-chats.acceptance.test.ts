@@ -8,23 +8,11 @@
  * - closed topics report status "closed"
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, configureMockMembersForRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, createMockRoom, configureMockMembersForRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: chats topics sub-list (sidebar v2)", () => {
   let ts: TestServer;
@@ -44,12 +32,7 @@ describe("Acceptance: chats topics sub-list (sidebar v2)", () => {
   });
 
   async function makeRoom(name: string) {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
-    });
-    expect(res.status).toBe(200);
-    return (JSON.parse(res.body) as any).id as string;
+    return (await createMockRoom(ts.port, token, name, ["pm"])).id;
   }
 
   it("room row carries topics with unread from the topic cursor; read clears it; close flips status", async () => {

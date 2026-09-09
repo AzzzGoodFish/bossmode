@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { closeTestServer, createTestServer, jsonRequest, setupConfigMock } from "../helpers/test-server.js";
+import { closeTestServer, createMockRoom, createTestServer, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 
 const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
-setupConfigMock();
+setupTestWorkspace();
 
 async function login(port: number): Promise<string> {
   const res = await jsonRequest(port, "POST", "/api/auth/login", { body: { username: "testuser", password: "testpass" } });
@@ -21,7 +21,7 @@ describe("artifact preview API", () => {
     while (servers.length) await closeTestServer(servers.pop()!);
   });
 
-  it("normalizes docs/ markdown refs and reads html artifacts from room cwd", async () => {
+  it("normalizes docs/ references and reads artifacts from current member asset roots", async () => {
     const ts = await createTestServer();
     servers.push(ts);
     const token = await login(ts.port);
@@ -32,18 +32,13 @@ describe("artifact preview API", () => {
     // Batch 7 P3: rooms no longer bind a cwd — artifacts resolve against room
     // members' asset roots (home + workspaces). Seed under the pm member's dir.
     const { getTestBossmodeDir } = await import("../helpers/test-server.js");
-    const pmDir = join(getTestBossmodeDir(), "members", "mem_pm");
+    const room = await createMockRoom(ts.port, token, "Preview", ["pm"]);
+    const pmDir = join(getTestBossmodeDir(), "members", room.globalMemberIds![0]);
     mkdirSync(join(pmDir, "design-prototype"), { recursive: true });
     writeFileSync(join(pmDir, "design-prototype/demo.html"), "<h1>Demo</h1>", "utf8");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
     writeFileSync(join(pmDir, "design-prototype/demo.png"), png);
 
-    const room = roomStore.createRoom("Preview", undefined, drafts(["pm"]));
-    // Stamp the global id link so pm's asset roots are in policy.
-    const roomJson = join(getTestBossmodeDir(), "rooms", room.id, "room.json");
-    const persisted = JSON.parse((await import("node:fs")).readFileSync(roomJson, "utf-8"));
-    persisted.globalMemberIds = ["mem_pm"];
-    writeFileSync(roomJson, JSON.stringify(persisted));
     knowledgeStore.addEntry("Plan", "# Plan\n\nBody", "test", "vulnhunt-srv/plan.md");
 
     const md = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/vulnhunt-srv/plan.md")}`, { token });

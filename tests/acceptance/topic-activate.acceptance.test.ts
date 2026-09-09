@@ -4,30 +4,17 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
   loginAndGetToken,
-  configureMockMembersForRoom,
+  createMockRoom,
 } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM", skills: [], tags: [] },
-    { name: "developer", model: "mock-model", description: "Dev", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: topic @ activates topic instance (P0)", () => {
   let ts: TestServer;
@@ -46,18 +33,7 @@ describe("Acceptance: topic @ activates topic instance (P0)", () => {
   });
 
   it("QA four-step: room @ works, fork topic @alice creates topic instance, no room-not-found", async () => {
-    const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: {
-        name: "p0-topic-activate",
-        cwd: "/tmp",
-        members: [{ agent: "pm", name: "pm" }, { agent: "developer", name: "developer" }],
-        promptLeaderMemberName: "pm",
-      },
-    });
-    expect(roomRes.status).toBe(200);
-    const room = JSON.parse(roomRes.body);
-    await configureMockMembersForRoom(room.id, ["pm", "developer"]);
+    const room = await createMockRoom(ts.port, token, "p0-topic-activate", ["pm", "developer"]);
 
     const roomMention = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
       token, body: { content: "@pm room check" },
@@ -102,11 +78,8 @@ describe("Acceptance: topic @ activates topic instance (P0)", () => {
   });
 
   it("resets and reactivates a topic through the scope conversation API", async () => {
-    const room = JSON.parse((await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token, body: { name: "topic-reset", cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
-    })).body);
-    await configureMockMembersForRoom(room.id, ["pm"]);
-    const memberId = room.roomMembers.find((member: any) => member.name === "pm").id;
+    const room = await createMockRoom(ts.port, token, "topic-reset", ["pm"]);
+    const memberId = room.globalMemberIds![0];
     const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "topic reset anchor" } })).body);
     const { topic } = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/topics`, {
       token, body: { title: "reset-topic", anchorMessageId: anchor.id, seedMode: "fresh" },
@@ -120,18 +93,7 @@ describe("Acceptance: topic @ activates topic instance (P0)", () => {
   });
 
   it("topic activate prompt includes trigger body and reply quote", async () => {
-    const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: {
-        name: "p1-topic-envelope",
-        cwd: "/tmp",
-        members: [{ agent: "pm", name: "pm" }, { agent: "developer", name: "developer" }],
-        promptLeaderMemberName: "pm",
-      },
-    });
-    expect(roomRes.status).toBe(200);
-    const room = JSON.parse(roomRes.body);
-    await configureMockMembersForRoom(room.id, ["pm", "developer"]);
+    const room = await createMockRoom(ts.port, token, "p1-topic-envelope", ["pm", "developer"]);
 
     const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
       token, body: { content: "anchor" },

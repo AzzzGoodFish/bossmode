@@ -1,65 +1,48 @@
-/**
- * Test server helper — spins up a real HTTP + WS server for acceptance tests.
- * Uses mock config to avoid filesystem dependency.
- */
-import { vi } from "vitest";
+/** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
+import { beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
-import { createHash, randomBytes } from "node:crypto";
-
-// ── Mock config (must be called before importing server modules) ──
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { coreFixture } from "./core-fixture.js";
+import type { Room } from "../../src/shared/types.js";
 
 const TEST_PASSWORD = "testpass";
 const TEST_USERNAME = "testuser";
-
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  return `${salt}:${hash}`;
+const sandbox = process.env.BOSSMODE_TEST_ROOT;
+if (!sandbox) throw new Error("HTTP fixtures require the isolated npm test launcher");
+// Asset location is selected before consumer imports. Storage is explicitly initialized by the suite hook.
+const TEST_BOSSMODE_DIR = mkdtempSync(join(realpathSync(sandbox), "http-"));
+const servers = new Set<TestServer>();
+let storage: ReturnType<typeof coreFixture>;
+export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR; }
+export function getTestWorkspace() {
+  if (!storage) throw new Error("Test workspace has not been initialized");
+  return storage;
 }
 
-const testPasswordHash = hashPassword(TEST_PASSWORD);
-
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-// Per-process unique dir — a fixed "/tmp/bossmode-test" collides across users
-// on shared machines (EACCES on files owned by another user) and across runs.
-const TEST_BOSSMODE_DIR = mkdtempSync(join(tmpdir(), "bossmode-test-"));
-mkdirSync(join(TEST_BOSSMODE_DIR, "agents"), { recursive: true });
-for (const agent of ["pm", "qa", "architect", "developer"]) {
-  writeFileSync(join(TEST_BOSSMODE_DIR, "agents", `${agent}.md`), `---\nname: ${agent}\nskills: []\ntags: []\n---\n${agent}`, "utf8");
-}
-
-/** The BOSSMODE_DIR used by the mocked config — tests that build fixture paths must use this. */
-export function getTestBossmodeDir(): string {
-  return TEST_BOSSMODE_DIR;
-}
-
-export function setupConfigMock(): void {
-  vi.mock("../../src/shared/config.js", () => ({
-    readConfig: () => ({
-      auth: { username: TEST_USERNAME, passwordHash: testPasswordHash },
-      apiKeys: {},
-      defaults: { host: "127.0.0.1", port: 8080 },
-    }),
-    verifyPassword: (password: string, stored: string) => {
-      const [salt, expectedHash] = stored.split(":");
-      if (!salt || !expectedHash) return false;
-      const hash = createHash("sha256").update(salt + password).digest("hex");
-      const a = Buffer.from(hash, "hex");
-      const b = Buffer.from(expectedHash, "hex");
-      if (a.length !== b.length) return false;
-      return require("node:crypto").timingSafeEqual(a, b);
-    },
-    ensureBossmodeDir: () => {},
-    writePidFile: () => {},
-    removePidFile: () => {},
-    configExists: () => true,
+/** Opt-in suite lifecycle, not a global import-time DB initializer. Real password/config APIs are retained. */
+export function setupTestWorkspace(): void {
+  vi.mock("../../src/shared/config.js", async original => ({
+    ...await original<typeof import("../../src/shared/config.js")>(),
     getBossmodeDir: () => TEST_BOSSMODE_DIR,
-    getTopicSeedMode: () => "fork" as const,
-    writeConfig: () => {},
+    ensureBossmodeDir: () => mkdirSync(TEST_BOSSMODE_DIR, { recursive: true }),
   }));
+  beforeAll(async () => {
+    storage = coreFixture(TEST_BOSSMODE_DIR);
+    const { getDefaultConfig, hashPassword, writeConfig } = await import("../../src/shared/config.js");
+    writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
+    const { saveAgentDefinition } = await import("../../src/workforce/agent-store.js");
+    for (const slug of ["general", "pm", "qa", "architect", "developer"]) {
+      saveAgentDefinition(slug, `---\nname: ${slug}\nskills: []\ntags: []\n---\n${slug}`);
+    }
+  });
+  afterAll(async () => {
+    const errors: unknown[] = [];
+    for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
+    try { const { shutdownAll } = await import("../../src/engine/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }
+    try { storage?.close(); } catch (error) { errors.push(error); }
+    if (errors.length) throw new AggregateError(errors, "HTTP fixture cleanup failed");
+  });
 }
 
 // ── HTTP client ──
@@ -120,6 +103,7 @@ export interface TestServer {
 }
 
 export async function createTestServer(): Promise<TestServer> {
+  if (!storage) throw new Error("Call setupTestWorkspace before starting an HTTP fixture");
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/communication/ws.js");
   const { initAgentManager, wireMentionRouter } = await import("../../src/engine/agent-manager.js");
@@ -136,33 +120,36 @@ export async function createTestServer(): Promise<TestServer> {
   wireMentionRouter();
 
   const server = http.createServer(async (req, res) => {
-    const handled = await handleApiRequest(req, res);
-    if (!handled) {
-      res.writeHead(404);
-      res.end("Not found");
+    try {
+      if (!await handleApiRequest(req, res)) { res.writeHead(404); res.end("Not found"); }
+    } catch (error) {
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: String(error) }));
     }
   });
 
   createWebSocketServer(server);
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
-  return {
-    server,
-    port,
-    url: `http://127.0.0.1:${port}`,
-    wsUrl: `ws://127.0.0.1:${port}`,
-  };
+  const result = { server, port, url: `http://127.0.0.1:${port}`, wsUrl: `ws://127.0.0.1:${port}` };
+  servers.add(result);
+  return result;
 }
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
   const { shutdownWebSocket } = await import("../../src/communication/ws.js");
   shutdownWebSocket();
-  await new Promise<void>((resolve) => ts.server.close(() => resolve()));
+  const { shutdownAll } = await import("../../src/engine/agent-manager.js");
+  await shutdownAll();
+  ts.server.closeAllConnections();
+  if (ts.server.listening) await new Promise<void>((resolve, reject) => ts.server.close(error => error ? reject(error) : resolve()));
+  servers.delete(ts);
 }
 
 // ── Auth helper ──
@@ -181,14 +168,46 @@ export { TEST_USERNAME, TEST_PASSWORD };
 // The activation gate now requires every member to have an explicit
 // {model, credentialId} pair before it can be activated. Acceptance tests use
 // the mock runtime, which never talks to the real model-credentials engine, so
-// tests configure members directly through the room store (bypassing the HTTP
-// route's real-credential availability check) with a stable test-only pair.
+// tests configure current global members through the registry with a stable
+// test-only pair. The mock runtime never executes a real provider request.
 export const MOCK_MEMBER_MODEL = "mock-provider/mock-model";
 export const MOCK_MEMBER_CREDENTIAL_ID = "test-credential";
 
 export async function configureMockMemberModel(roomId: string, memberRef: string): Promise<void> {
   const roomStore = await import("../../src/workspace/room-store.js");
-  roomStore.updateRoomMemberOverride(roomId, memberRef, { model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID });
+  const registry = await import("../../src/workspace/member-registry.js");
+  const member = registry.getMember(memberRef) || registry.getMember(roomStore.findRoomMemberByName(roomId, memberRef)?.id || "");
+  if (!member) throw new Error("Mock execution requires a current global member; create the room with memberIds");
+  if (member.global.model !== MOCK_MEMBER_MODEL || member.global.credentialId !== MOCK_MEMBER_CREDENTIAL_ID) {
+    registry.updateMember(member.id, { global: { ...member.global, model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+  }
+}
+
+/** Creates current global identities and uses the actual memberIds room API, never the retired local draft path. */
+export async function createMockRoom(port: number, token: string, name: string, names: string[]): Promise<Room> {
+  const listed = await jsonRequest(port, "GET", "/api/members", { token });
+  if (listed.status !== 200) throw new Error(`Cannot list fixture members: ${listed.status} ${listed.body}`);
+  const existing = JSON.parse(listed.body).members as Array<{ memberId: string; name: string }>;
+  const memberIds: string[] = [];
+  for (const memberName of names) {
+    let member = existing.find(candidate => candidate.name === memberName);
+    if (!member) {
+      const created = await jsonRequest(port, "POST", "/api/members", { token, body: {
+        name: memberName, agentTemplate: "general", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
+      } });
+      if (created.status !== 200) throw new Error(`Cannot create fixture member: ${created.status} ${created.body}`);
+      member = JSON.parse(created.body).member;
+      if (!member || typeof member.memberId !== "string") throw new Error("Invalid fixture member response");
+      existing.push(member);
+    }
+    if (typeof member.memberId !== "string") throw new Error("Invalid fixture member identity");
+    memberIds.push(member.memberId);
+  }
+  const response = await jsonRequest(port, "POST", "/api/rooms", { token, body: { name, memberIds, leaderMemberId: memberIds[0] } });
+  if (response.status !== 200) throw new Error(`Cannot create fixture room: ${response.status} ${response.body}`);
+  const room = JSON.parse(response.body) as Room;
+  await configureMockMembersForRoom(room.id, memberIds);
+  return room;
 }
 
 export async function configureMockMembersForRoom(roomId: string, memberRefs: string[]): Promise<void> {

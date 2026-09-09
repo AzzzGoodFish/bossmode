@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  setupConfigMock,
+  setupTestWorkspace,
   createTestServer,
   closeTestServer,
   jsonRequest,
@@ -17,19 +17,7 @@ import type { TestServer } from "../helpers/test-server.js";
 
 import { resetMocks } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
   let ts: TestServer;
@@ -49,49 +37,23 @@ describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
     vi.clearAllMocks();
   });
 
-  it.skip("DM mainline msg refs resolve and carry msgId+summary; around window serves the jump", async () => {
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "architect", agentTemplate: "pm" } });
+  it("resolves a DM message jump by ID and returns an empty window for a missing target", async () => {
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "dm-jump", agentTemplate: "pm" } });
+    expect(created.status).toBe(200);
     const memberId = JSON.parse(created.body).member.memberId;
-    const scope = `dm:${memberId}`;
-
-    // Seed DM conversation (5 messages) via the API
     let targetId = "";
     for (let i = 1; i <= 5; i++) {
-      const sent = await jsonRequest(ts.port, "POST", `/api/dm/${memberId}/messages`, { token, body: { content: `dm message ${i}` } });
-      const msg = JSON.parse(sent.body).message;
-      if (i === 3) targetId = msg.id;
+      const sent = await jsonRequest(ts.port, "POST", `/api/dm/${memberId}/messages`, { token, body: { text: `dm message ${i}` } });
+      expect(sent.status).toBe(200);
+      if (i === 3) targetId = JSON.parse(sent.body).message.id;
     }
-
-    // Write mainline with a msg ref pointing at the third message's seq
-    const ml = await import("../../src/workspace/member-memory-store.js");
-    const dm = await import("../../src/workspace/dm-message-store.js");
-    const messages = dm.readAllDmMessages(memberId);
-    const target = messages.find((m) => m.id === targetId)!;
-    const { writeMemoryLayer } = ml;
-    writeMemoryLayer(memberId, "mainline", `## Focus\nJump\n\n## Dynamic Index\n- msg:#${target.seq} — the dm decision\n- msg:#999999 — gone\n`, { type: "user" }, { scopeId: scope });
-
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/memory?layer=mainline&scope=${encodeURIComponent(scope)}`, { token });
-    expect(res.status).toBe(200);
-    const body = JSON.parse(res.body);
-    const entries = body.parsed.index.filter((e: any) => e.kind === "msg");
-    const live = entries.find((e: any) => e.ref === `msg:#${target.seq}`)!;
-    expect(live.stale).toBe(false);
-    expect(live.msgId).toBe(targetId);
-    expect(live.summary).toContain("dm message 3");
-    const gone = entries.find((e: any) => e.ref === "msg:#999999")!;
-    expect(gone.stale).toBe(true);
-    expect(gone.msgId).toBeUndefined();
-
-    // Around window: fetching around the target returns a centered slice containing it
     const around = await jsonRequest(ts.port, "GET", `/api/dm/${memberId}/messages?around=${targetId}&limit=50`, { token });
     expect(around.status).toBe(200);
-    const win = JSON.parse(around.body).messages;
-    expect(win.length).toBeGreaterThanOrEqual(5); // all messages fit the window (+ mock notices)
-    expect(win.filter((m: any) => m.content.startsWith("dm message")).length).toBe(5);
-    expect(win.some((m: any) => m.id === targetId)).toBe(true);
-
-    // Unknown around id → empty window (client treats as no-op jump)
-    const missing = await jsonRequest(ts.port, "GET", `/api/dm/${memberId}/messages?around=does-not-exist&limit=50`, { token });
+    const messages = JSON.parse(around.body).messages;
+    expect(messages.some((message: any) => message.id === targetId)).toBe(true);
+    expect(messages.filter((message: any) => message.content.startsWith("dm message"))).toHaveLength(5);
+    const missing = await jsonRequest(ts.port, "GET", `/api/dm/${memberId}/messages?around=missing&limit=50`, { token });
+    expect(missing.status).toBe(200);
     expect(JSON.parse(missing.body).messages).toEqual([]);
   });
 
@@ -101,8 +63,9 @@ describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
 
     const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name: "r", cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
+      body: { name: "r", memberIds: [memberId] },
     });
+    expect(roomRes.status).toBe(200);
     const room = JSON.parse(roomRes.body);
     const roomScope = `room:${room.id}`;
 

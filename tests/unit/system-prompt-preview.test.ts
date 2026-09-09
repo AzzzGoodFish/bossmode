@@ -4,9 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupConfigMock } from "../helpers/test-server.js";
+import { createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 describe("member system-prompt preview", () => {
   it("room scope: preview is byte-identical to activation compile", async () => {

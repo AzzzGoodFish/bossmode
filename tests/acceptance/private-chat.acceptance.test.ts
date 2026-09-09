@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, configureMockMembersForRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, createMockRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
@@ -24,20 +24,7 @@ import type { Room, RoomMessage } from "../../src/shared/types.js";
 
 import { mockPromptFn, mockSteerFn, resetMocks, setMockIsWorking, setMockPromptFn } from "../helpers/mock-runtime.js";
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn().mockImplementation((name: string) => ({
-    name, model: "mock-model", description: `Test agent ${name}`,
-    systemPrompt: `You are ${name}.`, skills: [], tags: [],
-  })),
-  loadAgentDefinitions: vi.fn().mockReturnValue([
-    { name: "pm", model: "mock-model", description: "PM agent", skills: [], tags: [] },
-    { name: "architect", model: "mock-model", description: "Architect agent", skills: [], tags: [] },
-  ]),
-}));
-
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   let ts: TestServer;
@@ -58,14 +45,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   });
 
   async function createRoom(name: string, members: string[]): Promise<Room> {
-    const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: members.map((member) => ({ agent: member, name: member })), promptLeaderMemberName: members[0] },
-    });
-    expect(res.status).toBe(200);
-    const room = JSON.parse(res.body);
-    await configureMockMembersForRoom(room.id, members);
-    return room;
+    return createMockRoom(ts.port, token, name, members);
   }
 
   async function sendMessage(roomId: string, content: string): Promise<RoomMessage> {
@@ -257,7 +237,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       const room = await createRoom("reset-session-test", ["pm"]);
       const roomDir = join(getTestBossmodeDir(), "rooms", room.id);
       mkdirSync(roomDir, { recursive: true });
-      const pmMemberId = room.roomMembers?.find((member) => member.name === "pm")?.id || "pm";
+      const pmMemberId = room.globalMemberIds![0];
       const memberSessions = join(getTestBossmodeDir(), "members", pmMemberId, "sessions");
       const archiveDir = join(memberSessions, "2026-09-08", "rooms", room.id);
       mkdirSync(archiveDir, { recursive: true });
@@ -266,16 +246,20 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
         [`room:${room.id}`]: { runtime: "mock", sessionId: "session-123", sessionFile: `sessions/2026-09-08/rooms/${room.id}/session.jsonl` },
       }, null, 2));
       writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ [pmMemberId]: "msg-123", pm: "legacy-msg" }, null, 2));
+      const retiredSessions = readFileSync(join(memberSessions, "current.json"), "utf8");
+      const retiredCursors = readFileSync(join(roomDir, "cursors.json"), "utf8");
+      const sessions = await import("../../src/workspace/session-store.js");
+      const rooms = await import("../../src/workspace/room-store.js");
+      sessions.saveCurrentSession(pmMemberId, room.id, { runtime: "mock", sessionId: "session-123", sessionFile: join(archiveDir, "session.jsonl") });
+      rooms.setCursor(room.id, pmMemberId, "msg-123");
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });
       expect(res.status).toBe(200);
       expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
-
-      const sessions = JSON.parse(readFileSync(join(memberSessions, "current.json"), "utf-8"));
-      expect(sessions[`room:${room.id}`]).toBeUndefined();
-
-      const cursors = JSON.parse(readFileSync(join(roomDir, "cursors.json"), "utf-8"));
-      expect(cursors[pmMemberId]).toBeNull();
-      expect(cursors.pm).toBeUndefined();
+      expect(sessions.getCurrentSession(pmMemberId, room.id)).toBeUndefined();
+      expect(rooms.getCursors(room.id)[pmMemberId]).toBeNull();
+      expect(readFileSync(join(memberSessions, "current.json"), "utf8")).toBe(retiredSessions);
+      expect(readFileSync(join(roomDir, "cursors.json"), "utf8")).toBe(retiredCursors);
+      expect(readFileSync(join(archiveDir, "session.jsonl"), "utf8")).toBe("{}\n");
 
       const eventsRes = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/agents/pm/events`, { token });
       expect(eventsRes.status).toBe(200);

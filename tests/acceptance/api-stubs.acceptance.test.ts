@@ -8,10 +8,10 @@
  * Coverage: F3 (rooms), F4 (agents), F5 (messages)
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { setupConfigMock, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 
-setupConfigMock();
+setupTestWorkspace();
 
 describe("Acceptance: API Stubs & Routing", () => {
   let ts: TestServer;
