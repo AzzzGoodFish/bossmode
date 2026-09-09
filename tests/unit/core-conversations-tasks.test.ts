@@ -20,9 +20,52 @@ const sourceTask = (id = "task-original"): Task => ({
 });
 
 describe("normalized task authority", () => {
-  it("replaces only the old projection schema and preserves original IDs/times/source fields on import and restart", () => {
-    expect(f.db.get("SELECT * FROM tasks WHERE task_id='projection'")).toBeUndefined();
-    expect(f.db.all<{ name: string }>("PRAGMA table_info(tasks)").map(r => r.name)).not.toContain("payload_json");
+  it("creates, edits, comments on and deletes tasks across restart without losing defaults or references", () => {
+    const task = createTask("room-uuid", { title: " Work ", createdBy: "user", priority: "P0", references: ["docs/a.md"] });
+    expect(task).toMatchObject({ title: "Work", status: "todo", priority: "P0", createdBy: "user", comments: [], subscribers: ["user"], references: ["docs/a.md"] });
+    expect(task.id).toMatch(/^task-/);
+    updateTask(task.roomId, task.id, { title: "Work updated", status: "in-progress" });
+    expect(getTask(task.roomId, task.id)?.references).toEqual(["docs/a.md"]);
+    updateTask(task.roomId, task.id, { references: ["docs/b.md"] });
+    const comment = addTaskComment(task.roomId, task.id, { author: "user", content: "Implemented" })!;
+    expect(comment.comment.id).toMatch(/^comment-/);
+    expect(comment.task.updatedAt).toBeGreaterThanOrEqual(task.updatedAt);
+    f.room("other");
+    const other = createTask("other", { title: "Work elsewhere", createdBy: "user" });
+    expect(other.priority).toBe("P1");
+    f.reopen();
+    expect(getTask(task.roomId, task.id)).toMatchObject({ title: "Work updated", status: "in-progress", references: ["docs/b.md"], comments: [comment.comment] });
+    expect(listAllTasks({ query: "Work" }).map(t => t.id).sort()).toEqual([task.id, other.id].sort());
+    expect(deleteTask(task.roomId, task.id)).toBe(true);
+    expect(getTask(task.roomId, task.id)).toBeNull();
+    expect(getTask(other.roomId, other.id)).not.toBeNull();
+  });
+
+  it("retains local creator/assignee/subscriber IDs on rename without rewriting history", () => {
+    const room = { id: "room-uuid", name: "Local", members: ["pm", "dev", "qa"], createdAt: 0,
+      roomMembers: ["pm", "dev", "qa"].map(name => ({ id: `rm_${name}`, name, sourceAgent: "general", createdAt: 0, updatedAt: 0 })) };
+    f.repository().upsertRoom(room);
+    const task = createTask(room.id, { title: "Local identity", createdBy: "pm", assignee: "dev", assigneeMemberId: "rm_dev", subscribers: ["qa", "qa"], subscriberMemberIds: ["rm_qa"] });
+    expect(task.subscriberMemberIds).toEqual(["rm_pm", "rm_qa"]);
+    addTaskComment(room.id, task.id, { author: "dev", content: "Historical name" });
+    const stored = f.tasks().get(room.id, task.id);
+    room.roomMembers.forEach(member => { member.name += " new"; });
+    f.repository().upsertRoom(room);
+    for (const result of [getTask(room.id, task.id), listTasks(room.id)[0], listTaskSummaries(room.id)[0], listAllTasks()[0]]) {
+      expect(result).toMatchObject({ assignee: "dev new", subscribers: ["pm new", "qa new"], createdBy: "pm" });
+    }
+    expect(getTask(room.id, task.id)?.comments?.[0].author).toBe("dev");
+    expect(f.tasks().get(room.id, task.id)).toEqual(stored);
+  });
+
+  it("does not fabricate stable creators or history for names-only legacy tasks", () => {
+    f.repository().upsertRoom({ id: "room-uuid", name: "Legacy", members: ["pm"], createdAt: 0 });
+    expect(createTask("room-uuid", { title: "New", createdBy: "pm" }).subscriberMemberIds).toEqual([]);
+    f.tasks().importTasks("room-uuid", [{ id: "old", roomId: "room-uuid", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 0, updatedAt: 0 }]);
+    expect(getTask("room-uuid", "old")).toMatchObject({ comments: [], subscribers: [] });
+    expect(listTaskSummaries("room-uuid")[0].commentCount).toBe(0);
+  });
+  it("preserves original IDs/times/source fields on idempotent import and restart", () => {
     const original = sourceTask();
     f.tasks().importTasks(original.roomId, [original]);
     f.tasks().importTasks(original.roomId, [original]);

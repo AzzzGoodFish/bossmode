@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import type { coreFixture } from "./helpers/core-fixture.js";
+let fixture: ReturnType<typeof coreFixture>;
 
 let tempDir: string;
 let database: import("../src/storage/database.js").Database;
@@ -16,13 +17,11 @@ describe("archive", () => {
   let archiveStore: typeof import("../src/workspace/archive-store.js");
 
   beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bossmode-archive-test-"));
     vi.resetModules();
-    const storage = await import("../src/storage/database.js");
-    const { coreStorageMigrations } = await import("../src/storage/migrations.js");
-    database = storage.openDatabase(join(tempDir, "bossmode.db"));
-    storage.applyStorageMigrations(database, coreStorageMigrations);
-    storage.bindDatabase(database);
+    const { coreFixture } = await import("./helpers/core-fixture.js");
+    fixture = coreFixture();
+    tempDir = fixture.root;
+    database = fixture.db;
     roomStore = await import("../src/workspace/room-store.js");
     messageStore = await import("../src/workspace/message-store.js");
     archiveStore = await import("../src/workspace/archive-store.js");
@@ -30,8 +29,7 @@ describe("archive", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    database?.close();
-    rmSync(tempDir, { recursive: true, force: true });
+    fixture?.close();
   });
 
   it("rolls back archive publication and pruning together", () => {

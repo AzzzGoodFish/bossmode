@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { coreFixture } from "./helpers/core-fixture.js";
 import { join } from "node:path";
-import { openDatabase, bindDatabase, applyStorageMigrations, getDatabase, type Database } from "../src/storage/database.js";
+import { openDatabase, applyStorageMigrations, getDatabase, type Database } from "../src/storage/database.js";
 import { baseStorageMigration } from "../src/storage/base-schema.js";
 import { messagesMigration, eventSourceMigration } from "../src/storage/schema/messages.js";
 import { archiveMessagesInTransaction, readArchivedMessages, importArchivedMessage, appendMessage, appendMessageInTransaction, importMessage, importMessageNextSequence, readMessages, pageMessages, messagesSince, patchMessage, searchMessageFacts, replaceMessages, writeMemberCursor, readMemberCursor } from "../src/storage/message-repository.js";
@@ -19,18 +20,16 @@ vi.mock("../src/engine/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity
 vi.mock("../src/workspace/room-store.js",() => ({getRoom:vi.fn()}));
 vi.mock("../src/foundation/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
 
-let db: Database; let root: string;
+let db: Database; let root: string; let fixture: ReturnType<typeof coreFixture>;
 const member = {ownerKey:"mem_old",memberId:"mem_old"};
 const input = {sender:"old-name",senderMemberId:"mem_old",content:"hello",mentions:["target"],mentionMemberIds:["mem_target"]};
 const flush = () => new Promise<void>(resolve => queueMicrotask(resolve));
 beforeEach(() => {
-  root = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!,"core-messages-"));
-  db = openDatabase(join(root,"test.sqlite"));
-  applyStorageMigrations(db,[baseStorageMigration,messagesMigration,eventSourceMigration]); bindDatabase(db);
+  fixture = coreFixture(); root = fixture.root; db = fixture.db;
   db.run("INSERT INTO scopes VALUES('room','room','room',NULL),('dm:mem_old','dm',NULL,'mem_old'),('topic:t','topic','room',NULL)");
   vi.clearAllMocks();
 });
-afterEach(async () => { await flush(); db.close(); rmSync(root,{recursive:true,force:true}); });
+afterEach(async () => { await flush(); fixture.close(); });
 
 describe("authoritative message transactions",() => {
   it("commits message, sequence, all literal target IDs, reply and intent atomically in every scope",() => {
@@ -41,7 +40,7 @@ describe("authoritative message transactions",() => {
       expect(db.get<{next_seq:number}>("SELECT next_seq FROM scope_sequences WHERE scope_id=?",scope)!.next_seq).toBe(2);
     }
     expect(db.get<{n:number}>("SELECT COUNT(*) n FROM outbox")!.n).toBe(3);
-    expect(readdirSync(root).every(name => name.startsWith("test.sqlite"))).toBe(true);
+    expect(readdirSync(root).every(name => name === "knowledge" || name.startsWith("bossmode.db"))).toBe(true);
   });
   it("dispatches the committed original snapshot even when history is archived before delivery",async () => {
     const off = onMessage(vi.fn()); const message = postMessage("room","user","original");
@@ -67,7 +66,7 @@ describe("authoritative message transactions",() => {
     const listener = vi.fn(); const off = onMessage(listener);
     db.transaction(() => { postMessage("room","user","committed"); expect(transport.room).not.toHaveBeenCalled(); });
     await flush(); expect(listener).toHaveBeenCalledTimes(1);
-    const pending = appendMessage("room",input); db.close(); db = openDatabase(join(root,"test.sqlite")); bindDatabase(db);
+    const pending = appendMessage("room",input); db = fixture.reopen();
     scheduleMessageDispatch(); await flush();
     expect(listener).toHaveBeenLastCalledWith("room",pending);
     scheduleMessageDispatch(); await flush(); expect(listener).toHaveBeenCalledTimes(2); off();
@@ -167,7 +166,7 @@ describe("complete event authority and aggregate identity",() => {
     const event = {type:"message_end",ts:150,usage:{inputTokens:10,outputTokens:2,cacheRead:3,cacheWrite:4,cost:0.1},model:"p/m"};
     appendAgentEvent("room",member,event,"end-message");
     appendAgentEvent("room",member,{type:"agent_end",ts:200},"end");
-    db.close(); db = openDatabase(join(root,"test.sqlite")); bindDatabase(db);
+    db = fixture.reopen();
     appendAgentEvent("room",member,event,"end-message"); recordDailyUsage("end-message");
     expect(() => appendAgentEvent("room",member,{...event,ts:151},"end-message")).toThrow("Conflicting event identity");
     const stats = readStats("room","mem_old");
