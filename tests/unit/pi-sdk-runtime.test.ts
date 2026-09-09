@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,11 +9,15 @@ vi.mock("../../src/workspace/extension-store.js", () => ({
   resolveMemberExtensionSkillPaths: () => [],
 }));
 
+import { coreFixture } from "../helpers/core-fixture.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 let exportedConfig: any = null;
 let bossmodeConfig: any;
 const modelRegistryCreate = vi.fn();
 const modelRegistryRefresh = vi.fn();
+const databaseRuntimeRefresh = vi.fn(async (_runtime: unknown, _profileId?: string) => {});
+const modelRuntime = { kind: "database-runtime", refresh: modelRegistryRefresh, getAuth: vi.fn(), checkAuth: vi.fn() };
 const modelRegistryGetApiKeyAndHeaders = vi.fn(async () => ({ ok: true, apiKey: "sk-test" }));
 const createAgentSession = vi.fn();
 const resourceLoaderCtor = vi.fn();
@@ -51,6 +55,8 @@ vi.mock("../../src/shared/config.js", () => ({
 
 vi.mock("../../src/engine/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
+  createDatabaseModelRuntime: async (credentials: unknown, profileId: string) => { modelRegistryCreate(credentials, profileId); return modelRuntime; },
+  refreshDatabaseModelRuntime: databaseRuntimeRefresh,
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
   createCredentialStore: (profile: any) => ({ kind: "credentials", profile, read: vi.fn(), list: vi.fn(async () => []), modify: vi.fn(), delete: vi.fn() }),
@@ -76,15 +82,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   }
   return {
     VERSION: "test-sdk",
-    ModelRuntime: {
-      create: async (...args: any[]) => {
-        modelRegistryCreate(...args);
-        return { kind: "model-runtime", args, refresh: modelRegistryRefresh, getAuth: vi.fn(), checkAuth: vi.fn() };
-      },
-    },
     ModelRegistry: class {
       constructor(public runtime: any) {}
-      find() { return { provider: "anthropic", id: "claude-sonnet-4-6" }; }
+      find(provider: string, id: string) { return { provider, id }; }
       getApiKeyAndHeaders(...args: any[]) { return modelRegistryGetApiKeyAndHeaders(...args); }
       async refresh(...args: any[]) { return modelRegistryRefresh(...args); }
     },
@@ -152,9 +152,14 @@ function savedSessionFile(): string {
   return path;
 }
 
+beforeEach(() => {
+  fixture = coreFixture(); dir = fixture.root;
+  fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('pm','pm','pm','general','{}',0,0)");
+});
+afterEach(() => fixture.close());
+
 describe("PiSdkRuntime", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-"));
     exportedConfig = null;
     openedSessionModel = null;
     openedLeafEntry = null;
@@ -169,6 +174,7 @@ describe("PiSdkRuntime", () => {
     settingsGetCompactionSettings.mockReturnValue({ enabled: true, reserveTokens: 1000, keepRecentTokens: 20000 });
     createAgentSession.mockResolvedValue({
       session: {
+        modelRuntime,
         subscribe: vi.fn(() => vi.fn()),
         prompt: vi.fn(),
         steer: vi.fn(),
@@ -198,9 +204,6 @@ describe("PiSdkRuntime", () => {
     });
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
 
   it("throws setup guidance instead of falling back to SDK default auth when no Bossmode credential profile exists", async () => {
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -210,17 +213,14 @@ describe("PiSdkRuntime", () => {
     expect(modelRegistryCreate).not.toHaveBeenCalled();
   });
 
-  it("uses exported Bossmode auth and model files when a credential profile exists", async () => {
+  it("creates the runtime from the database adapter with the selected profile", async () => {
     const agentDir = join(dir, "profile-agent-dir");
     exportedConfig = { agentDir, extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
-    expect(modelRegistryCreate).toHaveBeenCalledWith(expect.objectContaining({
-      credentials: expect.objectContaining({ read: expect.any(Function), modify: expect.any(Function) }),
-      modelsPath: join(agentDir, "models.json"),
-    }));
+    expect(modelRegistryCreate).toHaveBeenCalledWith(expect.objectContaining({ read: expect.any(Function), modify: expect.any(Function) }), "test-profile");
   });
 
   it("warns when a run crosses compaction threshold but SDK emits no compaction event", async () => {
@@ -237,6 +237,7 @@ describe("PiSdkRuntime", () => {
     });
     createAgentSession.mockResolvedValueOnce({
       session: {
+        modelRuntime,
         subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
         prompt,
         steer: vi.fn(),
@@ -278,6 +279,7 @@ describe("PiSdkRuntime", () => {
     });
     createAgentSession.mockResolvedValueOnce({
       session: {
+        modelRuntime,
         subscribe: vi.fn((fn: any) => { listener = fn; return vi.fn(); }),
         prompt,
         steer: vi.fn(), abort: vi.fn(), abortCompaction: vi.fn(), abortBranchSummary: vi.fn(), dispose: vi.fn(), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(), bindExtensions: sessionBindExtensions,
@@ -385,12 +387,12 @@ describe("PiSdkRuntime", () => {
     expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
   });
 
-  it("member mcp.json is the sole source — every server in the file is enabled", async () => {
+  it("member SQL MCP configuration is the source — every configured server is enabled", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     // Batch 6 §1.2: member-owned mcp.json; the registry enable list is retired.
-    mkdirSync(join(dir, ".bossmode", "members", "pm"), { recursive: true });
-    writeFileSync(join(dir, ".bossmode", "members", "pm", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } }, null, 2));
+    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
@@ -401,7 +403,7 @@ describe("PiSdkRuntime", () => {
     expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
-    expect(scopedPath).toMatch(/\.bossmode\/mcp\/runtime\/scopes\/room-a\/pm\/mcp\.json$/);
+    expect(existsSync(scopedPath)).toBe(true);
     const scoped = JSON.parse(readFileSync(scopedPath, "utf-8"));
     // File present = enabled: BOTH servers pass; the mcpServers list is ignored.
     expect(Object.keys(scoped.mcpServers).sort()).toEqual(["github", "playwright"]);
@@ -547,6 +549,7 @@ describe("PiSdkRuntime", () => {
     const setModel = vi.fn().mockResolvedValue(undefined);
     createAgentSession.mockResolvedValueOnce({
       session: {
+        modelRuntime,
         subscribe: vi.fn(() => vi.fn()),
         prompt: vi.fn(),
         steer: vi.fn(),
@@ -575,7 +578,7 @@ describe("PiSdkRuntime", () => {
     expect(sessionManagerOpen).toHaveBeenCalledWith(join(dir, "old-session.jsonl"), expect.any(String), dir);
     expect(sessionManagerCreate).not.toHaveBeenCalled();
     expect(createAgentSession.mock.calls[0][0].sessionManager.kind).toBe("opened-session");
-    expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));
+    expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-fable-5" }));
   });
 
   it("rolls back the failed turn and resumes instead of discarding history when saved session ended with assistant provider error", async () => {
@@ -700,6 +703,7 @@ describe("PiSdkRuntime", () => {
     const setModel = vi.fn().mockResolvedValue(undefined);
     createAgentSession.mockResolvedValueOnce({
       session: {
+        modelRuntime,
         subscribe: vi.fn(() => vi.fn()),
         prompt: vi.fn(),
         steer: vi.fn(),
@@ -724,8 +728,9 @@ describe("PiSdkRuntime", () => {
     await handle.refreshModelRegistry?.();
     await handle.setModel?.("anthropic/claude-opus-4-6", "cred-b");
 
-    expect(modelRegistryRefresh).toHaveBeenCalled();
-    expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }));
+    expect(databaseRuntimeRefresh).toHaveBeenCalledWith(modelRuntime, "test-profile");
+    expect(databaseRuntimeRefresh).toHaveBeenCalledWith(modelRuntime, "cred-b");
+    expect(setModel).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", id: "claude-opus-4-6" }));
     expect(handle.runtimeParams?.model).toBe("anthropic/claude-opus-4-6");
   });
 
@@ -747,6 +752,7 @@ describe("PiSdkRuntime", () => {
     activeToolNames = ["read", "bash", "wait", "web_search", "mcp"];
     createAgentSession.mockResolvedValueOnce({
       session: {
+        modelRuntime,
         subscribe: vi.fn(() => vi.fn()),
         prompt: vi.fn(), steer: vi.fn(), abort: vi.fn(), abortCompaction: vi.fn(), abortBranchSummary: vi.fn(), dispose: vi.fn(),
         reload: vi.fn(), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(),
@@ -858,15 +864,11 @@ function responsesInput(messages: any[]) {
 
 describe("PiSdkAgentHandle compaction watchdog action", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-pi-sdk-watchdog-"));
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: false }, mcp: { enabled: false } };
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
 
   it("mid-run crossing: aborts and compacts without rewriting SDK history", async () => {
     const mock = makeWatchdogSession({

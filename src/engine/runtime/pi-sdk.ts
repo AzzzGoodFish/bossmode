@@ -7,7 +7,6 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   ModelRegistry,
-  ModelRuntime,
   SessionManager,
   SettingsManager,
   VERSION as PI_SDK_VERSION,
@@ -18,7 +17,7 @@ import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
-import { exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
+import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
@@ -663,8 +662,10 @@ export class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
-  async refreshModelRegistry(opts?: { allowNetwork?: boolean }): Promise<void> {
-    await this.session.modelRuntime.refresh({ allowNetwork: opts?.allowNetwork ?? false });
+  async refreshModelRegistry(_opts?: { allowNetwork?: boolean }): Promise<void> {
+    // Catalog network refresh belongs to the application service; the SDK consumes SQL snapshots.
+    const profileId = this.runtimeParams.credentialId;
+    await refreshDatabaseModelRuntime(this.session.modelRuntime, profileId);
   }
 
   async setModel(modelRef: string, credentialId: string): Promise<void> {
@@ -673,7 +674,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (!profile || !profile.enabled || profile.providerSlug !== provider) {
       throw new Error(`Invalid credential binding for ${modelRef}`);
     }
-    await this.credentials.runProfile(profile, () => this.session.modelRuntime.refresh({ allowNetwork: false }));
+    await this.credentials.runProfile(profile, () => refreshDatabaseModelRuntime(this.session.modelRuntime, profile.id));
     const found = this.modelRegistry.find(provider, modelId);
     if (!found) throw new Error(`Model not found: ${modelRef}`);
     const model = this.credentials.bind(found, profile);
@@ -895,7 +896,7 @@ export class PiSdkRuntime implements AgentRuntime {
 
     if (!piConfig.profile) throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
     const authStorageCredentials = new ModelCredentialBinding(piConfig.profile);
-    const runtime = await ModelRuntime.create({ credentials: authStorageCredentials, modelsPath: join(runtimeAgentDir, "models.json"), allowModelNetwork: false });
+    const runtime = await createDatabaseModelRuntime(authStorageCredentials, piConfig.profile.id);
     authStorageCredentials.attach(runtime);
     const modelRegistry = new ModelRegistry(runtime);
     const settingsManager = SettingsManager.create(opts.cwd, runtimeAgentDir);
