@@ -1545,9 +1545,22 @@ export interface MemberWorkspaceEntry {
   user?: string;
 }
 
+export interface MemberExtensionAsset {
+  name: string;
+  /** absolute configured package dir or standalone file, never abbreviated server-side */
+  path: string;
+  /** resolved symlink target; null if inaccessible/missing */
+  realPath: string | null;
+  /** existing module entry files, configured paths (extension-inventory contract 2026-09-08) */
+  entryPoints: string[];
+  source: "member" | "builtin";
+  /** filesystem/manifest diagnostics, not runtime load errors */
+  issues: string[];
+}
+
 export interface MemberAssets {
   mcpServers: Array<{ name: string; toolCount?: number }>;
-  extensions: Array<{ name: string }>;
+  extensions: MemberExtensionAsset[];
   skills: MemberSkillEntry[];
   workspaces: MemberWorkspaceEntry[];
   sshPublicKey: string | null;

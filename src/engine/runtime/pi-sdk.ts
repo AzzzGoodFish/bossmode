@@ -1,6 +1,7 @@
 // Pi SDK Runtime — in-process pi Agent SDK integration behind the legacy pi-cli storage key
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync } from "node:fs";
+import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../../workspace/member-extensions.js";
+export { discoverMemberExtensionEntries } from "../../workspace/member-extensions.js";
 import { join } from "node:path";
 import {
   createAgentSession,
@@ -171,62 +172,6 @@ interface McpRuntimeSettings {
 }
 
 
-/**
- * Member extensions dir → loadable file entries (qa rc.14 finding ①).
- * pi's loader treats additionalExtensionPaths as module files; handing it the
- * directory itself fails with "Cannot find module". pi has an internal
- * discoverExtensionsInDir() for exactly this (private, not exported), so we
- * mirror its documented discovery rules:
- *   1. direct `extensions/*.ts` / `*.js` files
- *   2. subdirectory with `index.ts` / `index.js`
- *   3. subdirectory with `package.json` carrying a `pi.extensions` manifest
- * No recursion beyond one level.
- */
-function resolveExtensionEntries(dir: string): string[] | null {
-  const pkgPath = join(dir, "package.json");
-  if (existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-      const declared = pkg?.pi?.extensions;
-      if (Array.isArray(declared) && declared.length > 0) {
-        const entries = declared
-          .map((rel: string) => join(dir, String(rel)))
-          .filter((p: string) => existsSync(p));
-        if (entries.length > 0) return entries;
-      }
-    } catch { /* unreadable manifest → fall through */ }
-  }
-  for (const index of ["index.ts", "index.js"]) {
-    const p = join(dir, index);
-    if (existsSync(p)) return [p];
-  }
-  return null;
-}
-
-export function discoverMemberExtensionEntries(extDir: string): string[] {
-  if (!existsSync(extDir)) return [];
-  const out: string[] = [];
-  let entries;
-  try {
-    entries = readdirSync(extDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
-    const entryPath = join(extDir, entry.name);
-    if ((entry.isFile() || entry.isSymbolicLink()) && /\.(ts|js)$/.test(entry.name)) {
-      out.push(entryPath);
-      continue;
-    }
-    if (entry.isDirectory() || entry.isSymbolicLink()) {
-      const resolved = resolveExtensionEntries(entryPath);
-      if (resolved) out.push(...resolved);
-    }
-  }
-  return out;
-}
-
 /** Batch 6 §1: member-dir assets that join the loader paths (create + reload
  * both call this — skills dir §1.1, extensions dir §1.3 expanded to file
  * entries, present = included). */
@@ -238,16 +183,12 @@ export function memberDirLoaderAssetPaths(memberId: string): { skills: string[];
   };
 }
 
-function resolveVendorMcpAdapterPath(): string {
-  return fileURLToPath(new URL("../../../vendor/pi-mcp-adapter/index.ts", import.meta.url));
-}
-
 function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
   // Batch 6 §1.2+§1.4: members/<id>/mcp.json is the sole source (file present
   // = enabled); the adapter is platform infrastructure, always bound — an
   // empty config is harmless.
   const runtimeDir = getBossmodeMcpRuntimeDir();
-  const adapterPath = resolveVendorMcpAdapterPath();
+  const adapterPath = builtinMcpAdapterPath();
   if (!existsSync(adapterPath)) {
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }

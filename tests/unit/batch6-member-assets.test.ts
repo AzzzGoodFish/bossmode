@@ -150,6 +150,7 @@ describe("GET /api/members/:id/assets (batch 6 §4 outlet)", () => {
     // extensions dir with one entry
     const { memberExtensionsDir, memberSkillsDir } = await import("../../src/workspace/member-profile.js");
     mkdirSync(join(memberExtensionsDir(memberId), "my-ext"), { recursive: true });
+    writeFileSync(join(memberExtensionsDir(memberId), "my-ext", "index.ts"), "export default () => {};", "utf-8");
     // member skill
     mkdirSync(join(memberSkillsDir(memberId), "my-skill"), { recursive: true });
     writeFileSync(join(memberSkillsDir(memberId), "my-skill", "SKILL.md"), "---\nname: my-skill\ndescription: does things\n---\nbody\n", "utf-8");
@@ -159,7 +160,15 @@ describe("GET /api/members/:id/assets (batch 6 §4 outlet)", () => {
     const body = JSON.parse(res.body);
     expect(body.mcpServers.map((s: any) => s.name).sort()).toEqual(["srv-a", "srv-b"]);
     expect(body.mcpServers[0].toolCount).toBeNull();
-    expect(body.extensions).toEqual(["my-ext"]);
+    expect(body.extensions).toHaveLength(2);
+    expect(body.extensions[0]).toEqual({
+      name: "my-ext", path: join(memberExtensionsDir(memberId), "my-ext"),
+      realPath: join(memberExtensionsDir(memberId), "my-ext"),
+      entryPoints: [join(memberExtensionsDir(memberId), "my-ext", "index.ts")],
+      source: "member", issues: [],
+    });
+    expect(body.extensions[1]).toMatchObject({ name: "pi-mcp-adapter", source: "builtin", issues: [] });
+    expect(body.extensions[1].entryPoints).toEqual([body.extensions[1].path]);
     expect(body.skills.map((s: any) => s.name)).toEqual(["my-skill"]);
     expect(body.skills[0].description).toBe("does things");
 
