@@ -1,28 +1,12 @@
-import { ensureMemberStorageReady } from "../workspace/member-storage-startup.js";
+import { prepareCoreStorage } from "../storage/core-startup.js";
+import type { UpgradeProgress } from "../storage/upgrade-runner.js";
+import type { BossmodeConfig } from "../shared/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
-import { removePidFile, writePidFile, ensureBossmodeDir, readConfig } from "../shared/config.js";
-import { runKnowledgeMigration } from "../knowledge/migration.js";
-import { runRoomMemberMigration } from "../workspace/room-member-migration.js";
-import { runMemberCredentialBindingMigration } from "../workspace/member-credential-binding-migration.js";
-import { runMessageSeqMigration } from "../workspace/message-seq-migration.js";
-import { runMemoryStorageReorgMigration } from "../workspace/memory-storage-reorg-migration.js";
-import { runPromptMemoryRenameMigration } from "../workspace/prompt-memory-rename-migration.js";
-import { runPromptAssetsRenameMigration } from "../workspace/prompt-assets-rename-migration.js";
-import { runMainlineEnglishHeadingsMigration } from "../workspace/mainline-english-headings-migration.js";
-import { runMemberStatsBackfillMigration } from "../workspace/member-stats-backfill-migration.js";
-import { runDmPhantomMessagesMigration } from "../workspace/dm-phantom-messages-migration.js";
-import { runMemberOverridesCleanupMigration } from "../workspace/member-overrides-cleanup-migration.js";
-import { runMemberGlobalMigration } from "../workspace/member-global-migration.js";
-import { runSummaryRemovalMigration } from "../workspace/summary-removal-migration.js";
-import { runAgentEventsRekeyMigration } from "../workspace/agent-events-rekey-migration.js";
-import { runIdentityMigrationOnStartup } from "../workspace/identity-migration.js";
-import { runMemberAssetsMigrationOnStartup } from "../workspace/member-assets-migration.js";
-import { runRoomAttachmentsMigrationOnStartup } from "../workspace/room-attachments-migration.js";
-import { initProjection, waitForProjectionInitialization } from "../workspace/db/projection.js";
+import { removePidFile, writePidFile, ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
 import { sweepInterruptedBackgroundTasks } from "../engine/background-task-store.js";
@@ -32,7 +16,6 @@ import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import { seedBuiltinAssets } from "../workforce/team-updates.js";
-import { postMessage } from "../communication/message-bus.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -57,136 +40,18 @@ function serveStatic(res: ServerResponse, filePath: string): boolean {
 export interface ServerOptions {
   host: string;
   port: number;
+  initialConfig?: BossmodeConfig;
+  onProgress?(progress: UpgradeProgress): void;
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
-  // Ensure dirs + seed builtin team files on first run
   ensureBossmodeDir();
-  ensureMemberStorageReady();
+  await prepareCoreStorage({root:getBossmodeDir(),initialConfig:opts.initialConfig,onProgress:opts.onProgress,
+    activate:async()=>{await startApplication(opts);}});
+}
+
+async function startApplication(opts: ServerOptions): Promise<void> {
   seedBuiltinAssets();
-
-  // Knowledge: migrate legacy JSON-entry KBs to filesystem-markdown layout (idempotent)
-  try {
-    runKnowledgeMigration();
-  } catch (err) {
-    logger.error("server", "knowledge migration failed", { error: String(err) });
-  }
-
-  try {
-    runRoomMemberMigration();
-  } catch (err) {
-    logger.error("server", "room member migration failed", { error: String(err) });
-  }
-
-  try {
-    runMemberCredentialBindingMigration();
-  } catch (err) {
-    logger.error("server", "member credential binding migration failed", { error: String(err) });
-  }
-
-  try {
-    runMessageSeqMigration();
-  } catch (err) {
-    logger.error("server", "message seq migration failed", { error: String(err) });
-  }
-
-  try {
-    runMemoryStorageReorgMigration();
-  } catch (err) {
-    logger.error("server", "memory storage reorg migration failed", { error: String(err) });
-  }
-
-  try {
-    runPromptMemoryRenameMigration();
-  } catch (err) {
-    logger.error("server", "prompt memory rename migration failed", { error: String(err) });
-  }
-
-  try {
-    runPromptAssetsRenameMigration();
-  } catch (err) {
-    logger.error("server", "prompt assets rename migration failed", { error: String(err) });
-  }
-
-  try {
-    runMainlineEnglishHeadingsMigration();
-  } catch (err) {
-    logger.error("server", "mainline english headings migration failed", { error: String(err) });
-  }
-
-  try {
-    runMemberStatsBackfillMigration();
-  } catch (err) {
-    logger.error("server", "member stats backfill migration failed", { error: String(err) });
-  }
-
-  try {
-    runDmPhantomMessagesMigration();
-  } catch (err) {
-    logger.error("server", "dm phantom messages migration failed", { error: String(err) });
-  }
-
-  try {
-    const result = runMemberGlobalMigration();
-    if (!result.skipped) {
-      logger.info("server", "member-global-v1 migration applied", result);
-    }
-  } catch (err) {
-    logger.error("server", "member-global-v1 migration failed", { error: String(err) });
-  }
-
-  // Runs after member-global-v1: cleanup needs rooms stamped (globalMemberIds)
-  // to know memberOverrides is no longer consulted.
-  try {
-    const result = runMemberOverridesCleanupMigration();
-    if (result.entriesRemoved > 0 || result.entriesKeptSuspicious > 0 || result.legacyRoomsSkipped > 0) {
-      logger.info("server", "cleanup-member-overrides-v1 migration applied", { ...result });
-    }
-  } catch (err) {
-    logger.error("server", "cleanup-member-overrides migration failed", { error: String(err) });
-  }
-
-  try {
-    const result = runSummaryRemovalMigration();
-    if (!result.skipped) {
-      logger.info("server", "summary-removal-v1 migration applied", result);
-    }
-  } catch (err) {
-    logger.error("server", "summary-removal-v1 migration failed", { error: String(err) });
-  }
-
-  // Reconstruct a genuinely fresh projection before rekeying files or accepting
-  // live writes. Existing projections are retained through the member migration.
-  try {
-    initProjection();
-    await waitForProjectionInitialization();
-  } catch (err) {
-    logger.error("server", "projection init failed", { error: String(err) });
-  }
-
-  // F5: rekey legacy agent-events artifacts (name/rm_ keys) to mem_ identity.
-  // Runs after projection init so stale index rows can be deleted and the
-  // merged files re-indexed immediately. Data-driven idempotent — re-runs are
-  // no-ops once no resolvable legacy files remain.
-  try {
-    const result = runAgentEventsRekeyMigration();
-    if (result.roomsWithChanges > 0 || result.orphans.length > 0) {
-      logger.info("server", "agent-events-rekey-v1 migration applied", { ...result });
-    }
-  } catch (err) {
-    logger.error("server", "agent-events-rekey migration failed", { error: String(err) });
-  }
-
-  // Identity/three-memory redesign: auto-migrate leftover legacy assets before listen.
-  // Data-driven (F1); failure never blocks startup — archive prompt lines remain visible.
-  try {
-    runIdentityMigrationOnStartup();
-    runMemberAssetsMigrationOnStartup();
-    runRoomAttachmentsMigrationOnStartup();
-  } catch (err) {
-    logger.error("server", "identity-memory-v1 startup migration failed", { error: String(err) });
-  }
-
   // Background tasks: service-startup-only sweep. Non-terminal tasks from a
   // previous daemon run are marked interrupted (terminal; never resumed).
   // Runs exactly here — never on member reload or session rebuild.
@@ -226,26 +91,6 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
   // Initialize communication router — topic: scopes dispatch to activateTopicMember.
   const unsubscribeRouter = wireMentionRouter();
-
-  // One-shot migration: drop legacy watches.json (async watch → blocking wait).
-  // No dual-mode / no fallback — leftover subscriptions are cleared with a room note.
-  let clearedWatches = 0;
-  for (const room of roomStore.listRooms()) {
-    const watchesPath = join(roomStore.roomDir(room.id), "watches.json");
-    if (!existsSync(watchesPath)) continue;
-    try {
-      unlinkSync(watchesPath);
-      clearedWatches += 1;
-      try {
-        postMessage(room.id, "system", "Legacy watch subscriptions were cleared — use the blocking `wait` tool instead of watch.");
-      } catch { /* room may not be fully ready */ }
-    } catch (err) {
-      logger.warn("server", "failed to clear watches.json", { roomId: room.id, error: String(err) });
-    }
-  }
-  if (clearedWatches > 0) {
-    logger.info("server", "cleared legacy watches.json files", { count: clearedWatches });
-  }
 
   return new Promise((resolve, reject) => {
     const webDistDir = join(import.meta.dirname, "../../web/dist");
@@ -291,6 +136,9 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     server.listen(opts.port, opts.host, () => {
       const address = `http://${opts.host === "0.0.0.0" ? "localhost" : opts.host}:${opts.port}`;
       logger.info("server", `running at ${address}`, { host: opts.host, port: opts.port });
+      const config = readConfig();
+      config.defaults = {host:opts.host,port:opts.port};
+      writeConfig(config);
       writePidFile(process.pid);
       resolve();
     });

@@ -1,23 +1,23 @@
 #!/usr/bin/env node
+import { inspectStartupSettings } from "../storage/startup-inspection.js";
+import { waitForStartup, StartupWaitError } from "./startup-wait.js";
+import type { BossmodeConfig } from "../shared/types.js";
 
 import { fork } from "node:child_process";
 import { stopDaemonProcess, processIsAlive } from "./stop-process.js";
-import { openSync, readFileSync } from "node:fs";
+import { openSync, closeSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { networkInterfaces } from "node:os";
 import {
-  configExists,
   ensureBossmodeDir,
   getBossmodeDir,
   getDefaultConfig,
   hashPassword,
   isProcessRunning,
-  readConfig,
   readPidFile,
   removePidFile,
-  writeConfig,
 } from "../shared/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -96,7 +96,7 @@ async function promptPassword(question: string): Promise<string> {
   });
 }
 
-async function firstRunSetup(): Promise<void> {
+async function firstRunSetup(): Promise<BossmodeConfig> {
   console.log("Welcome to Bossmode! Let's set up your account.\n");
 
   const username = await promptUser("Username: ");
@@ -111,8 +111,7 @@ async function firstRunSetup(): Promise<void> {
   config.auth.username = username;
   config.auth.passwordHash = hashPassword(password);
 
-  writeConfig(config);
-  console.log("\nConfig saved. You're good to go!\n");
+  return config;
 }
 
 function parseArgs(args: string[]): { command: string; flags: Record<string, string> } {
@@ -134,28 +133,18 @@ function parseArgs(args: string[]): { command: string; flags: Record<string, str
 async function cmdOn(flags: Record<string, string>): Promise<void> {
   ensureBossmodeDir();
 
-  // First run setup
-  if (!configExists()) {
-    await firstRunSetup();
-  }
-
-  // Check if already running
+  const snapshot = inspectStartupSettings(getBossmodeDir());
   const existingPid = readPidFile();
   if (existingPid && isProcessRunning(existingPid)) {
-    const config = readConfig();
-    const host = config.defaults.host;
-    const port = config.defaults.port;
     console.log(`Bossmode is already running (PID ${existingPid})`);
-    console.log(`Access at ${formatAddress(host, port)}`);
+    if (snapshot.configured) console.log(`Access at ${formatAddress(snapshot.host!, snapshot.port!)}`);
     return;
   }
-
-  // Clean up stale PID
   if (existingPid) removePidFile();
-
-  const config = readConfig();
-  const host = flags.host || config.defaults.host;
-  const port = flags.port || String(config.defaults.port);
+  const initialConfig = snapshot.configured ? undefined : await firstRunSetup();
+  const host = flags.host || snapshot.host || initialConfig!.defaults.host;
+  const port = flags.port || String(snapshot.port || initialConfig!.defaults.port);
+  if (!/^\d+$/.test(port) || Number(port)<1 || Number(port)>65535) throw new Error("Invalid listen port");
 
   // Fork daemon process with IPC channel, stdout/stderr → log file
   const serverModule = join(__dirname, "../server/daemon.js");
@@ -170,49 +159,23 @@ async function cmdOn(flags: Record<string, string>): Promise<void> {
 
   const address = formatAddress(host, port);
 
-  // Wait for daemon to confirm startup (or fail)
+  closeSync(logFd);
   try {
-    await new Promise<void>((resolve, reject) => {
-      const onTimeoutMs = Math.max(1000, parseInt(process.env.BOSSMODE_ON_TIMEOUT_MS || "30000", 10) || 30000);
-      const timeout = setTimeout(() => {
-        reject(new Error(`Daemon startup timed out (${Math.round(onTimeoutMs / 1000)}s)`));
-      }, onTimeoutMs);
-
-      child.on("message", (msg: any) => {
-        clearTimeout(timeout);
-        if (msg.type === "ready") {
-          resolve();
-        } else if (msg.type === "error") {
-          reject(new Error(msg.message));
-        }
-      });
-
-      child.on("exit", (code) => {
-        clearTimeout(timeout);
-        if (code !== null && code !== 0) {
-          reject(new Error(`Daemon exited with code ${code}`));
-        }
-      });
+    const waiting = waitForStartup(child, {
+      inactivityMs: Math.max(1000, Number(process.env.BOSSMODE_ON_TIMEOUT_MS) || 30000),
+      onProgress: progress => { if (progress.completed === undefined) console.log(`Startup: ${progress.phase}`); },
+      onStall: phase => console.log(`Startup is still ${phase}; waiting without interrupting storage preparation.`),
     });
-
-    // Disconnect IPC so child runs fully detached
-    child.disconnect();
-    child.unref();
-
-    // Update defaults if flags provided
-    if (flags.host || flags.port) {
-      config.defaults.host = host;
-      config.defaults.port = parseInt(port, 10);
-      writeConfig(config);
-    }
-
+    child.send({type:"start",initialConfig});
+    await waiting;
+    child.disconnect(); child.unref();
     console.log(`Bossmode started at ${address} (PID ${child.pid})`);
     console.log(`Logs: ${logPath}`);
-  } catch (err: any) {
-    // Kill the child if it's still alive
-    try { child.kill(); } catch {}
-    console.error(`Failed to start Bossmode: ${err.message}`);
-    process.exit(1);
+  } catch (err) {
+    if (err instanceof StartupWaitError && !err.preparationStarted) { try { child.kill(); } catch {} }
+    if (child.connected) child.disconnect(); child.unref();
+    console.error(`Failed to start Bossmode: ${(err as Error).message}`);
+    process.exitCode = 1;
   }
 }
 
@@ -248,9 +211,9 @@ function cmdStatus(): void {
   }
 
   try {
-    const config = readConfig();
-    const host = config.defaults.host;
-    const port = config.defaults.port;
+    const config = inspectStartupSettings(getBossmodeDir());
+    const host = config.host!;
+    const port = config.port!;
     console.log(`Bossmode is running (PID ${pid})`);
     console.log(`Access at ${formatAddress(host, port)}`);
   } catch {
