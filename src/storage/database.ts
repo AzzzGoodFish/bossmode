@@ -144,22 +144,30 @@ export function bindDatabase(db: Database): void {
   active = db;
 }
 
-/** Ordered, transactional schema steps. Applied SQL cannot silently change. */
-export function applyStorageMigrations(db: Database, migrations: readonly StorageMigration[]): void {
+/** Applied history must be an exact, checksummed prefix of supported history. */
+export function validateStorageMigrationHistory(db: Database, migrations: readonly StorageMigration[]): void {
   const ids = new Set<string>();
   for (const migration of migrations) {
     if (!migration.id || ids.has(migration.id)) throw new Error(`Duplicate or empty storage migration ID: ${migration.id}`);
     ids.add(migration.id);
   }
+  if (!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_schema_versions'")) return;
+  const applied = db.all<{id: string; checksum: string}>("SELECT id, checksum FROM storage_schema_versions ORDER BY rowid");
+  for (const [index, row] of applied.entries()) {
+    const supported = migrations[index];
+    if (!supported || supported.id !== row.id) throw new Error(`Unsupported or reordered storage migration history: ${row.id}`);
+    if (row.checksum !== createHash("sha256").update(supported.sql).digest("hex")) throw new Error(`Applied storage migration changed: ${row.id}`);
+  }
+}
+
+/** Ordered, transactional schema steps. Applied SQL cannot silently change. */
+export function applyStorageMigrations(db: Database, migrations: readonly StorageMigration[]): void {
+  validateStorageMigrationHistory(db, migrations);
   db.exec("CREATE TABLE IF NOT EXISTS storage_schema_versions (id TEXT NOT NULL PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)");
   for (const migration of migrations) {
     const checksum = createHash("sha256").update(migration.sql).digest("hex");
     db.transaction(tx => {
-      const previous = tx.get<{ checksum: string }>("SELECT checksum FROM storage_schema_versions WHERE id=?", migration.id);
-      if (previous) {
-        if (previous.checksum !== checksum) throw new Error(`Applied storage migration changed: ${migration.id}`);
-        return;
-      }
+      if (tx.get("SELECT 1 FROM storage_schema_versions WHERE id=?", migration.id)) return;
       tx.exec(migration.sql);
       tx.run("INSERT INTO storage_schema_versions (id, checksum, applied_at) VALUES (?, ?, ?)", migration.id, checksum, Date.now());
     });
