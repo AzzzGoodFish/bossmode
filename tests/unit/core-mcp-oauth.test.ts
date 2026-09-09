@@ -113,6 +113,24 @@ describe("MCP OAuth SQLite authority", () => {
     expect(repository.read("async")).toBeUndefined();
   });
 
+  it("atomically resets registration, tokens and PKCE, rolling back failure in the second SQL clear", () => {
+    repository.write("server", entry);
+    const auth = createMcpAuth(repository);
+    // write clears tokens, then clients: fail the second logical child clear.
+    db.exec("CREATE TRIGGER fail_second_clear BEFORE DELETE ON mcp_oauth_clients BEGIN SELECT RAISE(ABORT, 'injected second clear'); END");
+    expect(() => auth.resetRegistration("server")).toThrow("injected second clear");
+    expect(repository.read("server")).toEqual(entry);
+    const other = openDatabase(join(root, "oauth.sqlite")); connections.push(other);
+    expect(new McpOauthRepository(other).read("server")).toEqual(entry);
+    db.exec("DROP TRIGGER fail_second_clear");
+    const write = vi.spyOn(repository, "write");
+    auth.resetRegistration("server");
+    expect(write).toHaveBeenCalledTimes(1);
+    write.mockRestore();
+    expect(repository.read("server")).toEqual({ serverUrl: url });
+    expect(new McpOauthRepository(other).read("server")).toEqual({ serverUrl: url });
+  });
+
   it("propagates closed and read-only storage failures with no file fallback", async () => {
     const provider = new McpOAuthProvider("server", url, {}, { onRedirect: vi.fn() }, repository);
     db.exec("PRAGMA query_only=ON");
