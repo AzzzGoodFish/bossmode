@@ -1,20 +1,9 @@
-/**
- * CatalogStore — process-singleton source of truth for the model directory.
- *
- * Two layers:
- *   bundled  — packaged SDK catalog (constant fallback)
- *   remote   — last successful pi.dev refresh (disk cache + in-memory image)
- *
- * Rules (v2a):
- *   - getCatalog() always returns an answer (read-through)
- *   - refresh success atomically replaces remote (temp+rename on disk, then memory)
- *   - refresh failure keeps last-good remote forever — never null out on error
- *   - fetchedAt tracks the last successful remote refresh (null if never remote)
- */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { getBossmodeDir, ensureBossmodeDir } from "../shared/config.js";
+/** DB-backed catalog; packaged SDK models remain immutable bundled defaults. */
+import { getDatabase } from "../storage/database.js";
+import { CatalogRepository, DatabaseModelsStore } from "../storage/repositories/catalog-settings.js";
 import { logger } from "../foundation/logger.js";
+function repository(): CatalogRepository { return new CatalogRepository(getDatabase()); }
+export function createDatabaseModelsStore(): DatabaseModelsStore { return new DatabaseModelsStore(repository()); }
 
 export type CatalogRefreshSource = "remote" | "bundled";
 
@@ -37,10 +26,6 @@ export interface DiskCatalogCache {
   updatedAt: string;
 }
 
-const CACHE_FILE = "pi-catalog-remote.json";
-/** Per-provider pi models-store overlays (written to member agentDirs). */
-const OVERLAYS_FILE = "pi-models-store-overlays.json";
-
 /** Shape matches pi-ai ModelsStoreEntry (models-store.json per-provider value). */
 export interface ProviderModelsStoreEntry {
   models: any[];
@@ -53,24 +38,11 @@ let bundledLoader: () => any[] = () => [];
 let testModels: any[] | null = null;
 let networkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) = null;
 
-/** In-memory remote overlay — only replaced on successful refresh / disk hydrate. */
+/** Explicit test overrides only. Production reads always query the database. */
 let remoteModels: any[] | null = null;
 let remoteFetchedAt: number | null = null;
-/** Per-provider models-store entries for member agentDir distribution. */
+/** Explicit test-only provider override. */
 let providerOverlays: Record<string, ProviderModelsStoreEntry> | null = null;
-
-function cachePath(): string {
-  return join(getBossmodeDir(), CACHE_FILE);
-}
-
-function writePrivateJsonAtomic(path: string, data: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(tmp, 0o600); } catch { /* best-effort */ }
-  renameSync(tmp, path);
-  try { chmodSync(path, 0o600); } catch { /* best-effort */ }
-}
 
 /** Inject the packaged-catalog reader (owned by model-credentials registry warm path). */
 export function setBundledCatalogLoader(fn: () => any[]): void {
@@ -95,76 +67,33 @@ export function getPiCatalogModelsForTests(): any[] | null {
   return testModels;
 }
 
-function readDiskCache(): DiskCatalogCache | null {
-  try {
-    const path = cachePath();
-    if (!existsSync(path)) return null;
-    const data = JSON.parse(readFileSync(path, "utf-8"));
-    if (!Array.isArray(data?.models) || data.models.length === 0) return null;
-    const fetchedAt = typeof data.fetchedAt === "number" && Number.isFinite(data.fetchedAt)
-      ? data.fetchedAt
-      : (typeof data.updatedAt === "string" ? Date.parse(data.updatedAt) : NaN);
-    const ts = Number.isFinite(fetchedAt) ? fetchedAt : Date.now();
-    return { models: data.models, fetchedAt: ts, updatedAt: data.updatedAt || new Date(ts).toISOString() };
-  } catch {
-    return null;
-  }
-}
-
-function writeDiskCache(models: any[], fetchedAt: number): void {
-  try {
-    ensureBossmodeDir();
-    writePrivateJsonAtomic(cachePath(), {
-      models,
-      fetchedAt,
-      updatedAt: new Date(fetchedAt).toISOString(),
-    });
-  } catch (err) {
-    logger.warn("catalog", "failed to write remote catalog cache", { error: String(err) });
-  }
-}
-
-/** Offline hydrate: load last-good remote from disk into memory (no network). Idempotent. */
-export function hydrateCatalogFromDisk(): void {
-  if (remoteModels && remoteModels.length > 0) {
-    hydrateProviderOverlaysFromDisk();
-    return;
-  }
-  const cached = readDiskCache();
-  if (!cached) {
-    hydrateProviderOverlaysFromDisk();
-    return;
-  }
-  remoteModels = cached.models;
-  remoteFetchedAt = cached.fetchedAt;
-  logger.info("catalog", "hydrated remote catalog from disk", {
-    modelCount: cached.models.length,
-    fetchedAt: cached.updatedAt,
-  });
-  hydrateProviderOverlaysFromDisk();
-}
+/** Retained bootstrap entry point; reads the bound DB, never legacy disk. */
+export function hydrateCatalogFromDisk(): void { repository().remote(); }
 
 /**
  * Read-through catalog. Always returns an answer.
  * Priority: test override → remote overlay → bundled loader.
  */
 export function getCatalog(): CatalogSnapshot {
+  const stored = repository().remote();
+  const models = remoteModels ?? stored?.models;
+  const fetchedAt = remoteModels ? remoteFetchedAt : stored?.fetchedAt ?? null;
   if (testModels) {
     return {
       models: testModels,
       source: "remote",
-      fetchedAt: remoteFetchedAt,
-      fetchedAtIso: remoteFetchedAt ? new Date(remoteFetchedAt).toISOString() : null,
+      fetchedAt,
+      fetchedAtIso: fetchedAt ? new Date(fetchedAt).toISOString() : null,
       modelCount: testModels.length,
     };
   }
-  if (remoteModels && remoteModels.length > 0) {
+  if (models && models.length > 0) {
     return {
-      models: remoteModels,
+      models,
       source: "remote",
-      fetchedAt: remoteFetchedAt,
-      fetchedAtIso: remoteFetchedAt ? new Date(remoteFetchedAt).toISOString() : null,
-      modelCount: remoteModels.length,
+      fetchedAt,
+      fetchedAtIso: fetchedAt ? new Date(fetchedAt).toISOString() : null,
+      modelCount: models.length,
     };
   }
   const bundled = bundledLoader();
@@ -187,7 +116,7 @@ export function catalogForProvider(providerSlug: string): any[] {
 }
 
 /**
- * Install a successful remote overlay (memory + disk). Only call on verified success.
+ * Commit a successful remote overlay to the database. Only call on verified success.
  * Never used for failure paths.
  */
 export function commitRemoteCatalog(models: any[], fetchedAt: number = Date.now()): void {
@@ -195,9 +124,7 @@ export function commitRemoteCatalog(models: any[], fetchedAt: number = Date.now(
     logger.warn("catalog", "commitRemoteCatalog ignored empty models");
     return;
   }
-  remoteModels = models;
-  remoteFetchedAt = fetchedAt;
-  writeDiskCache(models, fetchedAt);
+  if (!repository().importRemote({ models, fetchedAt, updatedAt: new Date(fetchedAt).toISOString() })) return;
   logger.info("catalog", "remote catalog committed", {
     modelCount: models.length,
     fetchedAt: new Date(fetchedAt).toISOString(),
@@ -219,61 +146,21 @@ export function retainLastGoodCatalog(reason: string, error?: string): CatalogSn
   return snap;
 }
 
-/** Test/reset helper — clears in-memory remote (does not delete disk). */
+/** Clears test overrides, not database state. */
 export function clearRemoteCatalogMemoryForTests(): void {
   remoteModels = null;
   remoteFetchedAt = null;
   providerOverlays = null;
 }
 
-function overlaysPath(): string {
-  return join(getBossmodeDir(), OVERLAYS_FILE);
-}
-
-function readOverlaysDisk(): Record<string, ProviderModelsStoreEntry> | null {
-  try {
-    const path = overlaysPath();
-    if (!existsSync(path)) return null;
-    const data = JSON.parse(readFileSync(path, "utf-8"));
-    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-    return data as Record<string, ProviderModelsStoreEntry>;
-  } catch {
-    return null;
-  }
-}
-
-function writeOverlaysDisk(overlays: Record<string, ProviderModelsStoreEntry>): void {
-  try {
-    ensureBossmodeDir();
-    writePrivateJsonAtomic(overlaysPath(), overlays);
-  } catch (err) {
-    logger.warn("catalog", "failed to write models-store overlays cache", { error: String(err) });
-  }
-}
-
-/** Install per-provider models-store overlays (memory + disk). Call on successful pi.dev refresh. */
 export function commitProviderOverlays(overlays: Record<string, ProviderModelsStoreEntry>): void {
-  if (!overlays || typeof overlays !== "object") return;
-  providerOverlays = overlays;
-  writeOverlaysDisk(overlays);
-  logger.info("catalog", "provider models-store overlays committed", {
-    providers: Object.keys(overlays).length,
-  });
+  repository().importOverlays(overlays);
 }
 
-/** Offline hydrate overlays from disk (idempotent). */
-export function hydrateProviderOverlaysFromDisk(): void {
-  if (providerOverlays && Object.keys(providerOverlays).length > 0) return;
-  const disk = readOverlaysDisk();
-  if (!disk) return;
-  providerOverlays = disk;
-  logger.info("catalog", "hydrated provider models-store overlays from disk", {
-    providers: Object.keys(disk).length,
-  });
-}
+export function hydrateProviderOverlaysFromDisk(): void { repository().overlays(); }
 
 /**
- * Effective per-provider overlays for member agentDir models-store.json.
+ * Effective per-provider overlays for the native SDK ModelsStore.
  * Prefers last committed overlay; if missing, synthesizes from CatalogStore models
  * using fetchedAt as lastModified (must beat pi builtin generatedAt).
  */
@@ -281,9 +168,8 @@ export function getProviderOverlays(): Record<string, ProviderModelsStoreEntry> 
   if (providerOverlays && Object.keys(providerOverlays).length > 0) {
     return providerOverlays;
   }
-  const disk = readOverlaysDisk();
+  const disk = repository().overlays();
   if (disk && Object.keys(disk).length > 0) {
-    providerOverlays = disk;
     return disk;
   }
   // Synthesize from flat catalog so export still seeds something after hydrate-only.
@@ -313,7 +199,7 @@ export function setProviderOverlaysMemoryForTests(overlays: Record<string, Provi
   providerOverlays = overlays;
 }
 
-/** Test helper — seed memory overlay without disk write. */
+/** Test helper — seed an explicit override without a database write. */
 export function setRemoteCatalogMemoryForTests(models: any[] | null, fetchedAt: number | null = Date.now()): void {
   remoteModels = models;
   remoteFetchedAt = models && models.length ? fetchedAt : null;

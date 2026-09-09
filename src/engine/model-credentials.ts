@@ -1,12 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { getDatabase } from "../storage/database.js";
+import { ModelCredentialsRepository } from "../storage/repositories/model-settings.js";
+function credentialRepository(): ModelCredentialsRepository { return new ModelCredentialsRepository(getDatabase()); }
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { getBossmodeDir, ensureBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
+import { getBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
 import { resolveOwningRoomId } from "../workspace/topic-store.js";
 import { logger } from "../foundation/logger.js";
 import {
+  createDatabaseModelsStore,
   setBundledCatalogLoader,
   setPiCatalogModelsForTests as setCatalogTestModels,
   setCatalogNetworkRefreshForTests as setCatalogNetworkHook,
@@ -46,7 +50,6 @@ import type {
   OAuthSelectPrompt,
 } from "../shared/types.js";
 
-const STORE_FILE = "model-credentials.json";
 // SDK/provider adapters currently require an apiKey-shaped value even for keyless endpoints.
 // This sentinel is not a credential; it marks authType=none until upstream supports true no-auth providers.
 const DUMMY_API_KEY = "__bossmode_no_auth__";
@@ -113,46 +116,19 @@ let oauthLoginAdapter: OAuthLoginAdapter | null = null;
 let piCatalogModelsForTests: any[] | null = null;
 
 function now(): number { return Date.now(); }
-function storePath(): string { return join(getBossmodeDir(), STORE_FILE); }
 
 export function getBossmodePiRuntimeRoot(): string {
   return join(getBossmodeDir(), "pi-agent", "runtime");
 }
 
-function writePrivateJson(path: string, data: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch {}
-}
-
-function readStore(): ModelCredentialStore {
-  const path = storePath();
-  if (!existsSync(path)) return { profiles: [], migrations: [] };
-  const parsed = JSON.parse(readFileSync(path, "utf-8")) as { profiles?: ModelCredentialProfile[]; migrations?: string[] };
-  const rawProfiles = Array.isArray(parsed.profiles) ? parsed.profiles : [];
-  return {
-    profiles: rawProfiles.map(normalizeStoredRequestProfile),
-    migrations: Array.isArray(parsed.migrations) ? parsed.migrations.filter((m): m is string => typeof m === "string") : [],
-  };
-}
-
-// Legacy "Claude Code fingerprint" request profiles were removed; fold them back to standard.
-function normalizeStoredRequestProfile(profile: ModelCredentialProfile): ModelCredentialProfile {
-  const legacy = profile.requestProfile as string;
-  if (legacy === "anthropic_claude_code_oauth" || legacy === "anthropic_proxy_claude_code") {
-    return { ...profile, requestProfile: "standard" };
-  }
-  return profile;
-}
+function readStore(): ModelCredentialStore { return credentialRepository().read(); }
 
 function writeStore(profiles: ModelCredentialProfile[], migrations?: string[]): void {
-  ensureBossmodeDir();
-  const existingMigrations = migrations ?? readStore().migrations;
-  writePrivateJson(storePath(), { profiles, ...(existingMigrations.length ? { migrations: existingMigrations } : {}) });
+  credentialRepository().replace({ profiles, migrations: migrations ?? readStore().migrations });
 }
 
 function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredentialProfile {
-  const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, ...rest } = profile;
+  const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, headers: _headers, ...rest } = profile;
   const catalogModels = isBuiltinProviderProfile(profile)
     ? applyBuiltinMetadataOverrides(modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl), profile.modelCustomizations)
     : undefined;
@@ -322,36 +298,25 @@ function credentialChanged(a: OAuthCredentials | undefined, b: OAuthCredentials)
 }
 
 export function persistOAuthCredentialsForProfile(profileId: string, providerSlug: string, credentials: OAuthCredentials): ModelCredentialProfile | null {
-  const store = readStore();
-  let updated: ModelCredentialProfile | null = null;
-  const next = store.profiles.map((profile) => {
-    if (profile.id !== profileId || profile.providerSlug !== providerSlug || profile.authType !== "oauth") return profile;
-    if (!isNewerOAuthCredential(credentials, profile.oauthCredentials)) {
-      updated = profile;
-      return profile;
-    }
-    if (!credentialChanged(profile.oauthCredentials as OAuthCredentials | undefined, credentials)) {
-      updated = profile;
-      return profile;
-    }
-    updated = { ...profile, oauthCredentials: sanitizeOAuthCredentials(credentials), updatedAt: now() };
+  return getDatabase().transaction(() => {
+    const store = readStore();
+    let updated: ModelCredentialProfile | null = null;
+    const next = store.profiles.map((profile) => {
+      if (profile.id !== profileId || profile.providerSlug !== providerSlug || profile.authType !== "oauth") return profile;
+      if (!isNewerOAuthCredential(credentials, profile.oauthCredentials)) {
+        updated = profile;
+        return profile;
+      }
+      if (!credentialChanged(profile.oauthCredentials as OAuthCredentials | undefined, credentials)) {
+        updated = profile;
+        return profile;
+      }
+      updated = { ...profile, oauthCredentials: sanitizeOAuthCredentials(credentials), updatedAt: now() };
+      return updated;
+    });
+    if (updated) writeStore(next);
     return updated;
   });
-  if (updated) writeStore(next);
-  return updated;
-}
-
-function persistApiKeyForProfile(profileId: string, providerSlug: string, apiKey: string): ModelCredentialProfile | null {
-  const store = readStore();
-  const index = store.profiles.findIndex((p) => p.id === profileId);
-  if (index < 0) return null;
-  const existing = store.profiles[index];
-  if (existing.providerSlug !== providerSlug || existing.authType !== "api_key") return existing;
-  if (existing.apiKey === apiKey) return existing;
-  const next = { ...existing, apiKey, updatedAt: now() };
-  store.profiles[index] = next;
-  writeStore(store.profiles, store.migrations);
-  return next;
 }
 
 // Serialize OAuth rotations of the same account across all live sessions.
@@ -381,13 +346,20 @@ class ProfileCredentialStore implements CredentialStore {
     profileModifications.set(this.profileId, pending);
     await previous;
     try {
-      const current = await this.read(providerId);
+      const repo = credentialRepository();
+      const profile = getModelCredentialProfile(this.profileId);
+      const revision = repo.revision(this.profileId);
+      const current = profile?.enabled && profile.providerSlug === this.providerSlug ? authEntry(profile) as Credential | undefined : undefined;
       const next = await fn(current);
+      if (revision === null) return this.read(providerId);
       if (next?.type === "oauth") {
         const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
-        if (hasCompleteOAuthCredentials(oauth)) persistOAuthCredentialsForProfile(this.profileId, this.providerSlug, oauth);
+        if (hasCompleteOAuthCredentials(oauth)) {
+          if (!isNewerOAuthCredential(oauth, profile?.oauthCredentials)) return this.read(providerId);
+          if (!repo.updateSecretIfRevision(this.profileId, this.providerSlug, revision, { oauthCredentials: sanitizeOAuthCredentials(oauth) }, now())) return this.read(providerId);
+        }
       } else if (next?.type === "api_key" && typeof next.key === "string" && next.key.length > 0) {
-        persistApiKeyForProfile(this.profileId, this.providerSlug, next.key);
+        if (!repo.updateSecretIfRevision(this.profileId, this.providerSlug, revision, { apiKey: next.key }, now())) return this.read(providerId);
       }
       // SDK contract: undefined from fn leaves the entry unchanged.
       return next ?? current;
@@ -510,7 +482,7 @@ function validateInput(input: ModelCredentialProfileInput, existing?: ModelCrede
 }
 
 export function loadModelCredentialProfiles(): ModelCredentialProfile[] {
-  return refreshBuiltinProviderProfilesFromStore({ persist: true });
+  return readStore().profiles;
 }
 
 export function listPublicModelCredentialProfiles(): PublicModelCredentialProfile[] {
@@ -547,7 +519,7 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
     oauthCredentials: valid.authType === "oauth" ? (valid.oauthCredentials ?? existing?.oauthCredentials) : undefined,
     requestProfile: valid.requestProfile,
     authHeader: valid.authHeader,
-    headers: valid.headers,
+    headers: valid.headers ?? existing?.headers,
     enabled: valid.enabled ?? existing?.enabled ?? true,
     isDefault: valid.isDefault ?? existing?.isDefault ?? false,
     models: valid.models,
@@ -1220,7 +1192,6 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
   const timeoutMs = options?.timeoutMs ?? 15_000;
 
   try {
-    ensureBossmodeDir();
     await ensureCatalogRegistry(); // pure bundled registry (offline)
     const bundled = loadBundledCatalogSync();
     if (bundled.length === 0) {
@@ -1278,8 +1249,7 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     // Evidence gate only affects logging; content is still the merged candidate.
     const hasEvidence = catalogHasRemoteEvidence(bundled, candidate);
     commitRemoteCatalog(candidate, fetchedAt);
-    // Build per-provider models-store overlays (pi FileModelsStore shape) and distribute
-    // to all member agentDirs so offline runtimes pick up new models (e.g. grok-4.6).
+    // Commit per-provider entries for the native database ModelsStore and refresh live runtimes.
     const overlays = buildProviderOverlaysFromFetch(candidate, providerFetchMeta, fetchedAt);
     commitProviderOverlays(overlays);
     try {
@@ -1335,11 +1305,8 @@ let catalogRefreshInFlight: Promise<CatalogManualRefreshResult> | null = null;
 let catalogSchedulerTimer: ReturnType<typeof setInterval> | null = null;
 
 export function getCatalogAutoRefreshIntervalDays(): number {
-  try {
-    const cfg = readConfig();
-    const v = cfg.catalog?.autoRefreshIntervalDays;
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-  } catch { /* no config yet */ }
+  const v = readConfig().catalog?.autoRefreshIntervalDays;
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
   return DEFAULT_CATALOG_AUTO_REFRESH_DAYS;
 }
 
@@ -1581,18 +1548,6 @@ function isDefaultTextOnlyInput(input: ModelDefinitionConfig["input"]): boolean 
   return Array.isArray(input) && input.length === 1 && input[0] === "text";
 }
 
-function snapshotCredentialStoreOnce(storePathStr: string): void {
-  if (!existsSync(storePathStr)) return;
-  const snapRoot = join(getBossmodePiRuntimeRoot(), ".migration-snapshots");
-  mkdirSync(snapRoot, { recursive: true });
-  const dest = join(snapRoot, `${MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1}-${Date.now()}.json`);
-  try {
-    writeFileSync(dest, readFileSync(storePathStr, "utf-8"), "utf-8");
-  } catch (err) {
-    logger.warn("credentials", "reasoning-default snapshot failed", { error: String(err) });
-  }
-}
-
 function migrateCustomEndpointReasoningDefault(profile: ModelCredentialProfile): ModelCredentialProfile {
   if ((profile.profileKind ?? "custom_endpoint") !== "custom_endpoint") return profile;
   let changed = false;
@@ -1602,18 +1557,6 @@ function migrateCustomEndpointReasoningDefault(profile: ModelCredentialProfile):
     return { ...model, reasoning: true };
   });
   return changed ? { ...profile, models, updatedAt: now() } : profile;
-}
-
-function rewriteAgentDirModelsJson(): void {
-  for (const dir of listMemberAgentDirs()) {
-    const path = join(dir, "models.json");
-    if (!existsSync(path)) continue;
-    try {
-      writePrivateJson(path, { providers: buildAllProvidersCatalog() });
-    } catch (err) {
-      logger.warn("credentials", "models.json rewrite after reasoning-default failed", { dir, error: String(err) });
-    }
-  }
 }
 
 function migrateCustomEndpointVisionInput(profile: ModelCredentialProfile, catalog: any[]): ModelCredentialProfile {
@@ -1633,27 +1576,27 @@ function migrateCustomEndpointVisionInput(profile: ModelCredentialProfile, catal
   return changed ? { ...profile, models, updatedAt: now() } : profile;
 }
 
+/** Explicit startup-import conversion only; no reads, writes or SDK initialization. */
+export function normalizeLegacyCredentialImport(store: ModelCredentialStore, catalog: any[]): ModelCredentialStore {
+  const vision = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_VISION_V1);
+  const reasoning = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1);
+  return {
+    profiles: store.profiles.map(profile => {
+      const legacy = profile.requestProfile as string;
+      let next = legacy === "anthropic_claude_code_oauth" || legacy === "anthropic_proxy_claude_code"
+        ? { ...profile, requestProfile: "standard" as const } : profile;
+      if (vision) next = migrateCustomEndpointVisionInput(next, catalog);
+      if (reasoning) next = migrateCustomEndpointReasoningDefault(next);
+      return next;
+    }),
+    migrations: Array.from(new Set([...store.migrations, MIGRATION_CUSTOM_ENDPOINT_VISION_V1, MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1])),
+  };
+}
+
 function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }): ModelCredentialProfile[] {
   const store = readStore();
-  const catalog = loadPiCatalogModelsSync();
-  let changed = false;
-  const runVisionMigration = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_VISION_V1);
-  const runReasoningDefault = !store.migrations.includes(MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1);
-  if (runReasoningDefault && options.persist) snapshotCredentialStoreOnce(storePath());
-  const profiles = store.profiles.map((profile) => {
-    const refreshed = refreshBuiltinProviderProfile(profile);
-    let next = runVisionMigration ? migrateCustomEndpointVisionInput(refreshed, catalog) : refreshed;
-    if (runReasoningDefault) next = migrateCustomEndpointReasoningDefault(next);
-    if (next !== profile) changed = true;
-    return next;
-  });
-  let migrations = store.migrations;
-  if (runVisionMigration) { migrations = [...migrations, MIGRATION_CUSTOM_ENDPOINT_VISION_V1]; changed = true; }
-  if (runReasoningDefault) { migrations = [...migrations, MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1]; changed = true; }
-  if (changed && options.persist) {
-    writeStore(profiles, migrations);
-    if (runReasoningDefault) rewriteAgentDirModelsJson();
-  }
+  const profiles = store.profiles.map(refreshBuiltinProviderProfile);
+  if (options.persist && profiles.some((p, i) => p !== store.profiles[i])) writeStore(profiles, store.migrations);
   return profiles;
 }
 
@@ -1979,8 +1922,8 @@ export function assertModelAvailable(modelRef: string, context: string): void {
   throw new Error(`Model is not available or credential is missing: ${modelRef}`);
 }
 
-/** Provider entry for models.json — endpoint + model metadata only, no secrets.
- * Auth is supplied per-request by the session's fixed-profile store. */
+/** Internal SDK provider definition. API/OAuth tokens come from the fixed-profile store;
+ * custom transport headers are secret-bearing and must stay inside the runtime. */
 function piProviderCatalogEntry(profile: ModelCredentialProfile): Record<string, unknown> | undefined {
   if (shouldUseSdkBuiltinCatalog(profile)) return undefined;
   const full = piProviderConfig(profile);
@@ -1998,7 +1941,7 @@ function mergeProviderCatalogEntries(a: Record<string, unknown>, b: Record<strin
   return { ...a, ...b, models: Array.from(byId.values()) };
 }
 
-/** Build models.json providers map for every enabled profile (no auth secrets). */
+/** Internal provider map for in-memory SDK registration; never a public DTO. */
 export function buildAllProvidersCatalog(preferredProfileId?: string): Record<string, Record<string, unknown>> {
   const providers: Record<string, Record<string, unknown>> = {};
   const profiles = loadModelCredentialProfiles().filter((p) => p.enabled);
@@ -2016,6 +1959,28 @@ export function buildAllProvidersCatalog(preferredProfileId?: string): Record<st
   return providers;
 }
 
+
+const databaseRuntimeProviders = new WeakMap<ModelRuntime, Set<string>>();
+
+/** Supported SDK construction with DB catalog/credentials, no generated config files. */
+export async function createDatabaseModelRuntime(credentials: CredentialStore, preferredProfileId?: string): Promise<ModelRuntime> {
+  const runtime = await ModelRuntime.create({ credentials, modelsPath: null, modelsStore: createDatabaseModelsStore(), allowModelNetwork: false });
+  await refreshDatabaseModelRuntime(runtime, preferredProfileId);
+  return runtime;
+}
+
+/** Re-register only Bossmode-managed provider definitions; extension registrations stay owned by extensions. */
+export async function refreshDatabaseModelRuntime(runtime: ModelRuntime, preferredProfileId?: string): Promise<void> {
+  const providers = buildAllProvidersCatalog(preferredProfileId);
+  for (const id of databaseRuntimeProviders.get(runtime) ?? []) {
+    if (!(id in providers)) runtime.unregisterProvider(id);
+  }
+  for (const [id, config] of Object.entries(providers)) {
+    runtime.registerProvider(id, config as Parameters<ModelRuntime["registerProvider"]>[1]);
+  }
+  databaseRuntimeProviders.set(runtime, new Set(Object.keys(providers)));
+  await runtime.refresh({ allowNetwork: false });
+}
 
 /** Build pi ModelsStoreEntry map from flat catalog + per-provider fetch metadata. */
 export function buildProviderOverlaysFromFetch(
@@ -2048,88 +2013,15 @@ export function buildProviderOverlaysFromFetch(
   return out;
 }
 
-/**
- * Enumerate member runtime agentDirs under getBossmodePiRuntimeRoot():
- *   <root>/<roomSeg>/<memberSeg>/
- *   <root>/members/<memberSeg>/dm/
- */
-export function listMemberAgentDirs(root: string = getBossmodePiRuntimeRoot()): string[] {
-  const dirs: string[] = [];
-  if (!existsSync(root)) return dirs;
-  let top: string[] = [];
-  try {
-    top = readdirSync(root);
-  } catch {
-    return dirs;
-  }
-  for (const name of top) {
-    const topPath = join(root, name);
-    let st;
-    try { st = statSync(topPath); } catch { continue; }
-    if (!st.isDirectory()) continue;
-    if (name === "members") {
-      // DM agentDirs: members/<id>/dm
-      let memberNames: string[] = [];
-      try { memberNames = readdirSync(topPath); } catch { continue; }
-      for (const mid of memberNames) {
-        const dmDir = join(topPath, mid, "dm");
-        try {
-          if (statSync(dmDir).isDirectory()) dirs.push(dmDir);
-        } catch { /* skip */ }
-      }
-      continue;
-    }
-    // Room agentDirs: <room>/<member>
-    let members: string[] = [];
-    try { members = readdirSync(topPath); } catch { continue; }
-    for (const mid of members) {
-      const agentDir = join(topPath, mid);
-      try {
-        if (!statSync(agentDir).isDirectory()) continue;
-        // Heuristic: agentDir has models.json or is a leaf runtime dir
-        if (existsSync(join(agentDir, "models.json")) || existsSync(join(agentDir, "models-store.json"))) {
-          dirs.push(agentDir);
-        } else {
-          // Still include empty-looking dirs that look like member slots (not nested further)
-          dirs.push(agentDir);
-        }
-      } catch { /* skip */ }
-    }
-  }
-  return dirs;
-}
-
-/** Write models-store.json (pi FileModelsStore whole-file shape: providerId → entry). */
-export function writeModelsStoreFile(agentDir: string, overlays: Record<string, ProviderModelsStoreEntry>): void {
-  if (!overlays || Object.keys(overlays).length === 0) return;
-  mkdirSync(agentDir, { recursive: true });
-  writePrivateJson(join(agentDir, "models-store.json"), overlays);
-}
-
-/**
- * Distribute models-store overlays to every known member agentDir and refresh
- * live runtimes (disk-only). Failures are warned, never thrown.
- */
+/** Catalog distribution uses native DB-backed SDK adapters, never generated JSON files. */
 export function distributeModelsStoreOverlays(
   overlays: Record<string, ProviderModelsStoreEntry> = getProviderOverlays(),
 ): { dirs: number; written: number } {
-  if (!overlays || Object.keys(overlays).length === 0) return { dirs: 0, written: 0 };
-  const dirs = listMemberAgentDirs();
-  let written = 0;
-  for (const dir of dirs) {
-    try {
-      writeModelsStoreFile(dir, overlays);
-      written += 1;
-    } catch (err) {
-      logger.warn("catalog", "models-store write failed", { agentDir: dir, error: String(err) });
-    }
-  }
-  // Live instances: disk-only registry refresh so new overlay is picked up without Reload.
-  void refreshLiveInstanceModelRegistries().catch((err) => {
-    logger.warn("catalog", "live registry refresh after distribute failed", { error: String(err) });
+  commitProviderOverlays(overlays);
+  void refreshLiveInstanceModelRegistries().catch(() => {
+    logger.warn("catalog", "live registry refresh failed");
   });
-  logger.info("catalog", "models-store distributed", { dirs: dirs.length, written, providers: Object.keys(overlays).length });
-  return { dirs: dirs.length, written };
+  return { dirs: 0, written: 0 };
 }
 
 async function refreshLiveInstanceModelRegistries(): Promise<void> {
@@ -2174,21 +2066,7 @@ export function exportPiConfigForMember(args: {
   const agentDir = resolvePiAgentDir(args.roomId, args.memberName);
   mkdirSync(agentDir, { recursive: true });
 
-  // Materialize ALL enabled providers (endpoint + model metadata only). Auth is
-  // live-read per request via the session's fixed-profile store, so cross-provider setModel
-  // works without recreating the runtime.
-  writePrivateJson(join(agentDir, "models.json"), {
-    providers: buildAllProvidersCatalog(profile.id),
-  });
-
-  // Seed pi models-store.json overlay so builtin providers pick up remote catalog
-  // models (e.g. xai/grok-4.6) offline via withRemoteCatalog (fish 2026-08-18).
-  try {
-    const overlays = getProviderOverlays();
-    if (Object.keys(overlays).length > 0) writeModelsStoreFile(agentDir, overlays);
-  } catch (err) {
-    logger.warn("catalog", "models-store seed on export failed", { agentDir, error: String(err) });
-  }
-
+  // Parent runtime registers buildAllProvidersCatalog(profile.id) in memory and
+  // passes createDatabaseModelsStore(); agentDir is retained for SDK sessions/assets.
   return { agentDir, extensionPaths: [], profile: sanitizeProfile(profile) };
 }

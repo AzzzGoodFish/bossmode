@@ -1,16 +1,8 @@
-/**
- * Batch 7 P1 (spec-batch7-workspace-shell-impl-v1 §1-§2): member workspace
- * registry. Two kinds — original (whole local machine, builtin, cannot be
- * removed) and ssh (remote machine + root). The active pointer decides where
- * relative paths in file tools resolve and where sessions run.
- *
- * Storage: members/<id>/workspaces.json. Presence of a file with a non-empty
- * workspaces list is the source of truth; original is synthesized when absent
- * so a member always has a valid workspace even before the file exists.
- */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+/** Member workspace metadata is authoritative in the bound core database. */
+import { getDatabase } from "../storage/database.js";
+import { WorkspacesRepository } from "../storage/repositories/workspace-settings.js";
+function repository(): WorkspacesRepository { return new WorkspacesRepository(getDatabase()); }
 import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
 import { memberDir } from "./member-profile.js";
 
 export interface OriginalWorkspace {
@@ -57,35 +49,14 @@ export function originalWorkspace(memberId: string): OriginalWorkspace {
 }
 
 export function readWorkspaces(memberId: string): WorkspaceRegistry {
-  const path = workspacesJsonPath(memberId);
-  if (!existsSync(path)) {
-    return { active: "original", workspaces: [originalWorkspace(memberId)] };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<WorkspaceRegistry>;
-    const workspaces = Array.isArray(parsed.workspaces) && parsed.workspaces.length > 0
-      ? parsed.workspaces
-      : [originalWorkspace(memberId)];
-    // original is always present and always synthesized from the member dir
-    // (member folder moves should not leave a stale root on disk).
-    const merged = [
-      originalWorkspace(memberId),
-      ...workspaces.filter((w) => w && (w as WorkspaceEntry).id !== "original"),
-    ];
-    const active = typeof parsed.active === "string" && merged.some((w) => w.id === parsed.active)
-      ? parsed.active
-      : "original";
-    return { active, workspaces: merged };
-  } catch {
-    return { active: "original", workspaces: [originalWorkspace(memberId)] };
-  }
+  const saved = repository().read(memberId);
+  if (!saved) return { active: "original", workspaces: [originalWorkspace(memberId)] };
+  const workspaces = [originalWorkspace(memberId), ...saved.workspaces.filter(w => w.id !== "original")];
+  return { active: workspaces.some(w => w.id === saved.active) ? saved.active : "original", workspaces };
 }
 
 function writeWorkspaces(memberId: string, registry: WorkspaceRegistry): void {
-  mkdirSync(memberDir(memberId), { recursive: true });
-  const path = workspacesJsonPath(memberId);
-  writeFileSync(path, JSON.stringify(registry, null, 2) + "\n", { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch { /* best effort */ }
+  repository().importRegistry(memberId, registry);
 }
 
 export function listWorkspaces(memberId: string): WorkspaceRegistry {
@@ -194,7 +165,7 @@ export function workspaceRootOf(w: WorkspaceEntry): string {
 
 /** Default workspace root for fresh members is the member's own folder. */
 export function ensureDefaultRegistry(memberId: string): void {
-  if (!existsSync(workspacesJsonPath(memberId))) {
+  if (!repository().read(memberId)) {
     writeWorkspaces(memberId, { active: "original", workspaces: [originalWorkspace(memberId)] });
   }
 }

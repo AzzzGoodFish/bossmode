@@ -1,4 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { getDatabase } from "../storage/database.js";
+import { SettingsRepository } from "../storage/repositories/settings.js";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -21,38 +23,20 @@ export function ensureBossmodeDir(): void {
   }
 }
 
-export function configExists(): boolean {
-  return existsSync(CONFIG_PATH);
-}
+export function configExists(): boolean { return new SettingsRepository(getDatabase()).exists(); }
 
 export function readConfig(): BossmodeConfig {
-  if (!configExists()) {
-    throw new Error(`Config not found at ${CONFIG_PATH}. Run 'bossmode on' to set up.`);
-  }
-  const raw = readFileSync(CONFIG_PATH, "utf-8");
-  const parsed = JSON.parse(raw) as BossmodeConfig & { sessionResume?: boolean };
-  // Backward compatibility: old config.json files may not have runtime.sessionResume
-  const legacySessionResume = parsed.sessionResume;
-  parsed.runtime = {
-    ...(parsed.runtime || {}),
-    sessionResume: (parsed.runtime?.sessionResume ?? legacySessionResume) !== false,
-    topicSeedMode: parsed.runtime?.topicSeedMode === "fresh" ? "fresh" : "fork",
-  };
-  return parsed;
+  const config = new SettingsRepository(getDatabase()).read();
+  if (!config) throw new Error("Application configuration is not initialized");
+  return config;
 }
 
 export function getTopicSeedMode(): "fork" | "fresh" {
-  try {
-    return readConfig().runtime?.topicSeedMode === "fresh" ? "fresh" : "fork";
-  } catch {
-    return "fork";
-  }
+  return readConfig().runtime?.topicSeedMode === "fresh" ? "fresh" : "fork";
 }
 
 export function writeConfig(config: BossmodeConfig): void {
-  ensureBossmodeDir();
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(CONFIG_PATH, 0o600); } catch { /* best effort */ }
+  new SettingsRepository(getDatabase()).importConfig(config);
 }
 
 // Password hashing: SHA-256 with salt
@@ -82,12 +66,7 @@ export function resolveApiKey(provider: string, config?: BossmodeConfig): string
     return config.apiKeys[provider];
   }
 
-  try {
-    const cfg = readConfig();
-    return cfg.apiKeys[provider];
-  } catch {
-    return undefined;
-  }
+  return readConfig().apiKeys[provider];
 }
 
 export function getDefaultConfig(): BossmodeConfig {

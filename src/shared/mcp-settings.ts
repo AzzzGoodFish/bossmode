@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { getDatabase } from "../storage/database.js";
+import { McpSettingsRepository } from "../storage/repositories/mcp-settings.js";
+function repository(): McpSettingsRepository { return new McpSettingsRepository(getDatabase()); }
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { getBossmodeDir } from "./config.js";
 import type { McpServerAvailability, McpServerSummary } from "./types.js";
 
@@ -67,16 +71,11 @@ export function getMcpServerNames(config: unknown): string[] {
 }
 
 export function readMcpConfigText(): string {
-  const path = getBossmodeMcpConfigPath();
-  if (!existsSync(path)) return "{\n  \"mcpServers\": {}\n}";
-  return readFileSync(path, "utf-8");
+  return JSON.stringify(repository().read(), null, 2);
 }
 
 export function writeMcpConfig(config: Record<string, unknown>): void {
-  ensureBossmodeMcpDirs();
-  const path = getBossmodeMcpConfigPath();
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch { /* best effort */ }
+  repository().importConfig(parseMcpConfigText(JSON.stringify(config)));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,8 +118,7 @@ export function restoreRedactedMcpConfig(submitted: unknown, existing: unknown):
 }
 
 export function readRedactedMcpConfigText(): { configText: string; serverCount: number; exists: boolean } {
-  const path = getBossmodeMcpConfigPath();
-  const exists = existsSync(path);
+  const exists = repository().exists();
   const raw = readMcpConfigText();
   try {
     const parsed = parseMcpConfigText(raw);
@@ -130,7 +128,8 @@ export function readRedactedMcpConfigText(): { configText: string; serverCount: 
       exists,
     };
   } catch {
-    return { configText: raw, serverCount: 0, exists };
+    // Never return unredacted source text if presentation validation fails.
+    return { configText: "{}", serverCount: 0, exists };
   }
 }
 
@@ -162,21 +161,11 @@ export function configFingerprint(value: unknown): string {
 }
 
 export function readMcpStatusCache(): Record<string, McpServerAvailability & { configHash?: string }> {
-  const path = getBossmodeMcpStatusPath();
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8"));
-    return isRecord(parsed) ? parsed as Record<string, McpServerAvailability & { configHash?: string }> : {};
-  } catch {
-    return {};
-  }
+  return repository().status();
 }
 
 export function writeMcpStatusCache(cache: Record<string, McpServerAvailability & { configHash?: string }>): void {
-  ensureBossmodeMcpDirs();
-  const path = getBossmodeMcpStatusPath();
-  writeFileSync(path, `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch { /* best effort */ }
+  repository().importStatus(cache);
 }
 
 export function listMcpServers(config: unknown, availabilityCache: Record<string, McpServerAvailability & { configHash?: string }> = {}, assignedCounts: Record<string, number> = {}): McpServerSummary[] {
@@ -213,38 +202,34 @@ export function disableDeferredMcpCapabilities(value: unknown, key?: string): un
   return out;
 }
 
-/** Batch 6 §1.2: members/<id>/mcp.json is the sole MCP source (file present = enabled). */
+/** Legacy import path only; live member MCP configuration is database-owned. */
 export function getMemberMcpConfigPath(memberId: string): string {
   return join(getBossmodeDir(), "members", safeSegment(memberId), "mcp.json");
 }
 
 export function readMemberMcpConfig(memberId: string): Record<string, unknown> | null {
-  const path = getMemberMcpConfigPath(memberId);
-  if (!existsSync(path)) return null;
-  return parseMcpConfigText(readFileSync(path, "utf-8"));
+  const repo = new McpSettingsRepository(getDatabase(), `member:${memberId}`);
+  return repo.exists() ? repo.read() : null;
 }
 
-/** Scoped runtime config derived from the member's own mcp.json (all servers in
- * the file; no enable list). No member file = empty config. */
-export function writeMemberScopedMcpConfig(args: { roomId: string; memberId: string }): { configPath: string; serverNames: string[] } {
-  const config = readMemberMcpConfig(args.memberId);
-  if (!config) {
-    const serverNames: string[] = [];
-    const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId));
-    mkdirSync(dir, { recursive: true });
+export function writeMemberMcpConfig(memberId: string, config: Record<string, unknown>): void {
+  new McpSettingsRepository(getDatabase()).importMemberConfig(memberId, config);
+}
+
+export interface MaterializedMcpConfig { configPath: string; serverNames: string[]; dispose(): void }
+/** Restricted derived adapter input. Caller disposes after adapter shutdown. */
+function materializeMcpConfig(config: Record<string, unknown>, serverNames: string[]): MaterializedMcpConfig {
+  const dir = mkdtempSync(join(tmpdir(), "bossmode-mcp-runtime-"));
+  try {
     const configPath = join(dir, "mcp.json");
-    writeFileSync(configPath, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-    try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
-    return { configPath, serverNames };
-  }
-  const validNames = getAssignableMcpServerNames(config);
-  const scoped = filterMcpConfigForServers(config, validNames);
-  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId));
-  mkdirSync(dir, { recursive: true });
-  const configPath = join(dir, "mcp.json");
-  writeFileSync(configPath, `${JSON.stringify(scoped, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
-  return { configPath, serverNames: validNames };
+    writeFileSync(configPath, JSON.stringify(filterMcpConfigForServers(config, serverNames)), {mode: 0o600});
+    return {configPath, serverNames, dispose: () => rmSync(dir, {recursive: true, force: true})};
+  } catch (error) { rmSync(dir, {recursive: true, force: true}); throw error; }
+}
+
+export function writeMemberScopedMcpConfig(args: { roomId: string; memberId: string }): MaterializedMcpConfig {
+  const config = readMemberMcpConfig(args.memberId) ?? {mcpServers: {}};
+  return materializeMcpConfig(config, getAssignableMcpServerNames(config));
 }
 
 export function filterMcpConfigForServers(config: unknown, serverNames: string[]): Record<string, unknown> {
@@ -259,23 +244,17 @@ export function filterMcpConfigForServers(config: unknown, serverNames: string[]
   return out;
 }
 
-export function writeScopedMcpConfig(args: { roomId: string; memberId?: string; memberName?: string; serverNames: string[]; config?: Record<string, unknown> }): { configPath: string; serverNames: string[] } {
+export function writeScopedMcpConfig(args: { roomId: string; memberId?: string; memberName?: string; serverNames: string[]; config?: Record<string, unknown> }): MaterializedMcpConfig {
   const config = args.config ?? parseMcpConfigText(readMcpConfigText());
-  const validNames = getAssignableMcpServerNames(config).filter((name) => args.serverNames.includes(name));
-  const scoped = filterMcpConfigForServers(config, validNames);
-  const dir = join(getBossmodeMcpRuntimeDir(), "scopes", safeSegment(args.roomId), safeSegment(args.memberId || args.memberName || "unknown"));
-  mkdirSync(dir, { recursive: true });
-  const configPath = join(dir, "mcp.json");
-  writeFileSync(configPath, `${JSON.stringify(scoped, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(configPath, 0o600); } catch { /* best effort */ }
-  return { configPath, serverNames: validNames };
+  const names = getAssignableMcpServerNames(config).filter(name => args.serverNames.includes(name));
+  return materializeMcpConfig(config, names);
 }
 
 function collectSecretLiterals(value: unknown, key?: string, out: string[] = []): string[] {
   if (typeof value === "string" && key && (SECRET_KEY_RE.test(key) || SECRET_OBJECT_KEYS.has(key))) out.push(value);
   if (Array.isArray(value)) value.forEach((item) => collectSecretLiterals(item, key, out));
   else if (isRecord(value)) {
-    for (const [childKey, childValue] of Object.entries(value)) collectSecretLiterals(childValue, childKey, out);
+    for (const [childKey, childValue] of Object.entries(value)) collectSecretLiterals(childValue, key && SECRET_OBJECT_KEYS.has(key) ? key : childKey, out);
   }
   return out;
 }
