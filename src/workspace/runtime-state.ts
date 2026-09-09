@@ -1,18 +1,6 @@
-// Per-scope runtime state: contract fingerprint + mount-stale markers.
-//
-// Used by the auto-reload prompt system (fish 2026-08-07): a contract
-// fingerprint lets the daemon detect "the build changed core tools/prompt"
-// after a restart, and mount-stale markers track MCP/extension config changes
-// that a running instance has not yet picked up.
-//
-// Storage: rooms/<id>/runtime-state.json for room scope, members/<id>/
-// runtime-state.json for DM scope. Corrupt/missing → treated as empty (quiet
-// fallback, never blocks startup — see spec §5).
-
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { parseScopeId } from "../shared/conversation-ref.js";
-import { getBossmodeDir } from "../shared/config.js";
+// DB-owned runtime recovery metadata. Module import never initializes storage.
+import { getDatabase } from "../storage/database.js";
+import { RuntimeRepository } from "../storage/repositories/runtime-repository.js";
 
 export interface MountStale {
   since: number;
@@ -33,77 +21,26 @@ export interface RuntimeStateEntry {
 
 export type RuntimeStateMap = Record<string, RuntimeStateEntry>;
 
-function stateFilePath(scopeId: string): string {
-  const ref = parseScopeId(scopeId);
-  if (!ref) throw new Error(`scope_not_found: ${scopeId}`);
-  if (ref.kind === "dm") return join(getBossmodeDir(), "members", ref.memberId, "runtime-state.json");
-  return join(getBossmodeDir(), "rooms", ref.roomId, "runtime-state.json");
-}
+function repository(): RuntimeRepository { return new RuntimeRepository(getDatabase()); }
 
-function stateKey(scopeId: string, memberId: string): string {
-  return `${scopeId}:${memberId}`;
-}
-
-export function readRuntimeState(scopeId: string): RuntimeStateMap {
-  const path = stateFilePath(scopeId);
-  if (!existsSync(path)) return {};
-  try {
-    const data = JSON.parse(readFileSync(path, "utf-8"));
-    return (data && typeof data === "object") ? data as RuntimeStateMap : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeRuntimeState(scopeId: string, state: RuntimeStateMap): void {
-  const path = stateFilePath(scopeId);
-  const dir = join(path, "..");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
-}
-
-export function getRuntimeStateEntry(scopeId: string, memberId: string): RuntimeStateEntry {
-  return readRuntimeState(scopeId)[stateKey(scopeId, memberId)] ?? {};
-}
-
+export function readRuntimeState(scopeId: string): RuntimeStateMap { return repository().list(scopeId); }
+export function getRuntimeStateEntry(scopeId: string, memberId: string): RuntimeStateEntry { return repository().get(scopeId, memberId); }
 export function updateRuntimeStateEntry(scopeId: string, memberId: string, patch: RuntimeStateEntry): void {
-  const state = readRuntimeState(scopeId);
-  const key = stateKey(scopeId, memberId);
-  state[key] = { ...state[key], ...patch };
-  writeRuntimeState(scopeId, state);
+  repository().update(scopeId, memberId, current => ({...current, ...patch}), Date.now());
 }
-
 export function setContractFingerprint(scopeId: string, memberId: string, fingerprint: string, contractVersion: number): void {
-  const entry = getRuntimeStateEntry(scopeId, memberId);
-  // Refreshing the fingerprint clears any pending contract drift notification.
-  updateRuntimeStateEntry(scopeId, memberId, { ...entry, contractFingerprint: fingerprint, contractVersion, driftNotified: undefined });
+  updateRuntimeStateEntry(scopeId, memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
 }
-
 export function markDriftNotified(scopeId: string, memberId: string, version: number): void {
-  const entry = getRuntimeStateEntry(scopeId, memberId);
-  updateRuntimeStateEntry(scopeId, memberId, { ...entry, driftNotified: version });
+  updateRuntimeStateEntry(scopeId, memberId, {driftNotified: version});
 }
-
 export function markStaleMounts(scopeId: string, memberId: string, fields: string[]): void {
-  const entry = getRuntimeStateEntry(scopeId, memberId);
-  const existing = entry.staleMounts;
-  const mergedFields = [...new Set([...(existing?.fields ?? []), ...fields])];
-  updateRuntimeStateEntry(scopeId, memberId, { ...entry, staleMounts: { since: Date.now(), fields: mergedFields } });
+  const now = Date.now();
+  repository().update(scopeId, memberId, current => ({...current, staleMounts: {
+    since: now, fields: [...new Set([...(current.staleMounts?.fields ?? []), ...fields])],
+  }}), now);
 }
-
 export function clearStaleMounts(scopeId: string, memberId: string): void {
-  const state = readRuntimeState(scopeId);
-  const key = stateKey(scopeId, memberId);
-  if (!state[key]?.staleMounts) return;
-  delete state[key].staleMounts;
-  writeRuntimeState(scopeId, state);
+  repository().update(scopeId, memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }
-
-/** Clear all state for a member in a scope (after reset). */
-export function clearRuntimeStateEntry(scopeId: string, memberId: string): void {
-  const state = readRuntimeState(scopeId);
-  const key = stateKey(scopeId, memberId);
-  if (!(key in state)) return;
-  delete state[key];
-  writeRuntimeState(scopeId, state);
-}
+export function clearRuntimeStateEntry(scopeId: string, memberId: string): void { repository().clear(scopeId, memberId); }
