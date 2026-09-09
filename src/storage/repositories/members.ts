@@ -1,4 +1,5 @@
-import { getDatabase, type Database } from "../database.js";
+import type { Database } from "../database.js";
+import { validateArchivePath } from "./member-archives.js";
 import type { MemberGlobalConfig, MemberRecord } from "../../workspace/member-registry.js";
 
 interface MemberRow {
@@ -19,9 +20,13 @@ function encode(config: MemberGlobalConfig): string {
 
 /** Identity SQL only. Name policy, asset preparation and notifications belong to services. */
 export class MembersRepository {
-  constructor(private readonly db: Database = getDatabase()) {}
+  constructor(private readonly db: Database) {}
   get(id: string): MemberRecord | null {
     const row = this.db.get<MemberRow>("SELECT * FROM members WHERE id=? AND archived_at IS NULL", id);
+    return row ? decode(row) : null;
+  }
+  getRetained(id: string): MemberRecord | null {
+    const row = this.db.get<MemberRow>("SELECT * FROM members WHERE id=?", id);
     return row ? decode(row) : null;
   }
   findByNameKey(key: string): MemberRecord | null {
@@ -34,8 +39,16 @@ export class MembersRepository {
       record.id, record.name, record.name.toLowerCase(), record.title || null,
       record.agentTemplate, encode(record.global), record.createdAt, record.updatedAt);
   }
+  /** Strict startup tombstone import. Historical labels may already be reused by a live identity. */
+  importArchived(record: MemberRecord, path: string, timestamp: number): void {
+    validateArchivePath(path);
+    if (!Number.isSafeInteger(timestamp)) throw new Error("invalid_archive_timestamp");
+    this.db.run(`INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at,archived_at,archive_path)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`, record.id, record.name, record.name.toLowerCase(), record.title || null,
+      record.agentTemplate, encode(record.global), record.createdAt, record.updatedAt, timestamp, path);
+  }
   update(record: MemberRecord): void {
-    this.db.run("UPDATE members SET name=?,name_key=?,title=?,agent_template=?,global_json=?,created_at=?,updated_at=? WHERE id=?",
+    this.db.run("UPDATE members SET name=?,name_key=?,title=?,agent_template=?,global_json=?,created_at=?,updated_at=? WHERE id=? AND archived_at IS NULL",
       record.name, record.name.toLowerCase(), record.title || null, record.agentTemplate,
       encode(record.global), record.createdAt, record.updatedAt, record.id);
   }
@@ -43,6 +56,8 @@ export class MembersRepository {
     return this.db.get<{archive_path: string|null}>("SELECT archive_path FROM members WHERE id=?", id)?.archive_path ?? null;
   }
   archive(id: string, path: string, timestamp: number): void {
+    validateArchivePath(path);
+    if (!Number.isSafeInteger(timestamp)) throw new Error("invalid_archive_timestamp");
     this.db.run("UPDATE members SET archived_at=?,archive_path=? WHERE id=? AND archived_at IS NULL", timestamp, path, id);
   }
   delete(id: string): void { this.db.run("DELETE FROM members WHERE id=?", id); }

@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
+import { getDatabase } from "../storage/database.js";
 import { logger } from "../foundation/logger.js";
 
 export function memberDir(memberId: string): string {
@@ -49,12 +50,14 @@ export function sharedProjectsMemoryDir(): string {
 
 /** Ensure shared memory roots exist (idempotent). */
 export function ensureSharedMemoryDirs(): void {
+  getDatabase().assertOutsideTransaction();
   mkdirSync(sharedUserMemoryDir(), { recursive: true });
   mkdirSync(sharedProjectsMemoryDir(), { recursive: true });
 }
 
 /** Birth creates an empty persona, its skills directory, and shared memory roots. */
 export function writeMemberProfileSkeleton(memberId: string): string {
+  getDatabase().assertOutsideTransaction();
   mkdirSync(memberDir(memberId), { recursive: true });
   mkdirSync(memberSkillsDir(memberId), { recursive: true });
   ensureSharedMemoryDirs();
@@ -64,6 +67,7 @@ export function writeMemberProfileSkeleton(memberId: string): string {
 }
 
 export function readMemberProfile(memberId: string): MemberProfile {
+  getDatabase().assertOutsideTransaction();
   const path = memberProfilePath(memberId);
   let raw: string;
   try { raw = readFileSync(path, "utf-8"); }
