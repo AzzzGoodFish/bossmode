@@ -1,83 +1,52 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { parseFrontmatter, asStringArray, asString } from "../shared/frontmatter.js";
 import type { AgentDefinition } from "../shared/types.js";
 import { logger } from "../foundation/logger.js";
+import { getDatabase } from "../storage/database.js";
+import { TemplateRepository, type TemplateMetadata } from "../storage/repositories/templates.js";
+import { parseAgentDefinitionMarkdown, readTemplateBody, renderTemplateMarkdown, templateDefinition, writeTemplateBody } from "./template-files.js";
 
-const AGENTS_DIR = join(getBossmodeDir(), "agents");
+export function getAgentsDir(): string { return join(getBossmodeDir(), "agents"); }
+export function ensureAgentsDir(): void { mkdirSync(getAgentsDir(), { recursive: true }); }
 
-export function getAgentsDir(): string {
-  return AGENTS_DIR;
+function repository(): TemplateRepository { return new TemplateRepository(getDatabase()); }
+function definition(metadata: TemplateMetadata): AgentDefinition {
+  return templateDefinition(metadata, readTemplateBody(getBossmodeDir(), metadata));
+}
+function parseAgentFile(content: string, slug: string): AgentDefinition {
+  const parsed = parseAgentDefinitionMarkdown(slug, content);
+  return templateDefinition(parsed.metadata, parsed.body);
 }
 
-export function ensureAgentsDir(): void {
-  if (!existsSync(AGENTS_DIR)) {
-    mkdirSync(AGENTS_DIR, { recursive: true });
-  }
-}
-
-function parseAgentFile(content: string, fallbackName: string): AgentDefinition {
-  const { meta, body } = parseFrontmatter(content);
-  return {
-    name: asString(meta.name, fallbackName),
-    description: asString(meta.description),
-    systemPrompt: body,
-    avatar: meta.avatar ? String(meta.avatar) : undefined,
-    tags: asStringArray(meta.tags),
-    // Backward compat: read model/skills if present, but they're optional now
-    model: meta.model ? asString(meta.model) : undefined,
-    skills: meta.skills ? asStringArray(meta.skills) : undefined,
-  };
-}
-
-export function loadAgentDefinitions(): AgentDefinition[] {
-  ensureAgentsDir();
-
-  const files = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md"));
-  const agents: AgentDefinition[] = [];
-
-  for (const file of files) {
-    try {
-      const content = readFileSync(join(AGENTS_DIR, file), "utf-8");
-      agents.push(parseAgentFile(content, file.replace(/\.md$/, "")));
-    } catch (err) {
-      logger.error("agent-store", "failed to parse agent file", { file, error: String(err) });
-    }
-  }
-
-  return agents;
-}
-
-/** Authority read for user-facing lists: never return a silent partial result. */
-export function loadAgentDefinitionsStrict(): AgentDefinition[] {
-  ensureAgentsDir();
-  return readdirSync(AGENTS_DIR)
-    .filter((file) => file.endsWith(".md"))
-    .map((file) => parseAgentFile(readFileSync(join(AGENTS_DIR, file), "utf-8"), file.replace(/\.md$/, "")));
-}
-
+/** Both list reads are strict: a broken body reference is never a partial successful list. */
+export function loadAgentDefinitions(): AgentDefinition[] { return repository().list().map(definition); }
+export function loadAgentDefinitionsStrict(): AgentDefinition[] { return loadAgentDefinitions(); }
 export function loadAgentDefinition(name: string): AgentDefinition | null {
-  const filePath = join(AGENTS_DIR, `${name}.md`);
-  if (!existsSync(filePath)) return null;
+  const metadata = repository().get(name);
+  return metadata ? definition(metadata) : null;
+}
 
-  const content = readFileSync(filePath, "utf-8");
-  return parseAgentFile(content, name);
+/** Use for API iteration when the lookup slug can differ from the display name. */
+export function listAgentTemplateMetadata(): TemplateMetadata[] { return repository().list(); }
+export function hasAgentDefinition(slug: string): boolean { return repository().has(slug); }
+export function renderAgentDefinitionMarkdown(slug: string): string | null {
+  const metadata = repository().get(slug);
+  return metadata ? renderTemplateMarkdown(metadata, readTemplateBody(getBossmodeDir(), metadata)) : null;
 }
 
 export function saveAgentDefinition(name: string, markdownContent: string): AgentDefinition {
-  ensureAgentsDir();
-  const filePath = join(AGENTS_DIR, `${name}.md`);
-  writeFileSync(filePath, markdownContent, "utf-8");
-  return parseAgentFile(markdownContent, name);
+  const store = repository();
+  const parsed = parseAgentDefinitionMarkdown(name, markdownContent);
+  // Fail missing/unavailable schema before preparing a file, then publish only after durable file IO.
+  store.has(name);
+  const personaPath = writeTemplateBody(getBossmodeDir(), name, parsed.body);
+  store.upsert({ ...parsed.metadata, personaPath });
+  return templateDefinition(parsed.metadata, parsed.body);
 }
 
-export function deleteAgentDefinition(name: string): boolean {
-  const filePath = join(AGENTS_DIR, `${name}.md`);
-  if (!existsSync(filePath)) return false;
-  unlinkSync(filePath);
-  return true;
-}
+/** Remove authority first. Unreferenced body cleanup must run outside caller transactions. */
+export function deleteAgentDefinition(name: string): boolean { return repository().delete(name); }
 
 /** Package factory agents directory (shipped with the npm package). */
 export function getFactoryAgentsDir(): string {

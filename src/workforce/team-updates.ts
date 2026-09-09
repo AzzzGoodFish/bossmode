@@ -8,6 +8,8 @@ import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { logger } from "../foundation/logger.js";
 
+import { hasAgentDefinition, saveAgentDefinition } from "./agent-store.js";
+
 type AssetCategory = "agent" | "skill" | "rule";
 
 interface TemplateFile {
@@ -318,13 +320,21 @@ function cleanupDeletedBuiltinSkills(templates: TemplateFile[]): string[] {
 
 /** Fresh-install seed: write any packaged builtin agent/skill/rule template
  * that doesn't already exist locally. Idempotent, no update-detection —
- * files present locally (regardless of content) are left untouched. */
+ * Agents use DB presence; skill/rule files present locally are left untouched. */
 export function seedBuiltinAssets(): void {
   const currentVersion = getCurrentVersion();
   const templates = enumerateTemplates();
   let seeded = 0;
 
   for (const tpl of templates) {
+    // Installed agents are a SQL registry; retired mixed Markdown is never presence authority.
+    if (tpl.category === "agent") {
+      if (!hasAgentDefinition(tpl.name)) {
+        saveAgentDefinition(tpl.name, renderTemplate(tpl, currentVersion));
+        seeded += 1;
+      }
+      continue;
+    }
     if (getLocalContent(tpl) !== null) continue;
 
     try {
