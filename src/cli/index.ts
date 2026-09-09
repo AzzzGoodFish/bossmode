@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { fork } from "node:child_process";
+import { stopDaemonProcess, processIsAlive } from "./stop-process.js";
 import { openSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -215,25 +216,21 @@ async function cmdOn(flags: Record<string, string>): Promise<void> {
   }
 }
 
-function cmdOff(): void {
+async function cmdOff(): Promise<void> {
   const pid = readPidFile();
-  if (!pid) {
-    console.log("Bossmode is not running.");
-    return;
-  }
-
-  if (!isProcessRunning(pid)) {
-    removePidFile();
+  if (!pid) { console.log("Bossmode is not running."); return; }
+  if (!processIsAlive(pid)) {
+    if (readPidFile() === pid) removePidFile();
     console.log("Bossmode was not running (stale PID file cleaned up).");
     return;
   }
-
   try {
-    process.kill(pid, "SIGTERM");
+    await stopDaemonProcess(pid);
+    if (readPidFile() === pid) removePidFile();
     console.log(`Bossmode stopped (PID ${pid}).`);
-    removePidFile();
-  } catch (err: any) {
-    console.error(`Failed to stop Bossmode: ${err.message}`);
+  } catch (error) {
+    console.error(`Failed to stop Bossmode: ${(error as Error).message}`);
+    process.exitCode = 1;
   }
 }
 
@@ -304,7 +301,7 @@ async function main(): Promise<void> {
       await cmdOn(flags);
       break;
     case "off":
-      cmdOff();
+      await cmdOff();
       break;
     case "status":
       cmdStatus();
