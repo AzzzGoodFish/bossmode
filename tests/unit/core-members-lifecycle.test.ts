@@ -389,6 +389,12 @@ describe("DB archive catalog and explicit source import", () => {
     expect(() => importArchive({archivePath:path,name:"Too long"})).toThrow(/exceed its budget/);
     expect(registry.listMembers()).toEqual([]);
   });
+  it("rejects over-budget whitespace without requiring a history hook", () => {
+    const path = "backups/whitespace-budget"; file(join(root,path,"persona.md")," ".repeat(4001));
+    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:false}}));
+    expect(() => wizard.importMemberFromArchive({archivePath:path,name:"Whitespace"})).toThrow(/exceed its budget/);
+    expect(registry.listMembers()).toEqual([]);
+  });
   it("catalog SQL import rolls back rooms/conflicts and refuses a current-ID association", () => {
     registry.importMemberRecord(record()); const repo = new MemberArchivesRepository(db);
     const source = wizard.catalogFromFiredExport({archivePath:"backups/a",member:record()});

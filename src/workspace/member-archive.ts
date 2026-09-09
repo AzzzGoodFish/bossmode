@@ -120,7 +120,7 @@ export function importMemberFromArchive(opts: {
   if (needsHistory && !hooks) throw new Error("archive_document_integration_required");
   if (hooks?.commitPersona.constructor.name === "AsyncFunction") throw new Error("member_metadata_commit_must_be_synchronous");
   const limit = getMemoryBudget("persona");
-  if (needsHistory && profile.body.length > limit) throw new AssetBudgetError({assetLabel:"member persona",
+  if (profile.body.length > limit) throw new AssetBudgetError({assetLabel:"member persona",
     attemptedLength:profile.body.length, currentContent:"", budget:computeAssetBudget(0, limit)});
   const selected = Object.fromEntries(Object.entries(opts.global ?? {}).filter(([,value]) => value !== undefined));
   const global: MemberGlobalConfig = {...source.global, ...selected};
