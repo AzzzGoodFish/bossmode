@@ -173,4 +173,14 @@ describe("ordinary startup storage upgrade coordinator", () => {
     expect(existsSync(join(root,"config.json"))).toBe(false);
   });
 
+  it("snapshots existing exported archive metadata without retiring those backups", async () => {
+    source("backups/fired-old/member.json", '{"id":"mem_old"}');
+    const result = await run({collectLegacySources: async () => [{path:"config.json",retire:true},{path:"backups/fired-old/member.json",retire:false}]});
+    expect(readFileSync(join(root,"backups/fired-old/member.json"),"utf8")).toBe('{"id":"mem_old"}');
+    expect(existsSync(join(result.backupDirectory!,"files/backups/fired-old/member.json"))).toBe(true);
+  });
+  it("never treats coordinator recovery backups as new business input", async () => {
+    await expect(run({collectLegacySources: async () => [{path:"backups/core-upgrade-old/config.json",retire:false}]})).rejects.toThrow("Invalid legacy source inventory");
+  });
+
 });

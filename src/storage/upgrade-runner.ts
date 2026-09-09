@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { isAbsolute, join, relative } from "node:path";
 import { applyStorageMigrations, validateStorageMigrationHistory, openDatabase, type Database, type StorageMigration } from "./database.js";
-import { copyDurably, publishAssetDurably, ensurePrivateDirectory, hashFile, managedPath, moveDurably, requireRegularFile, syncDirectory, syncFile, writeDurably } from "./upgrade-files.js";
+import { copyDurably, publishAssetDurably, ensurePrivateDirectory, hashFile, managedPath, moveDurably, requireRegularFile, syncDirectory, syncDirectoryChain, syncFile, writeDurably } from "./upgrade-files.js";
 
 type NativeSqlite = typeof import("node:sqlite");
 export type UpgradePhase = "checking" | "backing-up" | "importing" | "validating" | "cutover" | "retiring" | "ready";
@@ -182,7 +182,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
       const name = entry.path;
       const source = managedPath(root, name);
       // Coordinator artifacts/database are never ordinary legacy sources.
-      if (/^(?:bossmode\.db(?:-|$)|bossmode\.pid$|upgrades\/|backups\/)/.test(name)) throw new Error("Invalid legacy source inventory");
+      if (/^(?:bossmode\.db(?:-|$)|bossmode\.pid$|upgrades\/)/.test(name) || (name.startsWith("backups/") && (entry.retire || !/^backups\/(?:fired-|legacy-)[^/]+\//.test(name)))) throw new Error("Invalid legacy source inventory");
       const destination = managedPath(sourceRoot, name);
       const hash = await hashFile(source);
       copyDurably(source, destination);
@@ -228,11 +228,16 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     report({ phase: "validating" });
     await options.validate(context);
     if (db.get<{ integrity_check: string }>("PRAGMA integrity_check")?.integrity_check !== "ok" || db.all("PRAGMA foreign_key_check").length) throw new Error("Staging database validation failed");
-    for (const record of records) if (await hashFile(managedPath(root, record.path)) !== record.hash) throw new Error(`Source changed before cutover: ${record.path}`);
+    for (const record of records) {
+      const source = managedPath(root, record.path);
+      if (await hashFile(source) !== record.hash) throw new Error(`Source changed before cutover: ${record.path}`);
+      if (!record.retire) { syncFile(source); syncDirectoryChain(join(source, ".."), root); }
+    }
     for (const asset of prepared) {
       const destination = managedPath(root, asset.path);
       if (existsSync(destination)) {
         if (await hashFile(destination) !== asset.hash) throw new Error(`Existing asset differs: ${asset.path}`);
+        syncFile(destination); syncDirectoryChain(join(destination, ".."), root);
       } else publishAssetDurably(asset.staged, destination);
     }
     options.checkpoint?.("validated");

@@ -2,13 +2,26 @@
 import { createReadStream } from "node:fs";
 import { closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, writeFileSync, chmodSync, linkSync, unlinkSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, parse } from "node:path";
 
 export function syncFile(path: string): void {
   const fd = openSync(path, "r");
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 export function syncDirectory(path: string): void { syncFile(path); }
+
+/** Retry-visible entries may come from a failed earlier fsync, not durable state. */
+export function syncDirectoryChain(path: string, boundary = parse(resolve(path)).root): void {
+  let cursor = resolve(path);
+  const stop = resolve(boundary);
+  const rel = relative(stop, cursor);
+  if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) throw new Error("Directory sync boundary does not contain path");
+  for (;;) {
+    syncDirectory(cursor);
+    if (cursor === stop) return;
+    cursor = dirname(cursor);
+  }
+}
 
 /** Reject traversal and symlink parents before touching a managed destination. */
 export function managedPath(root: string, name: string): string {
@@ -48,7 +61,7 @@ export function ensurePrivateDirectory(path: string): void {
     syncDirectory(dirname(directory));
   }
   chmodSync(path, 0o700);
-  syncDirectory(path);
+  syncDirectoryChain(path);
 }
 
 /** Publish a complete asset without ever replacing pre-existing user content. */
