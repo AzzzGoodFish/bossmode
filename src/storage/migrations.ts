@@ -1,0 +1,21 @@
+import { baseStorageMigration } from "./base-schema.js";
+import { membersMigration } from "./schema/members.js";
+import { settingsMigration } from "./schema/settings.js";
+import { conversationsMigration } from "./schema/conversations.js";
+import { messagesMigration, eventSourceMigration } from "./schema/messages.js";
+import { executionMigration } from "./schema/execution.js";
+import { assetsMigration } from "./schema/assets.js";
+import { templatesMigration } from "./schema/templates.js";
+import { memberArchivesMigration } from "./schema/member-archives.js";
+import { mcpOauthMigration } from "./schema/mcp-oauth.js";
+import { deliveryMigration } from "./schema/delivery.js";
+import type { StorageMigration } from "./database.js";
+
+// The sole ordered schema plan. Initial conversion runs on the upgrade staging DB,
+// never against a running legacy writer or through a repository getter.
+export const coreStorageMigrations: readonly StorageMigration[] = Object.freeze([
+  baseStorageMigration, membersMigration, settingsMigration, conversationsMigration,
+  messagesMigration, eventSourceMigration, executionMigration, assetsMigration,
+  templatesMigration, memberArchivesMigration, mcpOauthMigration, deliveryMigration,
+]);
+export const CORE_STORAGE_FORMAT = 1;
