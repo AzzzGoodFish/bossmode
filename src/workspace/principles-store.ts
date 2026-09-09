@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { documentContentMeta } from "../storage/document-repository.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
@@ -11,27 +12,6 @@ export interface PrinciplesActor {
   type: "user" | "member";
   memberId?: string;
   name?: string;
-}
-
-interface PrinciplesMetaFile {
-  room?: PrinciplesMeta;
-  members?: Record<string, PrinciplesMeta>;
-}
-
-interface PrinciplesHistoryEvent {
-  ts: number;
-  scope: PrinciplesScope;
-  memberId?: string;
-  revision: number;
-  contentHash: string;
-  contentLength: number;
-  actorType: "user" | "member";
-  actorMemberId?: string;
-  actorName?: string;
-  operation: "write" | "edit";
-  reason: string;
-  /** Full content snapshot of this revision (stored from day one so a future revert is zero-migration). */
-  content: string;
 }
 
 export const PRINCIPLES_MEMBER_MAX_CHARS = 4_000;
@@ -96,14 +76,6 @@ function memberDir(roomId: string, memberId: string): string {
   return join(membersDir(roomId), safeMemberId(memberId));
 }
 
-function metaPath(roomId: string): string {
-  return join(memoryDir(roomId), "principles-meta.json");
-}
-
-function historyPath(roomId: string): string {
-  return join(memoryDir(roomId), "principles-history.jsonl");
-}
-
 function contentPath(roomId: string, scope: PrinciplesScope, memberId?: string): string {
   if (scope === "room") return join(memoryDir(roomId), "room-principles.md");
   if (!memberId) throw new Error("memberId is required for member principles");
@@ -114,68 +86,14 @@ function safeMemberId(memberId: string): string {
   return memberId.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function ensurePrinciplesDir(roomId: string, scope?: PrinciplesScope, memberId?: string): void {
-  mkdirSync(membersDir(roomId), { recursive: true });
-  if (scope === "member" && memberId) mkdirSync(memberDir(roomId, memberId), { recursive: true });
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-/** Single source of truth for the {contentHash, contentLength} pair stored in
- * every principles/mainline meta.json. contentLength is the UTF-16 character
- * count (`.length`) — the same unit the budget system (computeAssetBudget) and
- * every store write path use. All migrations that touch stored content must
- * recompute meta through this helper so length/hash never drift from what the
- * stores themselves would have written. */
-export function computeContentMeta(content: string): { contentHash: string; contentLength: number } {
-  return { contentHash: hashContent(content), contentLength: content.length };
-}
-
-function readMetaFile(roomId: string): PrinciplesMetaFile {
-  const path = metaPath(roomId);
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as PrinciplesMetaFile;
-  } catch {
-    return {};
-  }
-}
-
-function writeMetaFile(roomId: string, meta: PrinciplesMetaFile): void {
-  ensurePrinciplesDir(roomId);
-  writeFileSync(metaPath(roomId), JSON.stringify(meta, null, 2), "utf-8");
-}
-
-function emptyMeta(content = ""): PrinciplesMeta {
-  return {
-    revision: 0,
-    contentHash: hashContent(content),
-    contentLength: content.length,
-  };
-}
-
-function getStoredMeta(meta: PrinciplesMetaFile, scope: PrinciplesScope, memberId?: string): PrinciplesMeta | undefined {
-  return scope === "room" ? meta.room : (memberId ? meta.members?.[memberId] : undefined);
-}
-
-function setStoredMeta(meta: PrinciplesMetaFile, scope: PrinciplesScope, next: PrinciplesMeta, memberId?: string): PrinciplesMetaFile {
-  if (scope === "room") return { ...meta, room: next };
-  if (!memberId) throw new Error("memberId is required for member principles");
-  return { ...meta, members: { ...(meta.members || {}), [memberId]: next } };
-}
-
-function appendHistory(roomId: string, event: PrinciplesHistoryEvent): void {
-  ensurePrinciplesDir(roomId);
-  appendFileSync(historyPath(roomId), JSON.stringify(event) + "\n", "utf-8");
-}
+/** Hash and UTF-16 length use the same units as document budgets. */
+export const computeContentMeta = documentContentMeta;
 
 export function readPrinciples(roomId: string, scope: PrinciplesScope, memberId?: string): Principles {
   const path = contentPath(roomId, scope, memberId);
   const content = existsSync(path) ? readFileSync(path, "utf-8") : "";
-  const stored = getStoredMeta(readMetaFile(roomId), scope, memberId);
-  const fallback = emptyMeta(content);
+  const stored = readDocumentMeta(documentIdentity(path, "principles", scope === "member" ? memberId : undefined, roomId));
+  const fallback: PrinciplesMeta = { revision: 0, ...computeContentMeta(content) };
   const meta = stored || fallback;
   return {
     content,
@@ -216,32 +134,9 @@ export function writePrinciples(args: {
       budget: computeAssetBudget(current.content.length, limit),
     });
   }
-  ensurePrinciplesDir(args.roomId, args.scope, args.memberId);
-  const nextMeta: PrinciplesMeta = {
-    revision: current.revision + 1,
-    contentHash: hashContent(content),
-    contentLength: content.length,
-    updatedAt: Date.now(),
-    updatedBy: args.actor.type,
-    updatedByMemberId: args.actor.memberId,
-    updatedByName: args.actor.name,
-  };
-  writeFileSync(contentPath(args.roomId, args.scope, args.memberId), content, "utf-8");
-  writeMetaFile(args.roomId, setStoredMeta(readMetaFile(args.roomId), args.scope, nextMeta, args.memberId));
-  appendHistory(args.roomId, {
-    ts: nextMeta.updatedAt!,
-    scope: args.scope,
-    memberId: args.scope === "member" ? args.memberId : undefined,
-    revision: nextMeta.revision,
-    contentHash: nextMeta.contentHash,
-    contentLength: nextMeta.contentLength,
-    actorType: args.actor.type,
-    actorMemberId: args.actor.memberId,
-    actorName: args.actor.name,
-    operation: args.operation || "write",
-    reason,
-    content,
-  });
+  const nextMeta = saveDocument(documentIdentity(contentPath(args.roomId, args.scope, args.memberId), "principles",
+    args.scope === "member" ? args.memberId : undefined, args.roomId), content, args.actor,
+    { operation: args.operation || "write", reason });
   return { content, ...nextMeta };
 }
 

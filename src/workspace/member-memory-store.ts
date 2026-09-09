@@ -2,12 +2,12 @@
  * 0.20 member memory layers — persona (global) + per-scope principles/mainline.
  * Contract §6. Write tools enforce "write current scope only"; reads may cross scope.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { memberDir } from "./member-registry.js";
 import { scopeDirName, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { parseJsonlLines } from "../shared/jsonl.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import {
   AssetBudgetError,
   PRINCIPLES_TEMPLATE,
@@ -46,12 +46,6 @@ function layerPath(memberId: string, layer: MemoryLayer, scopeId?: ScopeId): str
   if (!scopeId) throw new Error("scope_required");
   const base = scopeMemoryDir(memberId, scopeId);
   return join(base, layer === "principles" ? "principles.md" : "mainline.md");
-}
-
-function historyPath(memberId: string, layer: MemoryLayer, scopeId?: ScopeId): string {
-  if (layer === "persona") return join(memoryRoot(memberId), "persona-history.jsonl");
-  if (!scopeId) throw new Error("scope_required");
-  return join(scopeMemoryDir(memberId, scopeId), `${layer}-history.jsonl`);
 }
 
 function templateFor(layer: MemoryLayer): string {
@@ -102,25 +96,8 @@ export function writeMemoryLayer(
   }
 
   const p = layerPath(memberId, layer, opts.scopeId);
-  ensureParent(p);
-  writeFileSync(p, content, "utf-8");
-
-  const hp = historyPath(memberId, layer, opts.scopeId);
-  ensureParent(hp);
-  const event = {
-    ts: Date.now(),
-    layer,
-    scopeId: opts.scopeId,
-    contentHash: createHash("sha256").update(content).digest("hex").slice(0, 16),
-    contentLength: content.length,
-    actorType: actor.type,
-    actorMemberId: actor.memberId,
-    actorName: actor.name,
-    operation: opts.operation || "write",
-    reason: opts.reason || "",
-    content,
-  };
-  appendFileSync(hp, JSON.stringify(event) + "\n", "utf-8");
+  saveDocument(documentIdentity(p, layer, memberId, layer === "persona" ? undefined : opts.scopeId), content, actor,
+    { operation: opts.operation || "write", reason: opts.reason || "", eventScopeId: opts.scopeId });
   return { content };
 }
 
@@ -178,37 +155,20 @@ export interface MemoryLayerInfo {
   budget: ReturnType<typeof computeAssetBudget>;
 }
 
-interface MemoryHistoryEvent {
-  ts?: number;
-  actorType?: "user" | "member";
-  actorMemberId?: string;
-  actorName?: string;
-}
-
-/**
- * Read a layer with revision/audit metadata synthesized from its history log
- * (revision = number of persisted write events; last event carries writer + ts).
- * This is the read shape the memory tools and member-asset APIs expose.
- */
+/** Read file bytes with DB-authoritative revision and writer metadata. */
 export function readMemoryLayerInfo(memberId: string, layer: MemoryLayer, scopeId?: ScopeId): MemoryLayerInfo {
   const { content, meta } = readMemoryLayer(memberId, layer, scopeId);
-  const hp = historyPath(memberId, layer, scopeId);
-  const events = existsSync(hp)
-    ? parseJsonlLines<MemoryHistoryEvent>(readFileSync(hp, "utf-8"), {
-        category: "member-memory-store",
-        context: { memberId, layer, scopeId },
-      })
-    : [];
-  const last = events.length > 0 ? events[events.length - 1] : undefined;
+  const stored = readDocumentMeta(documentIdentity(layerPath(memberId, layer, scopeId), layer, memberId,
+    layer === "persona" ? undefined : scopeId));
   return {
     content,
-    revision: events.length,
+    revision: stored?.revision ?? 0,
     contentHash: createHash("sha256").update(content, "utf8").digest("hex"),
     contentLength: content.length,
-    updatedAt: last?.ts ?? null,
-    updatedBy: last?.actorType ?? null,
-    updatedByMemberId: last?.actorMemberId,
-    updatedByName: last?.actorName,
+    updatedAt: stored?.updatedAt ?? null,
+    updatedBy: stored?.updatedBy ?? null,
+    updatedByMemberId: stored?.updatedByMemberId,
+    updatedByName: stored?.updatedByName,
     budget: meta.budget,
   };
 }

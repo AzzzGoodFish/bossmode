@@ -4,12 +4,13 @@
 // The index stores pointers only — chat/tasks/docs remain the source of truth.
 // References are resolved at read/inject time; unresolvable lines are honestly
 // marked `[stale]`, never silently deleted.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { documentContentMeta } from "../storage/document-repository.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
-import type { Mainline, MainlineIndexEntry, ParsedMainline, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
+import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../shared/types.js";
 import { getTask } from "./task-store.js";
 import { readAllMessages } from "./message-store.js";
 import { readAllDmMessages } from "./dm-message-store.js";
@@ -22,25 +23,6 @@ export interface MainlineActor {
   type: "user" | "member";
   memberId?: string;
   name?: string;
-}
-
-interface MainlineMetaFile {
-  members?: Record<string, PrinciplesMeta>;
-}
-
-interface MainlineHistoryEvent {
-  ts: number;
-  memberId: string;
-  revision: number;
-  contentHash: string;
-  contentLength: number;
-  actorType: "user" | "member";
-  actorMemberId?: string;
-  actorName?: string;
-  operation: "write" | "edit";
-  reason: string;
-  /** Full content snapshot of this revision (stored from day one so a future revert is zero-migration). */
-  content: string;
 }
 
 export const MAINLINE_MAX_CHARS = 4_000;
@@ -61,14 +43,6 @@ function memberDir(roomId: string, memberId: string): string {
   return join(membersDir(roomId), safeMemberId(memberId));
 }
 
-function metaPath(roomId: string): string {
-  return join(mainlinesDir(roomId), "mainline-meta.json");
-}
-
-function historyPath(roomId: string): string {
-  return join(mainlinesDir(roomId), "mainline-history.jsonl");
-}
-
 function contentPath(roomId: string, memberId: string): string {
   return join(memberDir(roomId, memberId), "mainline.md");
 }
@@ -77,43 +51,14 @@ function safeMemberId(memberId: string): string {
   return memberId.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function ensureMainlinesDir(roomId: string, memberId?: string): void {
-  mkdirSync(membersDir(roomId), { recursive: true });
-  if (memberId) mkdirSync(memberDir(roomId, memberId), { recursive: true });
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-function readMetaFile(roomId: string): MainlineMetaFile {
-  const path = metaPath(roomId);
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as MainlineMetaFile;
-  } catch {
-    return {};
-  }
-}
-
-function writeMetaFile(roomId: string, meta: MainlineMetaFile): void {
-  ensureMainlinesDir(roomId);
-  writeFileSync(metaPath(roomId), JSON.stringify(meta, null, 2), "utf-8");
-}
-
-function appendHistory(roomId: string, event: MainlineHistoryEvent): void {
-  ensureMainlinesDir(roomId);
-  appendFileSync(historyPath(roomId), JSON.stringify(event) + "\n", "utf-8");
-}
-
 export function readMainline(roomId: string, memberId: string): Mainline {
   const path = contentPath(roomId, memberId);
   const content = existsSync(path) ? readFileSync(path, "utf-8") : "";
-  const stored = readMetaFile(roomId).members?.[memberId];
+  const stored = readDocumentMeta(documentIdentity(path, "mainline", memberId, roomId));
   return {
     content,
     revision: stored?.revision ?? 0,
-    contentHash: stored?.contentHash || hashContent(content),
+    contentHash: stored?.contentHash || documentContentMeta(content).contentHash,
     contentLength: stored?.contentLength ?? content.length,
     updatedAt: stored?.updatedAt,
     updatedBy: stored?.updatedBy,
@@ -149,32 +94,8 @@ export function writeMainline(args: {
       budget: computeAssetBudget(current.content.length, limit),
     });
   }
-  ensureMainlinesDir(args.roomId, args.memberId);
-  const nextMeta: PrinciplesMeta = {
-    revision: current.revision + 1,
-    contentHash: hashContent(content),
-    contentLength: content.length,
-    updatedAt: Date.now(),
-    updatedBy: args.actor.type,
-    updatedByMemberId: args.actor.memberId,
-    updatedByName: args.actor.name,
-  };
-  writeFileSync(contentPath(args.roomId, args.memberId), content, "utf-8");
-  const meta = readMetaFile(args.roomId);
-  writeMetaFile(args.roomId, { ...meta, members: { ...(meta.members || {}), [args.memberId]: nextMeta } });
-  appendHistory(args.roomId, {
-    ts: nextMeta.updatedAt!,
-    memberId: args.memberId,
-    revision: nextMeta.revision,
-    contentHash: nextMeta.contentHash,
-    contentLength: nextMeta.contentLength,
-    actorType: args.actor.type,
-    actorMemberId: args.actor.memberId,
-    actorName: args.actor.name,
-    operation: args.operation || "write",
-    reason,
-    content,
-  });
+  const nextMeta = saveDocument(documentIdentity(contentPath(args.roomId, args.memberId), "mainline", args.memberId, args.roomId),
+    content, args.actor, { operation: args.operation || "write", reason });
   return { content, ...nextMeta };
 }
 
