@@ -2,6 +2,7 @@ import {readFileSync} from "node:fs";
 import {getDefaultConfig} from "../shared/config.js";
 import type {BossmodeConfig} from "../shared/types.js";
 import {normalizeLegacyCredentialImport} from "../engine/model-credentials.js";
+import {McpOauthRepository,decodeLegacyMcpOauthEntry} from "./repositories/mcp-oauth.js";
 import {SettingsRepository} from "./repositories/settings.js";
 import {ModelCredentialsRepository} from "./repositories/model-settings.js";
 import {CatalogRepository} from "./repositories/catalog-settings.js";
@@ -65,6 +66,10 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
     if(!Array.isArray(value.profiles)||value.migrations!==undefined&&!Array.isArray(value.migrations))throw new Error("Invalid legacy credential store");
     const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,catalog.remote()?.models??[...bundledCatalog]);
     new ModelCredentialsRepository(ctx.db).replace({profiles:normalized.profiles,migrations:normalized.migrations??[]});break;
+   }
+   case "mcp-oauth":{
+    if(!entry.serverKey)throw new Error("Missing MCP OAuth source key");
+    new McpOauthRepository(ctx.db).importHashedAuthEntry(entry.serverKey,decodeLegacyMcpOauthEntry(read(entry)));break;
    }
    case "mcp-config":new McpSettingsRepository(ctx.db).importConfig(object(read(entry),entry.path));break;
    case "member-mcp":{

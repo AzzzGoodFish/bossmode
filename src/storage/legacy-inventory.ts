@@ -8,7 +8,7 @@ import { promisify } from "node:util";
  */
 export type LegacyKind =
   | "config" | "model-credentials" | "catalog-remote" | "catalog-overlays"
-  | "mcp-config" | "mcp-status" | "member-mcp" | "workspaces" | "ssh-private-key" | "ssh-public-key" | "ssh-config"
+  | "mcp-oauth" | "mcp-config" | "mcp-status" | "member-mcp" | "workspaces" | "ssh-private-key" | "ssh-public-key" | "ssh-config"
   | "member-metadata" | "member-profile-mixed" | "agent-template-mixed"
   | "room-metadata" | "topic-metadata" | "tasks" | "messages" | "message-sequence"
   | "member-cursors" | "dm-member-cursor" | "agent-events" | "derived-event-stats"
@@ -37,6 +37,7 @@ export interface LegacySourceEntry {
   sessionDir?: string;
   slug?: string;
   archiveTimestamp?: string;
+  serverKey?: string;
   /** Export snapshots are retained and routed only to the parent's archive catalog. */
   archivePath?: string;
   snapshotKind?: Exclude<LegacyKind, "export-snapshot"> | "archive-manifest";
@@ -75,6 +76,7 @@ const tokens: Record<string, RegExp> = {
   oldOwnerBody: /^.+\.md$/, template: /^.+\.md$/,
   snapshotLayer: /^(?:persona|principles|mainline|room-principles)$/,
   hashBody: /^[a-f0-9]{64}\.md$/,
+  oauthHash: /^sha256-[a-f0-9]{64}$/,
 };
 const rules: Rule[] = [];
 function rule(pattern: string, describe: Rule["describe"]): void { rules.push({ parts: pattern.split("/"), describe }); }
@@ -84,6 +86,8 @@ function memberScope(p: Params): string {
   return p.scope === "dm" ? `dm:${p.member}` : p.scope.startsWith("room-") ? p.scope.slice(5) : `topic:${p.scope.slice(6)}`;
 }
 function layer(file: string): "principles" | "mainline" { return file.startsWith("principles") ? "principles" : "mainline"; }
+
+rule("mcp/runtime/oauth/:oauthHash/tokens.json", p => ({...description("mcp-oauth"),serverKey:p.oauthHash.slice(7)}));
 
 for (const [path, kind] of Object.entries({
   "config.json": "config", "model-credentials.json": "model-credentials",

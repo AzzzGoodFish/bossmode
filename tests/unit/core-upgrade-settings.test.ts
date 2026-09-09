@@ -6,6 +6,7 @@ import {openDatabase,applyStorageMigrations,type Database} from "../../src/stora
 import {coreStorageMigrations} from "../../src/storage/migrations.js";
 import {discoverLegacyInventory} from "../../src/storage/legacy-inventory.js";
 import {decodeLegacyConfig,importLegacySettings} from "../../src/storage/upgrade-settings.js";
+import {McpOauthRepository,mcpOauthServerKey} from "../../src/storage/repositories/mcp-oauth.js";
 import {SettingsRepository} from "../../src/storage/repositories/settings.js";
 import {McpSettingsRepository} from "../../src/storage/repositories/mcp-settings.js";
 import type {UpgradeImportContext} from "../../src/storage/upgrade-runner.js";
@@ -29,6 +30,18 @@ it("imports only the snapshotted configuration and explicitly converts old resum
 it("creates empty setup configuration for a genuinely absent source",()=>{
  const {ctx,entries}=setup({});expect(importLegacySettings(ctx,entries,[]).size).toBe(0);
  expect(new SettingsRepository(ctx.db).read()?.auth).toEqual({username:"",passwordHash:""});
+});
+it("imports orphaned hashed MCP OAuth data without guessing URL or resuming authorization",()=>{
+ const key=mcpOauthServerKey("removed-server");const path=`mcp/runtime/oauth/sha256-${key}/tokens.json`;
+ const value={tokens:{accessToken:"fixture-token",expiresAt:0},clientInfo:{clientId:"fixture-client",redirectUris:[]},codeVerifier:"retained-verifier",oauthState:"retained-state"};
+ const {ctx,entries}=setup({[path]:value});expect(importLegacySettings(ctx,entries,[]).has(path)).toBe(true);
+ expect(new McpOauthRepository(ctx.db).read("removed-server")).toEqual(value);
+});
+it("refuses the unsupported flat OAuth format instead of importing an empty entry",()=>{
+ const path=`mcp/runtime/oauth/sha256-${mcpOauthServerKey("old")}/tokens.json`;
+ const {ctx,entries}=setup({[path]:{access_token:"not-to-be-logged",expiresAt:12}});
+ expect(()=>importLegacySettings(ctx,entries,[])).toThrow();
+ expect(ctx.db.all("SELECT * FROM mcp_oauth_entries")).toEqual([]);
 });
 it("rejects malformed existing configuration rather than resetting authentication",()=>{
  for(const value of [{}, {...config,auth:null},{...config,auth:{username:"owner",passwordHash:42}},{...config,apiKeys:{key:{secret:"private"}}}])expect(()=>decodeLegacyConfig(value)).toThrow(/Invalid legacy/);

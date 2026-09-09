@@ -145,7 +145,7 @@ describe("startup inventory", () => {
     vi.clearAllMocks();
     const result = discoverLegacyInventory(root);
     expect(result.entries.map(e => e.path)).toEqual(["members/mem_a/workspaces.json"]);
-    expect(result.diagnostics.map(d => d.path).sort()).toEqual(unknown.sort());
+    expect(result.diagnostics.map(d => d.path).sort()).toEqual([...unknown, "mcp/runtime/models.json"].sort());
     expect(fs.readFileSync).not.toHaveBeenCalled();
     const visited = vi.mocked(fs.readdirSync).mock.calls.map(c => String(c[0]));
     expect(visited.some(p => p.includes("/skills") || p.includes("/extensions") || p.includes("/node_modules") || p.includes("/pi-agent") || p.includes("/memory/user"))).toBe(false);
