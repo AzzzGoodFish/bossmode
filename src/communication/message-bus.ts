@@ -2,8 +2,8 @@
 // All messages (user, agent, system) go through here.
 
 import * as messageStore from "../workspace/message-store.js";
-import { addDmMessage } from "../workspace/dm-message-store.js";
-import { addTopicMessage, resolveTopicRoomId } from "../workspace/topic-store.js";
+import { appendMessage } from "../storage/message-repository.js";
+import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../storage/message-dispatch-repository.js";
 import { broadcastToRoom } from "./ws.js";
 import { logger } from "../foundation/logger.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -33,36 +33,10 @@ export function postMessage(
   mentions: string[] = [],
   extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "autoDelivered" | "replyTo">>,
 ): RoomMessage {
-  // Scope-aware egress:
-  // - dm:<memberId> → member-owned DM store
-  // - topic:<topicId> → rooms/<roomId>/topics/<topicId>/messages.jsonl
-  // - plain room id → room messages.jsonl
-  // Broadcast channel and listener notification stay keyed by the same address
-  // (topic messages never land in the parent room stream).
-  let message: RoomMessage;
-  if (roomId.startsWith("dm:")) {
-    message = addDmMessage(roomId.slice("dm:".length), { sender, content, mentions, ...extra });
-  } else if (roomId.startsWith("topic:")) {
-    const topicId = roomId.slice("topic:".length);
-    const parentRoomId = resolveTopicRoomId(topicId);
-    if (!parentRoomId) throw new Error(`Unknown topic scope: ${roomId}`);
-    message = addTopicMessage(parentRoomId, topicId, { sender, content, mentions, ...extra });
-  } else {
-    message = messageStore.addMessage(roomId, { sender, content, mentions, ...extra });
-  }
-
-  // WebSocket broadcast
-  broadcastToRoom(roomId, { type: "room:message", roomId, message });
-  logger.info("ws", "broadcast room:message", { roomId, sender, msgId: message.id, mentions });
-
-  // Notify listeners (synchronous — observer pattern, not event bus)
-  for (const fn of listeners) {
-    try {
-      fn(roomId, message);
-    } catch (err) {
-      logger.error("message-bus", "listener error", { error: String(err) });
-    }
-  }
+  const message = appendMessage(roomId, { sender, content, mentions, ...extra });
+  // A microtask runs after any enclosing synchronous business transaction has
+  // committed/rolled back. Never notify from inside a nested savepoint.
+  scheduleMessageDispatch();
 
   return message;
 }
@@ -80,4 +54,35 @@ export function getMessagesSince(roomId: string, cursorId: string | null): RoomM
 /** Get latest message ID — delegates to message-store */
 export function getLatestMessageId(roomId: string): string | null {
   return messageStore.getLatestMessageId(roomId);
+}
+
+let dispatchScheduled = false;
+/** Parent calls after listener registration at startup and after composed task commits.
+ * Scheduling (rather than immediate delivery) is safe even inside a transaction.
+ */
+export function scheduleMessageDispatch(): void {
+  if (dispatchScheduled) return;
+  dispatchScheduled = true;
+  queueMicrotask(() => {
+    dispatchScheduled = false;
+    try { dispatchPendingMessages(); }
+    catch (error) { logger.error("message-bus", "durable dispatch pending", {error:String(error)}); }
+  });
+}
+
+// Private: only called on a fresh microtask, never on a transaction caller's stack.
+function dispatchPendingMessages(): void {
+  const pending = pendingMessageDispatches();
+  for (const {id,scopeId,message} of pending) {
+    recordDispatchAttempt(id);
+    broadcastToRoom(scopeId,{type:"room:message",roomId:scopeId,message});
+    let failed = false;
+    for (const fn of listeners) {
+      try { fn(scopeId,message); }
+      catch (error) { failed = true; logger.error("message-bus","listener error",{error:String(error)}); }
+    }
+    if (!failed) markDispatchDelivered(id);
+  }
+  // Do not hot-loop on poison deliveries; parent retries on its recovery timer.
+  if (pending.length === 500 && pending.every(row => isDispatchDelivered(row.id))) scheduleMessageDispatch();
 }

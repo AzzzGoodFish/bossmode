@@ -1,19 +1,15 @@
-// Agent event handling — stream accumulation, disk persistence, WS push
-import { existsSync, mkdirSync, readFileSync, appendFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+// Agent event handling — stream accumulation, authoritative persistence, commit-safe WS push
+import { randomUUID } from "node:crypto";
+import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../storage/message-dispatch-repository.js";
+import { appendAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../storage/event-repository.js";
 import { logger } from "../foundation/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
-import { agentEventsDirForScope } from "../workspace/topic-store.js";
 import { refreshContextUsage } from "./agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../workspace/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../shared/types.js";
 import { limitRuntimeErrorEvent } from "../shared/runtime-error-limit.js";
-import { parseJsonlLines } from "../shared/jsonl.js";
-import { recordTurnStart, recordTurnEnd, recordToolCall, recordTokenUsage } from "../workspace/member-stats-store.js";
-import { recordDailyUsage } from "../workspace/db/token-rollup.js";
-import { indexAppendedEvent } from "../workspace/db/activity-index.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -22,90 +18,45 @@ export type AgentHistoryEvent =
   | { type: "agent_reply"; text: string; ts?: number }
   | { type: "system"; text: string; ts?: number };
 
-// -- Event persistence (JSONL) --
-
-function agentEventsDir(roomId: string): string {
-  return agentEventsDirForScope(roomId);
+// -- Event persistence (DB). Existing public names remain for caller integration. --
+const eventIdentities = new WeakMap<object,string>();
+function identityFor(event: object): string {
+  let id = eventIdentities.get(event);
+  if (!id) { id = randomUUID(); eventIdentities.set(event,id); }
+  return id;
 }
-
-function agentEventsPath(roomId: string, agentName: string): string {
-  return join(agentEventsDir(roomId), `${agentName}.jsonl`);
+export function appendEventToDisk(roomId: string,agentRef: string,event: AgentHistoryEvent,eventId = identityFor(event)): void {
+  // Existing callers supply a stable member ID; historical name-only data must
+  // use the strict importer with memberId:null, never this live entry point.
+  persistAgentEvent(roomId,{ownerKey:agentRef,memberId:agentRef},event,eventId);
 }
-
-export function appendEventToDisk(roomId: string, agentRef: string, event: AgentHistoryEvent): void {
-  const dir = agentEventsDir(roomId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  // Preserve an existing ts (handler stamps once so WS + disk share identity).
-  const limited = limitRuntimeErrorEvent(event);
-  const withTs = typeof (limited as { ts?: number }).ts === "number" && Number.isFinite((limited as { ts?: number }).ts)
-    ? limited
-    : { ...limited, ts: Date.now() };
-  const path = agentEventsPath(roomId, agentRef);
-  // Byte offset where this line will start = current file size. seq = 1-based
-  // line number (matches backfill's assignment). Maintained in-memory, seeded
-  // once from the file, so appends stay O(1) and the SQLite index stays aligned.
-  const byteOffsetBefore = existsSync(path) ? statSync(path).size : 0;
-  const seq = nextSeq(roomId, agentRef, path);
-  appendFileSync(path, JSON.stringify(withTs) + "\n", "utf-8");
-  // Live-index for the Activity read path (best-effort; skips non-indexed types).
-  try {
-    indexAppendedEvent(roomId, agentRef, seq, byteOffsetBefore, withTs);
-  } catch {
-    /* projection is best-effort; file remains authority */
-  }
+export function persistAgentEvent(scopeId: string,owner: EventOwner,event: AgentHistoryEvent,eventId = identityFor(event)): AgentHistoryEvent {
+  const fact = appendAgentEvent(scopeId,owner,limitRuntimeErrorEvent(event),eventId);
+  scheduleAgentEventDispatch();
+  return fact.event as AgentHistoryEvent;
 }
+/** Sequences now come from DB facts, no process counter to clear. */
+export function resetEventSeqCache(): void {}
+export function loadEventsFromDisk(roomId: string,agentRef: string): AgentHistoryEvent[] { return readAgentEvents<AgentHistoryEvent>(roomId,agentRef); }
+export function loadEventsPaginated(roomId: string,agentRef: string,limit: number,before?: number): {events:AgentHistoryEvent[];total:number;hasMore:boolean} { return pageAgentEvents<AgentHistoryEvent>(roomId,agentRef,limit,before); }
 
-// Per-file 1-based line counter, seeded lazily from the file on first append so
-// live-index seq matches backfill's line-number seq without recounting.
-const seqCache = new Map<string, number>();
-
-function seqCacheKey(roomId: string, agentRef: string): string {
-  return `${roomId}\u0000${agentRef}`;
-}
-
-function countLines(path: string): number {
-  if (!existsSync(path)) return 0;
-  const content = readFileSync(path, "utf-8");
-  if (!content) return 0;
-  // Non-empty lines only (backfill skips blank lines when assigning seq).
-  let n = 0;
-  for (const line of content.split("\n")) if (line.trim()) n += 1;
-  return n;
-}
-
-function nextSeq(roomId: string, agentRef: string, path: string): number {
-  const key = seqCacheKey(roomId, agentRef);
-  let cur = seqCache.get(key);
-  if (cur === undefined) cur = countLines(path);
-  const next = cur + 1;
-  seqCache.set(key, next);
-  return next;
-}
-
-/** Test helper: drop the in-memory seq cache. */
-export function resetEventSeqCache(): void {
-  seqCache.clear();
-}
-
-export function loadEventsFromDisk(roomId: string, agentRef: string): AgentHistoryEvent[] {
-  const path = agentEventsPath(roomId, agentRef);
-  if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return [];
-  return parseJsonlLines<AgentHistoryEvent>(content, {
-    category: "event-handler",
-    context: { roomId, agentRef },
-    map: (value) => limitRuntimeErrorEvent(value),
+let eventDispatchScheduled = false;
+/** Parent schedules at startup after socket subscriptions/runtime recovery, and on retry timer. */
+export function scheduleAgentEventDispatch(): void {
+  if (eventDispatchScheduled) return;
+  eventDispatchScheduled = true;
+  queueMicrotask(() => {
+    eventDispatchScheduled = false;
+    try {
+      const rows = pendingAgentEventDispatches();
+      for (const {id,fact,agentName,memberId} of rows) {
+        recordDispatchAttempt(id);
+        broadcastToAgentSubscribers(fact.scopeId,agentName,{type:"agent:event",roomId:fact.scopeId,agent:agentName,memberId:memberId ?? undefined,event:fact.event});
+        markDispatchDelivered(id);
+      }
+      if (rows.length === 500) scheduleAgentEventDispatch();
+    } catch (error) { logger.error("event","durable event dispatch pending",{error:String(error)}); }
   });
-}
-
-/** Load events with tail-based pagination. Returns { events, total, hasMore }. */
-export function loadEventsPaginated(roomId: string, agentRef: string, limit: number, before?: number): { events: AgentHistoryEvent[]; total: number; hasMore: boolean } {
-  const all = loadEventsFromDisk(roomId, agentRef);
-  const total = all.length;
-  const endIdx = before !== undefined ? Math.min(before, total) : total;
-  const startIdx = Math.max(0, endIdx - limit);
-  return { events: all.slice(startIdx, endIdx), total, hasMore: startIdx > 0 };
 }
 
 // -- Stream state accumulation --
@@ -119,7 +70,7 @@ const streamState = new Map<string, { text: string; thinking: string }>();
  * Handle an agent stream event:
  * 1. Accumulate text/thinking from message_update
  * 2. Enrich message_end with accumulated content
- * 3. Persist non-streaming events to disk
+ * 3. Persist non-streaming events to DB
  * 4. Push all events via WebSocket
  * 5. Update public instance status from runtime agent_start/agent_end
  *
@@ -133,6 +84,7 @@ export function handleAgentEvent(
   eventBuffer: AgentHistoryEvent[],
   memberId?: string,
   model?: string,
+  eventId = identityFor(event),
 ): AgentStatus | undefined {
   event = limitRuntimeErrorEvent(event);
 
@@ -228,54 +180,22 @@ export function handleAgentEvent(
     processedEvent = enriched as AgentStreamEvent;
   }
 
-  // One stamp for disk + WS so live feed sort and REST reload share identity.
+  // One stamp for DB + WS so live feed sort and REST reload share identity.
   // Keep an existing ts (tool/user_prompt may already carry one).
   const stamped: AgentStreamEvent & { ts?: number } =
     typeof (processedEvent as { ts?: number }).ts === "number" && Number.isFinite((processedEvent as { ts?: number }).ts)
       ? (processedEvent as AgentStreamEvent & { ts?: number })
       : { ...processedEvent, ts: Date.now() };
 
-  // Persist non-streaming events to disk
+  // Persist facts, usage, stats and notification intent together. A failed commit
+  // propagates; no successful buffer entry or final-event broadcast is fabricated.
   if (stamped.type !== "message_update" && stamped.type !== "tool_update") {
-    eventBuffer.push(stamped);
-    try { appendEventToDisk(roomId, memberId || agentName, stamped); } catch (err) { logger.error("event", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
+    const persisted = persistAgentEvent(roomId,{ownerKey:memberId ?? `unresolved:${agentName}`,memberId:memberId ?? null,label:agentName},stamped,eventId);
+    eventBuffer.push(persisted);
+  } else {
+    // Intentional transient deltas remain realtime-only.
+    broadcastToAgentSubscribers(roomId,agentName,{type:"agent:event",roomId,agent:agentName,memberId,event:stamped});
   }
-
-  // Persistent per-member stats (turns/tool calls/active time/tokens) —
-  // incremental, O(1) per event, so Overview reads never rescan the full log.
-  const statsRef = memberId || agentName;
-  const statsTs = typeof stamped.ts === "number" ? stamped.ts : Date.now();
-  if (stamped.type === "agent_start") {
-    recordTurnStart(instanceKey, statsTs);
-  } else if (stamped.type === "agent_end") {
-    try { recordTurnEnd(roomId, statsRef, instanceKey, statsTs); } catch (err) { logger.error("member-stats", "recordTurnEnd failed", { roomId, agent: agentName, error: String(err) }); }
-  } else if (stamped.type === "tool_start") {
-    try { recordToolCall(roomId, statsRef); } catch (err) { logger.error("member-stats", "recordToolCall failed", { roomId, agent: agentName, error: String(err) }); }
-  } else if (stamped.type === "message_end" && stamped.usage) {
-    try { recordTokenUsage(roomId, statsRef, stamped.usage); } catch (err) { logger.error("member-stats", "recordTokenUsage failed", { roomId, agent: agentName, error: String(err) }); }
-    // Dual-write the daily rollup (SQLite projection). Best-effort: never blocks
-    // the turn. Uses the stamped date/model above.
-    try {
-      recordDailyUsage(
-        roomId,
-        statsRef,
-        statsTs,
-        stamped.usage,
-        (stamped as { model?: string }).model,
-      );
-    } catch (err) {
-      logger.error("db", "recordDailyUsage threw", { roomId, agent: agentName, error: String(err) });
-    }
-  }
-
-  // WebSocket push — forward all events for live streaming (same stamped object as disk)
-  broadcastToAgentSubscribers(roomId, agentName, {
-    type: "agent:event",
-    roomId,
-    agent: agentName,
-    memberId,
-    event: stamped,
-  });
 
   // Public status is sourced only from runtime lifecycle events.
   if (stamped.type === "agent_start") {
