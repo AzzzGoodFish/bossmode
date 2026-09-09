@@ -4,6 +4,21 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.0-rc.1] — 2026-09-09
+
+### Added
+- Self-only `update_profile` for globally unique member names and optional titles. Current names resolve immediately; running sessions, room/DM/topic references, task ownership and reply obligations retain stable member IDs. Historical message names remain unchanged.
+- Shared runtime/Assets extension discovery, with member/builtin source, configured and resolved paths, entry points, diagnostics, expansion and copy feedback.
+
+### Changed
+- Node support is declared as `^22.19.0 || >=24.0.0`, matching the pinned SDK dependency requirements and SQLite migration APIs. This RC was verified on Node 24.13.0.
+- SQLite is the active member identity/configuration authority. `persona.md` is literal Markdown; outer whitespace is trimmed only at prompt injection, preserving the previous boundary behavior.
+- Existing installations must complete an explicitly approved offline migration. Startup rejects legacy member files and interrupted migration state; it does not silently migrate or fall back to old files. Back up the data directory, review the packaged migration script's dry-run report, and keep the service stopped for apply/recovery.
+- Member name changes use the global profile API/tool rather than the removed room-local rename path. Current UI labels update without resetting the Activity history window or reassigning task participants by reused names.
+- Tests initialize isolated member storage before application imports. Existing activity/task/usage projections are preserved; fresh reconstruction covers room, DM and topic sources.
+
+---
+
 ## [0.20.0-rc.6] — 2026-08-04
 
 ### Added

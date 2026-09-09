@@ -9,7 +9,7 @@
 A human–agent collaboration platform built around proven organizational patterns.
 
 [![npm](https://img.shields.io/npm/v/bossmode?style=flat-square&color=173e3d)](https://www.npmjs.com/package/bossmode)
-[![Node](https://img.shields.io/badge/Node.js-%E2%89%A522-26343a?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/Node.js-22.19%2B%20%28v22%29%20%2F%2024%2B-26343a?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-4f7773?style=flat-square)](LICENSE)
 
 <br />
@@ -29,6 +29,15 @@ A human–agent collaboration platform built around proven organizational patter
 npm install -g bossmode@latest
 bossmode on
 ```
+
+### Upgrading to 0.24 RC
+
+Existing installations require an **explicit offline member-storage migration**; startup does not migrate these files automatically. If `member.json` or `member.md` remains in an active member directory, startup refuses to continue.
+
+Stop Bossmode, retain a verified backup, and review the packaged `node <package-directory>/scripts/migrate-member-storage-v1.mjs --dry-run --bossmode-dir <absolute-data-directory>` report before an explicitly approved `--apply`. An interrupted migration requires `--recover` while the service remains stopped. Do not delete `bossmode.db` as a cache: it now owns member identity and configuration.
+
+Member persona is literal `persona.md` Markdown, without required sections or frontmatter. The self-only `update_profile` tool updates DB-owned name/title; names are globally unique, and `all`, `user`, and `system` are reserved. Renaming preserves member IDs, active sessions and historical messages. The member Assets panel lists extension sources, paths, entry points and discovery issues; discovery does not imply successful runtime loading.
+
 
 <div align="center">
 
@@ -51,7 +60,7 @@ Custom Agents, system prompts, and skills.
 
 ### Organize
 
-Room-local members with clear roles and responsibilities.
+Global members with clear roles and responsibilities across rooms.
 
 </td>
 <td width="25%" valign="top">
@@ -201,7 +210,7 @@ A member can compact its context, reload its resources, restart its runtime, or 
 npm install -g bossmode@latest
 ```
 
-Requires **Node.js 22.0.0 or newer**.
+Requires **Node.js 22.19+ within the 22.x line, or Node.js 24+**. This RC was verified with **Node.js 24.13.0**; Node 22 was not exercised in this release run.
 
 ### 2. Start Bossmode
 
