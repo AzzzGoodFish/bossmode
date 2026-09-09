@@ -15,7 +15,8 @@ export interface ParsedTemplate {
 /** Split only the YAML envelope; retain every persona byte after the closing delimiter. */
 export function parseAgentDefinitionMarkdown(slug: string, markdown: string): ParsedTemplate {
   validateTemplateSlug(slug);
-  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
+  // Zero YAML lines is a valid empty envelope; the closing delimiter owns its newline.
+  const match = markdown.match(/^---\r?\n((?:[^\n]*\n)*?)---(?:\r?\n|$)([\s\S]*)$/);
   if (/^---\r?\n/.test(markdown) && !match) throw new Error("Unterminated agent frontmatter");
   const meta = match ? (parse(match[1]) ?? {}) : {};
   if (typeof meta !== "object" || Array.isArray(meta)) throw new Error("Agent frontmatter must be a mapping");
@@ -93,7 +94,12 @@ export function writeTemplateBody(root: string, slug: string, body: string): str
     const fd = openSync(temporary, "wx", 0o600);
     try { writeFileSync(fd, body, "utf8"); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temporary, path);
-    sync(directory);
+    // A visible ancestor may be left by a mkdir whose parent fsync failed. Every
+    // save (also an identical-body retry) must re-sync the whole chain before SQL.
+    for (let cursor = directory; ; cursor = dirname(cursor)) {
+      sync(cursor);
+      if (cursor === join(root)) break;
+    }
   } finally { rmSync(temporary, { force: true }); }
   return relativePath;
 }

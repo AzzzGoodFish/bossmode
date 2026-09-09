@@ -13,10 +13,31 @@ import { seedBuiltinAssets } from "../../src/workforce/team-updates.js";
 // npm test has already established BOSSMODE_DIR isolation before any application import.
 vi.mock("../../src/shared/config.js", () => ({ getBossmodeDir: () => process.env.BOSSMODE_DIR! }));
 
-const ioFailure = vi.hoisted(() => ({ partialBody: false }));
+const ioFailure = vi.hoisted(() => ({
+  partialBody: false,
+  syncPath: "",
+  synced: [] as string[],
+  openPaths: new Map<number, string>(),
+}));
 vi.mock("node:fs", async importOriginal => {
   const fs = await importOriginal<typeof import("node:fs")>();
-  return { ...fs, writeFileSync: ((...args: Parameters<typeof fs.writeFileSync>) => {
+  return { ...fs,
+    openSync: ((...args: Parameters<typeof fs.openSync>) => {
+      const fd = fs.openSync(...args);
+      ioFailure.openPaths.set(fd, String(args[0]));
+      return fd;
+    }),
+    closeSync: (fd: number) => {
+      ioFailure.openPaths.delete(fd);
+      fs.closeSync(fd);
+    },
+    fsyncSync: (fd: number) => {
+      const path = ioFailure.openPaths.get(fd)!;
+      if (path === ioFailure.syncPath) throw new Error("injected directory fsync failure");
+      fs.fsyncSync(fd);
+      ioFailure.synced.push(path);
+    },
+    writeFileSync: ((...args: Parameters<typeof fs.writeFileSync>) => {
     if (ioFailure.partialBody && typeof args[0] === "number") {
       fs.writeFileSync(args[0], "partial");
       throw new Error("injected partial write");
@@ -44,6 +65,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   ioFailure.partialBody = false;
+  ioFailure.syncPath = "";
+  ioFailure.synced = [];
+  ioFailure.openPaths.clear();
+  vi.restoreAllMocks();
   db.close();
   process.chdir(originalCwd);
   process.env.BOSSMODE_DIR = originalDir;
@@ -89,6 +114,36 @@ describe("DB agent-template registry", () => {
     expect(repository.get("empty")!.skills).toEqual([]);
     expect(loadAgentDefinition("empty")!.systemPrompt).toBe("");
     expect(renderAgentDefinitionMarkdown("empty")).toContain("skills: []");
+  });
+
+  it.each(["\n", "\r\n"])("preserves empty frontmatter defaults and exact bodies with %j delimiters", newline => {
+    for (const body of ["", "body", "\r\n  中文 body.  \n\r\n", "---\nbody delimiter\n---\r\n"]) {
+      for (const terminator of body ? [newline] : ["", newline]) {
+        const markdown = `---${newline}---${terminator}${body}`;
+        const parsed = parseAgentDefinitionMarkdown("empty-envelope", markdown);
+        expect(parsed).toEqual({ metadata: {
+          slug: "empty-envelope", name: "empty-envelope", description: "",
+          avatar: undefined, model: undefined, tags: undefined, skills: undefined, extensions: {},
+        }, body });
+        const saved = saveAgentDefinition("empty-envelope", markdown);
+        expect(saved).toEqual({ name: "empty-envelope", description: "", avatar: undefined,
+          model: undefined, tags: [], skills: undefined, systemPrompt: body });
+        expect(loadAgentDefinition("empty-envelope")).toEqual(saved);
+        expect(readFileSync(join(root, repository.get("empty-envelope")!.personaPath))).toEqual(Buffer.from(body));
+        expect(parseAgentDefinitionMarkdown("empty-envelope", renderAgentDefinitionMarkdown("empty-envelope")!)).toEqual(parsed);
+      }
+    }
+  });
+
+  it.each(["\n", "\r\n"])("preserves nonempty frontmatter and exact empty/nonempty bodies with %j delimiters", newline => {
+    for (const body of ["", "\r\n  Persona.  \n\r\n"]) {
+      const markdown = ["---", "name: Display", "extra: keep", "---", body].join(newline);
+      const saved = saveAgentDefinition("envelope", markdown);
+      expect(saved.name).toBe("Display");
+      expect(saved.systemPrompt).toBe(body);
+      expect(repository.get("envelope")!.extensions).toEqual({ extra: "keep" });
+      expect(readFileSync(join(root, repository.get("envelope")!.personaPath))).toEqual(Buffer.from(body));
+    }
   });
 
   it("never discovers or falls back to legacy .md, and lists fail if any referenced body is missing", () => {
@@ -137,6 +192,49 @@ describe("DB agent-template registry", () => {
     ioFailure.partialBody = false;
     expect(repository.get("stable")).toEqual(metadata);
     expect(loadAgentDefinition("stable")!.systemPrompt).toBe("complete old body");
+  });
+
+  it.each(["agents", "agents/retry"])("re-syncs ancestors after %s mkdir succeeds but its parent fsync fails", created => {
+    const parent = join(root, created, "..");
+    mkdirSync(parent, { recursive: true });
+    ioFailure.syncPath = parent;
+    expect(() => saveAgentDefinition("retry", "identical body")).toThrow("injected directory fsync failure");
+    expect(existsSync(join(root, created))).toBe(true);
+    expect(repository.list()).toEqual([]);
+
+    // Visibility is not durability: a second failure at the existing ancestor must still abort.
+    expect(() => saveAgentDefinition("retry", "identical body")).toThrow("injected directory fsync failure");
+    expect(repository.list()).toEqual([]);
+    ioFailure.syncPath = "";
+    ioFailure.synced = [];
+    const upsert = TemplateRepository.prototype.upsert;
+    vi.spyOn(TemplateRepository.prototype, "upsert").mockImplementation(function (this: TemplateRepository, metadata) {
+      const directory = join(root, metadata.personaPath, "..");
+      expect(ioFailure.synced).toEqual(expect.arrayContaining([
+        join(directory, ".persona.tmp"), directory, join(root, "agents/retry"), join(root, "agents"), root,
+      ]));
+      expect(ioFailure.synced.every(path => path === root || path.startsWith(`${root}/`))).toBe(true);
+      return upsert.call(this, metadata);
+    });
+    saveAgentDefinition("retry", "identical body");
+    expect(loadAgentDefinition("retry")!.systemPrompt).toBe("identical body");
+  });
+
+  it.each(["", "agents", "agents/stable"])("blocks publication on renewed %j fsync failure even with an existing matching body", ancestor => {
+    saveAgentDefinition("stable", "identical body");
+    const previous = repository.get("stable")!;
+    ioFailure.syncPath = join(root, ancestor);
+    const publication = vi.spyOn(TemplateRepository.prototype, "upsert");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(() => saveAgentDefinition("stable", "identical body")).toThrow("injected directory fsync failure");
+      expect(publication).not.toHaveBeenCalled();
+      expect(repository.get("stable")).toEqual(previous);
+      expect(readTemplateBody(root, previous)).toBe("identical body");
+    }
+    ioFailure.syncPath = "";
+    saveAgentDefinition("stable", "identical body");
+    expect(publication).toHaveBeenCalledOnce();
+    expect(loadAgentDefinition("stable")!.systemPrompt).toBe("identical body");
   });
 
   it("rejects symlinked persona reads/writes", () => {
