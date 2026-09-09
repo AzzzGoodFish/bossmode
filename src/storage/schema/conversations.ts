@@ -5,7 +5,7 @@ export const conversationsMigration: StorageMigration = {
   id: "core-conversations-v1",
   sql: `
 CREATE TABLE rooms (
-  id TEXT PRIMARY KEY REFERENCES scopes(id) ON DELETE CASCADE,
+  id TEXT NOT NULL PRIMARY KEY REFERENCES scopes(id) ON DELETE CASCADE,
   name TEXT NOT NULL, created_at INTEGER NOT NULL, legacy_cwd TEXT,
   docs_path TEXT, leader_member_id TEXT, leader_global_member_id TEXT,
   roster_kind TEXT NOT NULL CHECK (roster_kind IN ('global','local','names')),
@@ -50,7 +50,7 @@ CREATE TABLE room_rule_docs (
   position INTEGER NOT NULL, path TEXT NOT NULL, PRIMARY KEY(room_id,position)
 );
 CREATE TABLE topics (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   scope_id TEXT NOT NULL UNIQUE REFERENCES scopes(id) ON DELETE CASCADE,
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   title TEXT NOT NULL, anchor_message_id TEXT NOT NULL, anchor_seq INTEGER,

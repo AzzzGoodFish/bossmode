@@ -76,6 +76,54 @@ describe("normalized task authority", () => {
     expect(f.tasks().get(original.roomId, original.id)!.assignee).toBe("旧名称");
   });
 
+  it.each(["rm_current", "imported-stable-id"])("filters a current local roster by stable ID %s, never by reused historical names", (id) => {
+    f.repository().upsertRoom({ id: "room-uuid", name: "Local", members: ["reused"], createdAt: 0, roomMembers: [
+      { id, name: "reused", sourceAgent: "general", createdAt: 1, updatedAt: 1 },
+    ] });
+    const owned = { ...sourceTask("current"), assignee: "prior label", assigneeMemberId: id, updatedAt: 1 };
+    const unresolved = { ...sourceTask("unresolved"), assignee: "reused", assigneeMemberId: undefined, updatedAt: 3 };
+    const oldOwner = { ...sourceTask("old-owner"), assignee: "reused", assigneeMemberId: "rm_deleted", updatedAt: 2 };
+    f.tasks().importTasks("room-uuid", [owned, unresolved, oldOwner]);
+    for (const ref of [" reused ", id]) {
+      expect(taskMatchesAssignee("room-uuid", owned, ref)).toBe(true);
+      expect(taskMatchesAssignee("room-uuid", unresolved, ref)).toBe(false);
+      expect(taskMatchesAssignee("room-uuid", oldOwner, ref)).toBe(false);
+      const result = queryRoomTasks("room-uuid", { assignee: ref, limit: 1 });
+      expect(result.total).toBe(1);
+      expect(result.tasks.map(t => t.id)).toEqual([owned.id]);
+      expect(result.tasks[0].assignee).toBe("reused");
+      expect(queryRoomTasks("room-uuid", { assignee: ref, limit: 1, offset: 1 }).tasks).toEqual([]);
+    }
+    expect(queryRoomTasks("room-uuid", { assignee: "rm_deleted" }).tasks.map(t => t.id)).toEqual([oldOwner.id]);
+    expect(f.tasks().get("room-uuid", unresolved.id)!.assigneeMemberId).toBeUndefined();
+  });
+
+  it("keeps unresolved label filtering for names-only rosters without inventing stable IDs", () => {
+    f.repository().upsertRoom({ id: "room-uuid", name: "Legacy", members: ["historical"], createdAt: 0 });
+    const task = { ...sourceTask(), assignee: "historical", assigneeMemberId: undefined };
+    f.tasks().upsert(task);
+    expect(taskMatchesAssignee(task.roomId, task, "historical")).toBe(true);
+    expect(queryRoomTasks(task.roomId, { assignee: "historical" }).tasks.map(t => t.id)).toEqual([task.id]);
+  });
+
+  it.each(["update", "comment"])("preserves exact imported subscriber arrays on unrelated %s", (operation) => {
+    const original = { ...sourceTask(), subscribers: [" user ", "user", " duplicate ", " duplicate ", "", "  "],
+      subscriberMemberIds: [" mem_original ", "mem_original", "mem_original", "", "  "] };
+    f.tasks().upsert(original);
+    if (operation === "update") updateTask(original.roomId, original.id, { title: "changed", status: "done", subscribers: undefined, subscriberMemberIds: undefined });
+    else addTaskComment(original.roomId, original.id, { author: " user ", content: " new comment " });
+    const expected = { subscribers: original.subscribers, subscriberMemberIds: original.subscriberMemberIds };
+    expect(f.tasks().get(original.roomId, original.id)).toMatchObject(expected);
+    f.reopen();
+    expect(f.tasks().get(original.roomId, original.id)).toMatchObject(expected);
+    updateTask(original.roomId, original.id, { subscribers: [" user ", "user", " new ", "new", "  "] });
+    expect(f.tasks().get(original.roomId, original.id)).toMatchObject({ subscribers: ["user", "new"], subscriberMemberIds: original.subscriberMemberIds });
+    // Updating IDs alone likewise cannot normalize the independent label snapshots.
+    f.tasks().upsert(original);
+    updateTask(original.roomId, original.id, { subscriberMemberIds: [" mem_new ", "mem_new", "", "  "] });
+    expect(f.tasks().get(original.roomId, original.id)).toMatchObject({ subscribers: original.subscribers, subscriberMemberIds: ["mem_new"] });
+  });
+
   it("applies status/assignee/search filtering before pagination with comment-free summaries", () => {
     f.member("mem_original", "Current");
     f.repository().upsertRoom({ ...f.room(), globalMemberIds: ["mem_original"] });

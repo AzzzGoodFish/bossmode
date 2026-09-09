@@ -721,8 +721,9 @@ export function removeRoomMemberByRef(
       }
     }
     if (Array.isArray(room.roomMembers)) {
-      room.roomMembers = room.roomMembers.filter((m) => m.id !== member.id && m.sourceMemberId !== gid);
-      if (room.globalMemberIds?.length) delete room.roomMembers;
+      // An absent global link is not a match for every unlinked local snapshot.
+      // Keep unrelated source records even when global membership is authoritative.
+      room.roomMembers = room.roomMembers.filter((m) => m.id !== member.id && (!gid || m.sourceMemberId !== gid));
     }
     room.members = (room.globalMemberIds?.length
       ? room.globalMemberIds.map((id) => getMember(id)?.name).filter((n): n is string => Boolean(n))

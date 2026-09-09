@@ -139,6 +139,63 @@ describe("normalized conversation authority", () => {
     expect(() => setCursor("not-a-scope", "mem_a", null)).toThrow();
   });
 
+  it("removes one local member without dropping unlinked peers, configs or cursors", () => {
+    const members = ["alice", "bob", "carol"].map((name, i) => ({
+      id: `rm_${name}`, roomId: "local-room", name, sourceAgent: "general", createdAt: i, updatedAt: i,
+      config: { model: `provider/${name}`, extensions: [" exact ", "duplicate", "duplicate"] },
+    }));
+    const room: Room = { id: "local-room", name: "Local", members: members.map(m => m.name), roomMembers: members,
+      memberOverrides: { bob: { thinkingLevel: "high" } }, createdAt: 0 };
+    f.repository().upsertRoom(room);
+    members.forEach(m => f.repository().setCursor(room.id, m.id, `msg-${m.name}`, 0));
+    f.repository().setCursor(room.id, "alice", "ambiguous-name", 1);
+    expect(removeRoomMemberByRef(room.id, "rm_alice").ok).toBe(true);
+    expect(f.repository().getRoom(room.id)).toEqual({ ...room, members: ["bob", "carol"], roomMembers: members.slice(1) });
+    expect(getRoom(room.id)!.members).toEqual(["bob", "carol"]);
+    expect(f.db.all("SELECT actor_key,value,updated_at FROM read_cursors ORDER BY actor_key")).toEqual([
+      { actor_key: "alice", value: "ambiguous-name", updated_at: 1 },
+      { actor_key: "rm_bob", value: "msg-bob", updated_at: 0 },
+      { actor_key: "rm_carol", value: "msg-carol", updated_at: 0 },
+    ]);
+  });
+
+  it("removes only linked global snapshots and preserves other historical source records", () => {
+    f.member("mem_a", "Alice");
+    f.member("mem_b", "Bob");
+    const room: Room = { ...f.room(), members: ["Alice", "Bob"], globalMemberIds: ["mem_a", "mem_b"],
+      roomMembers: [
+        { id: "rm_a", roomId: "room-uuid", name: "Old Alice", sourceMemberId: "mem_a", sourceAgent: "old", createdAt: 0, updatedAt: 0 },
+        { id: "rm_b", roomId: "room-uuid", name: "Old Bob", sourceMemberId: "mem_b", sourceAgent: "old", createdAt: 0, updatedAt: 0,
+          config: { model: "historical/model", contextLimit: 42 }, migratedFrom: { memberName: "source", memberId: "source-id" } },
+        { id: "rm_unlinked", roomId: "room-uuid", name: "Alice", sourceAgent: "old", createdAt: 0, updatedAt: 0, config: { thinkingLevel: "high" } },
+      ], memberOverrides: { "Old Bob": { model: "historical/override" } } };
+    f.repository().upsertRoom(room);
+    for (const key of ["mem_a", "mem_b", "rm_b", "rm_unlinked", "Alice"]) f.repository().setCursor(room.id, key, `msg-${key}`, 7);
+    expect(removeRoomMemberByRef(room.id, "mem_a").ok).toBe(true);
+    expect(f.repository().getRoom(room.id)).toEqual({ ...room, members: ["Bob"], globalMemberIds: ["mem_b"], roomMembers: room.roomMembers!.slice(1) });
+    expect(getRoom(room.id)!.members).toEqual(["Bob"]);
+    expect(f.db.all("SELECT actor_key,value,updated_at FROM read_cursors ORDER BY actor_key")).toEqual(
+      ["Alice", "mem_b", "rm_b", "rm_unlinked"].map(key => ({ actor_key: key, value: `msg-${key}`, updated_at: 7 })),
+    );
+    f.reopen();
+    expect(f.repository().getRoom(room.id)!.roomMembers).toEqual(room.roomMembers!.slice(1));
+  });
+
+  it("rejects a direct SQL NULL room key independently of the shared scopes schema", () => {
+    expect(() => f.db.run(`INSERT INTO rooms(id,name,created_at,roster_kind,has_local_records,has_rule_docs,has_overrides)
+      VALUES (NULL,'invalid',0,'names',0,0,0)`)).toThrow(/NOT NULL constraint failed: rooms.id/);
+    expect(f.db.all("SELECT * FROM rooms")).toEqual([]);
+  });
+
+  it("rejects a direct SQL NULL topic key even with valid scope and room foreign keys", () => {
+    const room = f.room();
+    f.db.run("INSERT INTO scopes(id,kind,room_id) VALUES ('topic:null-key','topic',?)", room.id);
+    expect(() => f.db.run(`INSERT INTO topics(id,scope_id,room_id,title,anchor_message_id,created_by,status,created_at,seed_mode)
+      VALUES (NULL,'topic:null-key',?,'invalid','anchor','user','active',0,'fresh')`, room.id))
+      .toThrow(/NOT NULL constraint failed: topics.id/);
+    expect(f.db.all("SELECT * FROM topics")).toEqual([]);
+  });
+
   it("rolls back membership and cursor changes together when a cursor write fails", () => {
     const room = f.room();
     f.member("mem_a", "Alice");

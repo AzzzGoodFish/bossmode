@@ -1,6 +1,6 @@
 // Task business rules over normalized SQLite authority.
 import { randomUUID } from "node:crypto";
-import { listRooms, getRoom, getRoomMembersFromRoom, resolveRoomMemberRef } from "./room-store.js";
+import { listRooms, getRoom, getRoomMembersFromRoom } from "./room-store.js";
 import { getConversationMember as getMember } from "../storage/repositories/conversations.js";
 import { TasksRepository } from "../storage/repositories/tasks.js";
 import type { Task, TaskStatus, TaskPriority, TaskComment, TaskListItem } from "../shared/types.js";
@@ -51,12 +51,21 @@ export function presentTaskParticipants(task: Task): Task {
   };
 }
 
-/** ID-backed tasks never match an old name snapshot, including after name reuse. */
+/** Only explicit current rosters establish identity; names-only rosters synthesize IDs. */
+export function resolveTaskAssigneeFilter(roomId: string, ref: string): { id: string; label: string; stableOnly: boolean } {
+  const label = ref.trim();
+  const room = getRoom(roomId);
+  const members = room && (Array.isArray(room.globalMemberIds) || Array.isArray(room.roomMembers))
+    ? getRoomMembersFromRoom(room) : [];
+  const member = members.find(m => m.id === label) ?? members.find(m => m.name === label);
+  return { id: member?.id ?? label, label, stableOnly: Boolean(member) };
+}
+
+/** Current identities never acquire unresolved historical tasks through name reuse. */
 export function taskMatchesAssignee(roomId: string, task: Pick<Task, "assignee" | "assigneeMemberId">, ref: string): boolean {
-  const value = ref.trim();
-  const member = resolveRoomMemberRef(roomId, value);
-  if (!task.assigneeMemberId) return !member?.id.startsWith("mem_") && task.assignee === value;
-  return task.assigneeMemberId === (member?.id ?? value);
+  const filter = resolveTaskAssigneeFilter(roomId, ref);
+  if (!task.assigneeMemberId) return !filter.stableOnly && task.assignee === filter.label;
+  return task.assigneeMemberId === filter.id;
 }
 
 export function toTaskListItem(task: Task): TaskListItem {
@@ -126,7 +135,7 @@ export function updateTask(
       cleanPatch.assignee = undefined;
       cleanPatch.assigneeMemberId = undefined;
     }
-    const updated: Task = normalizeTask({ ...current, ...cleanPatch, updatedAt: Date.now() });
+    const updated: Task = { ...current, ...cleanPatch, updatedAt: Date.now() };
     repository.upsert(updated);
     return presentTaskParticipants(updated);
   });
@@ -153,10 +162,9 @@ export function addTaskComment(
       content,
       createdAt: Date.now(),
     };
-    const task = normalizeTask(current);
     const updated: Task = {
-      ...task,
-      comments: [...(task.comments ?? []), comment],
+      ...current,
+      comments: [...(current.comments ?? []), comment],
       updatedAt: Date.now(),
     };
     repository.upsert(updated);
