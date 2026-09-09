@@ -13,6 +13,10 @@ mkdirSync(join(root, "memory", "projects"), { recursive: true });
 const { openDb } = await import("../../src/workspace/db/sqlite.js");
 const { applyStorageMigrations, bindDatabase, getDatabase, openDatabase } = await import("../../src/storage/database.js");
 const { baseStorageMigration } = await import("../../src/storage/base-schema.js");
+const { settingsMigration } = await import("../../src/storage/schema/settings.js");
+const { membersMigration } = await import("../../src/storage/schema/members.js");
+const { SettingsRepository } = await import("../../src/storage/repositories/settings.js");
+const { getDefaultConfig } = await import("../../src/shared/config.js");
 const { assetsMigration } = await import("../../src/storage/schema/assets.js");
 const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/storage/document-repository.js");
 const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/workspace/principles-store.js");
@@ -42,7 +46,8 @@ function ready(bind = true): Database {
   const legacy = openDb(join(root, "bossmode.db"));
   legacy.close();
   const database = openDatabase(join(root, "bossmode.db"));
-  applyStorageMigrations(database, [baseStorageMigration, assetsMigration]);
+  applyStorageMigrations(database, [baseStorageMigration, membersMigration, settingsMigration, assetsMigration]);
+  new SettingsRepository(database).importConfig(getDefaultConfig());
   database.run("INSERT INTO scopes VALUES (?, 'room', ?, NULL)", room, room);
   database.run("INSERT INTO scopes VALUES (?, 'dm', NULL, ?)", `dm:${member}`, member);
   database.run("INSERT INTO scopes VALUES ('topic:topic-one', 'topic', ?, NULL)", room);
@@ -172,7 +177,8 @@ it("uses UTF-16 budgets, exact limits, reason validation and unchanged over-budg
 });
 
 it("honors configured budgets without changing rejected content or revision", () => {
-  write("config.json", JSON.stringify({ memoryBudgets: { persona: 2, mainline: 3, memberPrinciples: 4, roomPrinciples: 5 } }));
+  new SettingsRepository(db).importConfig({...getDefaultConfig(), memoryBudgets: {persona:2,mainline:3,memberPrinciples:4,roomPrinciples:5}});
+  write("config.json", JSON.stringify({ memoryBudgets: { persona: 9999 } })); // retired file is inert
   writeMemoryLayer(member, "persona", "😀", user);
   expect(() => writeMemoryLayer(member, "persona", "😀x", user)).toThrow(AssetBudgetError);
   expect(() => writeMainline({ roomId: room, memberId: member, content: "1234", actor, reason: "r" })).toThrow(AssetBudgetError);
