@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import type { conversationsFixture } from "./unit/core-conversations-fixture.js";
 
 // Mock getBossmodeDir to use temp dir
 let tempDir: string;
+let fixture: ReturnType<typeof conversationsFixture>;
 
 vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
@@ -17,19 +18,21 @@ describe("room-store", () => {
   let messageStore: typeof import("../src/workspace/message-store.js");
 
   beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bossmode-room-test-"));
+    vi.resetModules();
+    tempDir = process.env.BOSSMODE_TEST_ROOT!;
+    const { conversationsFixture: createFixture } = await import("./unit/core-conversations-fixture.js");
+    fixture = createFixture();
+    tempDir = fixture.root;
     mkdirSync(join(tempDir, "agents"), { recursive: true });
     for (const agent of ["pm", "dev", "qa", "developer", "architect"]) {
       writeFileSync(join(tempDir, "agents", `${agent}.md`), `---\nname: ${agent}\n---\n${agent}`, "utf-8");
     }
-    // Re-import to pick up new tempDir
-    vi.resetModules();
     roomStore = await import("../src/workspace/room-store.js");
     messageStore = await import("../src/workspace/message-store.js");
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    fixture.close();
   });
 
   describe("createRoom", () => {
@@ -43,11 +46,11 @@ describe("room-store", () => {
       expect(room.docsPath).toBe("test-room/");
       expect(room.createdAt).toBeGreaterThan(0);
 
-      // Verify files created
+      // Metadata and cursors are DB authority; only file-asset directories are created
       const roomDir = join(tempDir, "rooms", room.id);
-      expect(existsSync(join(roomDir, "room.json"))).toBe(true);
-      expect(existsSync(join(roomDir, "messages.jsonl"))).toBe(true);
-      expect(existsSync(join(roomDir, "cursors.json"))).toBe(true);
+      expect(existsSync(join(roomDir, "room.json"))).toBe(false);
+      expect(existsSync(join(roomDir, "messages.jsonl"))).toBe(false);
+      expect(existsSync(join(roomDir, "cursors.json"))).toBe(false);
       expect(existsSync(join(tempDir, "memory", "projects", "test-room"))).toBe(true);
     });
 
@@ -250,11 +253,11 @@ describe("room-store", () => {
     });
 
     it("derives renamed global members from the DB without changing room member IDs", async () => {
-      const registry = await import("../src/workspace/member-registry.js");
-      const member = registry.createMember({ name: "qa-before" });
+      const member = { id: "mem_qa" };
+      fixture.member(member.id, "qa-before");
       const room = roomStore.createRoom("test", "/tmp", []);
       roomStore.stampGlobalMemberIds(room.id, [member.id]);
-      registry.renameMember(member.id, "qa-after");
+      fixture.member(member.id, "qa-after");
       expect(roomStore.getRoomMembers(room.id)).toMatchObject([{ id: member.id, name: "qa-after" }]);
       expect(roomStore.findRoomMemberByName(room.id, "qa-before")).toBeNull();
     });

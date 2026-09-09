@@ -1,15 +1,9 @@
-// Task store — per-room task CRUD, backed by rooms/<id>/tasks.json
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+// Task business rules over normalized SQLite authority.
 import { randomUUID } from "node:crypto";
-import { roomDir, listRooms, getRoom, getRoomMembersFromRoom, resolveRoomMemberRef } from "./room-store.js";
-import { getMember } from "./member-registry.js";
-import { syncRoomTasks } from "./db/tasks-index.js";
+import { listRooms, getRoom, getRoomMembersFromRoom, resolveRoomMemberRef } from "./room-store.js";
+import { getConversationMember as getMember } from "../storage/repositories/conversations.js";
+import { TasksRepository } from "../storage/repositories/tasks.js";
 import type { Task, TaskStatus, TaskPriority, TaskComment, TaskListItem } from "../shared/types.js";
-
-function tasksPath(roomId: string): string {
-  return join(roomDir(roomId), "tasks.json");
-}
 
 function uniqueStrings(values: unknown[] | undefined): string[] {
   if (!Array.isArray(values)) return [];
@@ -24,52 +18,11 @@ function uniqueStrings(values: unknown[] | undefined): string[] {
   return result;
 }
 
-function normalizeComment(raw: any): TaskComment | null {
-  if (!raw || typeof raw !== "object") return null;
-  const content = String(raw.content ?? "").trim();
-  const author = String(raw.author ?? "").trim();
-  if (!content || !author) return null;
-  return {
-    id: String(raw.id || `comment-${randomUUID().slice(0, 8)}`),
-    author,
-    content,
-    createdAt: Number(raw.createdAt) || Date.now(),
-  };
+function normalizeTask(raw: Task): Task {
+  return { ...raw, comments: raw.comments ?? [], subscribers: uniqueStrings(raw.subscribers), subscriberMemberIds: uniqueStrings(raw.subscriberMemberIds) };
 }
 
-function normalizeTask(raw: any): Task {
-  const comments = Array.isArray(raw?.comments)
-    ? raw.comments.map(normalizeComment).filter((c: TaskComment | null): c is TaskComment => Boolean(c))
-    : [];
-  return {
-    ...raw,
-    comments,
-    subscribers: uniqueStrings(raw?.subscribers),
-    subscriberMemberIds: uniqueStrings(raw?.subscriberMemberIds),
-  } as Task;
-}
-
-function readTasks(roomId: string): Task[] {
-  const p = tasksPath(roomId);
-  if (!existsSync(p)) return [];
-  try {
-    const raw = readFileSync(p, "utf-8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((task) => normalizeTask({ ...task, roomId })) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeTasks(roomId: string, tasks: Task[]): void {
-  const p = tasksPath(roomId);
-  const dir = join(p, "..");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const normalized = tasks.map(normalizeTask);
-  writeFileSync(p, JSON.stringify(normalized, null, 2), "utf-8");
-  // Dual-write the SQLite projection (best-effort; file is authority).
-  syncRoomTasks(roomId, normalized);
-}
+function readTasks(roomId: string): Task[] { return new TasksRepository().list(roomId); }
 
 /** Current participant labels are a read projection; stored names remain snapshots. */
 export function presentTaskParticipants(task: Task): Task {
@@ -120,7 +73,7 @@ export function listTaskSummaries(roomId: string): TaskListItem[] {
 }
 
 export function getTask(roomId: string, taskId: string): Task | null {
-  const task = readTasks(roomId).find((t) => t.id === taskId);
+  const task = new TasksRepository().get(roomId, taskId);
   return task ? presentTaskParticipants(task) : null;
 }
 
@@ -150,9 +103,7 @@ export function createTask(
     createdAt: now,
     updatedAt: now,
   };
-  const tasks = readTasks(roomId);
-  tasks.push(task);
-  writeTasks(roomId, tasks);
+  new TasksRepository().upsert(task);
   return presentTaskParticipants(task);
 }
 
@@ -161,23 +112,24 @@ export function updateTask(
   taskId: string,
   patch: Partial<Pick<Task, "title" | "status" | "priority" | "description" | "references" | "subscribers" | "subscriberMemberIds">> & { assignee?: string | null; assigneeMemberId?: string | null },
 ): Task | null {
-  const tasks = readTasks(roomId);
-  const idx = tasks.findIndex((t) => t.id === taskId);
-  if (idx < 0) return null;
-  // Only apply defined fields from patch (don't overwrite with undefined)
-  const cleanPatch: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(patch)) {
-    if (v !== undefined) cleanPatch[k] = k === "subscribers" || k === "subscriberMemberIds" ? uniqueStrings(v as unknown[]) : v;
-  }
-  // Explicit clearing removes both identity fields; omitted/undefined fields leave them alone.
-  if (patch.assignee === null || patch.assigneeMemberId === null) {
-    cleanPatch.assignee = undefined;
-    cleanPatch.assigneeMemberId = undefined;
-  }
-  const updated: Task = normalizeTask({ ...tasks[idx], ...cleanPatch, updatedAt: Date.now() });
-  tasks[idx] = updated;
-  writeTasks(roomId, tasks);
-  return presentTaskParticipants(updated);
+  const repository = new TasksRepository();
+  return repository.db.transaction(() => {
+    const current = repository.get(roomId, taskId);
+    if (!current) return null;
+    // Only apply defined fields from patch (don't overwrite with undefined)
+    const cleanPatch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) cleanPatch[k] = k === "subscribers" || k === "subscriberMemberIds" ? uniqueStrings(v as unknown[]) : v;
+    }
+    // Explicit clearing removes both identity fields; omitted/undefined fields leave them alone.
+    if (patch.assignee === null || patch.assigneeMemberId === null) {
+      cleanPatch.assignee = undefined;
+      cleanPatch.assigneeMemberId = undefined;
+    }
+    const updated: Task = normalizeTask({ ...current, ...cleanPatch, updatedAt: Date.now() });
+    repository.upsert(updated);
+    return presentTaskParticipants(updated);
+  });
 }
 
 
@@ -191,32 +143,29 @@ export function addTaskComment(
   const author = input.author.trim();
   if (!author) throw new Error("author is required");
 
-  const tasks = readTasks(roomId);
-  const idx = tasks.findIndex((t) => t.id === taskId);
-  if (idx < 0) return null;
-  const comment: TaskComment = {
-    id: `comment-${randomUUID().slice(0, 8)}`,
-    author,
-    content,
-    createdAt: Date.now(),
-  };
-  const task = normalizeTask(tasks[idx]);
-  const updated: Task = {
-    ...task,
-    comments: [...(task.comments ?? []), comment],
-    updatedAt: Date.now(),
-  };
-  tasks[idx] = updated;
-  writeTasks(roomId, tasks);
-  return { task: presentTaskParticipants(updated), comment };
+  const repository = new TasksRepository();
+  return repository.db.transaction(() => {
+    const current = repository.get(roomId, taskId);
+    if (!current) return null;
+    const comment: TaskComment = {
+      id: `comment-${randomUUID().slice(0, 8)}`,
+      author,
+      content,
+      createdAt: Date.now(),
+    };
+    const task = normalizeTask(current);
+    const updated: Task = {
+      ...task,
+      comments: [...(task.comments ?? []), comment],
+      updatedAt: Date.now(),
+    };
+    repository.upsert(updated);
+    return { task: presentTaskParticipants(updated), comment };
+  });
 }
 
 export function deleteTask(roomId: string, taskId: string): boolean {
-  const tasks = readTasks(roomId);
-  const next = tasks.filter((t) => t.id !== taskId);
-  if (next.length === tasks.length) return false;
-  writeTasks(roomId, next);
-  return true;
+  return new TasksRepository().delete(roomId, taskId);
 }
 
 export interface TaskWithRoomName extends TaskListItem {

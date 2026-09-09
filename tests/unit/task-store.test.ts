@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { conversationsFixture } from "./core-conversations-fixture.js";
 
 let tmpDir = "";
+let fixture: ReturnType<typeof conversationsFixture>;
 
 beforeAll(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-task-test-"));
+  fixture = conversationsFixture();
+  tmpDir = fixture.root;
 });
 afterAll(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  fixture.close();
 });
 
 vi.mock("../../src/shared/config.js", () => ({
@@ -22,12 +22,9 @@ vi.mock("../../src/shared/config.js", () => ({
 }));
 
 function ensureRoom(roomId: string) {
-  const dir = join(tmpDir, "rooms", roomId);
-  mkdirSync(dir, { recursive: true });
-  const roomJson = join(dir, "room.json");
-  writeFileSync(roomJson, JSON.stringify({
+  fixture.repository().upsertRoom({
     id: roomId, name: `Room ${roomId}`, cwd: "/tmp", members: ["pm"], createdAt: Date.now(),
-  }), "utf-8");
+  });
 }
 
 describe("task-store", () => {
@@ -191,33 +188,31 @@ describe("task-store", () => {
     const { createTask, getTask, listTasks, listTaskSummaries, listAllTasks, addTaskComment } = await import("../../src/workspace/task-store.js");
     const roomId = "r17-member-ids";
     ensureRoom(roomId);
-    const roomPath = join(tmpDir, "rooms", roomId, "room.json");
-    const room = JSON.parse(readFileSync(roomPath, "utf-8"));
+    const room = fixture.repository().getRoom(roomId)!;
     room.roomMembers = [
-      { id: "rm_pm", name: "pm" },
-      { id: "rm_dev_a", name: "dev-a" },
-      { id: "rm_qa_a", name: "qa-a" },
+      { id: "rm_pm", name: "pm", sourceAgent: "general", createdAt: 1, updatedAt: 1 },
+      { id: "rm_dev_a", name: "dev-a", sourceAgent: "general", createdAt: 1, updatedAt: 1 },
+      { id: "rm_qa_a", name: "qa-a", sourceAgent: "general", createdAt: 1, updatedAt: 1 },
     ];
-    writeFileSync(roomPath, JSON.stringify(room));
+    fixture.repository().upsertRoom(room);
     const task = createTask(roomId, {
       title: "Member ids", createdBy: "pm", assignee: "dev-a", assigneeMemberId: "rm_dev_a",
       subscribers: ["qa-a"], subscriberMemberIds: ["rm_qa_a"],
     });
     expect(task.subscriberMemberIds).toEqual(["rm_pm", "rm_qa_a"]);
     addTaskComment(roomId, task.id, { author: "dev-a", content: "Old name is history" });
-    const taskPath = join(tmpDir, "rooms", roomId, "tasks.json");
-    const before = readFileSync(taskPath, "utf-8");
+    const before = fixture.tasks().get(roomId, task.id);
     room.roomMembers[0].name = "lead";
     room.roomMembers[1].name = "dev-ui";
     room.roomMembers[2].name = "qa-browser";
-    writeFileSync(roomPath, JSON.stringify(room));
+    fixture.repository().upsertRoom(room);
     for (const projected of [getTask(roomId, task.id)!, listTasks(roomId)[0], listTaskSummaries(roomId)[0], listAllTasks().find((t) => t.id === task.id)!]) {
       expect(projected.assignee).toBe("dev-ui");
       expect(projected.subscribers).toEqual(["lead", "qa-browser"]);
       expect(projected.createdBy).toBe("pm");
     }
     expect(getTask(roomId, task.id)!.comments![0].author).toBe("dev-a");
-    expect(readFileSync(taskPath, "utf-8")).toBe(before);
+    expect(fixture.tasks().get(roomId, task.id)).toEqual(before);
   });
 
   it("does not fabricate creator IDs from a legacy name-only roster", async () => {
@@ -226,11 +221,10 @@ describe("task-store", () => {
     expect(createTask("legacy-creator", { title: "Legacy", createdBy: "pm" }).subscriberMemberIds).toEqual([]);
   });
 
-  it("normalizes old task json without comments and subscribers", async () => {
+  it("presents imported old tasks without comments and subscribers", async () => {
     const { getTask, listTaskSummaries } = await import("../../src/workspace/task-store.js");
     ensureRoom("r17");
-    const dir = join(tmpDir, "rooms", "r17");
-    writeFileSync(join(dir, "tasks.json"), JSON.stringify([{ id: "task-old", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 1, updatedAt: 1 }]), "utf-8");
+    fixture.tasks().importTasks("r17", [{ roomId: "r17", id: "task-old", title: "Old", status: "todo", priority: "P1", createdBy: "pm", createdAt: 1, updatedAt: 1 }]);
     const task = getTask("r17", "task-old")!;
     expect(task.roomId).toBe("r17");
     expect(task.comments).toEqual([]);

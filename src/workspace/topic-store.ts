@@ -1,17 +1,18 @@
 /**
- * Topic storage — room-owned sub-conversations (plan-topic-threads-v1 batch 1).
- * Path: rooms/<roomId>/topics/<topicId>/topic.json + messages.jsonl + .topic-seq
+ * Topic metadata is normalized SQLite authority.
+ * Message/cursor delegates remain unchanged here until the parent integrates C/D.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { invalidateJsonlCache, readJsonlCached } from "./jsonl-file-cache.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { roomDir, getRoomsDir, getRoom } from "./room-store.js";
+import { roomDir, getRoom } from "./room-store.js";
 import type { Room } from "../shared/types.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseJsonlLines } from "../shared/jsonl.js";
 import type { RoomMessage } from "../shared/types.js";
 import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
+import { ConversationsRepository } from "../storage/repositories/conversations.js";
 import { logger } from "../foundation/logger.js";
 
 export type TopicStatus = "active" | "closed";
@@ -121,10 +122,6 @@ function ensureTopicDir(roomId: string, topicId: string): string {
   return dir;
 }
 
-function topicJsonPath(roomId: string, topicId: string): string {
-  return join(topicDir(roomId, topicId), "topic.json");
-}
-
 function messagesPath(roomId: string, topicId: string): string {
   return join(ensureTopicDir(roomId, topicId), "messages.jsonl");
 }
@@ -133,43 +130,12 @@ function seqPath(roomId: string, topicId: string): string {
   return join(ensureTopicDir(roomId, topicId), ".topic-seq");
 }
 
-/** In-memory reverse index topicId → roomId (rebuilt lazily from disk). */
-const topicRoomIndex = new Map<string, string>();
-
-function indexTopic(topic: TopicRecord): void {
-  topicRoomIndex.set(topic.id, topic.roomId);
-}
-
 export function resolveTopicRoomId(topicId: string): string | null {
-  if (topicRoomIndex.has(topicId)) return topicRoomIndex.get(topicId)!;
-  // Slow path: scan rooms/*/topics/
-  try {
-    const roomsRoot = getRoomsDir();
-    if (!existsSync(roomsRoot)) return null;
-    for (const roomId of readdirSync(roomsRoot)) {
-      const tPath = join(roomsRoot, roomId, "topics", topicId, "topic.json");
-      if (existsSync(tPath)) {
-        topicRoomIndex.set(topicId, roomId);
-        return roomId;
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+  return new ConversationsRepository().resolveTopicRoomId(topicId);
 }
 
 export function getTopic(roomId: string, topicId: string): TopicRecord | null {
-  const path = topicJsonPath(roomId, topicId);
-  if (!existsSync(path)) return null;
-  try {
-    const t = JSON.parse(readFileSync(path, "utf-8")) as TopicRecord;
-    indexTopic(t);
-    return t;
-  } catch (err) {
-    logger.error("topic", "failed to read topic.json", { roomId, topicId, error: String(err) });
-    return null;
-  }
+  return new ConversationsRepository().getTopic(roomId, topicId);
 }
 
 export function getTopicById(topicId: string): TopicRecord | null {
@@ -179,23 +145,11 @@ export function getTopicById(topicId: string): TopicRecord | null {
 }
 
 export function saveTopic(topic: TopicRecord): void {
-  ensureTopicDir(topic.roomId, topic.id);
-  writeFileSync(topicJsonPath(topic.roomId, topic.id), JSON.stringify(topic, null, 2) + "\n", "utf-8");
-  indexTopic(topic);
+  new ConversationsRepository().upsertTopic(topic);
 }
 
 export function listTopics(roomId: string, opts?: { status?: TopicStatus }): TopicRecord[] {
-  const root = topicsRoot(roomId);
-  if (!existsSync(root)) return [];
-  const out: TopicRecord[] = [];
-  for (const name of readdirSync(root)) {
-    const t = getTopic(roomId, name);
-    if (!t) continue;
-    if (opts?.status && t.status !== opts.status) continue;
-    out.push(t);
-  }
-  out.sort((a, b) => b.createdAt - a.createdAt);
-  return out;
+  return new ConversationsRepository().listTopics(roomId, opts?.status);
 }
 
 /** First meaningful line, @mentions stripped — used when create API omits title. */

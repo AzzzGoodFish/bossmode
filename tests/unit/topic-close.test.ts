@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { conversationsFixture } from "./core-conversations-fixture.js";
+let fixture: ReturnType<typeof conversationsFixture>;
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ dir: "" }));
@@ -35,7 +36,7 @@ function writeRoom(roomId: string): Room {
     roomMembers: [{ id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 }],
     createdAt: 1,
   } as Room;
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+  fixture.repository().upsertRoom(room);
   return room;
 }
 
@@ -58,10 +59,11 @@ describe("summarizeTopicMessages", () => {
 
 describe("closeTopic + card flip", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-close-"));
+    fixture = conversationsFixture();
+    state.dir = fixture.root;
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("closes, writes extractive summary, is idempotent", () => {
