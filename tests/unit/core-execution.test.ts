@@ -18,6 +18,11 @@ import * as background from "../../src/engine/background-task-store.js";
 
 let sandbox: string;
 let db: Database;
+let forcedUUID: string | undefined;
+vi.mock("node:crypto", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {...actual, randomUUID: () => forcedUUID ?? actual.randomUUID()};
+});
 vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => sandbox}));
 const owner = "mem_owner";
 const other = "mem_other";
@@ -37,6 +42,7 @@ function restart(): void {
   bindDatabase(db);
 }
 beforeEach(() => {
+  forcedUUID = undefined;
   sandbox = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!, "execution-"));
   mkdirSync(join(sandbox, "knowledge"));
   // Explicit accepted member schema bootstrap on an absolute isolated path, closed
@@ -112,8 +118,46 @@ describe("DB session associations, unchanged SDK files", () => {
     expect(readFileSync(file,"utf8")).toBe("old-sdk-bytes\n");
     expect(db.all("SELECT name FROM sqlite_master WHERE name LIKE '%session%' AND type='table'")).toEqual([{name:"current_sessions"}]);
   });
+  it("keeps real SDK create/open/context/fork behavior file-backed across DB reopen", async () => {
+    const {SessionManager} = await import("@earendil-works/pi-coding-agent");
+    const dir = sessions.mainSessionDirectory(owner,"room:r");mkdirSync(dir,{recursive:true});
+    const manager=SessionManager.create(sandbox,dir);
+    manager.appendMessage({role:"user",content:[{type:"text",text:"original user context"}]} as any);
+    manager.appendMessage({role:"assistant",content:[{type:"text",text:"original answer"}]} as any);
+    const file=manager.getSessionFile()!;
+    const bytes=readFileSync(file);
+    const context=JSON.stringify(manager.buildSessionContext());
+    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionId:manager.getSessionId(),sessionFile:file});
+    restart();
+    const association=sessions.getCurrentSession(owner,"r")!;
+    const opened=SessionManager.open(association.sessionFile!,dir,sandbox);
+    expect(opened.getSessionId()).toBe(manager.getSessionId());
+    expect(JSON.stringify(opened.buildSessionContext())).toBe(context);
+    const topicDir=sessions.mainSessionDirectory(owner,"topic:t");mkdirSync(topicDir,{recursive:true});
+    const fork=SessionManager.forkFrom(file,sandbox,topicDir);
+    expect(JSON.stringify(fork.buildSessionContext())).toBe(context);
+    sessions.saveCurrentSession(owner,"topic:t",{runtime:"pi-sdk",sessionId:fork.getSessionId(),sessionFile:fork.getSessionFile()});
+    fork.appendMessage({role:"user",content:[{type:"text",text:"topic-only continuation"}]} as any);
+    fork.appendMessage({role:"assistant",content:[{type:"text",text:"topic answer"}]} as any);
+    expect(readFileSync(file)).toEqual(bytes);
+    const task=background.createBackgroundTask({...input(),sessionMode:"fork",parentSessionRef:file});
+    const child=SessionManager.forkFrom(file,sandbox,task.sessionDir);
+    expect(JSON.stringify(child.buildSessionContext())).toBe(context);
+    expect(readFileSync(file)).toEqual(bytes);
+    expect(existsSync(join(task.sessionDir,"task.json"))).toBe(false);
+    sessions.clearCurrentSession(owner,"topic:t");
+    expect(existsSync(fork.getSessionFile()!)).toBe(true);
+    expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe(manager.getSessionId());
+  });
+  it("rejects malformed pure-import archive references and non-file SDK references", () => {
+    const repo=new SessionRepository(db);
+    expect(() => repo.importAssociation({memberId:owner,scopeId:"r",referenceKind:"member-relative",createdAt:1,updatedAt:2,
+      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/topics/t/wrong.jsonl"}})).toThrow(/owned scope/);
+    const fake=join(sandbox,"members",owner,"sessions/2026-09-09/rooms/r/directory.jsonl");mkdirSync(fake,{recursive:true});
+    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:fake})).toThrow(/not a file/);
+  });
   it("does not read legacy current.json on get or preserve it as a shadow", () => {
-    const file=sessionFile();const legacy=join(dirname(dirname(dirname(file))),"current.json");
+    const file=sessionFile();const legacy=join(sandbox,"members",owner,"sessions","current.json");
     writeFileSync(legacy,"broken");
     expect(sessions.getCurrentSession(owner,"r")).toBeUndefined();
     sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk"});
@@ -291,8 +335,28 @@ describe("background DB lifecycle, cancellation and restart", () => {
     const reject=expect(w.promise).rejects.toThrow(/unsaved/);background.failBackgroundTaskUnsaved(owner,a.taskId,"closed database");await reject;
     expect(() => getDatabase()).toThrow(/not initialized/);
   });
+  it("refuses to reuse an orphan SDK preparation directory", () => {
+    forcedUUID="11111111-1111-4111-8111-111111111111";
+    const dir=join(sandbox,"members",owner,"background-tasks",new Date().toISOString().slice(0,10),`bgt-${forcedUUID}`);
+    mkdirSync(dir,{recursive:true});writeFileSync(join(dir,"orphan.jsonl"),"orphan SDK bytes");
+    expect(() => background.createBackgroundTask(input())).toThrow(/EEXIST/);
+    expect(background.listBackgroundTasks(owner)).toEqual([]);
+    expect(readFileSync(join(dir,"orphan.jsonl"),"utf8")).toBe("orphan SDK bytes");
+  });
+  it("propagates SQLite read-only/full failures without successful terminal writes", () => {
+    const task=background.createBackgroundTask(input());background.updateBackgroundTask(owner,task.taskId,{status:"running"});
+    db.exec("PRAGMA query_only=ON");
+    expect(() => background.updateBackgroundTask(owner,task.taskId,{status:"done",result:"not saved"})).toThrow(/readonly/);
+    expect(() => cursors.setUserReadCursor("room:r",{seq:5})).toThrow(/readonly/);
+    db.exec("PRAGMA query_only=OFF; PRAGMA max_page_count=1");
+    expect(() => background.updateBackgroundTask(owner,task.taskId,{status:"done",result:"x".repeat(1024*1024)})).toThrow(/full/);
+    expect(background.getBackgroundTask(owner,task.taskId)).toMatchObject({status:"running",result:null,endedAt:null});
+    expect(db.all("SELECT * FROM outbox")).toEqual([]);
+    expect(existsSync(join(task.sessionDir,"task.json"))).toBe(false);
+  });
   it("rejects new-task invalid ownership before preparing filesystem assets", () => {
     expect(() => background.createBackgroundTask({...input(),memberId:"../outside"})).toThrow(/member ID/);
+    expect(() => background.createBackgroundTask({...input(),scopeId:`room:dm:${owner}`})).toThrow(/Invalid execution scope/);
     expect(() => background.createBackgroundTask({...input(),scopeId:`dm:${other}`})).toThrow(/belong/);
     expect(existsSync(join(sandbox,"members",owner,"background-tasks"))).toBe(false);
     symlinkSync(join(sandbox,"knowledge"),join(sandbox,"members",owner,"background-tasks"));

@@ -56,6 +56,7 @@ function archiveRelativePath(memberId: string, scope: MainScopeId, file: string)
   if (realParent !== root && !realParent.startsWith(root + sep)) throw new Error(`Session archive path escapes member directory: ${file}`);
   if (existsSync(absolute)) {
     if (lstatSync(absolute).isSymbolicLink()) throw new Error(`Session file may not be a symlink: ${file}`);
+    if (!lstatSync(absolute).isFile()) throw new Error(`Session reference is not a file: ${file}`);
     const realFile = realpathSync(absolute);
     if (!realFile.startsWith(root + sep)) throw new Error(`Session file escapes member directory: ${file}`);
   }
@@ -75,7 +76,7 @@ export function getCurrentSession(memberId: string, scopeValue: string): AgentSe
     // verified import metadata, never the basename or today's member name.
     const root = realpathSync(getBossmodeDir());
     if (!existsSync(absolute)) throw new Error(`Session file referenced by database is missing: ${absolute}`);
-    if (lstatSync(absolute).isSymbolicLink() || !realpathSync(absolute).startsWith(root + sep)) {
+    if (!lstatSync(absolute).isFile() || !realpathSync(absolute).startsWith(root + sep)) {
       throw new Error(`Legacy session reference escapes data root: ${absolute}`);
     }
   } else archiveRelativePath(memberId, scope, absolute);

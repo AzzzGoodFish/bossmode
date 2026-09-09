@@ -3,13 +3,16 @@ import type { Database } from "../database.js";
 /** Shared DB keys use bare room IDs. API session/runtime keys also accept room:<id>. */
 export function executionScopeId(scope: string): string {
   const key = scope.startsWith("room:") ? scope.slice(5) : scope;
-  if (!key || !/^(?:dm:|topic:)?[^/:\\]+$/.test(key)) throw new Error(`Invalid execution scope: ${scope}`);
+  if (!key || (scope.startsWith("room:") && key.includes(":")) ||
+    !/^(?:dm:|topic:)?[^/:\\\0]+$/.test(key) || [".", ".."].includes(key.split(":").at(-1)!)) {
+    throw new Error(`Invalid execution scope: ${scope}`);
+  }
   return key;
 }
 
 /** Exact stable-ID lookup only. Never turn a legacy display name into a current owner. */
 export function assertExecutionOwner(db: Database, memberId: string, scopeValue: string): string {
-  if (!memberId || /[/\\:]/.test(memberId) || !db.get("SELECT id FROM members WHERE id=?", memberId)) {
+  if (!memberId || [".", ".."].includes(memberId) || /[/\\:\0]/.test(memberId) || !db.get("SELECT id FROM members WHERE id=?", memberId)) {
     throw new Error(`Unknown execution member ID: ${memberId}`);
   }
   const scopeId = executionScopeId(scopeValue);

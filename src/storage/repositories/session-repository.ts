@@ -37,6 +37,15 @@ export class SessionRepository {
       (a.referenceKind === "member-relative" ? isAbsolute(file) || file.split(/[/\\]/).includes("..") : !isAbsolute(file)))) {
       throw new Error("Invalid session file reference");
     }
+    if (file !== undefined && a.referenceKind === "member-relative") {
+      const parts = file.split("/");
+      const archiveScope = scope.startsWith("dm:") ? "dm"
+        : scope.startsWith("topic:") ? `topics/${scope.slice(6)}` : `rooms/${scope}`;
+      if (parts[0] !== "sessions" || !/^\d{4}-\d{2}-\d{2}$/.test(parts[1] ?? "") ||
+        parts.slice(2, -1).join("/") !== archiveScope || !/^[^/]+\.jsonl$/.test(parts.at(-1) ?? "")) {
+        throw new Error("Session file reference does not match its owned scope archive");
+      }
+    }
     this.db.run(`INSERT INTO current_sessions(member_id,scope_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(member_id,scope_id) DO UPDATE SET runtime=excluded.runtime,
       sdk_session_id=excluded.sdk_session_id,file_reference=excluded.file_reference,reference_kind=excluded.reference_kind,

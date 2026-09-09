@@ -81,11 +81,14 @@ export function createBackgroundTask(input: CreateBackgroundTaskInput): Backgrou
   // Validate each existing ancestor before creation to reject symlink escapes.
   const root = realpathSync(getBossmodeDir());
   let current = root;
-  for (const segment of ["members", input.memberId, "background-tasks", startedAt.slice(0, 10), taskId]) {
+  for (const segment of ["members", input.memberId, "background-tasks", startedAt.slice(0, 10)]) {
     current = join(current, segment);
     mkdirSync(current, {recursive: true});
     if (realpathSync(current) !== current || !current.startsWith(root + sep)) throw new Error("Background session directory escapes data root");
   }
+  // Never reuse an orphan preparation or overwrite another SDK archive, even
+  // if a generated ID collides. EEXIST is an observable failed preparation.
+  mkdirSync(join(current, taskId));
   const record: BackgroundTaskRecord = {taskId, kind: input.kind, memberId: input.memberId, scopeId: input.scopeId,
     sessionMode: input.sessionMode, prompt: input.prompt, snapshot: {...input.snapshot}, status: "starting",
     startedAt, endedAt: null, result: null, error: null, sessionDir: dir, parentSessionRef: input.parentSessionRef ?? null};
