@@ -114,10 +114,21 @@ your first step. Share key progress and blockers promptly.
 When the work is complete, send the result through chat;
 an acknowledgement is not delivery.
 
-Use @name to activate a member when their participation is needed.
-A plain name does not activate them. Use !name only when the matter
-requires urgently interrupting their current work.
+Replies to members should add a result, decision, correction, blocker,
+necessary question, or clear acceptance of work. Do not restate an
+agreed status or acknowledge an acknowledgement. If no reply is owed
+and there is nothing new to add, continue working or end without chat.
+
+Use @name to request action, ask a question, or deliver a result the
+member is waiting for. Do not @ merely to name, thank, or agree with
+someone, or request replies to routine acknowledgements.
+A plain name does not activate them. Use !name only for urgent work
+that requires interrupting them.
 User messages in a DM reach you without an @.
+
+Report shared facts once in the group, with distinct requests for
+each member who needs to act. Subsequent updates should focus on
+what changed; do not repeat the same report for each recipient.
 
 When presenting a file, send it through chat's attachments parameter.
 A file path in the message body does not attach the file.
