@@ -1,3 +1,4 @@
+import { normalizeRuntimeSettings, updateRuntimeSettings, SettingsValidationError, type RuntimeSettingsPatch } from "../services/settings-service.js";
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./index.js";
 import {
@@ -246,79 +247,16 @@ addRoute("POST", "/api/model-catalog/refresh", async (_req, res) => {
   }
 });
 
-const VALID_PI_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);
-
-function normalizeRuntimeSettings(runtime: any = {}) {
-  const transport = VALID_PI_TRANSPORTS.has(runtime.codexTransport) ? runtime.codexTransport : "auto";
-  const websocketConnectTimeoutMs = typeof runtime.websocketConnectTimeoutMs === "number" && Number.isFinite(runtime.websocketConnectTimeoutMs) && runtime.websocketConnectTimeoutMs >= 0
-    ? Math.floor(runtime.websocketConnectTimeoutMs)
-    : 15000;
-  const httpIdleTimeoutMs = typeof runtime.httpIdleTimeoutMs === "number" && Number.isFinite(runtime.httpIdleTimeoutMs) && runtime.httpIdleTimeoutMs >= 0
-    ? Math.floor(runtime.httpIdleTimeoutMs)
-    : undefined;
-  return {
-    sessionResume: runtime.sessionResume !== false,
-    topicSeedMode: runtime.topicSeedMode === "fresh" ? "fresh" : "fork",
-    codexTransport: transport,
-    websocketConnectTimeoutMs,
-    ...(httpIdleTimeoutMs !== undefined ? { httpIdleTimeoutMs } : {}),
-  };
-}
-
-// GET /api/settings/runtime — runtime behavior settings
+// GET /api/settings/runtime — never substitute defaults for a storage failure.
 addRoute("GET", "/api/settings/runtime", async (_req, res) => {
-  try {
-    const config = readConfig();
-    sendJson(res, 200, normalizeRuntimeSettings(config.runtime));
-  } catch {
-    sendJson(res, 200, normalizeRuntimeSettings());
-  }
+  try { sendJson(res, 200, normalizeRuntimeSettings(readConfig().runtime)); }
+  catch { sendJson(res, 500, {error: "Unable to read runtime settings"}); }
 });
 
-// PUT /api/settings/runtime — update runtime behavior settings
 addRoute("PUT", "/api/settings/runtime", async (req, res) => {
-  const body = (await parseBody(req)) as {
-    sessionResume?: boolean;
-    topicSeedMode?: "fork" | "fresh";
-    codexTransport?: PiTransportSetting;
-    websocketConnectTimeoutMs?: number | null;
-    httpIdleTimeoutMs?: number | null;
-  };
-  try {
-    const config = readConfig();
-    const runtime = {
-      ...(config.runtime || {}),
-      sessionResume: body.sessionResume === undefined ? config.runtime?.sessionResume !== false : body.sessionResume !== false,
-      topicSeedMode: (body.topicSeedMode === undefined
-        ? config.runtime?.topicSeedMode === "fresh"
-        : body.topicSeedMode === "fresh") ? "fresh" as const : "fork" as const,
-    };
-    if (body.codexTransport !== undefined) {
-      if (!VALID_PI_TRANSPORTS.has(body.codexTransport)) {
-        sendJson(res, 400, { error: "Invalid codexTransport" });
-        return;
-      }
-      runtime.codexTransport = body.codexTransport;
-    }
-    for (const field of ["websocketConnectTimeoutMs", "httpIdleTimeoutMs"] as const) {
-      if (body[field] !== undefined) {
-        if (body[field] === null) {
-          delete runtime[field];
-          continue;
-        }
-        if (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0) {
-          sendJson(res, 400, { error: `Invalid ${field}` });
-          return;
-        }
-        runtime[field] = Math.floor(body[field]);
-      }
-    }
-    config.runtime = runtime;
-    writeConfig(config);
-    sendJson(res, 200, normalizeRuntimeSettings(config.runtime));
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
+  const body = await parseBody(req) as RuntimeSettingsPatch;
+  try { sendJson(res, 200, updateRuntimeSettings(body)); }
+  catch (error) { sendJson(res, error instanceof SettingsValidationError ? 400 : 500, {error: error instanceof SettingsValidationError ? error.message : "Unable to update runtime settings"}); }
 });
 
 // GET /api/settings/environment-communication — global user-editable prompt

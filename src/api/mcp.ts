@@ -1,19 +1,16 @@
 // MCP Settings API — Bossmode-managed pi-mcp-adapter config
-import { existsSync } from "node:fs";
+import { getDatabase } from "../storage/database.js";
+import { updateMcpSettings, SettingsValidationError } from "../services/settings-service.js";
 import { addRoute, parseBody, sendJson } from "./index.js";
-import { readConfig, writeConfig } from "../shared/config.js";
+import { readConfig } from "../shared/config.js";
 import {
   configFingerprint,
-  countMcpServers,
-  getBossmodeMcpConfigPath,
   getMcpServersObject,
   listMcpServers,
   parseMcpConfigText,
   readMcpConfigText,
   readMcpStatusCache,
   readRedactedMcpConfigText,
-  restoreRedactedMcpConfig,
-  writeMcpConfig,
   writeMcpStatusCache,
 } from "../shared/mcp-settings.js";
 import { checkMcpServerAvailability } from "../engine/mcp-availability.js";
@@ -41,10 +38,9 @@ function readParsedMcpConfig(): Record<string, unknown> {
 }
 
 function mcpStatus(enabled: boolean) {
-  const configPath = getBossmodeMcpConfigPath();
+  const configPath = getDatabase().path;
   const redacted = readRedactedMcpConfigText();
-  let parsed: Record<string, unknown> = { mcpServers: {} };
-  try { parsed = readParsedMcpConfig(); } catch {}
+  const parsed = readParsedMcpConfig();
   const availability = readMcpStatusCache();
   const servers = listMcpServers(parsed, availability, assignedServerCounts());
   return {
@@ -57,9 +53,9 @@ function mcpStatus(enabled: boolean) {
     sources: [
       {
         id: "bossmode-global",
-        label: "Bossmode MCP config",
+        label: "Bossmode database",
         path: configPath,
-        exists: redacted.exists || existsSync(configPath),
+        exists: redacted.exists,
         serverCount: redacted.serverCount,
       },
     ],
@@ -103,34 +99,9 @@ addRoute("POST", "/api/settings/mcp/check", async (req, res) => {
 addRoute("PUT", "/api/settings/mcp", async (req, res) => {
   const body = (await parseBody(req)) as { enabled?: boolean; configText?: string };
   try {
-    let parsedConfig: Record<string, unknown> | undefined;
-    if (body.configText !== undefined) {
-      const submittedConfig = parseMcpConfigText(body.configText);
-      let existingConfig: Record<string, unknown> | undefined;
-      try {
-        existingConfig = parseMcpConfigText(readMcpConfigText());
-      } catch {
-        existingConfig = undefined;
-      }
-      parsedConfig = restoreRedactedMcpConfig(submittedConfig, existingConfig) as Record<string, unknown>;
-    }
-
-    const config = readConfig();
-    config.mcp = {
-      ...(config.mcp || { enabled: false }),
-      enabled: body.enabled === undefined ? config.mcp?.enabled === true : body.enabled === true,
-    };
-
-    if (parsedConfig !== undefined) {
-      writeMcpConfig(parsedConfig);
-    }
-    writeConfig(config);
-
-    sendJson(res, 200, {
-      ...mcpStatus(config.mcp.enabled),
-      ...(parsedConfig !== undefined ? { savedServerCount: countMcpServers(parsedConfig) } : {}),
-    });
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
+    const result = updateMcpSettings(body);
+    sendJson(res, 200, {...mcpStatus(result.enabled), ...(result.savedServerCount !== undefined ? {savedServerCount: result.savedServerCount} : {})});
+  } catch (error) {
+    sendJson(res, error instanceof SettingsValidationError ? 400 : 500, {error: error instanceof SettingsValidationError ? error.message : "Unable to update MCP settings"});
   }
 });
