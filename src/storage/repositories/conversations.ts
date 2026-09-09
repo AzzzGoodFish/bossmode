@@ -169,7 +169,7 @@ export class ConversationsRepository {
 /** Narrow current-identity projection over the parent's authoritative member contract. */
 export function getConversationMember(id: string): { id: string; name: string; agentTemplate: string; createdAt: number; updatedAt: number } | null {
   const row = getDatabase().get<{ id: string; name: string; agent_template: string; created_at: number; updated_at: number }>(
-    "SELECT id,name,agent_template,created_at,updated_at FROM members WHERE id=?", id);
+    "SELECT id,name,agent_template,created_at,updated_at FROM members WHERE id=? AND archived_at IS NULL", id);
   return row ? { id: row.id, name: row.name, agentTemplate: row.agent_template, createdAt: row.created_at, updatedAt: row.updated_at } : null;
 }
 

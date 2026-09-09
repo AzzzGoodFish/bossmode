@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import type { PrinciplesMeta } from "../shared/types.js";
 import { getMemoryBudget } from "./memory-budgets.js";
 import { AssetBudgetError, computeAssetBudget } from "./principles-store.js";
-import { parse as parseYaml } from "yaml";
+import { parseLegacyMemberPersona } from "../storage/upgrade-member-parser.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { getDatabase, type Database } from "../storage/database.js";
 import { MemberArchivesRepository, validateArchivePath, type ArchiveCatalogSource } from "../storage/repositories/member-archives.js";
@@ -32,10 +32,8 @@ export function listArchives(): ArchiveListItem[] {
 /** Literal persona wins. Only explicitly tagged historical member.md sources strip frontmatter once. */
 export function decodeArchivePersona(raw: string, format: "plain" | "frontmatter"): {body:string; title?:string} {
   if (format === "plain") return {body:raw};
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
-  if (!match) return {body:raw};
-  const meta = parseYaml(match[1]);
-  return {body:match[2], ...(typeof meta?.title === "string" ? {title:meta.title} : {})};
+  const parsed = parseLegacyMemberPersona(Buffer.from(raw, "utf8"), "archive/member.md");
+  return {body:Buffer.from(parsed.body).toString("utf8"), ...(parsed.title !== undefined ? {title:parsed.title} : {})};
 }
 
 export interface FiredArchiveSource {

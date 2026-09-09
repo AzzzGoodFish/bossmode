@@ -19,7 +19,7 @@ export function parseLegacyMemberPersona(bytes: Uint8Array, path: string): {body
   try {
     const document=parseDocument(remaining.slice(0,close.index),{uniqueKeys:true});
     if (document.errors.length) throw new Error("invalid YAML");
-    meta=document.toJS({maxAliasCount:100});
+    meta=document.contents===null?{}:document.toJS({maxAliasCount:100});
   } catch { throw new Error(`Invalid legacy member frontmatter: ${path}`); }
   if (!meta || typeof meta!=="object" || Array.isArray(meta) || (meta.title!==undefined && typeof meta.title!=="string") || (meta.name!==undefined && typeof meta.name!=="string")) throw new Error(`Invalid legacy member profile metadata: ${path}`);
   const consumed=prefix[0]+remaining.slice(0,close.index+close[0].length);

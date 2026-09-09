@@ -3,6 +3,7 @@ import {readFileSync} from "node:fs";
 import {prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade-runner.js";
 import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./migrations.js";
 import {discoverLegacyInventory,type LegacySourceEntry} from "./legacy-inventory.js";
+import {importLegacyArchives} from "./upgrade-archives.js";
 import {importLegacyMembers} from "./upgrade-members.js";
 import {importLegacySettings} from "./upgrade-settings.js";
 import {importLegacyConversations} from "./upgrade-conversations.js";
@@ -45,6 +46,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
    if(!ctx.legacy)return;
    const consumed=new Set<string>();const add=(paths:Iterable<string>)=>{for(const path of paths)consumed.add(path);};
    const members=importLegacyMembers(ctx,entries,memberAuthority(ctx));add(members.consumed);
+   add(importLegacyArchives(ctx,entries));
    add(importLegacySettings(ctx,entries,options.bundledCatalog??[]));
    if(options.initialConfig){
     if(entries.some(e=>e.kind==="config"))throw new Error("Initial account cannot replace existing configuration");
