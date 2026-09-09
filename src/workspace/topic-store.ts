@@ -1,18 +1,16 @@
 /**
  * Topic metadata is normalized SQLite authority.
- * Message/cursor delegates remain unchanged here until the parent integrates C/D.
+ * Message and member-cursor delegates share the initialized core database.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { invalidateJsonlCache, readJsonlCached } from "./jsonl-file-cache.js";
+import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { roomDir, getRoom } from "./room-store.js";
 import type { Room } from "../shared/types.js";
-import { getBossmodeDir } from "../shared/config.js";
-import { parseJsonlLines } from "../shared/jsonl.js";
 import type { RoomMessage } from "../shared/types.js";
-import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import { ConversationsRepository } from "../storage/repositories/conversations.js";
+import { appendMessage, readMessages, messagesSince, latestMessage, readMemberCursors, writeMemberCursor } from "../storage/message-repository.js";
+import { getDatabase } from "../storage/database.js";
 import { logger } from "../foundation/logger.js";
 
 export type TopicStatus = "active" | "closed";
@@ -78,56 +76,19 @@ export function resolveChatScopeRoom(scopeOrRoomId: string): Room | null {
   return id ? getRoom(id) : null;
 }
 
-function topicCursorsPath(roomId: string, topicId: string): string {
-  return join(ensureTopicDir(roomId, topicId), "cursors.json");
+function ownedTopicScope(roomId: string, topicId: string): string {
+  if (!getTopic(roomId, topicId)) throw new Error("Topic does not belong to the supplied room");
+  return `topic:${topicId}`;
 }
 
 export function getTopicCursors(roomId: string, topicId: string): Record<string, string | null> {
-  const path = topicCursorsPath(roomId, topicId);
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as Record<string, string | null>;
-  } catch {
-    return {};
-  }
+  return readMemberCursors(ownedTopicScope(roomId, topicId));
 }
-
 export function setTopicCursor(roomId: string, topicId: string, memberRef: string, cursor: string | null): void {
-  const cursors = getTopicCursors(roomId, topicId);
-  cursors[memberRef] = cursor;
-  writeFileSync(topicCursorsPath(roomId, topicId), JSON.stringify(cursors, null, 2), "utf-8");
+  getDatabase().transaction(() => writeMemberCursor(ownedTopicScope(roomId, topicId), memberRef, cursor));
 }
-
 export function getTopicMessagesSince(roomId: string, topicId: string, cursorId: string | null): RoomMessage[] {
-  const all = readAllTopicMessages(roomId, topicId);
-  if (!cursorId) return all;
-  const idx = all.findIndex((m) => m.id === cursorId);
-  if (idx === -1) return all;
-  return all.slice(idx + 1);
-}
-
-/** Event history dir: topic events live under the parent room, never rooms/topic:<id>/. */
-export function agentEventsDirForScope(roomIdOrScope: string): string {
-  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("topic:")) {
-    const topicId = roomIdOrScope.slice("topic:".length);
-    const parent = resolveTopicRoomId(topicId);
-    if (parent) return join(topicDir(parent, topicId), "agent-events");
-  }
-  return join(getBossmodeDir(), "rooms", roomIdOrScope, "agent-events");
-}
-
-function ensureTopicDir(roomId: string, topicId: string): string {
-  const dir = topicDir(roomId, topicId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function messagesPath(roomId: string, topicId: string): string {
-  return join(ensureTopicDir(roomId, topicId), "messages.jsonl");
-}
-
-function seqPath(roomId: string, topicId: string): string {
-  return join(ensureTopicDir(roomId, topicId), ".topic-seq");
+  return messagesSince(ownedTopicScope(roomId, topicId), cursorId).map(limitRuntimeFailureRoomMessage);
 }
 
 export function resolveTopicRoomId(topicId: string): string | null {
@@ -215,81 +176,38 @@ export function summarizeTopicMessages(messages: RoomMessage[], maxChars = 400):
 }
 
 export function closeTopic(roomId: string, topicId: string, summary?: string): TopicRecord | null {
-  const t = getTopic(roomId, topicId);
-  if (!t) return null;
-  if (t.status === "closed") return t;
-  const messages = readAllTopicMessages(roomId, topicId);
-  t.status = "closed";
-  t.closedAt = Date.now();
-  t.summary = (summary && summary.trim()) || summarizeTopicMessages(messages);
-  saveTopic(t);
-  logger.info("topic", "closed", { roomId, topicId, summaryChars: t.summary.length });
-  return t;
+  return getDatabase().transaction(() => {
+    const t = getTopic(roomId, topicId);
+    if (!t) return null;
+    if (t.status === "closed") return t;
+    const messages = readAllTopicMessages(roomId, topicId);
+    t.status = "closed";
+    t.closedAt = Date.now();
+    t.summary = (summary && summary.trim()) || summarizeTopicMessages(messages);
+    saveTopic(t);
+    logger.info("topic", "closed", { roomId, topicId, summaryChars: t.summary.length });
+    return t;
+  });
 }
 
 export function addTopicParticipant(roomId: string, topicId: string, memberId: string): void {
-  const t = getTopic(roomId, topicId);
-  if (!t) return;
-  if (t.participants.includes(memberId)) return;
-  t.participants = [...t.participants, memberId];
-  saveTopic(t);
-}
-
-function readNextSeq(roomId: string, topicId: string): number {
-  const path = seqPath(roomId, topicId);
-  if (existsSync(path)) {
-    try {
-      const n = parseInt(readFileSync(path, "utf-8").trim(), 10);
-      if (Number.isFinite(n) && n > 0) return n;
-    } catch { /* fall through */ }
-  }
-  let max = 0;
-  for (const m of readAllTopicMessages(roomId, topicId)) {
-    if (typeof m.seq === "number" && m.seq > max) max = m.seq;
-  }
-  return max + 1;
+  getDatabase().transaction(() => {
+    const t = getTopic(roomId, topicId);
+    if (!t) return;
+    if (t.participants.includes(memberId)) return;
+    t.participants = [...t.participants, memberId];
+    saveTopic(t);
+  });
 }
 
 export function readAllTopicMessages(roomId: string, topicId: string): RoomMessage[] {
-  const path = join(topicDir(roomId, topicId), "messages.jsonl");
-  return readJsonlCached(
-    path,
-    (content) => {
-      if (!content.trim()) return [];
-      return parseJsonlLines<RoomMessage>(content, {
-        category: "topic-message-store",
-        context: { roomId, topicId },
-        map: (value) => limitRuntimeFailureRoomMessage(value as RoomMessage),
-      });
-    },
-    [],
-  );
+  return readMessages(ownedTopicScope(roomId, topicId)).map(limitRuntimeFailureRoomMessage);
 }
-
-export function addTopicMessage(
-  roomId: string,
-  topicId: string,
-  msg: Omit<RoomMessage, "id" | "ts" | "seq">,
-): RoomMessage {
-  const bounded = limitRuntimeFailureRoomMessage(msg as RoomMessage);
-  const seq = readNextSeq(roomId, topicId);
-  const message: RoomMessage = {
-    ...bounded,
-    id: `msg-${randomUUID().slice(0, 8)}`,
-    seq,
-    ts: Date.now(),
-  };
-  const path = messagesPath(roomId, topicId);
-  appendFileSync(path, JSON.stringify(message) + "\n", "utf-8");
-  invalidateJsonlCache(path);
-  writeFileSync(seqPath(roomId, topicId), String(seq + 1), "utf-8");
-  return message;
+export function addTopicMessage(roomId: string, topicId: string, msg: Omit<RoomMessage, "id" | "ts" | "seq">): RoomMessage {
+  return getDatabase().transaction(() => appendMessage(ownedTopicScope(roomId, topicId), msg));
 }
-
 export function getLatestTopicMessageId(roomId: string, topicId: string): string | null {
-  const all = readAllTopicMessages(roomId, topicId);
-  if (all.length === 0) return null;
-  return all[all.length - 1].id;
+  return latestMessage(ownedTopicScope(roomId, topicId))?.id ?? null;
 }
 
 /** Build English guide text for topic entry (batch 1: truncate anchor; summarizer in batch 2). */

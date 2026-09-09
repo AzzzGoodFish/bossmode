@@ -38,8 +38,8 @@ export function persistAgentEvent(scopeId: string,owner: EventOwner,event: Agent
 }
 /** Sequences now come from DB facts, no process counter to clear. */
 export function resetEventSeqCache(): void {}
-export function loadEventsFromDisk(roomId: string,agentRef: string): AgentHistoryEvent[] { return readAgentEvents<AgentHistoryEvent>(roomId,agentRef); }
-export function loadEventsPaginated(roomId: string,agentRef: string,limit: number,before?: number): {events:AgentHistoryEvent[];total:number;hasMore:boolean} { return pageAgentEvents<AgentHistoryEvent>(roomId,agentRef,limit,before); }
+export function loadEventsFromDisk(roomId: string,agentRef: string): AgentHistoryEvent[] { return readAgentEvents<AgentHistoryEvent>(roomId,agentRef).map(limitRuntimeErrorEvent); }
+export function loadEventsPaginated(roomId: string,agentRef: string,limit: number,before?: number): {events:AgentHistoryEvent[];total:number;hasMore:boolean} { const page=pageAgentEvents<AgentHistoryEvent>(roomId,agentRef,limit,before); return {...page,events:page.events.map(limitRuntimeErrorEvent)}; }
 
 let eventDispatchScheduled = false;
 /** Parent schedules at startup after socket subscriptions/runtime recovery, and on retry timer. */

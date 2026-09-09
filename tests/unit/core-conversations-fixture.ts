@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase, openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/storage/database.js";
 import { baseStorageMigration } from "../../src/storage/base-schema.js";
+import { messagesMigration, eventSourceMigration } from "../../src/storage/schema/messages.js";
 import { conversationsMigration } from "../../src/storage/schema/conversations.js";
 import { openDb } from "../../src/workspace/db/sqlite.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
@@ -17,7 +18,7 @@ export function conversationsFixture() {
   legacy.run("INSERT INTO tasks(room_id,task_id,title,status,payload_json) VALUES (?,?,?,?,?)", "obsolete", "projection", "Do not import me", "todo", "{}");
   legacy.close();
   let db: Database = openDatabase(path);
-  applyStorageMigrations(db, [baseStorageMigration, conversationsMigration]);
+  applyStorageMigrations(db, [baseStorageMigration, conversationsMigration, messagesMigration, eventSourceMigration]);
   bindDatabase(db);
   const repository = () => new ConversationsRepository();
   const tasks = () => new TasksRepository();
@@ -37,7 +38,7 @@ export function conversationsFixture() {
     reopen() {
       db.close();
       db = openDatabase(path);
-      applyStorageMigrations(db, [baseStorageMigration, conversationsMigration]);
+      applyStorageMigrations(db, [baseStorageMigration, conversationsMigration, messagesMigration, eventSourceMigration]);
       bindDatabase(db);
     },
     close() { db.close(); rmSync(root, { recursive: true, force: true }); },

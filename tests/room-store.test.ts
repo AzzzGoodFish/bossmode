@@ -148,7 +148,7 @@ describe("room-store", () => {
       expect(messages[2].content).toBe("msg 9");
     });
 
-    it("caps new runtime failures before persistence and caps legacy failures on read", () => {
+    it("caps runtime failure views without truncating imported database facts", async () => {
       const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
       const longFailure = `Member "pm" request failed. Error: ${"x".repeat(5_763)}`;
       const stored = messageStore.addMessage(room.id, { sender: "system", content: longFailure, mentions: [] });
@@ -156,14 +156,20 @@ describe("room-store", () => {
       expect(Array.from(stored.content)).toHaveLength(300);
       expect(stored.content.endsWith("…")).toBe(true);
       const path = join(tempDir, "rooms", room.id, "messages.jsonl");
-      expect(JSON.parse(readFileSync(path, "utf-8")).content).toBe(stored.content);
+      expect(existsSync(path)).toBe(false);
+      expect(fixture.db.get<{content:string}>("SELECT content FROM messages WHERE id=?",stored.id)?.content).toBe(stored.content);
 
       const legacyFailure = { id: "legacy", ts: 1, sender: "system", content: longFailure, mentions: [] };
       const userMessage = { id: "user", ts: 2, sender: "user", content: "u".repeat(5_763), mentions: [] };
       const memberMessage = { id: "member", ts: 3, sender: "pm", content: "r".repeat(5_763), mentions: [] };
       writeFileSync(path, [legacyFailure, userMessage, memberMessage].map((message) => JSON.stringify(message)).join("\n") + "\n", "utf-8");
 
-      const messages = messageStore.getMessages(room.id);
+      const {importMessage}=await import("../src/storage/messages-import.js");
+      const legacyRoom=roomStore.createRoom("legacy", "/tmp", drafts([]));
+      for(const message of [legacyFailure,userMessage,memberMessage]) importMessage(fixture.db,legacyRoom.id,message);
+      const messages = messageStore.getMessages(legacyRoom.id);
+      expect(fixture.db.get<{content:string}>("SELECT content FROM messages WHERE scope_id=? AND id='legacy'",legacyRoom.id)?.content).toBe(longFailure);
+      expect(messageStore.getMessages(room.id)).toHaveLength(1); // retired file is inert
       expect(Array.from(messages[0].content)).toHaveLength(300);
       expect(messages[0].content.endsWith("…")).toBe(true);
       expect(messages[1].content).toHaveLength(5_763);

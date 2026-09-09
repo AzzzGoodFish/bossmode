@@ -1,14 +1,15 @@
 // Application messages are authoritative DB facts; scopes are created by ConversationService.
+import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
 import type { RoomMessage } from "../shared/types.js";
 import { appendMessage, readMessages, pageMessages, messagesSince, latestMessage, patchMessage, replaceMessages, searchMessageFacts } from "../storage/message-repository.js";
 
 export const addMessage = appendMessage;
-export const getMessages = pageMessages;
-export const getMessagesSince = messagesSince;
+export function getMessages(...args: Parameters<typeof pageMessages>): RoomMessage[] { return pageMessages(...args).map(limitRuntimeFailureRoomMessage); }
+export function getMessagesSince(...args: Parameters<typeof messagesSince>): RoomMessage[] { return messagesSince(...args).map(limitRuntimeFailureRoomMessage); }
 export function getLatestMessageId(scopeId: string): string | null { return latestMessage(scopeId)?.id ?? null; }
 export const updateMessage = patchMessage;
 export const overwriteMessages = replaceMessages;
-export const readAllMessages = readMessages;
+export function readAllMessages(...args: Parameters<typeof readMessages>): RoomMessage[] { return readMessages(...args).map(limitRuntimeFailureRoomMessage); }
 
 export interface SearchOptions {
   query?: string;    // case-insensitive substring on content
@@ -26,4 +27,4 @@ export interface SearchResult {
   messages: RoomMessage[];
 }
 
-export const searchMessages = searchMessageFacts;
+export function searchMessages(...args: Parameters<typeof searchMessageFacts>): SearchResult { const result=searchMessageFacts(...args); return {...result,messages:result.messages.map(limitRuntimeFailureRoomMessage)}; }

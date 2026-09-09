@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { latestMessage } from "../storage/message-repository.js";
 import type { CreateRoomMemberInput, Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
 import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../storage/repositories/conversations.js";
@@ -20,10 +20,6 @@ export function getRoomsDir(): string {
 
 export function roomDir(roomId: string): string {
   return join(roomsDir(), roomId);
-}
-
-function messagesPath(roomId: string): string {
-  return join(roomDir(roomId), "messages.jsonl");
 }
 
 /** Batch 7 P3: cwd is peeled on write — it exists on disk only until the
@@ -593,7 +589,7 @@ export function updateRoomMember(roomId: string, memberRef: string, patch: { con
 
 function initializeMemberCursor(roomId: string, memberId: string): void {
   // Initialize cursor at latest message under stable memberId.
-  const latestId = getLatestMessageIdInline(roomId);
+  const latestId = latestMessage(roomId)?.id ?? null;
   setCursor(roomId, memberId, latestId);
 }
 
@@ -751,29 +747,4 @@ export function addMember(roomId: string, agentName: string): boolean {
 
     return true;
   });
-}
-
-// Inline helper to avoid circular dependency with message-store
-function getLatestMessageIdInline(roomId: string): string | null {
-  const path = messagesPath(roomId);
-  if (!existsSync(path)) return null;
-  const content = readFileSync(path, "utf-8");
-  if (!content.trim()) return null;
-  // Walk backward so a truncated trailing line does not hide the real latest id.
-  const lines = content.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    try {
-      const msg = JSON.parse(line);
-      if (msg?.id) return msg.id;
-    } catch (err) {
-      logger.warn("room-store", "skipped corrupt jsonl line (latest-id scan)", {
-        roomId,
-        lineNo: i + 1,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return null;
 }
