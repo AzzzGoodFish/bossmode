@@ -29,6 +29,7 @@ export function decodeLegacyConfig(value:unknown):BossmodeConfig{
 /** Snapshot-only reads. Caller supplies packaged catalog rows without starting a runtime.
  * Returned keys identify sources this adapter consumed; other domains must account for the rest. */
 export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],bundledCatalog:readonly any[]):Set<string>{
+ ctx.db.assertOutsideTransaction();
  const consumed=new Set<string>();
  const owner=(id:string|undefined):string=>{
   if(!id||!ctx.db.get("SELECT id FROM members WHERE id=?",id))throw new Error("Unproven member settings owner");

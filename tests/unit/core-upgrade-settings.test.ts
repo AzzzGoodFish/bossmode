@@ -41,6 +41,10 @@ it("refuses unsnapshotted paths even when the source file exists",()=>{
  const {ctx,entries}=setup({"config.json":config});
  expect(()=>importLegacySettings({...ctx,sourceFiles:[]},entries,[])).toThrow("Unsnapshotted legacy source");
 });
+it("rejects file-backed source conversion inside an ambient transaction",()=>{
+ const {ctx,entries}=setup({});
+ expect(()=>ctx.db.transaction(()=>importLegacySettings(ctx,entries,[]))).toThrow(/outside|transaction/i);
+});
 it("imports empty MCP definitions as empty, not global file fallback",()=>{
  const {ctx,entries}=setup({"mcp/mcp.json":{mcpServers:{}}});
  const consumed=importLegacySettings(ctx,entries,[]);expect(consumed.has("mcp/mcp.json")).toBe(true);
