@@ -1082,7 +1082,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         return null;
       }
       const topicRec = getTopic(parentRoomId, topicId);
-      // Member+Communication byte-identical to room; Environment first line is topic-scoped.
+      // Identity and static platform sections match the room; Environment is topic-scoped.
       compiled = compileMemberPromptForScope({
         scopeId,
         memberId,

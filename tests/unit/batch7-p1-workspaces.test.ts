@@ -163,7 +163,7 @@ describe("Environment prompt line", () => {
       docsRoot: join(dir, "docs"),
     });
     expect(compiled.envPrompt).toContain("Current workspace: original");
-    expect(compiled.envPrompt).toContain("workspace_list");
+    expect(compiled.envPrompt).toContain(`relative file paths resolve under ${join(dir, "members", MEMBER)}`);
   });
 });
 

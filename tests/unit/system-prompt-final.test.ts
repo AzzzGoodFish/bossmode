@@ -10,7 +10,6 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
 
@@ -32,6 +31,7 @@ const { buildSystemPrompt: piBuildSystemPrompt } = await import(pathToFileURL(fi
 
 // Plain unit env: no mocked config → readPiBuiltinPromptFlag() is false.
 import { buildFinalMemberSystemPrompt } from "../../src/engine/system-prompt-final.js";
+import { COMMUNICATION_SEGMENT, WORKING_PRINCIPLES_SEGMENT } from "../../src/engine/prompt-compiler.js";
 
 function fakeMember(over: Partial<Parameters<typeof buildFinalMemberSystemPrompt>[0]["member"]> = {}) {
   return {
@@ -50,7 +50,7 @@ const baseArgs = {
   member: fakeMember(),
   skillPaths: [],
   agentPrompt: "You are tester.",
-  appendSystemPrompt: ["Communication segment.", "Environment segment."],
+  appendSystemPrompt: [WORKING_PRINCIPLES_SEGMENT, COMMUNICATION_SEGMENT, "## Environment\n\nTest environment."],
 };
 
 /** Feed pi's real builder the same inputs the member session would give it. */

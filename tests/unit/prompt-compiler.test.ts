@@ -41,8 +41,8 @@ function room(): Room {
 const agentDef: AgentDefinition = { name: "qa", description: "QA", systemPrompt: "QA ROLE", tags: [] };
 const member: AgentMemberConfig = { id: "rm_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
 
-describe("prompt compiler (three-segment)", () => {
-  it("assembles Member → Communication → Environment in order", async () => {
+describe("prompt compiler (four-section)", () => {
+  it("assembles Member → Working Principles → Communication → Environment in order", async () => {
     const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
     writeMemberProfileSkeleton("rm_qa", { name: "qa" });
     writeFileSync(
@@ -55,14 +55,18 @@ describe("prompt compiler (three-segment)", () => {
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     const prompt = compiled.fullPrompt;
 
-    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
-    expect(prompt.indexOf("# Member")).toBeLessThan(prompt.indexOf("## Communication"));
+    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
+    expect(prompt.indexOf("# Member")).toBeLessThan(prompt.indexOf("## Working Principles"));
+    expect(prompt.indexOf("## Working Principles")).toBeLessThan(prompt.indexOf("## Communication"));
     expect(prompt.indexOf("## Communication")).toBeLessThan(prompt.indexOf("## Environment"));
+    expect(compiled.agentPrompt).toBe(compiled.sections[0].content);
+    expect(compiled.appendSystemPrompt).toEqual(compiled.sections.slice(1).map((s) => s.content));
+    expect(prompt).toBe([compiled.agentPrompt, ...compiled.appendSystemPrompt].join("\n\n"));
     expect(prompt).toContain("I am qa.");
     expect(prompt).toContain("I prefer short answers.");
-    expect(prompt).toContain("The chat tool is the only way your messages reach the room");
+    expect(prompt).toContain("Use the chat tool to communicate.");
     expect(prompt).toContain('You are in room "Prompt Lab"');
-    expect(prompt).toContain("this file IS your persona");
+    expect(prompt).toContain(`Your profile: ${join(tmpDir, "members", "rm_qa", "member.md")} (persona)`);
     // Old assets not injected
     expect(prompt).not.toContain("## Scope Principles");
     expect(prompt).not.toContain("## Scope Mainline");
@@ -76,7 +80,7 @@ describe("prompt compiler (three-segment)", () => {
     expect(compiled.fullPrompt).toContain("I am qa.");
     // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
     expect(compiled.fullPrompt).toMatch(/bossmode-guide/);
-    expect(compiled.fullPrompt).toMatch(/When unsure how to manage your identity/);
+    expect(compiled.fullPrompt).toMatch(/Platform guide:/);
     expect(compiled.fullPrompt).not.toMatch(/Legacy notes/);
   });
 
@@ -102,9 +106,11 @@ describe("prompt compiler (three-segment)", () => {
       topicTitle: "Wire up cache",
     });
     expect(topic.fullPrompt).toContain('You are in topic "Wire up cache" of room "Prompt Lab"');
+    expect(dm.appendSystemPrompt.slice(0, 2)).toEqual(topic.appendSystemPrompt.slice(0, 2));
+    expect(dm.contractFingerprint).not.toBe(topic.contractFingerprint);
   });
 
-  it("Member + Communication are byte-identical between room and topic (cache invariant)", async () => {
+  it("identity and static platform sections match between room and topic (cache invariant)", async () => {
     writeFileSync(
       join(tmpDir, "members", "rm_qa", "member.md"),
       "---\nname: qa\n---\n\nSteady.\n",
@@ -128,14 +134,12 @@ describe("prompt compiler (three-segment)", () => {
       docsRoot: "/docs",
       topicTitle: "T",
     });
-    const roomMember = roomC.sections.find((s) => s.id === "member")!.content;
-    const topicMember = topicC.sections.find((s) => s.id === "member")!.content;
-    const roomComm = roomC.sections.find((s) => s.id === "communication")!.content;
-    const topicComm = topicC.sections.find((s) => s.id === "communication")!.content;
-    expect(roomMember).toBe(topicMember);
-    expect(roomComm).toBe(topicComm);
+    expect(roomC.agentPrompt).toBe(topicC.agentPrompt);
+    expect(roomC.appendSystemPrompt.slice(0, 2)).toEqual(topicC.appendSystemPrompt.slice(0, 2));
+    expect(roomC.contractFingerprint).toBe(topicC.contractFingerprint);
     // Environment differs
     expect(roomC.envPrompt).not.toBe(topicC.envPrompt);
+    expect(roomC.manifestHash).not.toBe(topicC.manifestHash);
   });
 
   it("frontmatter fields are not injected; missing name falls back; parse failure does not throw", async () => {
