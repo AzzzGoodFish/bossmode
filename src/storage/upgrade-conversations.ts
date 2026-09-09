@@ -3,6 +3,7 @@ import type {Database} from "./database.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
 import {ConversationsRepository} from "./repositories/conversations.js";
+import {MessageArchivesRepository,type ArchiveSummary} from "./repositories/message-archives.js";
 import {TasksRepository} from "./repositories/tasks.js";
 import {UserCursorRepository} from "./repositories/user-cursor-repository.js";
 import {executionScopeId} from "./repositories/execution-identity.js";
@@ -49,10 +50,12 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
    for(const [key,cursor]of Object.entries(cursors)){ensureImportedScope(ctx.db,key);repo.importCursor(key,cursor);}
    consumed.add(e.path);continue;
   }
-  if(!["tasks","messages","message-sequence","member-cursors","dm-member-cursor","agent-events","message-archive","derived-event-stats"].includes(e.kind))continue;
+  if(!["tasks","messages","message-sequence","member-cursors","dm-member-cursor","agent-events","message-archive","message-archive-summary","derived-event-stats"].includes(e.kind))continue;
   check(e);if(!e.scopeId)throw new Error(`Conversation source has no scope: ${e.path}`);
   const scope=ensureImportedScope(ctx.db,e.scopeId,e.path.startsWith("rooms/")?e.path.split("/")[1]:undefined);
-  if(e.kind==="tasks"){
+  if(e.kind==="message-archive-summary"){
+   new MessageArchivesRepository(ctx.db).saveSummary(scope,Number(e.archiveTimestamp),object(read(e),e.path) as ArchiveSummary);
+  }else if(e.kind==="tasks"){
    const tasks=read(e);if(!Array.isArray(tasks))throw new Error(`Invalid legacy task list: ${e.path}`);
    const ids=new Set<string>();for(const task of tasks){const row=object(task,e.path);if(typeof row.id!=="string"||ids.has(row.id))throw new Error(`Duplicate or missing task identity: ${e.path}`);ids.add(row.id);}
    // The legacy readTasks adapter took room ownership from its containing file,
@@ -75,7 +78,7 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
    const memberId=identity?.memberId??null;
    if(memberId!==null&&!ctx.db.get("SELECT id FROM members WHERE id=?",memberId))throw new Error("Unknown imported event member ID");
    const archiveTs=e.kind==="message-archive"?Number(e.archiveTimestamp):null;
-   if(e.kind==="message-archive"&&!Number.isSafeInteger(archiveTs))throw new Error("Invalid archive timestamp");
+   if(e.kind==="message-archive")new MessageArchivesRepository(ctx.db).recordMessages(scope,archiveTs!);
    let batch:Array<{ordinal:number;value:unknown}>=[];let bytes=0;
    const flush=()=>{
     ctx.db.transaction(tx=>{for(const row of batch){

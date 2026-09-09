@@ -53,6 +53,12 @@ it("retains original nonblank event order, unknown event kinds and archived mess
  expect(ctx.db.all<{seq:number;member_id:null;payload_json:string}>("SELECT seq,member_id,payload_json FROM agent_events ORDER BY seq").map(r=>({seq:r.seq,memberId:r.member_id,event:JSON.parse(r.payload_json)}))).toEqual(events.map((event,i)=>({seq:i+1,memberId:null,event})));
  expect(readArchivedMessages(room.id,123,ctx.db)).toEqual([message]);expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
 });
+it("preserves empty archives and independent summary metadata",async()=>{
+ const summary={summary:"retained",archivedCount:2,range:["old-one","old-two"],ts:123};
+ const {ctx,entries}=setup({"rooms/room-one/archives/123.jsonl":"", "rooms/room-one/archives/123.summary.json":JSON.stringify(summary)});
+ expect((await importLegacyConversations(ctx,entries)).size).toBe(2);
+ expect(ctx.db.get("SELECT archive_ts,has_messages,summary_json FROM message_archives")).toEqual({archive_ts:123,has_messages:1,summary_json:JSON.stringify(summary)});
+});
 it("does not turn an ID-shaped event filename into a current member identity",async()=>{
  const {ctx,entries}=setup({"rooms/room-one/agent-events/mem_one.jsonl":JSON.stringify({type:"agent_end",ts:2})+"\n"});
  ctx.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_one','new-label','new-label','general','{}',1,1)");

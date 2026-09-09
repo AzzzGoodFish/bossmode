@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 let tempDir: string;
+let database: import("../src/storage/database.js").Database;
 
 vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
@@ -17,13 +18,48 @@ describe("archive", () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bossmode-archive-test-"));
     vi.resetModules();
+    const storage = await import("../src/storage/database.js");
+    const { coreStorageMigrations } = await import("../src/storage/migrations.js");
+    database = storage.openDatabase(join(tempDir, "bossmode.db"));
+    storage.applyStorageMigrations(database, coreStorageMigrations);
+    storage.bindDatabase(database);
     roomStore = await import("../src/workspace/room-store.js");
     messageStore = await import("../src/workspace/message-store.js");
     archiveStore = await import("../src/workspace/archive-store.js");
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    database?.close();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("rolls back archive publication and pruning together", () => {
+    const room = roomStore.createRoom("test", "/tmp", []);
+    messageStore.addMessage(room.id, { sender: "user", content: "kept on failure", mentions: [] });
+    database.exec("CREATE TRIGGER fail_prune BEFORE DELETE ON messages BEGIN SELECT RAISE(ABORT,'injected prune failure'); END");
+    expect(() => archiveStore.archiveMessages(room.id, 0)).toThrow("injected prune failure");
+    expect(messageStore.getMessages(room.id)).toHaveLength(1);
+    expect(archiveStore.listArchives(room.id)).toEqual([]);
+    expect(database.all("SELECT * FROM message_archive_entries")).toEqual([]);
+  });
+
+  it("keeps distinct same-millisecond archives and ignores poison retired files", () => {
+    const room = roomStore.createRoom("test", "/tmp", []);
+    const dir = join(tempDir, "rooms", room.id, "archives");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "99.summary.json"), "invalid legacy data");
+    vi.spyOn(Date, "now").mockReturnValue(100);
+    for (let i = 0; i < 2; i++) {
+      messageStore.addMessage(room.id, { sender: "user", content: String(i), mentions: [] });
+      expect(archiveStore.archiveMessages(room.id, 0)?.kept).toEqual([]);
+    }
+    expect(archiveStore.listArchives(room.id)).toEqual([
+      { timestamp: 101, hasMessages: true, hasSummary: false },
+      { timestamp: 100, hasMessages: true, hasSummary: false },
+    ]);
+    expect(archiveStore.readArchiveSummary(room.id, 99)).toBeNull();
+    expect(() => archiveStore.archiveMessages(room.id, -1)).toThrow("keep count");
   });
 
   it("should archive old messages, keeping last N", () => {
@@ -39,7 +75,7 @@ describe("archive", () => {
     expect(result!.archived).toHaveLength(10);
     expect(result!.kept).toHaveLength(50);
 
-    // Verify messages file now only has 50
+    // Verify the authoritative current-message query now returns only 50
     const remaining = messageStore.getMessages(room.id, { limit: 100 });
     expect(remaining).toHaveLength(50);
     expect(remaining[0].content).toBe("msg 10"); // First kept
