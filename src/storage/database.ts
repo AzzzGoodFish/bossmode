@@ -15,11 +15,18 @@ export class Database {
   private depth = 0;
   private savepoint = 0;
   private closed = false;
+  private transactionFailure: Error | undefined;
+  private unusable: Error | undefined;
 
   constructor(private readonly connection: DatabaseSync, readonly path: string) {}
 
   private assertOpen(): void {
     if (this.closed) throw new Error("Database context is closed");
+    if (this.unusable) throw this.unusable;
+    if (this.depth > 0 && (this.transactionFailure || !this.connection.isTransaction)) {
+      this.transactionFailure ??= new Error("Database transaction was aborted; further operations are refused until rollback");
+      throw this.transactionFailure;
+    }
   }
 
   exec(sql: string): void { this.assertOpen(); this.connection.exec(sql); }
@@ -44,7 +51,8 @@ export class Database {
     }
     const outer = this.depth === 0;
     const name = `bossmode_sp_${++this.savepoint}`;
-    this.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
+    if (outer) this.transactionFailure = undefined;
+    this.connection.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
     this.depth++;
     let valid = true;
     const scoped = new Proxy(this, {
@@ -57,6 +65,7 @@ export class Database {
         };
       },
     });
+    transactionContexts.add(scoped);
     try {
       const result = fn(scoped);
       if (result != null && typeof (result as any).then === "function") {
@@ -64,17 +73,28 @@ export class Database {
         void Promise.resolve(result).catch(() => {});
         throw new Error("Database transactions must not return promises");
       }
-      this.exec(outer ? "COMMIT" : `RELEASE SAVEPOINT ${name}`);
+      this.assertOpen();
+      this.connection.exec(outer ? "COMMIT" : `RELEASE SAVEPOINT ${name}`);
       return result;
     } catch (error) {
       try {
-        this.exec(outer ? "ROLLBACK" : `ROLLBACK TO SAVEPOINT ${name}`);
-        if (!outer) this.exec(`RELEASE SAVEPOINT ${name}`);
-      } catch { /* Preserve the original transaction error. */ }
+        if (this.connection.isTransaction) {
+          this.connection.exec(outer ? "ROLLBACK" : `ROLLBACK TO SAVEPOINT ${name}`);
+          if (!outer) this.connection.exec(`RELEASE SAVEPOINT ${name}`);
+        } else if (!outer) {
+          this.transactionFailure = new Error("Database transaction was aborted while handling a nested operation");
+        }
+      } catch {
+        this.transactionFailure = new Error("Database savepoint cleanup failed; outer transaction must roll back");
+      }
       throw error;
     } finally {
       valid = false;
       this.depth--;
+      if (outer) {
+        if (this.connection.isTransaction) this.unusable = new Error("Database rollback failed; close this context before continuing");
+        this.transactionFailure = undefined;
+      }
     }
   }
 
@@ -87,6 +107,7 @@ export class Database {
   }
 }
 
+const transactionContexts = new WeakSet<Database>();
 let active: Database | undefined;
 
 /** A consumer can use an initialized context, never initialize one implicitly. */
@@ -117,6 +138,7 @@ export function openDatabase(path: string): Database {
 
 /** Only the composition root/test fixture binds the process context. */
 export function bindDatabase(db: Database): void {
+  if (transactionContexts.has(db)) throw new Error("Cannot bind a transaction-scoped database context");
   if (active && active !== db) throw new Error("A different database context is already bound");
   db.get("SELECT 1");
   active = db;
@@ -129,7 +151,7 @@ export function applyStorageMigrations(db: Database, migrations: readonly Storag
     if (!migration.id || ids.has(migration.id)) throw new Error(`Duplicate or empty storage migration ID: ${migration.id}`);
     ids.add(migration.id);
   }
-  db.exec("CREATE TABLE IF NOT EXISTS storage_schema_versions (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)");
+  db.exec("CREATE TABLE IF NOT EXISTS storage_schema_versions (id TEXT NOT NULL PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)");
   for (const migration of migrations) {
     const checksum = createHash("sha256").update(migration.sql).digest("hex");
     db.transaction(tx => {

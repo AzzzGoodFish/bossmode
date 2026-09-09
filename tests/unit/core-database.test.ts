@@ -62,6 +62,24 @@ describe("transaction boundaries", () => {
     })).toThrow("outer");
     expect(db.all("SELECT * FROM records")).toEqual([]);
   });
+  it("refuses writes after SQLite aborts the entire transaction inside a savepoint", () => {
+    const db = ready(); db.run("INSERT INTO records VALUES (99)");
+    expect(() => db.transaction(tx => {
+      tx.run("INSERT INTO records VALUES (1)");
+      expect(() => tx.transaction(inner => inner.run("INSERT OR ROLLBACK INTO records VALUES (1)"))).toThrow();
+      expect(() => tx.run("INSERT INTO records VALUES (2)")).toThrow("aborted");
+    })).toThrow("aborted");
+    expect(db.all("SELECT * FROM records")).toEqual([{ id: 99 }]);
+    db.transaction(tx => tx.run("INSERT INTO records VALUES (3)"));
+    expect(db.all("SELECT * FROM records ORDER BY id")).toEqual([{ id: 3 }, { id: 99 }]);
+  });
+  it("never binds an expiring transaction handle as the process context", () => {
+    const db = ready();
+    db.transaction(tx => expect(() => bindDatabase(tx)).toThrow("transaction-scoped"));
+    expect(() => getDatabase()).toThrow("not initialized");
+    bindDatabase(db); expect(getDatabase()).toBe(db);
+    db.close(); expect(() => getDatabase()).toThrow("not initialized");
+  });
   it("rejects async callbacks before they execute", async () => {
     const db = ready(); let entered = false;
     expect(() => db.transaction(async tx => { entered = true; tx.run("INSERT INTO records VALUES (1)"); })).toThrow("synchronous");
@@ -105,6 +123,10 @@ describe("versioned schemas and shared scope keys", () => {
   });
   it("enforces scope ownership shape and reference constraints", () => {
     const db = open(); applyStorageMigrations(db, [baseStorageMigration]);
+    expect(() => db.run("INSERT INTO storage_meta VALUES (NULL, 'bad')")).toThrow();
+    expect(() => db.run("INSERT INTO scopes VALUES (NULL, 'room', 'room-one', NULL)")).toThrow();
+    expect(() => db.run("INSERT INTO scope_sequences VALUES (NULL, 1)")).toThrow();
+    expect(() => db.run("INSERT INTO storage_schema_versions VALUES (NULL, 'bad', 1)")).toThrow();
     db.run("INSERT INTO scopes VALUES (?, ?, ?, ?)", "room-one", "room", "room-one", null);
     db.run("INSERT INTO scopes VALUES (?, ?, ?, ?)", "topic:t", "topic", "room-one", null);
     db.run("INSERT INTO scopes VALUES (?, ?, ?, ?)", "dm:mem_one", "dm", null, "mem_one");

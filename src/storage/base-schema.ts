@@ -5,11 +5,11 @@ export const baseStorageMigration: StorageMigration = {
   id: "core-base-v1",
   sql: `
 CREATE TABLE storage_meta (
-  key TEXT PRIMARY KEY,
+  key TEXT NOT NULL PRIMARY KEY,
   value TEXT NOT NULL
 );
 CREATE TABLE scopes (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('room', 'dm', 'topic')),
   room_id TEXT,
   member_id TEXT,
@@ -18,7 +18,7 @@ CREATE TABLE scopes (
 );
 CREATE INDEX scopes_room ON scopes(room_id);
 CREATE TABLE scope_sequences (
-  scope_id TEXT PRIMARY KEY REFERENCES scopes(id) ON DELETE CASCADE,
+  scope_id TEXT NOT NULL PRIMARY KEY REFERENCES scopes(id) ON DELETE CASCADE,
   next_seq INTEGER NOT NULL CHECK (next_seq >= 1)
 );
 CREATE TABLE read_cursors (
