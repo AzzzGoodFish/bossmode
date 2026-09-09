@@ -1,0 +1,35 @@
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, jsonRequest, type TestServer } from "../helpers/test-server.js";
+setupTestWorkspace();
+let server: TestServer, token: string;
+beforeAll(async () => { server = await createTestServer(); token = await loginAndGetToken(server.port); });
+afterAll(async () => { if (server) await closeTestServer(server); });
+
+it("serves SQL-owned MCP definitions, member file assets and the generated public SSH key", async () => {
+  const created = await jsonRequest(server.port, "POST", "/api/members", { token, body: { name: "Assets", agentTemplate: "general" } });
+  expect(created.status, created.body).toBe(200);
+  const id = JSON.parse(created.body).member.memberId;
+  const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+  writeMemberMcpConfig(id, { mcpServers: { one: { command: "fixture-unused" }, two: { url: "https://example.test/mcp" } } });
+  const { memberExtensionsDir, memberSkillsDir } = await import("../../src/workspace/member-profile.js");
+  const extension = join(memberExtensionsDir(id), "member-extension");
+  mkdirSync(extension, { recursive: true });
+  writeFileSync(join(extension, "index.ts"), "export default () => {};\n");
+  const skill = join(memberSkillsDir(id), "member-skill");
+  mkdirSync(skill, { recursive: true });
+  writeFileSync(join(skill, "SKILL.md"), "---\nname: member-skill\ndescription: Fixture skill\n---\nBody\n");
+  const response = await jsonRequest(server.port, "GET", `/api/members/${id}/assets`, { token });
+  expect(response.status, response.body).toBe(200);
+  const assets = JSON.parse(response.body);
+  expect(assets.mcpServers).toEqual([{ name: "one", toolCount: null }, { name: "two", toolCount: null }]);
+  expect(assets.extensions).toContainEqual({ name: "member-extension", path: extension, realPath: extension, entryPoints: [join(extension, "index.ts")], source: "member", issues: [] });
+  const builtin = assets.extensions.find((entry: any) => entry.source === "builtin");
+  expect(builtin).toMatchObject({ name: "pi-mcp-adapter", issues: [] });
+  expect(builtin.entryPoints).toEqual([builtin.path]);
+  expect(assets.skills).toEqual([expect.objectContaining({ name: "member-skill", description: "Fixture skill" })]);
+  expect(assets.sshPublicKey).toMatch(/^ssh-ed25519 /);
+  expect(response.body).not.toContain("PRIVATE KEY");
+  expect((await jsonRequest(server.port, "GET", "/api/members/mem_missing/assets", { token })).status).toBe(404);
+});

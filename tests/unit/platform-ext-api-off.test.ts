@@ -4,7 +4,8 @@
  * Lives in its own file: test-server's vi.mock pins shared/config file-wide.
  */
 import { describe, expect, it } from "vitest";
-import { createTestServer, jsonRequest, loginAndGetToken, closeTestServer } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, jsonRequest, loginAndGetToken, closeTestServer } from "../helpers/test-server.js";
+setupTestWorkspace();
 
 describe("platform extension API retirement", () => {
   it("/api/extensions is gone (404)", async () => {

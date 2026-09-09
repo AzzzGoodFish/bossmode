@@ -181,23 +181,6 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
     // only fatal in package form. Source-level check is the unit-test net.
     expect(src.includes("require(")).toBe(false);
   });
-
-  it("assets API returns a non-null sshPublicKey after birth (ESM-safe read)", async () => {
-    const { createTestServer, jsonRequest, loginAndGetToken } = await import("../helpers/test-server.js");
-    const ts = await createTestServer();
-    const token = await loginAndGetToken(ts.port);
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "keybot", agentTemplate: "pm" } });
-    const memberId = JSON.parse(created.body).member.memberId as string;
-    const res = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/assets`, { token });
-    expect(res.status).toBe(200);
-    const body = JSON.parse(res.body);
-    // Regression for the ESM require() bug: public key must be readable,
-    // never silently null with the .pub file on disk.
-    expect(typeof body.sshPublicKey).toBe("string");
-    expect(body.sshPublicKey).toMatch(/^ssh-ed25519 /);
-    await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
-    await new Promise<void>((r) => ts.server.close(() => r()));
-  });
 });
 
 describe("ssh key backfill (batch 7 §6, pm ruling)", () => {

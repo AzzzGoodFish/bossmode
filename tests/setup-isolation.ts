@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 const root=process.env.BOSSMODE_TEST_ROOT;
@@ -7,4 +7,5 @@ if(!root || !resolve(root).startsWith(resolve(tmpdir())+'/bossmode-test-run-') |
 }
 if(realpathSync(root)===resolve(homedir(),'.bossmode')) throw new Error('Production Bossmode directory is forbidden for tests');
 // This runs before test-file imports; beforeEach alone is too late for config.ts.
-process.env.BOSSMODE_DIR=root;
+// Each test file gets its own asset root before application imports. SQL is still opt-in.
+process.env.BOSSMODE_DIR=mkdtempSync(join(realpathSync(root),'suite-'));

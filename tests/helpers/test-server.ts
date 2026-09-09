@@ -1,20 +1,16 @@
 /** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
-import { beforeAll, afterAll, vi } from "vitest";
+import { beforeAll, afterAll } from "vitest";
 import http from "node:http";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
-import { join } from "node:path";
 import { coreFixture } from "./core-fixture.js";
 import type { Room } from "../../src/shared/types.js";
 
 const TEST_PASSWORD = "testpass";
 const TEST_USERNAME = "testuser";
-const sandbox = process.env.BOSSMODE_TEST_ROOT;
-if (!sandbox) throw new Error("HTTP fixtures require the isolated npm test launcher");
-// Asset location is selected before consumer imports. Storage is explicitly initialized by the suite hook.
-const TEST_BOSSMODE_DIR = mkdtempSync(join(realpathSync(sandbox), "http-"));
+const TEST_BOSSMODE_DIR = process.env.BOSSMODE_DIR;
+if (!process.env.BOSSMODE_TEST_ROOT || !TEST_BOSSMODE_DIR) throw new Error("HTTP fixtures require the isolated npm test launcher");
 const servers = new Set<TestServer>();
 let storage: ReturnType<typeof coreFixture>;
-export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR; }
+export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR!; }
 export function getTestWorkspace() {
   if (!storage) throw new Error("Test workspace has not been initialized");
   return storage;
@@ -22,11 +18,6 @@ export function getTestWorkspace() {
 
 /** Opt-in suite lifecycle, not a global import-time DB initializer. Real password/config APIs are retained. */
 export function setupTestWorkspace(): void {
-  vi.mock("../../src/shared/config.js", async original => ({
-    ...await original<typeof import("../../src/shared/config.js")>(),
-    getBossmodeDir: () => TEST_BOSSMODE_DIR,
-    ensureBossmodeDir: () => mkdirSync(TEST_BOSSMODE_DIR, { recursive: true }),
-  }));
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
     const { getDefaultConfig, hashPassword, writeConfig } = await import("../../src/shared/config.js");
@@ -103,7 +94,8 @@ export interface TestServer {
 }
 
 export async function createTestServer(): Promise<TestServer> {
-  if (!storage) throw new Error("Call setupTestWorkspace before starting an HTTP fixture");
+  const { getDatabase } = await import("../../src/storage/database.js");
+  getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/communication/ws.js");
   const { initAgentManager, wireMentionRouter } = await import("../../src/engine/agent-manager.js");

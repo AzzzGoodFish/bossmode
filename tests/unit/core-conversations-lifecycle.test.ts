@@ -18,7 +18,7 @@ it("does not open, bind, migrate or fall back from any domain getter before expl
   const calls = [() => new ConversationsRepository(), () => new TasksRepository(), () => ensureDmScope("mem_a"),
     () => getRoom("legacy-only"), () => listRooms(), () => getTopicById("topic_a"), () => listTasks("legacy-only"), () => queryRoomTasks("legacy-only", {})];
   for (const call of calls) expect(call).toThrow("bootstrap must initialize storage");
-  expect(existsSync(join(process.env.BOSSMODE_TEST_ROOT!, "bossmode.db"))).toBe(false);
+  expect(existsSync(join(process.env.BOSSMODE_DIR!, "bossmode.db"))).toBe(false);
 });
 
 it("never caches topic ownership across database contexts and surfaces a closed context", () => {
