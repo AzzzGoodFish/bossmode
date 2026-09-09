@@ -34,7 +34,8 @@
     "vendor/pi-mcp-adapter/*.js",
     "!vendor/pi-mcp-adapter/package.json",
     "vendor/pi-mcp-adapter/LICENSE",
-    "vendor/pi-mcp-adapter/README.md"
+    "vendor/pi-mcp-adapter/README.md",
+    "CHANGELOG.md"
   ],
   "bin": {
     "bossmode": "./dist/cli/index.js"
