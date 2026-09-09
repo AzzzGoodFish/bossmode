@@ -17,8 +17,33 @@ export class Database {
   private closed = false;
   private transactionFailure: Error | undefined;
   private unusable: Error | undefined;
+  private commitCallbacks: Array<() => void> = [];
 
-  constructor(private readonly connection: DatabaseSync, readonly path: string) {}
+  constructor(
+    private readonly connection: DatabaseSync,
+    readonly path: string,
+    private readonly onPostCommitError: (error: unknown) => void = () => console.warn("Database post-commit observer failed"),
+  ) {}
+
+  /** Notifications/cache changes only; durable delivery belongs in the outbox.
+   * Nested registrations wait for outer commit and are discarded on rollback.
+   * Outside a transaction the preceding write is already committed, so run now.
+   * Observer failures never misreport a committed transaction as rolled back.
+   */
+  afterCommit(callback: () => void): void {
+    this.assertOpen();
+    if (typeof callback !== "function") throw new Error("Post-commit callback must be a function");
+    if (this.depth) this.commitCallbacks.push(callback);
+    else this.observeCommit(callback);
+  }
+
+  private observeCommit(callback: () => void): void {
+    const report = (error: unknown) => { try { this.onPostCommitError(error); } catch { /* Commit already succeeded. */ } };
+    try {
+      const result = callback() as unknown;
+      if (result && typeof (result as any).then === "function") void Promise.resolve(result).catch(report);
+    } catch (error) { report(error); }
+  }
 
   private assertOpen(): void {
     if (this.closed) throw new Error("Database context is closed");
@@ -50,6 +75,8 @@ export class Database {
       throw new Error("Database transactions must be synchronous");
     }
     const outer = this.depth === 0;
+    const callbackMark = this.commitCallbacks.length;
+    let committed = false;
     const name = `bossmode_sp_${++this.savepoint}`;
     if (outer) this.transactionFailure = undefined;
     this.connection.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
@@ -75,8 +102,10 @@ export class Database {
       }
       this.assertOpen();
       this.connection.exec(outer ? "COMMIT" : `RELEASE SAVEPOINT ${name}`);
+      committed = true;
       return result;
     } catch (error) {
+      this.commitCallbacks.splice(callbackMark);
       try {
         if (this.connection.isTransaction) {
           this.connection.exec(outer ? "ROLLBACK" : `ROLLBACK TO SAVEPOINT ${name}`);
@@ -94,6 +123,8 @@ export class Database {
       if (outer) {
         if (this.connection.isTransaction) this.unusable = new Error("Database rollback failed; close this context before continuing");
         this.transactionFailure = undefined;
+        const callbacks = this.commitCallbacks.splice(0);
+        if (committed) for (const callback of callbacks) this.observeCommit(callback);
       }
     }
   }
@@ -117,13 +148,13 @@ export function getDatabase(): Database {
 }
 
 /** Open a connection only. Schema/import/readiness and context binding are explicit. */
-export function openDatabase(path: string): Database {
+export function openDatabase(path: string, options: {onPostCommitError?: (error: unknown) => void} = {}): Database {
   if (!isAbsolute(path)) throw new Error("Database path must be absolute");
   const require = createRequire(import.meta.url);
   const { DatabaseSync: Connection } = require("node:sqlite") as typeof import("node:sqlite");
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const connection = new Connection(path);
-  const db = new Database(connection, path);
+  const db = new Database(connection, path, options.onPostCommitError);
   try {
     // Settings and credentials share this store; sidecars must be private too.
     chmodSync(path, 0o600);
