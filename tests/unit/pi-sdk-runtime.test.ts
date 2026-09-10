@@ -24,6 +24,7 @@ const modelRuntime = { kind: "database-runtime", refresh: modelRegistryRefresh, 
 const modelRegistryGetApiKeyAndHeaders = vi.fn(async () => ({ ok: true, apiKey: "sk-test" }));
 const createAgentSession = vi.fn();
 const resourceLoaderCtor = vi.fn();
+let hostedMcpLoaded = true;
 const toolsFactory = vi.fn();
 const sessionManagerCreate = vi.fn();
 const sessionManagerOpen = vi.fn();
@@ -82,6 +83,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   class DefaultResourceLoader {
     constructor(options: any) { resourceLoaderCtor(options); }
     async reload() {}
+    getExtensions() { return { extensions: hostedMcpLoaded ? [{path:"<inline:pi-mcp-adapter>",tools:new Map([["mcp", {}]])}] : [], errors: [] }; }
   }
   return {
     VERSION: "test-sdk",
@@ -158,6 +160,7 @@ function savedSessionFile(): string {
 const createdHandles: any[] = [];
 beforeEach(async () => {
   fixture = coreFixture(); dir = fixture.root;
+  hostedMcpLoaded = true;
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('pm','pm','pm','general','{}',0,0)");
   const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
   const create = PiSdkRuntime.prototype.createAgent;
@@ -550,6 +553,14 @@ describe("PiSdkRuntime", () => {
     expect(session.abort).toHaveBeenCalled();
     expect(session.dispose).toHaveBeenCalled();
     expect(existsSync(sessionExtensionSetFlagValue.mock.calls.at(-1)![1])).toBe(false);
+  });
+
+  it("does not create an apparently healthy session when the SDK suppresses a hosted factory error", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    hostedMcpLoaded = false;
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("Hosted MCP extension failed to load");
+    expect(createAgentSession).not.toHaveBeenCalled();
   });
 
   it("removes derived config when the hosted factory cannot load", async () => {

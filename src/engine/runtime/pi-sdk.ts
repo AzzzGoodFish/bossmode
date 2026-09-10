@@ -11,6 +11,7 @@ import {
   SettingsManager,
   VERSION as PI_SDK_VERSION,
   type AgentSession,
+  type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
@@ -48,26 +49,47 @@ export function resolvePiSystemPromptSources(args: {
 
 
 /** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
-export class BossmodeResourceLoader extends DefaultResourceLoader {
+export class BossmodeResourceLoader implements ResourceLoader {
+  private delegate: DefaultResourceLoader;
+  private pathsChanged = false;
   private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
 
   constructor(
-    options: ConstructorParameters<typeof DefaultResourceLoader>[0],
+    private options: ConstructorParameters<typeof DefaultResourceLoader>[0],
     sources: ReturnType<typeof resolvePiSystemPromptSources>,
   ) {
-    super(options);
+    this.delegate = new DefaultResourceLoader(options);
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
+
+  /** The SDK has no public path setters. Replace the delegate at reload, not its private fields. */
+  setResourcePaths(skillPaths: string[], extensionPaths: string[]): void {
+    this.options = { ...this.options, additionalSkillPaths: [...skillPaths], additionalExtensionPaths: [...extensionPaths] };
+    this.pathsChanged = true;
+  }
+
+  async reload(options?: Parameters<ResourceLoader["reload"]>[0]): Promise<void> {
+    if (this.pathsChanged) this.delegate = new DefaultResourceLoader(this.options);
+    await this.delegate.reload(options);
+    this.pathsChanged = false;
+  }
+
+  getExtensions() { return this.delegate.getExtensions(); }
+  getSkills() { return this.delegate.getSkills(); }
+  getPrompts() { return this.delegate.getPrompts(); }
+  getThemes() { return this.delegate.getThemes(); }
+  getAgentsFiles() { return this.delegate.getAgentsFiles(); }
+  extendResources(paths: Parameters<ResourceLoader["extendResources"]>[0]): void { this.delegate.extendResources(paths); }
 
   setPromptSources(sources: ReturnType<typeof resolvePiSystemPromptSources>): void {
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
 
-  override getSystemPrompt(): string | undefined {
+  getSystemPrompt(): string | undefined {
     return this.promptSources.systemPrompt;
   }
 
-  override getAppendSystemPrompt(): string[] {
+  getAppendSystemPrompt(): string[] {
     return [...this.promptSources.appendSystemPrompt];
   }
 }
@@ -201,6 +223,11 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     process.env.PI_CODING_AGENT_DIR = runtimeDir;
   }
   return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames, dispose: scoped.dispose };
+}
+
+function assertHostedMcpLoaded(loader: ResourceLoader): void {
+  const extension = loader.getExtensions().extensions.find(entry => entry.path === "<inline:pi-mcp-adapter>");
+  if (!extension?.tools.has("mcp")) throw new Error("Hosted MCP extension failed to load");
 }
 
 async function bindMcpExtension(session: AgentSession, opts: { configPath: string; agent: string }): Promise<void> {
@@ -777,18 +804,19 @@ export class PiSdkAgentHandle implements AgentHandle {
       ...managedExtensions,
       ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)),
     ];
-    const loader = this.resourceLoader as any;
     const appendBase = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
     const promptSources = resolvePiSystemPromptSources({
       agentPrompt: opts.agentPrompt,
       appendSystemPrompt: appendBase,
     });
     this.resourceLoader.setPromptSources(promptSources);
-    loader.additionalSkillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
-    loader.additionalExtensionPaths = activeExtensionPaths;
+    this.resourceLoader.setResourcePaths(
+      [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills], activeExtensionPaths,
+    );
 
     await this.session.reload({
       beforeSessionStart: async () => {
+        assertHostedMcpLoaded(this.resourceLoader);
         this.session.extensionRunner.setFlagValue("mcp-config", mcpSettings.configPath);
       },
     });
@@ -1016,6 +1044,7 @@ export class PiSdkRuntime implements AgentRuntime {
         appendSystemPrompt,
       }, promptSources);
       await resourceLoader.reload();
+      assertHostedMcpLoaded(resourceLoader);
       // DefaultResourceLoader.reload() reloads SettingsManager and clears its
       // in-memory overrides. Apply runtime transport afterwards, immediately
       // before the SDK session is created.

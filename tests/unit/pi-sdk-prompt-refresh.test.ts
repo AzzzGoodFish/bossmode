@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, SessionManager, SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -7,6 +7,32 @@ import { BossmodeResourceLoader, PiSdkAgentHandle, resolvePiSystemPromptSources 
 
 // Real installed SDK, local in-memory session only. No provider calls or credentials.
 describe("real SDK prompt refresh", () => {
+  it("reloads changed member paths through the public loader while retaining inline factories", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bossmode-resource-paths-"));
+    try {
+      const a = join(dir, "a.ts"), b = join(dir, "b.ts");
+      for (const [path, name] of [[a, "first-member-command"], [b, "second-member-command"]]) {
+        writeFileSync(path, `export default function(pi) { pi.registerCommand(${JSON.stringify(name)}, {description:'fixture',handler:async()=>{}}); }`);
+      }
+      const loader = new BossmodeResourceLoader({
+        cwd: dir, agentDir: dir, settingsManager: SettingsManager.inMemory(),
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+        additionalExtensionPaths: [a],
+        extensionFactories: [{name: "fixture-inline", factory: pi => { pi.registerCommand("retained-command", {description:"fixture", handler:async()=>{}}); }}],
+      }, {systemPrompt:"initial",appendSystemPrompt:[]});
+      await loader.reload();
+      expect(loader.getExtensions().errors).toEqual([]);
+      expect(loader.getExtensions().extensions.flatMap(e => [...e.commands.keys()]).sort()).toEqual(["first-member-command", "retained-command"]);
+      loader.setResourcePaths([], [b]);
+      loader.setPromptSources({systemPrompt:"updated",appendSystemPrompt:["current roster"]});
+      await loader.reload();
+      expect(loader.getExtensions().errors).toEqual([]);
+      expect(loader.getExtensions().extensions.flatMap(e => [...e.commands.keys()]).sort()).toEqual(["retained-command", "second-member-command"]);
+      expect(loader.getSystemPrompt()).toBe("updated");
+      expect(loader.getAppendSystemPrompt()).toEqual(["current roster"]);
+    } finally { rmSync(dir, {recursive:true,force:true}); }
+  });
+
   it("rebuilds the SDK base prompt while preserving active tools and existing messages", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bossmode-prompt-refresh-"));
     const settings = SettingsManager.inMemory();
