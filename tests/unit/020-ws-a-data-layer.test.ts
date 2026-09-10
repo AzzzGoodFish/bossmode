@@ -1,14 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const state = vi.hoisted(() => ({ dir: "" }));
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => state.dir,
-}));
-
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
 import {
   scopeIdOf,
   parseScopeId,
@@ -17,6 +11,10 @@ import {
   instanceKey,
   parseInstanceKey,
 } from "../../src/shared/conversation-ref.js";
+
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => { fixture = coreFixture(); });
+afterEach(() => fixture.close());
 
 describe("ConversationRef / ScopeId", () => {
   it("round-trips dm and room refs", () => {
@@ -59,13 +57,6 @@ describe("ConversationRef / ScopeId", () => {
 });
 
 describe("member-registry", () => {
-  beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bm-memreg-"));
-  });
-  afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
-  });
-
   it("creates unique members, rejects name clash, renames, fires", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const a = reg.createMember({ name: "pm", agentTemplate: "pm", model: "anthropic/claude" });
@@ -83,8 +74,8 @@ describe("member-registry", () => {
     expect(reg.resolveMemberRef("project-pm")?.id).toBe(a.id);
     expect(reg.resolveMemberRef(a.id)?.name).toBe("project-pm");
 
-    const { archived } = reg.fireMember(a.id, { confirm: true });
-    expect(archived).toMatch(/^backups\/fired-project-pm-/);
+    const { archived } = await new MemberArchiveService(fixture.db, fixture.root, {quiesce: async () => {}}).archive(a.id, {confirm: true});
+    expect(archived.startsWith(`backups/fired-${a.id}-`)).toBe(true);
     expect(reg.getMember(a.id)).toBeNull();
     expect(reg.listMembers()).toHaveLength(0);
   });
@@ -104,13 +95,6 @@ describe("member-registry", () => {
 });
 
 describe("member-memory-store + dm-message-store", () => {
-  beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bm-mem-"));
-  });
-  afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
-  });
-
   it("writes persona and per-scope layers under member dir", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const mem = await import("../../src/workspace/member-memory-store.js");
@@ -150,204 +134,16 @@ describe("member-memory-store + dm-message-store", () => {
   });
 });
 
-describe("member-global migration", () => {
-  beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bm-mig-"));
-  });
-  afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
-  });
+// Retired name-guessing/marker migration assertions are mapped to explicit
+// historical SQL import cases in core-execution-finish-imports.test.ts.
 
-  it("full auto-migration: members created, persona seeded, rooms stamped; idempotent", async () => {
-    const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
-    const roomId = "room-test-1";
-    const roomDir = join(state.dir, "rooms", roomId);
-    mkdirSync(join(roomDir, "memory", "members", "rm_pm"), { recursive: true });
-    mkdirSync(join(roomDir, "memory", "members", "rm_dev"), { recursive: true });
-    writeFileSync(join(roomDir, "memory", "members", "rm_pm", "principles.md"), "## Rules\nLead well.\n", "utf8");
-    writeFileSync(
-      join(roomDir, "room.json"),
-      JSON.stringify({
-        id: roomId,
-        name: "dev",
-        cwd: state.dir,
-        members: ["pm", "developer"],
-        promptLeaderMemberId: "rm_pm",
-        roomMembers: [
-          { id: "rm_pm", roomId, name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 10 },
-          { id: "rm_dev", roomId, name: "developer", sourceAgent: "developer", createdAt: 1, updatedAt: 5 },
-        ],
-        createdAt: 1,
-      }, null, 2),
-      "utf8",
-    );
-    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
-
-    const mig = await import("../../src/workspace/member-global-migration.js");
-    const first = mig.runMemberGlobalMigration();
-    expect(first.skipped).toBe(false);
-    expect(first.createdMembers).toBe(2);
-    expect(first.roomsStamped).toBe(1);
-    expect(first.archivePath).toMatch(/legacy-0.19-/);
-    expect(existsSync(join(state.dir, first.archivePath!, "manifest.json"))).toBe(true);
-
-    // Full auto-migration (fish-confirmed 2026-08-04): members created, rooms stamped.
-    const reg = await import("../../src/workspace/member-registry.js");
-    expect(reg.listMembers()).toHaveLength(2);
-    const globalPm = reg.findMemberByName("pm")!;
-    expect(globalPm.agentTemplate).toBe("pm");
-
-    // persona seeded from member principles
-    const mem = await import("../../src/workspace/member-memory-store.js");
-    expect(mem.readMemoryLayer(globalPm.id, "persona").content).toMatch(/Lead well/);
-
-    // room stamped: globalMemberIds + leader
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const stamped = roomStore.getRoom(roomId)!;
-    expect(stamped.globalMemberIds?.length).toBe(2);
-    expect(stamped.promptLeaderGlobalMemberId).toBe(globalPm.id);
-
-    const manifest = JSON.parse(readFileSync(join(state.dir, first.archivePath!, "manifest.json"), "utf8"));
-    expect(manifest.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);
-
-    const second = mig.runMemberGlobalMigration();
-    expect(second.skipped).toBe(true);
-  });
-
-  it("F1: marker done + room never stamped (poisoned rc.2-era state) self-heals on first startup", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    // Registry already has the members (the rc.2-era build created them before
-    // the stamping code existed).
-    const reg = await import("../../src/workspace/member-registry.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
-
-    // Poisoned room: members present by name, roomMembers deleted, no stamp.
-    const roomId = "room-poisoned";
-    const roomDir = join(state.dir, "rooms", roomId);
-    mkdirSync(roomDir, { recursive: true });
-    writeFileSync(
-      join(roomDir, "room.json"),
-      JSON.stringify({ id: roomId, name: "dev", cwd: state.dir, members: ["pm", "developer"], createdAt: 1 }, null, 2),
-      "utf8",
-    );
-    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
-
-    // Marker lies: done, but no room was ever stamped.
-    mkdirSync(join(state.dir, ".migrations"), { recursive: true });
-    writeFileSync(join(state.dir, ".migrations", "member-global-v1.json"), JSON.stringify({ migration: "member-global-v1", done: true, at: 1 }), "utf8");
-
-    const mig = await import("../../src/workspace/member-global-migration.js");
-    const res = mig.runMemberGlobalMigration();
-    expect(res.skipped).toBe(true); // one-shot part stays marker-guarded
-
-    // Data-driven repair stamped the room anyway — first startup self-heals.
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const healed = roomStore.getRoom(roomId)!;
-    expect(healed.globalMemberIds?.sort()).toEqual([pm.id, dev.id].sort());
-    expect(roomStore.getRoomMembers(roomId).map((m) => m.name).sort()).toEqual(["developer", "pm"]);
-
-    // Steady state: already-stamped rooms are never rewritten by the repair.
-    const before = JSON.stringify(roomStore.getRoom(roomId));
-    mig.runMemberGlobalMigration();
-    expect(JSON.stringify(roomStore.getRoom(roomId))).toBe(before);
-  });
-
-  it("F1 repair is all-or-nothing: a room with an unresolvable member name is skipped, not partially stamped", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    const reg = await import("../../src/workspace/member-registry.js");
-    reg.createMember({ name: "pm", agentTemplate: "pm" });
-    // "ghost" exists in the room but not in the registry (removed/renamed member).
-
-    const roomId = "room-partial";
-    const roomDir = join(state.dir, "rooms", roomId);
-    mkdirSync(roomDir, { recursive: true });
-    writeFileSync(
-      join(roomDir, "room.json"),
-      JSON.stringify({ id: roomId, name: "dev", cwd: state.dir, members: ["pm", "ghost"], createdAt: 1 }, null, 2),
-      "utf8",
-    );
-    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
-    // Marker done → only the every-startup repair runs (one-shot stays guarded).
-    mkdirSync(join(state.dir, ".migrations"), { recursive: true });
-    writeFileSync(join(state.dir, ".migrations", "member-global-v1.json"), JSON.stringify({ migration: "member-global-v1", done: true, at: 1 }), "utf8");
-
-    const mig = await import("../../src/workspace/member-global-migration.js");
-    mig.runMemberGlobalMigration();
-
-    // Not stamped: ghost must not be silently delisted by an authoritative replace.
-    const roomStore = await import("../../src/workspace/room-store.js");
-    expect(roomStore.getRoom(roomId)!.globalMemberIds ?? []).toHaveLength(0);
-  });
-
-  it("moves per-room member mainline into (member, room) scope mainline", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    const roomId = "room-mig-ml";
-    const roomDir = join(state.dir, "rooms", roomId);
-    mkdirSync(join(roomDir, "memory", "members", "rm_pm"), { recursive: true });
-    writeFileSync(join(roomDir, "memory", "members", "rm_pm", "mainline.md"), "## Focus\n\nShip 0.19\n", "utf8");
-    writeFileSync(
-      join(roomDir, "room.json"),
-      JSON.stringify({
-        id: roomId,
-        name: "ml-room",
-        cwd: state.dir,
-        members: ["pm"],
-        promptLeaderMemberId: "rm_pm",
-        roomMembers: [{ id: "rm_pm", roomId, name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 10 }],
-        createdAt: 1,
-      }, null, 2),
-      "utf8",
-    );
-    writeFileSync(join(roomDir, "messages.jsonl"), "", "utf8");
-
-    const mig = await import("../../src/workspace/member-global-migration.js");
-    const res = mig.runMemberGlobalMigration();
-    expect(res.createdMembers).toBe(1);
-    expect(res.mainlinesMoved).toBe(1);
-
-    const reg = await import("../../src/workspace/member-registry.js");
-    const pm = reg.findMemberByName("pm")!;
-    const mem = await import("../../src/workspace/member-memory-store.js");
-    const scoped = mem.readMemoryLayer(pm.id, "mainline", `room:${roomId}`);
-    expect(scoped.content).toMatch(/Ship 0.19/);
-    // persona empty (no principles file)
-    expect(mem.readMemoryLayer(pm.id, "persona").content.trim()).toBe("");
-  });
-});
-
-describe("chats aggregation helpers + invite dual-write", () => {
-  beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bm-chats-"));
-  });
-  afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
-  });
-
+describe("SQL chats aggregation and ID membership", () => {
   it("inviteGlobalMember stamps globalMemberIds; remove clears membership", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
-    // seed general agent so invite can copy template
-    mkdirSync(join(state.dir, "agents"), { recursive: true });
-    writeFileSync(join(state.dir, "agents", "general.md"), "---\nname: general\n---\nHi\n", "utf8");
-
     const g = reg.createMember({ name: "ops", agentTemplate: "general" });
     const roomId = "room-inv-1";
-    mkdirSync(join(state.dir, "rooms", roomId), { recursive: true });
-    writeFileSync(
-      join(state.dir, "rooms", roomId, "room.json"),
-      JSON.stringify({
-        id: roomId,
-        name: "ops-room",
-        cwd: state.dir,
-        members: [],
-        roomMembers: [],
-        createdAt: 1,
-      }, null, 2),
-      "utf8",
-    );
-    writeFileSync(join(state.dir, "rooms", roomId, "messages.jsonl"), "", "utf8");
+    new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "ops-room", members: [], globalMemberIds: [], createdAt: 1});
 
     const invited = roomStore.inviteGlobalMember(roomId, {
       id: g.id,
@@ -368,25 +164,12 @@ describe("chats aggregation helpers + invite dual-write", () => {
   });
 
   it("stampGlobalMemberIds after invite matches memberIds create path", async () => {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const a = reg.createMember({ name: "alice", agentTemplate: "general" });
     const b = reg.createMember({ name: "bob", agentTemplate: "general" });
     const roomId = "room-mid-1";
-    mkdirSync(join(state.dir, "rooms", roomId), { recursive: true });
-    writeFileSync(
-      join(state.dir, "rooms", roomId, "room.json"),
-      JSON.stringify({
-        id: roomId,
-        name: "r2",
-        cwd: state.dir,
-        members: [],
-        roomMembers: [],
-        createdAt: 1,
-      }, null, 2),
-      "utf8",
-    );
+    new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "r2", members: [], globalMemberIds: [], createdAt: 1});
     // Invite both by global id — membership is globalMemberIds only
     expect(roomStore.inviteGlobalMember(roomId, { id: a.id, name: a.name, agentTemplate: "general" }).ok).toBe(true);
     expect(roomStore.inviteGlobalMember(roomId, { id: b.id, name: b.name, agentTemplate: "general" }).ok).toBe(true);

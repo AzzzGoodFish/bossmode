@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
+import { importLegacyMembers } from "../../src/storage/upgrade-members.js";
+import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
+import { importLegacyDocuments } from "../../src/storage/upgrade-documents.js";
+import { importLegacyExecution } from "../../src/storage/upgrade-execution.js";
+import { getDocument } from "../../src/storage/document-repository.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
+import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
+import { BackgroundRepository } from "../../src/storage/repositories/background-repository.js";
+import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
+import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
+
+let fixture: ReturnType<typeof coreFixture>;
+const member = {id: "mem_one", name: "pm", agentTemplate: "general", global: {}, createdAt: 11, updatedAt: 22,
+  unifiedModel: true as const, unifiedExtensions: true as const, scopeOverrides: {}};
+beforeEach(() => { fixture = coreFixture(); });
+afterEach(() => fixture.close());
+function source(files: Record<string, unknown>) {
+  const sourceRoot = join(fixture.root, "snapshot");
+  for (const [path, value] of Object.entries(files)) {
+    const file = join(sourceRoot, path);
+    mkdirSync(dirname(file), {recursive: true});
+    writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value));
+    utimesSync(file, 123, 123);
+  }
+  const entries = discoverLegacyInventory(sourceRoot).entries;
+  const staged = new Map<string, Buffer>();
+  const ctx: UpgradeImportContext = {db: fixture.db, root: fixture.root, sourceRoot, previousDatabase: undefined,
+    sourceFiles: entries.map(e => e.path), legacy: true, progress() {},
+    stageAsset(path, bytes) { staged.set(path, Buffer.from(bytes)); }};
+  return {ctx, entries, staged};
+}
+function seedMember() { new MembersRepository(fixture.db).insert(member); }
+const conversationSources = {
+  "rooms/r/room.json": {id: "r", name: "Historical room", members: [], createdAt: 1},
+  "rooms/r/topics/t/topic.json": {id: "t", roomId: "r", title: "Historical topic", anchorMessageId: "anchor",
+    createdBy: "user", createdAt: 2, status: "active", seedMode: "fresh", participants: []},
+};
+
+describe("explicit historical identity import, not recurring name/marker repair", () => {
+  it("imports identified members, literal persona and room links with original timestamps", async () => {
+    const room = {id: "r", name: "Imported", members: ["old display label"], globalMemberIds: [member.id],
+      promptLeaderGlobalMemberId: member.id, createdAt: 3};
+    const {ctx, entries, staged} = source({"members/mem_one/member.json": member,
+      "members/mem_one/member.md": "---\nname: historical-label\n---\n## Persona\nLead well.\n",
+      "rooms/r/room.json": room});
+    const imported = importLegacyMembers(ctx, entries, "files");
+    await importLegacyConversations(ctx, entries);
+    expect(new MembersRepository(fixture.db).get(member.id)).toMatchObject(member);
+    expect(staged.get("members/mem_one/persona.md")?.toString()).toBe("## Persona\nLead well.\n");
+    expect(imported.personas[0].updatedAt).toBe(22);
+    fixture.reopen();
+    expect(new ConversationsRepository(fixture.db).getRoom("r")).toMatchObject(room);
+    expect(fixture.db.get("SELECT member_id FROM scopes WHERE id='dm:mem_one'")).toEqual({member_id: member.id});
+    // Reimporting identical conversation metadata is idempotent and emits no live work.
+    await importLegacyConversations({...ctx, db: fixture.db}, entries);
+    expect(fixture.db.all("SELECT * FROM room_members")).toHaveLength(1);
+    expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
+  });
+
+  it("ignores a stale done marker and preserves an unstamped roster instead of guessing current owners", async () => {
+    seedMember();
+    const room = {id: "r", name: "Poisoned-era room", members: ["pm"], createdAt: 1};
+    const {ctx, entries} = source({"rooms/r/room.json": room,
+      ".migrations/member-global-v1.json": {done: true, at: 1}});
+    await importLegacyConversations(ctx, entries);
+    const repo = new ConversationsRepository(fixture.db);
+    expect(repo.getRoom("r")).toEqual(room);
+    expect(repo.getRoom("r")?.globalMemberIds).toBeUndefined();
+    await importLegacyConversations(ctx, entries);
+    expect(repo.getRoom("r")).toEqual(room);
+    expect(fixture.db.all("SELECT * FROM room_members")).toEqual([]);
+  });
+
+  it("retains every historical roster entry when only some names match today's registry", async () => {
+    seedMember();
+    const room = {id: "r", name: "Partial", members: ["pm", "ghost"], createdAt: 1,
+      roomMembers: ["pm", "ghost"].map(name => ({id: `rm_${name}`, roomId: "r", name, sourceAgent: name, createdAt: 2, updatedAt: 3}))};
+    const {ctx, entries} = source({"rooms/r/room.json": room});
+    await importLegacyConversations(ctx, entries);
+    expect(new ConversationsRepository(fixture.db).getRoom("r")).toEqual(room);
+    expect(fixture.db.all("SELECT * FROM room_members")).toEqual([]);
+  });
+
+  it("imports old per-room mainline/principles as historical documents without rehoming by a reused name", async () => {
+    seedMember();
+    const mainline = "rooms/r/memory/members/rm_pm/mainline.md";
+    const principles = "rooms/r/memory/members/rm_pm/principles.md";
+    const {ctx, entries} = source({[mainline]: "## Focus\nShip 0.19\n", [principles]: "## Rules\nLead well.\n"});
+    await importLegacyDocuments(ctx, entries, []);
+    expect(getDocument(fixture.db, mainline)).toBeDefined();
+    expect(getDocument(fixture.db, principles)).toBeDefined();
+    expect(readFileSync(join(ctx.sourceRoot, mainline), "utf8")).toBe("## Focus\nShip 0.19\n");
+    expect(getDocument(fixture.db, "members/mem_one/persona.md")).toBeUndefined();
+    expect(getDocument(fixture.db, "members/mem_one/memory/scopes/room-r/mainline.md")).toBeUndefined();
+  });
+});
+
+describe("historical execution metadata uses stable IDs, explicit imports and source time", () => {
+  it("imports room/DM/topic associations and checkpoints with exact source times and quarantines reused labels", async () => {
+    seedMember();
+    const session = {runtime: "pi-sdk", sessionId: "historical-sdk-id"};
+    const checkpoint = {contractFingerprint: "historical", contractVersion: 4, driftNotified: 5,
+      staleMounts: {since: 99, fields: ["mcpServers", "skills"]}};
+    const {ctx, entries} = source({
+      ...conversationSources,
+      "members/mem_one/sessions/current.json": {"room:r": session, "dm:mem_one": session, "topic:t": session},
+      "rooms/r/runtime-state.json": {"room:r:mem_one": checkpoint, "room:r:pm": {contractFingerprint: "ambiguous"}},
+      "rooms/runtime-state.json": {"topic:t:mem_one": checkpoint},
+      "members/mem_one/runtime-state.json": {"dm:mem_one:mem_one": checkpoint},
+    });
+    await importLegacyConversations(ctx, entries);
+    importLegacyExecution(ctx, entries);
+    fixture.reopen();
+    for (const scope of ["room:r", "dm:mem_one", "topic:t"]) {
+      expect(new SessionRepository(fixture.db).get(member.id, scope)).toMatchObject({session, createdAt: 123000, updatedAt: 123000});
+      expect(new RuntimeRepository(fixture.db).get(scope, member.id)).toEqual(checkpoint);
+    }
+    expect(fixture.db.all("SELECT updated_at FROM runtime_checkpoints")).toEqual(Array(3).fill({updated_at: 123000}));
+    expect(fixture.db.get("SELECT source_key,reason,record_json FROM execution_import_ambiguities")).toEqual({
+      source_key: "room:r:pm", reason: "unresolved-runtime-owner", record_json: JSON.stringify({contractFingerprint: "ambiguous"})});
+  });
+
+  it("aborts explicit malformed current.json import rather than treating corruption as empty", () => {
+    seedMember();
+    const {ctx, entries} = source({"members/mem_one/sessions/current.json": "{ not json"});
+    expect(() => importLegacyExecution(ctx, entries)).toThrow();
+    expect(fixture.db.all("SELECT * FROM current_sessions")).toEqual([]);
+    expect(readFileSync(join(ctx.sourceRoot, entries[0].path), "utf8")).toBe("{ not json");
+  });
+
+  it("imports terminal background evidence exactly, without replay or trusting embedded sessionDir", () => {
+    seedMember();
+    const taskId = "bgt-00000000-0000-4000-8000-000000000001";
+    const path = `members/mem_one/background-tasks/2026-09-09/${taskId}/task.json`;
+    const task = {taskId, memberId: member.id, scopeId: "dm:mem_one", kind: "recall", sessionMode: "fork", prompt: "literal prompt",
+      snapshot: {model: "p/m", credentialId: "old-account", thinkingLevel: "high"}, status: "done",
+      startedAt: "2026-09-09T01:00:00Z", endedAt: "2026-09-09T02:00:00Z", result: " exact answer\r\n", error: null,
+      sessionDir: "/forged/path", parentSessionRef: "/historical/sdk/session.jsonl"};
+    const {ctx, entries} = source({[path]: task});
+    importLegacyExecution(ctx, entries);
+    importLegacyExecution(ctx, entries);
+    expect(new BackgroundRepository(fixture.db).get(member.id, taskId)).toEqual({...task, sessionDir: join(fixture.root, dirname(path))});
+    expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
+    expect(fixture.db.all("SELECT * FROM background_tasks")).toHaveLength(1);
+  });
+
+  it("preserves user/member cursor kinds, timestamps and unresolved historical actor keys separately", async () => {
+    seedMember();
+    const user = {messageId: "historical-message", seq: 0, updatedAt: 77};
+    const {ctx, entries} = source({...conversationSources, "rooms/r/cursors.json": {pm: "label-position", mem_one: "id-position"},
+      "user-read-cursors.json": {"room:r": user, "dm:mem_one": {...user, seq: null}, "topic:t": {...user, seq: 9}}});
+    await importLegacyConversations(ctx, entries);
+    fixture.reopen();
+    expect(new ConversationsRepository(fixture.db).getCursors("r")).toEqual({pm: "label-position", mem_one: "id-position"});
+    expect(new UserCursorRepository(fixture.db).list()).toEqual({"room:r": user, "dm:mem_one": {...user, seq: null}, "topic:t": {...user, seq: 9}});
+    expect(fixture.db.all("SELECT updated_at FROM read_cursors WHERE kind='member'")).toEqual([{updated_at: 123000}, {updated_at: 123000}]);
+  });
+});

@@ -1,57 +1,33 @@
 /**
  * G3 cutover: room config links by global member ID (sourceMemberId / globalMemberIds), not free name search.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-let dir: string;
-
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
-
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`);
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+let fixture: ReturnType<typeof coreFixture>;
+function historicalRoom(names: string[]) {
+  // Explicit historical import, never inferred from today's names or template files.
+  const room = {id: "imported-room", name: "R", members: names, createdAt: 1,
+    roomMembers: names.map(name => ({id: `rm_${name}`, roomId: "imported-room", name, sourceAgent: name, createdAt: 1, updatedAt: 2}))};
+  new ConversationsRepository(fixture.db).upsertRoom(room);
+  return room;
 }
+describe("G3 ID-link SQL cutover", () => {
+  beforeEach(() => { fixture = coreFixture(); });
+  afterEach(() => fixture.close());
 
-describe("G3 ID-link cutover", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-g3-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
-    mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("pm");
-    seedAgent("developer");
-    seedAgent("general");
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("stampGlobalMemberIds synthesizes members from globalMemberIds and drops roomMembers", async () => {
+  it("stampGlobalMemberIds synthesizes members from globalMemberIds without discarding historical roomMembers", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "m/a", credentialId: "c1" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer", model: "m/b", credentialId: "c2" });
 
-    const room = roomStore.createRoom("R", dir, [
-      { agent: "pm", name: "pm" },
-      { agent: "developer", name: "developer" },
-    ], undefined, { promptLeaderMemberName: "pm" });
+    const room = historicalRoom(["pm", "developer"]);
 
     roomStore.stampGlobalMemberIds(room.id, [pm.id, dev.id], pm.id);
     const fresh = roomStore.getRoom(room.id)!;
-    expect(fresh.roomMembers).toBeUndefined();
+    expect(fresh.roomMembers).toEqual(room.roomMembers);
     expect(fresh.globalMemberIds).toEqual([pm.id, dev.id]);
     expect(fresh.promptLeaderMemberId).toBe(pm.id);
 
@@ -65,23 +41,25 @@ describe("G3 ID-link cutover", () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }], undefined, { promptLeaderMemberName: "pm" });
+    const room = historicalRoom(["pm"]);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
 
     // Rename global member
     reg.renameMember(pm.id, "prime");
     const local = roomStore.getRoomMembers(room.id).find((m) => m.sourceMemberId === pm.id)!;
-    // Local name still "pm" but sourceMemberId holds the link
+    expect(local.name).toBe("prime");
+    fixture.reopen();
+    // The SQL ID link survives both rename and storage reopen.
     const fresh = roomStore.getRoom(room.id)!;
     expect(roomStore.resolveGlobalMemberId(fresh, local)).toBe(pm.id);
   });
 
-  it("inviteGlobalMember adds mem_* membership without roomMembers array", async () => {
+  it("inviteGlobalMember adds mem_* membership without activating historical roomMembers", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }], undefined, { promptLeaderMemberName: "pm" });
+    const room = historicalRoom(["pm"]);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
 
     const invited = roomStore.inviteGlobalMember(room.id, {
@@ -96,7 +74,7 @@ describe("G3 ID-link cutover", () => {
     }
     const fresh = roomStore.getRoom(room.id)!;
     expect(fresh.globalMemberIds).toContain(dev.id);
-    expect(fresh.roomMembers).toBeUndefined();
+    expect(fresh.roomMembers).toEqual(room.roomMembers);
     expect(roomStore.getRoomMembers(room.id).map((m) => m.id)).toEqual(expect.arrayContaining([pm.id, dev.id]));
   });
 
@@ -105,7 +83,7 @@ describe("G3 ID-link cutover", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     // Two globals cannot share name — so create room-local "shadow" without stamp
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }], undefined, { promptLeaderMemberName: "pm" });
+    const room = historicalRoom(["pm"]);
     // No stampGlobalMemberIds — empty globalMemberIds
     const local = roomStore.getRoomMembers(room.id)[0];
     const fresh = roomStore.getRoom(room.id)!;

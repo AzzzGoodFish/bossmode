@@ -1,54 +1,53 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
+import { coreFixture } from "./helpers/core-fixture.js";
+import { MembersRepository } from "../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../src/storage/repositories/conversations.js";
+import { SessionRepository } from "../src/storage/repositories/session-repository.js";
+import * as sessionStore from "../src/workspace/session-store.js";
 
+let fixture: ReturnType<typeof coreFixture>;
 let tempDir: string;
-
-vi.mock("../src/shared/config.js", () => ({
-  getBossmodeDir: () => tempDir,
-}));
-
-describe("session-store", () => {
-  let roomStore: typeof import("../src/workspace/room-store.js");
-  let sessionStore: typeof import("../src/workspace/session-store.js");
-
-  beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bossmode-session-test-"));
-    mkdirSync(join(tempDir, "agents"), { recursive: true });
-    writeFileSync(join(tempDir, "agents", "pm.md"), "---\nname: pm\n---\npm", "utf8");
-    vi.resetModules();
-    roomStore = await import("../src/workspace/room-store.js");
-    sessionStore = await import("../src/workspace/session-store.js");
+describe("session-store SQL associations", () => {
+  beforeEach(() => {
+    fixture = coreFixture();
+    tempDir = fixture.root;
+    new MembersRepository(fixture.db).insert({id: "rm_pm", name: "pm", agentTemplate: "general", global: {},
+      createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}});
+    mkdirSync(join(tempDir, "members", "rm_pm"), {recursive: true});
+    const conversations = new ConversationsRepository(fixture.db);
+    conversations.ensureDmScope("rm_pm");
+    conversations.upsertRoom({id: "room_a", name: "test", members: [], globalMemberIds: ["rm_pm"], createdAt: 1});
   });
+  afterEach(() => fixture.close());
 
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it("writes one member current.json reference and reset removes only that reference", () => {
-    const room = roomStore.createRoom("test", "/tmp", drafts(["pm"]));
+  it("persists one SQL association and reset removes only that reference", () => {
+    const room = {id: "room_a"};
     const archive = join(tempDir, "members", "rm_pm", "sessions", "2026-09-07", "rooms", room.id, "session.jsonl");
     mkdirSync(join(archive, ".."), { recursive: true });
     writeFileSync(archive, "{\"type\":\"session\"}\n", "utf8");
 
     sessionStore.saveSession(room.id, "rm_pm", { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive });
     expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({ rm_pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: archive } });
-    const raw = JSON.parse(readFileSync(join(tempDir, "members", "rm_pm", "sessions", "current.json"), "utf8"));
-    expect(raw[`room:${room.id}`].sessionFile).toBe(`sessions/2026-09-07/rooms/${room.id}/session.jsonl`);
+    const raw = new SessionRepository(fixture.db).get("rm_pm", room.id)!;
+    expect(raw.session.sessionFile).toBe(`sessions/2026-09-07/rooms/${room.id}/session.jsonl`);
 
+    fixture.reopen();
+    expect(sessionStore.getCurrentSession("rm_pm", room.id)?.sessionFile).toBe(archive);
     sessionStore.clearSession(room.id, "rm_pm", "pi-cli");
     expect(sessionStore.getSessions(room.id, "rm_pm")).toEqual({});
     expect(readFileSync(archive, "utf8")).toBe("{\"type\":\"session\"}\n");
   });
 
-  it("refuses to overwrite a malformed current.json", () => {
+  it("ignores malformed retired current.json without overwriting the historical source", () => {
     const path = join(tempDir, "members", "rm_pm", "sessions");
     mkdirSync(path, { recursive: true });
     writeFileSync(join(path, "current.json"), "not json", "utf8");
-    expect(() => sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli" })).toThrow(/Invalid member session current.json/);
+    sessionStore.saveSession("room:room_a", "rm_pm", { runtime: "pi-cli" });
+    expect(sessionStore.getCurrentSession("rm_pm", "room:room_a")).toEqual({runtime: "pi-cli"});
+    expect(readFileSync(join(path, "current.json"), "utf8")).toBe("not json");
   });
 
   it("rejects wrong-scope and missing current session files", () => {
@@ -56,8 +55,9 @@ describe("session-store", () => {
     mkdirSync(join(roomFile, ".."), { recursive: true });
     writeFileSync(roomFile, "{}\n");
     expect(() => sessionStore.saveSession("topic:topic_a", "rm_pm", { runtime: "pi-sdk", sessionFile: roomFile })).toThrow(/outside the topic:topic_a archive/);
-    const currentDir = join(tempDir, "members", "rm_pm", "sessions");
-    writeFileSync(join(currentDir, "current.json"), JSON.stringify({ "room:room_a": { runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/rooms/room_a/missing.jsonl" } }));
+    new SessionRepository(fixture.db).importAssociation({memberId: "rm_pm", scopeId: "room:room_a",
+      session: {runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/rooms/room_a/missing.jsonl"},
+      referenceKind: "member-relative", createdAt: 1, updatedAt: 2});
     expect(() => sessionStore.getCurrentSession("rm_pm", "room:room_a")).toThrow(/is missing/);
     sessionStore.clearCurrentSession("rm_pm", "room:room_a");
     expect(sessionStore.getCurrentSession("rm_pm", "room:room_a")).toBeUndefined();

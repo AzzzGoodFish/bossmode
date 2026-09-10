@@ -1,86 +1,86 @@
 /**
- * Background task store: lifecycle records, atomic task.json persistence,
+ * Background task store: lifecycle records, transactional SQL persistence,
  * UTC date folders, strict validation, disposable waiters, restart sweep.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { coreFixture } from "../helpers/core-fixture.js";
+import { createMember } from "../../src/workspace/member-registry.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { BackgroundRepository } from "../../src/storage/repositories/background-repository.js";
+import * as store from "../../src/engine/background-task-store.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
-let store: typeof import("../../src/engine/background-task-store.js");
-let registry: typeof import("../../src/workspace/member-registry.js");
-let loggerMod: typeof import("../../src/foundation/logger.js");
-
-function seed() {
-  dir = mkdtempSync(join(tmpdir(), "bm-bgstore-"));
-  process.env.BOSSMODE_DIR = dir;
-  mkdirSync(join(dir, "members"), { recursive: true });
-  vi.resetModules();
-}
-
-let errorSpy: ReturnType<typeof vi.spyOn> | null = null;
-
-beforeEach(async () => {
-  seed();
-  store = await import("../../src/engine/background-task-store.js");
-  registry = await import("../../src/workspace/member-registry.js");
-  loggerMod = await import("../../src/foundation/logger.js");
-  errorSpy = vi.spyOn(loggerMod.logger, "error");
+let memberId: string;
+beforeEach(() => {
+  fixture = coreFixture();
+  dir = fixture.root;
+  memberId = createMember({name: "bgtester"}).id;
+  new ConversationsRepository(fixture.db).upsertRoom({id: "bgroom", name: "Background", members: [], globalMemberIds: [memberId], createdAt: 1});
 });
-
-afterEach(() => {
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.resolve(); // Drain committed terminal notifications before closing storage.
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  fixture.close();
 });
-
-let memberRegistered = false;
-let memberId = "";
 function mkTask(overrides: Partial<Parameters<typeof store.createBackgroundTask>[0]> = {}) {
-  if (!memberRegistered) {
-    const created = registry.createMember({ name: "bgtester" } as any);
-    memberId = created.id;
-    memberRegistered = true;
-  }
-  return store.createBackgroundTask({
-    memberId,
-    scopeId: "room:bgroom",
-    kind: "recall",
-    sessionMode: "fork",
-    prompt: "collect memory",
-    snapshot: { model: "test/model", credentialId: "cred-1", thinkingLevel: "medium" },
-    ...overrides,
-  });
-}
-
-function diagLogged(): boolean {
-  return (errorSpy?.mock.calls.length ?? 0) > 0;
+  return store.createBackgroundTask({memberId, scopeId: "room:bgroom", kind: "recall", sessionMode: "fork",
+    prompt: "collect memory", snapshot: {model: "test/model", credentialId: "cred-1", thinkingLevel: "medium"}, ...overrides});
 }
 
 describe("background task store", () => {
-  it("creates a task in a UTC date folder with the starting record on disk (full-UUID id, no tmp leftover)", () => {
+  it("creates a UTC SDK directory with a full UUID and SQL metadata, no task.json", () => {
     const record = mkTask();
     expect(record.status).toBe("starting");
     expect(record.result).toBeNull();
     expect(record.taskId).toMatch(/^bgt-[0-9a-f-]{36}$/);
-    const folder = record.startedAt.slice(0, 10);
-    const expected = join(dir, "members", memberId, "background-tasks", folder, record.taskId, "task.json");
-    expect(existsSync(expected)).toBe(true);
-    expect(existsSync(`${expected}.tmp`)).toBe(false); // atomic write left no temp behind
-    const onDisk = JSON.parse(readFileSync(expected, "utf-8"));
-    expect(onDisk.taskId).toBe(record.taskId);
-    expect(onDisk.snapshot).toEqual({ model: "test/model", credentialId: "cred-1", thinkingLevel: "medium" });
+    expect(record.sessionDir).toBe(join(dir, "members", memberId, "background-tasks", record.startedAt.slice(0, 10), record.taskId));
+    expect(existsSync(record.sessionDir)).toBe(true);
+    expect(existsSync(join(record.sessionDir, "task.json"))).toBe(false);
+    fixture.reopen();
+    expect(store.getBackgroundTask(memberId, record.taskId)).toEqual(record);
   });
 
-  it("round-trips via getBackgroundTask and lists across date folders", () => {
+  it("round-trips via getBackgroundTask and lists records in start-time order across UTC dates", () => {
     const a = mkTask();
     const loaded = store.getBackgroundTask(memberId, a.taskId);
     expect(loaded?.prompt).toBe("collect memory");
     expect(loaded?.sessionMode).toBe("fork");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.parse(a.startedAt) + 86400000));
     const b = mkTask({ kind: "memorize", sessionMode: "new" });
+    vi.useRealTimers();
     const list = store.listBackgroundTasks(memberId);
-    expect(list.map((t) => t.taskId).sort()).toEqual([a.taskId, b.taskId].sort());
+    expect(list.map((t) => t.taskId)).toEqual([a.taskId, b.taskId]);
     expect(store.getBackgroundTask("mem_other", a.taskId)).toBeNull();
+  });
+
+  it("isolates known members and room/DM/topic records, including terminal waiters", async () => {
+    const other = createMember({name: "other"}).id;
+    const conversations = new ConversationsRepository(fixture.db);
+    conversations.upsertTopic({id: "topic", roomId: "bgroom", title: "Topic", anchorMessageId: "anchor", createdBy: "user",
+      createdAt: 1, status: "active", seedMode: "fresh", participants: [memberId, other]});
+    const roomTask = mkTask();
+    const dmTask = mkTask({scopeId: `dm:${memberId}`});
+    const topicTask = mkTask({scopeId: "topic:topic"});
+    const otherTask = mkTask({memberId: other, scopeId: `dm:${other}`});
+    expect(store.listBackgroundTasks(memberId).map(t => t.scopeId).sort()).toEqual(["room:bgroom", `dm:${memberId}`, "topic:topic"].sort());
+    expect(store.listBackgroundTasks(other)).toEqual([otherTask]);
+    expect(store.getBackgroundTask(other, roomTask.taskId)).toBeNull();
+    expect(() => store.updateBackgroundTask(other, roomTask.taskId, {status: "running"})).toThrow(/not found/);
+    const waiting = store.whenTerminal(memberId, dmTask.taskId);
+    let settled = false;
+    void waiting.promise.then(() => { settled = true; });
+    store.updateBackgroundTask(memberId, topicTask.taskId, {status: "failed", error: "topic failed"});
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    store.updateBackgroundTask(memberId, dmTask.taskId, {status: "failed", error: "DM failed"});
+    expect((await waiting.promise).scopeId).toBe(`dm:${memberId}`);
+    expect(store.getBackgroundTask(memberId, roomTask.taskId)?.status).toBe("starting");
+    expect(store.getBackgroundTask(other, otherTask.taskId)?.status).toBe("starting");
   });
 
   it("rejects malformed task ids before any path use", () => {
@@ -122,7 +122,7 @@ describe("background task store", () => {
   it("rejects illegal transitions, terminal writes, result without done, error without terminal", () => {
     const a = mkTask();
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { status: "done" })).toThrow(/illegal/);
-    expect(() => store.updateBackgroundTask(memberId, a.taskId, { result: "x" })).toThrow(/done/);
+    expect(() => store.updateBackgroundTask(memberId, a.taskId, { result: "x" })).toThrow(/nonterminal outcome/);
     store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { error: "boom" })).toThrow(/terminal/);
     expect(() => store.updateBackgroundTask(memberId, a.taskId, { status: "cancelled", error: "by request" })).toThrow(/illegal/);
@@ -192,56 +192,44 @@ describe("background task store", () => {
     expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
   });
 
-  it("treats corrupt records as absent with a diagnostic (no guessed defaults)", () => {
+  it("ignores corrupt historical task.json and temp files, even with a missing SDK directory", () => {
     const a = mkTask();
-    const p = join(a.sessionDir, "task.json");
-    writeFileSync(p, "{ not json", "utf-8");
-    expect(store.listBackgroundTasks(memberId)).toEqual([]);
-    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
-    expect(store.sweepInterruptedBackgroundTasks()).toBe(0);
-    expect(diagLogged()).toBe(true);
+    writeFileSync(join(a.sessionDir, "task.json"), "{ not json");
+    writeFileSync(join(a.sessionDir, "task.json.tmp"), "{ partial");
+    expect(store.getBackgroundTask(memberId, a.taskId)).toEqual(a);
+    rmSync(a.sessionDir, {recursive: true});
+    expect(store.listBackgroundTasks(memberId)).toEqual([a]);
+    expect(store.sweepInterruptedBackgroundTasks()).toBe(1);
+    expect(store.getBackgroundTask(memberId, a.taskId)?.status).toBe("interrupted");
   });
 
-  it("rejects records with unknown enum values or member mismatch instead of normalizing them", () => {
+  it("rejects unknown enums, forged ownership and directory references during explicit import", () => {
     const a = mkTask();
-    const p = join(a.sessionDir, "task.json");
-    const raw = JSON.parse(readFileSync(p, "utf-8"));
-    // unknown kind
-    writeFileSync(p, JSON.stringify({ ...raw, kind: "mystery" }), "utf-8");
-    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
-    // unknown status
-    writeFileSync(p, JSON.stringify({ ...raw, status: "paused" }), "utf-8");
-    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
-    // wrong member ownership
-    writeFileSync(p, JSON.stringify({ ...raw, memberId: "mem_other" }), "utf-8");
-    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
-    // forged sessionDir in contents must not leak into the loaded record
-    writeFileSync(p, JSON.stringify({ ...raw, sessionDir: "/tmp/elsewhere" }), "utf-8");
-    const loaded = store.getBackgroundTask(memberId, a.taskId);
-    expect(loaded?.sessionDir).toBe(a.sessionDir);
-    expect(diagLogged()).toBe(true);
+    const repo = new BackgroundRepository(fixture.db);
+    for (const patch of [{kind: "mystery"}, {status: "paused"}, {memberId: "mem_other"}, {sessionDir: "/tmp/elsewhere"}]) {
+      expect(() => repo.importRecord({...a, ...patch} as typeof a)).toThrow(/Invalid|member/);
+      expect(store.getBackgroundTask(memberId, a.taskId)).toEqual(a);
+    }
   });
 
-  it("terminal records missing their terminal evidence fail validation", () => {
+  it("rejects terminal historical records missing their terminal evidence", () => {
     const a = mkTask();
-    store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
-    store.updateBackgroundTask(memberId, a.taskId, { status: "failed", error: "boom" });
-    const p = join(a.sessionDir, "task.json");
-    const raw = JSON.parse(readFileSync(p, "utf-8"));
-    writeFileSync(p, JSON.stringify({ ...raw, error: null }), "utf-8"); // failed without error
-    expect(store.getBackgroundTask(memberId, a.taskId)).toBeNull();
+    const repo = new BackgroundRepository(fixture.db);
+    expect(() => repo.importRecord({...a, status: "failed", endedAt: a.startedAt, error: null})).toThrow(/terminal result/);
+    expect(() => repo.importRecord({...a, status: "done", endedAt: null, result: "answer"})).toThrow(/terminal endedAt/);
+    expect(store.getBackgroundTask(memberId, a.taskId)).toEqual(a);
   });
 
-  it("a leftover .tmp file never shadows the last valid record", () => {
+  it("rolls back terminal metadata when outbox persistence fails, with no false waiter success", async () => {
     const a = mkTask();
-    store.updateBackgroundTask(memberId, a.taskId, { status: "running" });
-    // simulated crash mid-write: garbage in the temp file, rename never happened
-    writeFileSync(join(a.sessionDir, "task.json.tmp"), "{ partial", "utf-8");
-    const loaded = store.getBackgroundTask(memberId, a.taskId);
-    expect(loaded?.status).toBe("running");
-    // next successful write replaces both record and temp cleanly
-    store.updateBackgroundTask(memberId, a.taskId, { status: "done", result: "ok" });
-    expect(store.getBackgroundTask(memberId, a.taskId)?.result).toBe("ok");
-    expect(existsSync(join(a.sessionDir, "task.json.tmp"))).toBe(false);
+    store.updateBackgroundTask(memberId, a.taskId, {status: "running"});
+    const waiter = store.whenTerminal(memberId, a.taskId);
+    fixture.db.exec("CREATE TRIGGER reject_terminal BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT,'outbox full'); END");
+    expect(() => store.updateBackgroundTask(memberId, a.taskId, {status: "done", result: "unsaved"})).toThrow("outbox full");
+    expect(store.getBackgroundTask(memberId, a.taskId)).toMatchObject({status: "running", endedAt: null, result: null});
+    expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
+    const rejection = expect(waiter.promise).rejects.toThrow(/unsaved diagnosis/);
+    store.failBackgroundTaskUnsaved(memberId, a.taskId, "outbox full");
+    await rejection;
   });
 });
