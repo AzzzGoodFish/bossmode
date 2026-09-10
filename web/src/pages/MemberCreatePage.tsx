@@ -34,7 +34,6 @@ export function MemberCreatePage({ onBack, onCreated }: {
     try {
       const res = await createGlobalMember({
         name: a.name,
-        agentTemplate: a.template,
         importFromArchive: a.archivePath,
       });
       onCreated(res.member.memberId);

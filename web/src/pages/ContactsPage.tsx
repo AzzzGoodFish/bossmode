@@ -69,7 +69,7 @@ export function ContactsPage({ onOpenDm, onOpenImport }: {
     return (contacts ?? []).filter((m) => {
       if (filter !== "all" && m.status !== filter) return false;
       if (!q) return true;
-      return m.name.toLowerCase().includes(q) || m.agentTemplate.toLowerCase().includes(q);
+      return m.name.toLowerCase().includes(q) || (m.title || "").toLowerCase().includes(q);
     });
   }, [contacts, query, filter]);
 
