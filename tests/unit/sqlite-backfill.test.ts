@@ -1,317 +1,80 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
+import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
+import { TasksRepository } from "../../src/storage/repositories/tasks.js";
+import { readUsageReport } from "../../src/storage/usage-repository.js";
+import { readStats, rebuildEventAggregates } from "../../src/storage/event-repository.js";
 
-// The projection DB path derives from getBossmodeDir(); point it at a temp dir.
-let dir: string;
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => {
-    mkdirSync(dir, { recursive: true });
-  },
-}));
-
-function writeEvents(roomId: string, fileStem: string, events: object[]): void {
-  const eventsDir = join(dir, "rooms", roomId, "agent-events");
-  mkdirSync(eventsDir, { recursive: true });
-  const body = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
-  writeFileSync(join(eventsDir, `${fileStem}.jsonl`), body, "utf-8");
+let fixture: ReturnType<typeof coreFixture>;
+let sourceRoot: string;
+beforeEach(() => { fixture = coreFixture(); sourceRoot = join(fixture.root, "snapshot"); mkdirSync(sourceRoot); });
+afterEach(() => { fixture.close(); });
+function file(path: string, data: string) {
+  const target = join(sourceRoot, path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, data);
 }
-
-function writeRoom(roomId: string, members: Array<{ id: string; name: string; sourceAgent: string }>): void {
-  const roomDir = join(dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
-  const room = {
-    id: roomId,
-    name: roomId,
-    cwd: "/tmp",
-    members: members.map((m) => m.name),
-    roomMembers: members.map((m) => ({
-      id: m.id,
-      roomId,
-      name: m.name,
-      sourceAgent: m.sourceAgent,
-      createdAt: 1,
-      updatedAt: 1,
-    })),
-    createdAt: 1,
-  };
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+function events(stem: string, values: object[]) { file(`rooms/room/agent-events/${stem}.jsonl`, values.map(v => JSON.stringify(v)).join("\n") + "\n"); }
+async function runImport() {
+  const entries = discoverLegacyInventory(sourceRoot).entries;
+  const ctx: UpgradeImportContext = { db: fixture.db, root: fixture.root, sourceRoot, previousDatabase: undefined, sourceFiles: entries.map(e => e.path), legacy: true, progress() {}, stageAsset() { throw Error("unexpected asset"); } };
+  return importLegacyConversations(ctx, entries);
 }
+const base = Date.parse("2026-07-24T00:00:00Z");
+const end = (n: number, model?: string) => ({ type: "message_end", ts: base + n, ...(model === undefined ? {} : { model }), usage: { inputTokens: n, outputTokens: n * 2, cacheRead: n * 3, cacheWrite: n * 4, cost: n * 0.25 } });
 
-function messageEnd(ts: number, usage: Partial<Record<string, number>>): object {
-  return {
-    type: "message_end",
-    text: "",
-    usage: { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, ...usage },
-    ts,
-  };
-}
-
-function messageEndModel(ts: number, model: string, usage: Partial<Record<string, number>>): object {
-  return { ...messageEnd(ts, usage), model };
-}
-
-describe("sqlite backfill", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-db-"));
-    vi.resetModules();
-  });
-
-  afterEach(async () => {
-    const { resetDbCache } = await import("../../src/workspace/db/sqlite.js");
-    resetDbCache();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("dedups id-keyed vs name-keyed files: id-keyed wins, name-keyed skipped", async () => {
-    const roomId = "room-a";
-    const memberId = "rm_abc123";
-    writeRoom(roomId, [{ id: memberId, name: "architect", sourceAgent: "architect" }]);
-
-    // Legacy name-keyed file: subset (2 turns). id-keyed: superset (3 turns).
-    // The base ts is a real epoch-ms so utcDate() yields a valid YYYY-MM-DD.
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, "architect", [
-      messageEnd(base, { inputTokens: 100 }),
-      messageEnd(base + 1000, { inputTokens: 100 }),
+describe("strict historical event and task imports, not projection backfill", () => {
+  it("retains unproven overlapping name and ID sources rather than guessing a historical identity", async () => {
+    file("rooms/room/room.json", JSON.stringify({ id: "room", name: "room", members: ["architect"], roomMembers: [{ id: "rm_old", roomId: "room", name: "architect", sourceAgent: "general", createdAt: 1, updatedAt: 1 }], createdAt: 1 }));
+    events("architect", [end(100), end(100)]);
+    events("rm_old", [end(100), end(100), end(100)]);
+    await runImport();
+    expect(fixture.db.all("SELECT owner_key,member_id,COUNT(*) n FROM agent_events GROUP BY owner_key ORDER BY owner_key")).toEqual([
+      { owner_key: "legacy-unresolved:architect", member_id: null, n: 2 },
+      { owner_key: "legacy-unresolved:rm_old", member_id: null, n: 3 },
     ]);
-    writeEvents(roomId, memberId, [
-      messageEnd(base, { inputTokens: 100 }),
-      messageEnd(base + 1000, { inputTokens: 100 }),
-      messageEnd(base + 2000, { inputTokens: 100 }),
+    expect(fixture.db.get("SELECT SUM(input_tokens) input,SUM(turns) turns FROM token_usage_daily")).toEqual({ input: 500, turns: 5 });
+  });
+  it("retains name-only source usage as unresolved even when a current member reuses the label", async () => {
+    fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_new','pm','pm','general','{}',1,1)");
+    events("pm", [end(42)]);
+    await runImport();
+    expect(readUsageReport({}).rows).toMatchObject([{ member_id: "legacy-unresolved:pm", input_tokens: 42 }]);
+    expect(readUsageReport({ memberId: "mem_new" }).rows).toEqual([]);
+  });
+  it("replays identical source IDs idempotently across reopen and aggregate rebuild without deleting facts", async () => {
+    events("historical", [{ type: "agent_start", ts: base }, end(10), end(20), { type: "agent_end", ts: base + 1000 }]);
+    file("rooms/room/agent-events/historical.stats.json", "invalid retired derived cache");
+    await runImport();
+    const before = readUsageReport({}).rows;
+    const stats = readStats("room", "legacy-unresolved:historical");
+    expect(stats).toEqual({ turns: 1, toolCalls: 0, activeMs: 1000, tokens: { input: 30, output: 60, cacheRead: 90, cacheWrite: 120 }, cost: 7.5, updatedAt: base + 1000 });
+    await runImport(); fixture.reopen(); await runImport(); rebuildEventAggregates(); rebuildEventAggregates();
+    expect(readUsageReport({}).rows).toEqual(before);
+    expect(fixture.db.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 4 });
+    expect(readStats("room", "legacy-unresolved:historical")).toEqual(stats);
+    expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
+  });
+  it("imports task ownership from its source path, preserving missing/stale embedded IDs and full comments", async () => {
+    file("rooms/room/room.json", JSON.stringify({ id: "room", name: "room", members: [], createdAt: 1 }));
+    const common = { title: "Activity", status: "todo", priority: "P1", assignee: "old-label", createdBy: "historic", createdAt: 1, updatedAt: 2, comments: [{ id: "c1", author: "old-label", content: "literal", createdAt: 1 }] };
+    file("rooms/room/tasks.json", JSON.stringify([{ ...common, id: "missing" }, { ...common, id: "stale", roomId: "other" }]));
+    await runImport();
+    expect(new TasksRepository().list("room")).toMatchObject([{ ...common, id: "missing", roomId: "room" }, { ...common, id: "stale", roomId: "room" }]);
+    expect(new TasksRepository().list("other")).toEqual([]);
+  });
+  it("preserves known, omitted and blank model buckets and every usage dimension", async () => {
+    events("historical", [end(100, "p/m"), end(50, "p/m"), end(20), end(10, "  ")]);
+    await runImport();
+    const rows = readUsageReport({ from: "2026-07-24", to: "2026-07-24", scopeId: "room" }).rows.sort((a, b) => a.model.localeCompare(b.model));
+    expect(rows).toEqual([
+      { room_id: "room", member_id: "legacy-unresolved:historical", date: "2026-07-24", model: "p/m", input_tokens: 150, output_tokens: 300, cache_read: 450, cache_write: 600, cost: 37.5, turns: 2 },
+      { room_id: "room", member_id: "legacy-unresolved:historical", date: "2026-07-24", model: "unknown", input_tokens: 30, output_tokens: 60, cache_read: 90, cache_write: 120, cost: 7.5, turns: 2 },
     ]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    const progress = await backfillAll(db);
-
-    expect(progress.skippedNameKeyedFiles).toBe(1);
-
-    // Only the id-keyed superset should be counted: 3 turns × 100 = 300, not
-    // 500 (would be double-count if both files were ingested).
-    const row = db.get<{ input_tokens: number; turns: number }>(
-      "SELECT SUM(input_tokens) AS input_tokens, SUM(turns) AS turns FROM token_usage_daily WHERE room_id = ? AND member_id = ?",
-      roomId,
-      memberId,
-    );
-    expect(row?.input_tokens).toBe(300);
-    expect(row?.turns).toBe(3);
-
-    // No rows should be keyed by the legacy name.
-    const legacy = db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM token_usage_daily WHERE member_id = 'architect'",
-    );
-    expect(legacy?.n).toBe(0);
-  });
-
-  it("uses name-keyed file for legacy member with no id-keyed file", async () => {
-    const roomId = "room-b";
-    const memberId = "rm_legacy1";
-    writeRoom(roomId, [{ id: memberId, name: "pm", sourceAgent: "pm" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, "pm", [messageEnd(base, { inputTokens: 42 })]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    await backfillAll(db);
-
-    // Falls back to name-keyed content but keys the row by the member id.
-    const row = db.get<{ input_tokens: number }>(
-      "SELECT input_tokens FROM token_usage_daily WHERE room_id = ? AND member_id = ?",
-      roomId,
-      memberId,
-    );
-    expect(row?.input_tokens).toBe(42);
-  });
-
-  it("is idempotent: re-running backfill does not double-count", async () => {
-    const roomId = "room-c";
-    const memberId = "rm_idem";
-    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, memberId, [
-      messageEnd(base, { inputTokens: 10, cost: 0.5 }),
-      messageEnd(base + 1000, { outputTokens: 20 }),
-    ]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    await backfillAll(db);
-    await backfillAll(db); // second run must be a no-op for totals
-
-    const row = db.get<{ input_tokens: number; output_tokens: number; cost: number; turns: number }>(
-      "SELECT input_tokens, output_tokens, cost, turns FROM token_usage_daily WHERE room_id = ? AND member_id = ?",
-      roomId,
-      memberId,
-    );
-    expect(row?.input_tokens).toBe(10);
-    expect(row?.output_tokens).toBe(20);
-    expect(row?.cost).toBeCloseTo(0.5);
-    expect(row?.turns).toBe(2);
-
-    // Activity rows are keyed by seq (PRIMARY KEY) so re-run is INSERT OR REPLACE.
-    const act = db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM activity_events WHERE room_id = ? AND member_id = ?",
-      roomId,
-      memberId,
-    );
-    expect(act?.n).toBe(2);
-  });
-
-  it("advances the events watermark to last seq + file mtime", async () => {
-    const roomId = "room-d";
-    const memberId = "rm_wm";
-    writeRoom(roomId, [{ id: memberId, name: "qa", sourceAgent: "qa" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, memberId, [
-      { type: "agent_start", ts: base },
-      messageEnd(base + 500, { inputTokens: 5 }),
-      { type: "agent_end", ts: base + 1000 },
-    ]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const { getWatermark } = await import("../../src/workspace/db/watermark.js");
-    const db = openDb();
-    await backfillAll(db);
-
-    const wm = getWatermark(db, "events", roomId, memberId);
-    expect(wm).toBeTruthy();
-    expect(wm?.lastSeq).toBe(3);
-    expect(wm?.lastTs).toBe(base + 1000);
-    expect(wm?.lastMtimeMs).toBeGreaterThan(0);
-  });
-
-  it("indexes activity events with byte offsets and skips streaming churn", async () => {
-    const roomId = "room-e";
-    const memberId = "rm_act";
-    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, memberId, [
-      { type: "agent_start", ts: base },
-      { type: "message_update", ts: base + 100 }, // high-churn: must be skipped
-      { type: "tool_start", ts: base + 200 },
-      messageEnd(base + 300, { inputTokens: 1 }),
-    ]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    await backfillAll(db);
-
-    const types = db
-      .all<{ type: string }>("SELECT type FROM activity_events WHERE room_id = ? ORDER BY seq", roomId)
-      .map((r) => r.type);
-    expect(types).toEqual(["agent_start", "tool_start", "message_end"]);
-
-    // Offsets are non-negative and strictly increasing by seq.
-    const rows = db.all<{ seq: number; byte_offset: number }>(
-      "SELECT seq, byte_offset FROM activity_events WHERE room_id = ? ORDER BY seq",
-      roomId,
-    );
-    expect(rows[0].byte_offset).toBe(0);
-    for (let i = 1; i < rows.length; i++) {
-      expect(rows[i].byte_offset).toBeGreaterThan(rows[i - 1].byte_offset);
-    }
-  });
-
-  it("projects tasks.json into the tasks table", async () => {
-    const roomId = "room-f";
-    writeRoom(roomId, [{ id: "rm_x", name: "pm", sourceAgent: "pm" }]);
-    const roomDir = join(dir, "rooms", roomId);
-    writeFileSync(
-      join(roomDir, "tasks.json"),
-      JSON.stringify([
-        { id: "t1", title: "First", status: "todo", priority: "P1", assignee: "developer", createdAt: 1, updatedAt: 2 },
-        { id: "t2", title: "Second", status: "done", createdAt: 3, updatedAt: 4 },
-      ]),
-      "utf-8",
-    );
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    const progress = await backfillAll(db);
-    expect(progress.tasks).toBe(2);
-
-    const t1 = db.get<{ title: string; assignee: string; payload_json: string }>(
-      "SELECT title, assignee, payload_json FROM tasks WHERE room_id = ? AND task_id = 't1'",
-      roomId,
-    );
-    expect(t1?.title).toBe("First");
-    expect(t1?.assignee).toBe("developer");
-    expect(JSON.parse(t1!.payload_json).status).toBe("todo");
-  });
-
-  it("rebuild after deleting the DB reproduces the same totals", async () => {
-    const roomId = "room-g";
-    const memberId = "rm_reb";
-    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    writeEvents(roomId, memberId, [messageEnd(base, { inputTokens: 7, cost: 0.1 })]);
-
-    const { rebuildProjection } = await import("../../src/workspace/db/projection.js");
-    const { openDb, getDbPath, resetDbCache } = await import("../../src/workspace/db/sqlite.js");
-    const { existsSync, rmSync: rm } = await import("node:fs");
-
-    await rebuildProjection();
-    let db = openDb();
-    const before = db.get<{ input_tokens: number }>(
-      "SELECT input_tokens FROM token_usage_daily WHERE member_id = ?",
-      memberId,
-    );
-    expect(before?.input_tokens).toBe(7);
-
-    // Kill DB → rebuild → data returns.
-    resetDbCache();
-    for (const suffix of ["", "-wal", "-shm"]) {
-      const p = getDbPath() + suffix;
-      if (existsSync(p)) rm(p);
-    }
-    await rebuildProjection();
-    db = openDb();
-    const after = db.get<{ input_tokens: number }>(
-      "SELECT input_tokens FROM token_usage_daily WHERE member_id = ?",
-      memberId,
-    );
-    expect(after?.input_tokens).toBe(7);
-  });
-
-  it("honors the stamped model on events (does not wipe to unknown)", async () => {
-    const roomId = "room-model";
-    const memberId = "rm_stamped";
-    writeRoom(roomId, [{ id: memberId, name: "dev", sourceAgent: "developer" }]);
-    const base = Date.parse("2026-07-24T00:00:00Z");
-    // Two stamped turns (real model) + one legacy turn (no model → unknown).
-    writeEvents(roomId, memberId, [
-      messageEndModel(base, "anthropic/claude-opus-4-8", { inputTokens: 100 }),
-      messageEndModel(base + 1000, "anthropic/claude-opus-4-8", { inputTokens: 50 }),
-      messageEnd(base + 2000, { inputTokens: 30 }),
-    ]);
-
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const { backfillAll } = await import("../../src/workspace/db/backfill.js");
-    const db = openDb();
-    await backfillAll(db);
-
-    const stamped = db.get<{ input_tokens: number }>(
-      "SELECT input_tokens FROM token_usage_daily WHERE room_id = ? AND member_id = ? AND model = ?",
-      roomId,
-      memberId,
-      "anthropic/claude-opus-4-8",
-    );
-    expect(stamped?.input_tokens).toBe(150); // two stamped turns preserved, not wiped
-    const unknown = db.get<{ input_tokens: number }>(
-      "SELECT input_tokens FROM token_usage_daily WHERE room_id = ? AND member_id = ? AND model = 'unknown'",
-      roomId,
-      memberId,
-    );
-    expect(unknown?.input_tokens).toBe(30); // legacy turn stays unknown
+    expect(readUsageReport({ model: "unknown" }).rows).toEqual([rows[1]]);
+    expect(readUsageReport({ from: "2026-07-25" }).rows).toEqual([]);
+    expect(readUsageReport({ to: "2026-07-23" }).rows).toEqual([]);
   });
 });

@@ -1,79 +1,50 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { appendAgentEvent, importAgentEvent } from "../../src/storage/event-repository.js";
+import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../../src/workspace/token-usage-store.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 
-const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
-
-let dir: string;
-
+let fixture: ReturnType<typeof coreFixture>;
+const member = { ownerKey: "mem_dev", memberId: "mem_dev" };
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bossmode-token-usage-"));
-  vi.resetModules();
-  vi.stubEnv("BOSSMODE_DIR", dir);
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", "developer.md"), "---\nname: developer\n---\ndeveloper", "utf8");
+  fixture = coreFixture();
+  fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_dev','developer','developer','general','{}',1,1)");
+  for (const id of ["room-a", "room-b"]) new ConversationsRepository().upsertRoom({ id, name: id, members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 });
+  fixture.db.run("INSERT INTO scopes VALUES('dm:mem_dev','dm',NULL,'mem_dev'),('topic:a','topic','room-a',NULL)");
 });
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-  rmSync(dir, { recursive: true, force: true });
-});
-
-describe("token usage store", () => {
-  it("aggregates message_end usage for a member across rooms", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const { getMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
-    const { createMember, renameMember } = await import("../../src/workspace/member-registry.js");
-    const current = createMember({ name: "developer" });
-
-    const roomA = roomStore.createRoom("A", dir, drafts(["developer"]));
-    const roomB = roomStore.createRoom("B", dir, drafts(["developer"]));
-
-    roomStore.stampGlobalMemberIds(roomA.id, [current.id]);
-    roomStore.stampGlobalMemberIds(roomB.id, [current.id]);
-    const eventsA = join(roomStore.roomDir(roomA.id), "agent-events");
-    const eventsB = join(roomStore.roomDir(roomB.id), "agent-events");
-    mkdirSync(eventsA, { recursive: true });
-    mkdirSync(eventsB, { recursive: true });
-    writeFileSync(join(eventsA, "developer.jsonl"), [
-      JSON.stringify({ type: "message_end", usage: { inputTokens: 10, outputTokens: 5, cacheRead: 3, cacheWrite: 2 } }),
-      JSON.stringify({ type: "message_start" }),
-      JSON.stringify({ type: "message_end", usage: { inputTokens: 7, outputTokens: 8 } }),
-    ].join("\n"));
-    writeFileSync(join(eventsB, "developer.jsonl"), [
-      JSON.stringify({ type: "message_end", usage: { inputTokens: 1, outputTokens: 2, cacheRead: 3, cacheWrite: 4 } }),
-      JSON.stringify({ type: "message_end" }),
-    ].join("\n"));
-
-    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 45 });
-    // Canonical copies win over old name-keyed files rather than double counting.
-    const { copyFileSync } = await import("node:fs");
-    for (const events of [eventsA, eventsB]) copyFileSync(join(events, "developer.jsonl"), join(events, `${current.id}.jsonl`));
-    const dm = join(dir, "rooms", `dm:${current.id}`, "agent-events");
-    const topic = join(dir, "rooms", roomA.id, "topics", "topic-a", "agent-events");
-    for (const events of [dm, topic]) {
-      mkdirSync(events, { recursive: true });
-      writeFileSync(join(events, `${current.id}.jsonl`), JSON.stringify({ type: "message_end", usage: { inputTokens: 5 } }) + "\n");
-      writeFileSync(join(events, "mem_other.jsonl"), JSON.stringify({ type: "message_end", usage: { inputTokens: 900 } }) + "\n");
+afterEach(() => { fixture.close(); });
+describe("stable member token summaries", () => {
+  it("sums all token dimensions across rooms, DM and topic without double-counting a proven event ID", () => {
+    appendAgentEvent("room-a", member, { type: "message_end", usage: { inputTokens: 10, outputTokens: 5, cacheRead: 3, cacheWrite: 2 } }, "a1");
+    appendAgentEvent("room-a", member, { type: "message_start" });
+    appendAgentEvent("room-a", member, { type: "message_end", usage: { inputTokens: 7, outputTokens: 8 } });
+    appendAgentEvent("room-b", member, { type: "message_end", usage: { inputTokens: 1, outputTokens: 2, cacheRead: 3, cacheWrite: 4 } });
+    appendAgentEvent("room-b", member, { type: "message_end" });
+    expect(getMemberTokenUsage(member.memberId)).toEqual({ totalTokens: 45 });
+    appendAgentEvent("room-a", member, { type: "message_end", usage: { inputTokens: 10, outputTokens: 5, cacheRead: 3, cacheWrite: 2 } }, "a1");
+    for (const scope of ["dm:mem_dev", "topic:a"]) {
+      appendAgentEvent(scope, member, { type: "message_end", usage: { inputTokens: 5 } });
+      appendAgentEvent(scope, { ownerKey: "mem_other", memberId: "mem_other" }, { type: "message_end", usage: { inputTokens: 900 } });
     }
-    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 55 });
-    renameMember(current.id, "renamed");
-    expect(getMemberTokenUsage(current.id)).toEqual({ totalTokens: 55 });
+    fixture.db.run("UPDATE members SET name='renamed',name_key='renamed' WHERE id='mem_dev'");
+    fixture.reopen();
+    expect(getMemberTokenUsage(member.memberId)).toEqual({ totalTokens: 55 });
+    fixture.db.run("UPDATE members SET archived_at=2,archive_path='backups/fired-dev' WHERE id='mem_dev'");
+    expect(getMemberTokenUsage(member.memberId)).toEqual({ totalTokens: 55 });
   });
-
-  it("reads token usage by stable room member id", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const { getRoomMemberTokenUsage } = await import("../../src/workspace/token-usage-store.js");
-
-    const room = roomStore.createRoom("A", dir, drafts(["developer"]));
-    const [member] = roomStore.getRoomMembers(room.id);
-    const events = join(roomStore.roomDir(room.id), "agent-events");
-    mkdirSync(events, { recursive: true });
-    writeFileSync(join(events, `${member.id}.jsonl`), [
-      JSON.stringify({ type: "message_end", usage: { inputTokens: 4, outputTokens: 6 } }),
-    ].join("\n"));
-
-    expect(getRoomMemberTokenUsage(room.id, member.id)).toEqual({ totalTokens: 10 });
+  it("reads only the requested room by stable ID or its current roster label", () => {
+    appendAgentEvent("room-a", member, { type: "message_end", usage: { inputTokens: 4, outputTokens: 6 } });
+    appendAgentEvent("room-b", member, { type: "message_end", usage: { inputTokens: 100 } });
+    expect(getRoomMemberTokenUsage("room-a", member.memberId)).toEqual({ totalTokens: 10 });
+    expect(getRoomMemberTokenUsage("room-a", "developer")).toEqual({ totalTokens: 10 });
+    expect(getRoomMemberTokenUsage("room-a", "absent")).toEqual({ totalTokens: 0 });
+  });
+  it("never attributes unresolved historical labels or ID-shaped filenames to a current member", () => {
+    for (const ownerKey of ["legacy-unresolved:developer", "legacy-unresolved:mem_dev"]) importAgentEvent(fixture.db, { id: ownerKey, scopeId: "room-a", ownerKey, memberId: null, seq: 1, ts: 1, event: { type: "message_end", usage: { inputTokens: 999 } } });
+    expect(getMemberTokenUsage("mem_dev")).toEqual({ totalTokens: 0 });
+  });
+  it("counts only positive finite token values, never cost as tokens", () => {
+    appendAgentEvent("room-a", member, { type: "message_end", usage: { inputTokens: -4, outputTokens: 6, cacheRead: 0, cacheWrite: 2, cost: 900 } });
+    expect(getMemberTokenUsage("mem_dev")).toEqual({ totalTokens: 8 });
   });
 });

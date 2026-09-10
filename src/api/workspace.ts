@@ -16,7 +16,7 @@ import * as topicStore from "../workspace/topic-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
 import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
+import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
 
 import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
@@ -797,8 +797,6 @@ addRoute("GET", "/api/rooms/:id/members/:ref/events", async (req, res, params) =
   const typesParam = url.searchParams.get("types");
   const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
 
-  // Self-heal any index gap for this member before serving (tail beyond wm).
-  catchUpActivityIndex(params.id, memberId);
   const page = queryActivityPage(params.id, memberId, { beforeSeq, limit, types });
   if (page) {
     sendJson(res, 200, { events: page.events, hasMore: page.hasMore, nextBeforeSeq: page.nextBeforeSeq });

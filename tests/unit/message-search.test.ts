@@ -1,43 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-
-let tmpDir = "";
-
-// Single tmpDir for all tests (room-store caches ROOMS_DIR at module load time)
-beforeAll(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-search-test-"));
-});
-afterAll(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
-});
-
-beforeEach(() => {
-  vi.resetModules();
-});
-
-afterEach(() => {
-  vi.resetModules();
-});
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-  ensureBossmodeDir: () => {},
-  writePidFile: () => {},
-  removePidFile: () => {},
-  readConfig: () => ({ auth: {}, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } }),
-  configExists: () => true,
-}));
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { importMessage } from "../../src/storage/message-repository.js";
+import type { RoomMessage } from "../../src/shared/types.js";
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => { fixture = coreFixture(); });
+afterEach(() => { fixture.close(); });
 
 let roomSeq = 0;
 function makeRoomId() { return `room-search-${++roomSeq}`; }
 
 function writeMessages(roomId: string, messages: object[]) {
-  const roomDir = join(tmpDir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
-  const content = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
-  writeFileSync(join(roomDir, "messages.jsonl"), content, "utf-8");
+  fixture.db.run("INSERT INTO scopes VALUES(?, 'room', ?, NULL)", roomId, roomId);
+  for (const message of messages) importMessage(fixture.db, roomId, message as RoomMessage);
 }
 
 describe("message-store searchMessages", () => {

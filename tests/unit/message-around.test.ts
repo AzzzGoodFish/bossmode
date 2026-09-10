@@ -1,40 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-
-let tmpDir = "";
-
-beforeAll(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-msg-around-"));
-});
-afterAll(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
-});
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-  ensureBossmodeDir: () => {},
-  writePidFile: () => {},
-  removePidFile: () => {},
-  readConfig: () => ({ auth: {}, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } }),
-  configExists: () => true,
-}));
-
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { importMessage } from "../../src/storage/message-repository.js";
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => { fixture = coreFixture(); });
+afterEach(() => { fixture.close(); });
 function seedMessages(roomId: string, count: number) {
-  const dir = join(tmpDir, "rooms", roomId);
-  mkdirSync(dir, { recursive: true });
-  const lines: string[] = [];
-  for (let i = 0; i < count; i++) {
-    lines.push(JSON.stringify({
-      id: `msg-${i}`,
-      sender: "user",
-      content: `Message ${i}`,
-      mentions: [],
-      ts: Date.now() + i * 1000,
-    }));
-  }
-  writeFileSync(join(dir, "messages.jsonl"), lines.join("\n"), "utf-8");
+  fixture.db.run("INSERT INTO scopes VALUES(?, 'room', ?, NULL)", roomId, roomId);
+  for (let i = 0; i < count; i++) importMessage(fixture.db, roomId, {
+    id: `msg-${i}`, sender: "user", content: `Message ${i}`, mentions: [], ts: 1000 + i * 1000,
+  });
 }
 
 describe("getMessages around", () => {

@@ -1,17 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Task } from "../../src/shared/types.js";
-
-let dir: string;
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => {
-    mkdirSync(dir, { recursive: true });
-  },
-}));
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+let fixture: ReturnType<typeof coreFixture>;
 
 function task(id: string, over: Partial<Task> = {}): Task {
   const now = Date.parse("2026-07-24T00:00:00Z");
@@ -31,28 +22,14 @@ function task(id: string, over: Partial<Task> = {}): Task {
   } as Task;
 }
 
-async function openFreshDb() {
-  const { openDb } = await import("../../src/workspace/db/sqlite.js");
-  const { initProjection } = await import("../../src/workspace/db/projection.js");
-  // initProjection registers the process-level db so getProjectionDb() returns it.
-  initProjection();
-  return openDb();
-}
-
-describe("tasks-index (S3)", () => {
+describe("authoritative task queries", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-s3-tasks-"));
-    vi.resetModules();
+    fixture = coreFixture();
+    for (const id of ["room-a", "room-b"]) new ConversationsRepository().upsertRoom({ id, name: id, members: [], createdAt: 1 });
   });
-
-  afterEach(async () => {
-    const { resetDbCache } = await import("../../src/workspace/db/sqlite.js");
-    resetDbCache();
-    rmSync(dir, { recursive: true, force: true });
-  });
+  afterEach(() => { fixture.close(); });
 
   it("syncRoomTasks upserts rows and queryRoomTasks returns list items + total", async () => {
-    await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     syncRoomTasks("room-a", [
       task("task-1", { status: "todo", assignee: "dev-ben" }),
@@ -63,24 +40,22 @@ describe("tasks-index (S3)", () => {
     const all = queryRoomTasks("room-a", {})!;
     expect(all.total).toBe(3);
     expect(all.tasks.length).toBe(3);
-    // commentCount derived from payload, comments body stripped.
+    // commentCount derived from normalized comments, comments body stripped.
     const t3 = all.tasks.find((t) => t.id === "task-3")!;
     expect(t3.commentCount).toBe(1);
     expect((t3 as Record<string, unknown>).comments).toBeUndefined();
   });
 
-  it("hydrates the room context for historical payloads without roomId", async () => {
-    await openFreshDb();
+  it("rejects missing or mismatched live task ownership without pruning existing facts", async () => {
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
-    const { roomId: _roomId, ...legacy } = task("legacy", { assignee: "developer" });
-    syncRoomTasks("room-a", [legacy as Task]);
-    expect(queryRoomTasks("room-a", { assignee: "developer" })!.tasks).toMatchObject([
-      { id: "legacy", roomId: "room-a", assignee: "developer", commentCount: 0 },
-    ]);
+    syncRoomTasks("room-a", [task("kept")]);
+    for (const roomId of [undefined, "room-b"]) {
+      expect(() => syncRoomTasks("room-a", [task("new"), task("bad", { roomId })])).toThrow("ownership mismatch");
+      expect(queryRoomTasks("room-a", {}).tasks.map(t => t.id)).toEqual(["kept"]);
+    }
   });
 
   it("filters by status and assignee", async () => {
-    await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     syncRoomTasks("room-a", [
       task("task-1", { status: "todo", assignee: "dev-ben" }),
@@ -94,7 +69,6 @@ describe("tasks-index (S3)", () => {
   });
 
   it("q filters by title substring", async () => {
-    await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     syncRoomTasks("room-a", [
       task("task-1", { title: "SQLite base" }),
@@ -106,7 +80,6 @@ describe("tasks-index (S3)", () => {
   });
 
   it("paginates with limit/offset, total is unfiltered by page", async () => {
-    await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     const now = Date.parse("2026-07-24T00:00:00Z");
     syncRoomTasks("room-a", [0, 1, 2, 3, 4].map((i) => task(`task-${i}`, { updatedAt: now + i * 1000 })));
@@ -119,8 +92,7 @@ describe("tasks-index (S3)", () => {
     expect(page2.tasks.map((t) => t.id)).toEqual(["task-2", "task-1"]);
   });
 
-  it("prunes rows for tasks removed from the file (delete semantics)", async () => {
-    await openFreshDb();
+  it("prunes only explicitly replaced room tasks", async () => {
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     syncRoomTasks("room-a", [task("task-1"), task("task-2"), task("task-3")]);
     expect(queryRoomTasks("room-a", {})!.total).toBe(3);
@@ -132,7 +104,6 @@ describe("tasks-index (S3)", () => {
   });
 
   it("scopes rows per room", async () => {
-    await openFreshDb();
     const { syncRoomTasks, queryRoomTasks } = await import("../../src/workspace/db/tasks-index.js");
     syncRoomTasks("room-a", [task("task-1")]);
     syncRoomTasks("room-b", [task("task-9", { roomId: "room-b" })]);

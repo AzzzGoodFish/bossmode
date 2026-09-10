@@ -1,23 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-
-// S2: model stamp on message_end + token_usage_daily dual-write.
-//
-// event-handler writes to disk (file authority) AND upserts the SQLite rollup.
-// These tests assert the stamp lands on disk, the rollup increments additively,
-// the 'unknown' bucket is used when no model is known, and the existing
-// stats.json accumulator still updates (no regression).
-
-let dir: string;
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => {
-    mkdirSync(dir, { recursive: true });
-  },
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { readStats } from "../../src/storage/event-repository.js";
+let fixture: ReturnType<typeof coreFixture>;
 
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
@@ -40,27 +24,18 @@ function usageEvent(usage: Record<string, number>) {
 
 async function loadModules() {
   const eh = await import("../../src/engine/event-handler.js");
-  const sqlite = await import("../../src/workspace/db/sqlite.js");
-  const projection = await import("../../src/workspace/db/projection.js");
-  return { eh, sqlite, projection };
+  return { eh, db: fixture.db };
 }
 
-describe("S2 usage model-stamp + rollup dual-write", () => {
+describe("model stamps and atomic SQL usage", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-s2-"));
-    mkdirSync(join(dir, "rooms", "room1", "agent-events"), { recursive: true });
-    vi.resetModules();
+    fixture = coreFixture();
+    fixture.db.run("INSERT INTO scopes VALUES('room1','room','room1',NULL)");
     agentManagerMocks.refreshContextUsage.mockReset();
   });
-
   afterEach(async () => {
-    try {
-      const { resetDbCache } = await import("../../src/workspace/db/sqlite.js");
-      resetDbCache();
-    } catch {
-      /* ignore */
-    }
-    rmSync(dir, { recursive: true, force: true });
+    await new Promise<void>(resolve => queueMicrotask(resolve));
+    fixture.close();
   });
 
   it("stamps top-level model on the persisted message_end", async () => {
@@ -98,11 +73,8 @@ describe("S2 usage model-stamp + rollup dual-write", () => {
     expect("model" in end).toBe(false);
   });
 
-  it("dual-writes token_usage_daily additively under the stamped model", async () => {
-    const { eh, sqlite, projection } = await loadModules();
-    // Initialize the projection DB so recordDailyUsage has a target.
-    projection.initProjection(join(dir, "bossmode.db"));
-    const db = sqlite.openDb(join(dir, "bossmode.db"));
+  it("adds distinct final events under the stamped model", async () => {
+    const { eh, db } = await loadModules();
 
     const buffer: any[] = [];
     const model = "kimi-coding/k3";
@@ -121,9 +93,7 @@ describe("S2 usage model-stamp + rollup dual-write", () => {
   });
 
   it("routes unstamped usage to the 'unknown' model bucket", async () => {
-    const { eh, sqlite, projection } = await loadModules();
-    projection.initProjection(join(dir, "bossmode.db"));
-    const db = sqlite.openDb(join(dir, "bossmode.db"));
+    const { eh, db } = await loadModules();
 
     const buffer: any[] = [];
     eh.handleAgentEvent("room1", "qa", "room1:qa", usageEvent({ inputTokens: 7 }), buffer, "rm_qa", undefined);
@@ -135,27 +105,21 @@ describe("S2 usage model-stamp + rollup dual-write", () => {
     expect(row?.input_tokens).toBe(7);
   });
 
-  it("still updates stats.json (no regression)", async () => {
+  it("updates readStats additively including cache, cost and completed turns", async () => {
     const { eh } = await loadModules();
     const buffer: any[] = [];
-    eh.handleAgentEvent("room1", "dev", "room1:dev", usageEvent({ inputTokens: 30, outputTokens: 3, cost: 0.1 }), buffer, "rm_s", "prov/m");
-
-    const statsPath = join(dir, "rooms", "room1", "agent-events", "rm_s.stats.json");
-    const stats = JSON.parse(readFileSync(statsPath, "utf-8"));
-    expect(stats.tokens.input).toBe(30);
-    expect(stats.tokens.output).toBe(3);
-    expect(stats.cost).toBeCloseTo(0.1);
+    for (const n of [1, 2]) {
+      eh.handleAgentEvent("room1", "dev", "room1:dev", usageEvent({ inputTokens: 30 * n, outputTokens: 3 * n, cacheRead: 4 * n, cacheWrite: 5 * n, cost: 0.25 * n }), buffer, "rm_s", "prov/m");
+      eh.handleAgentEvent("room1", "dev", "room1:dev", { type: "agent_end" }, buffer, "rm_s", "prov/m");
+    }
+    expect(readStats("room1", "rm_s")).toMatchObject({ turns: 2, tokens: { input: 90, output: 9, cacheRead: 12, cacheWrite: 15 }, cost: 0.75 });
   });
 
-  it("does not throw when projection DB is unavailable (file-only mode)", async () => {
+  it("fails closed without authority rather than reporting file-only success", async () => {
     const { eh } = await loadModules();
-    // No initProjection call → getProjectionDb() is null; recordDailyUsage no-ops.
+    fixture.db.close();
     const buffer: any[] = [];
-    expect(() =>
-      eh.handleAgentEvent("room1", "dev", "room1:dev", usageEvent({ inputTokens: 1 }), buffer, "rm_none", "prov/m"),
-    ).not.toThrow();
-    // Disk write still happened.
-    const persisted = eh.loadEventsFromDisk("room1", "rm_none");
-    expect(persisted.some((e: any) => e.type === "message_end")).toBe(true);
+    expect(() => eh.handleAgentEvent("room1", "dev", "room1:dev", usageEvent({ inputTokens: 1 }), buffer, "rm_none", "prov/m")).toThrow("not initialized");
+    expect(buffer).toEqual([]);
   });
 });

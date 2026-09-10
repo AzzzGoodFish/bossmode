@@ -18,7 +18,7 @@ import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token
 import { readMemberStats } from "../workspace/member-stats-store.js";
 import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
-import { catchUpActivityIndex, queryActivityPage } from "../workspace/db/activity-index.js";
+import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 
 // ── Agent / Templates API retired (identity batch 2.5) ──
@@ -190,7 +190,6 @@ addRoute("GET", "/api/members/:id/events", async (req, res, params) => {
   const typesParam = url.searchParams.get("types");
   const types = typesParam ? typesParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
 
-  catchUpActivityIndex(artifactKey, member.id);
   const page = queryActivityPage(artifactKey, member.id, { beforeSeq, limit, types });
   if (page) {
     sendJson(res, 200, { events: page.events, hasMore: page.hasMore, nextBeforeSeq: page.nextBeforeSeq });
