@@ -313,6 +313,22 @@ function roomScopeId(roomId: string): ScopeId {
   return scopeIdOf({ kind: "room", roomId });
 }
 
+/** Current SQL scope access, separate from immutable historical execution ownership. */
+function memberHasScopeAccess(scopeValue: string, memberId: string): boolean {
+  const scope = runtimeInputOwner(scopeValue, memberId).scopeId;
+  if (scope.startsWith("dm:")) return scope === `dm:${memberId}`;
+  const topicId = scope.startsWith("topic:") ? scope.slice(6) : undefined;
+  const parent = topicId ? resolveTopicRoomId(topicId) : scope;
+  return !!parent && !!roomStore.resolveRoomMemberRef(parent, memberId)
+    && (!topicId || getTopic(parent, topicId)?.status === "active");
+}
+function memberScopeAllowsExecution(scopeValue: string, memberId: string): boolean {
+  return memberRuntimeAllowed(memberId) && memberHasScopeAccess(scopeValue, memberId);
+}
+class RuntimeScopeRevokedError extends Error {
+  constructor() { super("Member no longer has access to this execution scope"); }
+}
+
 /** Aggregate live status for a conversation scope (chats list / working-set). */
 export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inactive" {
   const ref = parseScopeId(scopeId);
@@ -441,14 +457,21 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
   const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(owner.scopeId,memberId);
   const current=inputPumps.get(key);if(current)return current;
   if(!memberRuntimeAllowed(memberId)||!pendingRuntimeInputCount(owner))return Promise.resolve();
+  if(!memberScopeAllowsExecution(owner.scopeId,memberId)){
+    cancelPendingRuntimeInputs(owner,"execution scope access revoked");
+    return Promise.resolve();
+  }
   const epoch=inputScopeEpoch.get(key)??0;
   let failed=false;
   const operation=trackMemberOperation(memberId,async()=>{
     const scopeId=owner.scopeId.startsWith("dm:")||owner.scopeId.startsWith("topic:")?owner.scopeId:roomScopeId(owner.scopeId);
     const instance=await buildMemberAgentSession(memberId,scopeId);
     if(!instance){
-      if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch)cancelPendingRuntimeInputs(owner,"runtime creation failed","failed");
-      if(memberRuntimeAllowed(memberId)&&(inputScopeEpoch.get(key)??0)===epoch){
+      if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch){
+        const revoked=!memberScopeAllowsExecution(owner.scopeId,memberId);
+        cancelPendingRuntimeInputs(owner,revoked?"execution scope access revoked":"runtime creation failed",revoked?"cancelled":"failed");
+      }
+      if(memberScopeAllowsExecution(owner.scopeId,memberId)&&(inputScopeEpoch.get(key)??0)===epoch){
         const member=memberRecordToConfig(memberId);
         postMessage(owner.scopeId,"system",member&&!isMemberConfigured(member)?memberUnconfiguredMessage(member.name):`Failed to activate member "${getMember(memberId)?.name??memberId}": runtime unavailable.`);
       }
@@ -456,6 +479,10 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
     }
     for(;;){
       if(!memberRuntimeAllowed(memberId)||instances.get(key)!==instance||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")break;
+      if(!memberScopeAllowsExecution(owner.scopeId,memberId)){
+        cancelPendingRuntimeInputs(owner,"execution scope access revoked");
+        break;
+      }
       const inputs=pendingRuntimeInputs(owner);if(!inputs.length)break;
       await runInputBatch(instance,inputs);
       for(const notify of [...(inputProgress.get(key)??[])])notify();
@@ -573,6 +600,7 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
       instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;
     }
     await instance.handle.prompt(message,{beforeDispatch:(event:{attemptId:string;dispatchIndex:number;message:string})=>{
+      if(!memberScopeAllowsExecution(instance.scopeId,instance.memberId))throw new RuntimeScopeRevokedError();
       if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
       else{
         const continuation=acceptControlInput(instance.scopeId,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(instance.scopeId,instance.memberId),inputs)).input;
@@ -581,7 +609,10 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
     }});
     if(!dispatched)throw new Error("Runtime returned without a durable input dispatch receipt");
     outcome=instance.dispatchState==="aborting"?"cancelled":instance.hadErrorInTurn?"failed":"completed";
-  }catch(error){failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);}
+  }catch(error){
+    if(error instanceof RuntimeScopeRevokedError){outcome="cancelled";instance.lastTurnError=null;}
+    else{failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);}
+  }
   instance.promptInFlight=false;
   // Provider settlement is not application publication. Publication failure cannot replay the input.
   try{finalizePromptSettlement(instance,inputs,`${trigger}_settled`,outcome!=="completed");}
@@ -944,7 +975,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
   // gate is held — the switch awaits pending creations, so a registered
   // waiter would deadlock both sides. No timeout: the switch always settles.
   for (;;) {
-    if (!memberRuntimeAllowed(memberId)) return null;
+    if (!memberScopeAllowsExecution(scopeId, memberId)) return null;
     const existing = instances.get(key);
     if (existing) return existing;
     const pending = pendingCreations.get(key);
@@ -952,7 +983,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       const retryAfterCancellation = cancelledCreations.has(key);
       const built = await pending;
       if (retryAfterCancellation) continue;
-      return built;
+      return memberScopeAllowsExecution(scopeId, memberId) ? built : null;
     }
     const gate = memberSwitchGates.get(memberId);
     if (gate) {
@@ -965,7 +996,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
   const publicationOwner = {};
   sessionPublishOwners.set(key,publicationOwner);
   // Closing execution admission must not discard final session facts from an owned run.
-  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner;
+  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner
+    && memberHasScopeAccess(scopeId, memberId);
   const creation = (async (): Promise<AgentInstance | null> => {
     if (!registry) {
       logger.error("agent", "runtime registry not initialized");
@@ -1509,8 +1541,7 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
   const broadcast=!scope.includes(":")&&Array.isArray(ctx.capture.snapshot.message.mentions)&&ctx.capture.snapshot.message.mentions.includes("all");
   const urgent=ctx.deliveryKind==="urgent";
   const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
-  const parent=scope.startsWith("topic:")?resolveTopicRoomId(scope.slice(6)):scope;
-  const scopeAllowed=scope.startsWith("dm:")?scope===`dm:${memberId}`:!!parent&&!!roomStore.resolveRoomMemberRef(parent,memberId)&&(!scope.startsWith("topic:")||getTopic(parent,scope.slice(6))?.status==="active");
+  const scopeAllowed=memberHasScopeAccess(scope,memberId);
   const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
   const notInTopic=scope.startsWith("topic:")&&urgent&&!active;
   const skipped=unavailable||notInTopic||(broadcast&&busy);
@@ -2127,6 +2158,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
   updateDispatchState(instance, "running", "compact-requested");
   transition(instance, instance.roomId, instance.agentName, "working", "compact-requested");
   let started = false;
+  let completed = false;
   try {
     // Settle the old turn first: shell waits return as running (commands stay
     // alive in the PTY), the SDK abort finishes the in-flight prompt.
@@ -2149,6 +2181,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
       logger.info("agent", "manualCompactAborted", { member: instance.agentName, scopeId: instance.scopeId });
       return { ok: false, action: "stopped" };
     }
+    completed = true;
     return { ok: true, action: "compacted" };
   } catch (err) {
     const message = formatRuntimeErrorMessage(err);
@@ -2167,6 +2200,10 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
       transition(instance, instance.roomId, instance.agentName, "idle", "compact-not-started");
       drainQueuedInputsAsPrompt(instance, "compact-not-started");
     }
+    // A manual compact emits agent_end after compaction_end and has no input
+    // pump to flush deferred reloads. Wait for the actual SDK operation first.
+    if (completed && instances.get(instanceKey(scopeId, memberId)) === instance
+      && memberRuntimeAllowed(memberId) && !queueDepth(instance)) maybeFlushPendingReload(instance);
   }
 }
 

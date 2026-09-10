@@ -54,10 +54,9 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     }
   });
 
-  // Source defect: compaction_end arrives with turnActive=true, then agent_end
-  // clears it without flushing pendingReload (agent-manager.ts:2457/2476).
-  // PiSdkHandle.compactInternal emits this same order (pi-sdk.ts:1005-1018).
-  it.fails("[source defect] mid-compaction reload queues; actual compaction settlement rebuilds the session", async () => {
+  // Real SDK order: compaction_end precedes agent_end. Reload must wait for
+  // actual compaction settlement, then flush even without another queued input.
+  it("mid-compaction reload queues; actual compaction settlement rebuilds the session", async () => {
     const { ts, memberId, scopeId } = await setupRoom("queuebot");
     let release = () => {};
     let compacting: Promise<unknown> | undefined;
