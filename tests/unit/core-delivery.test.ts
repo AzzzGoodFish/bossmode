@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/storage/database.js";
 import { baseStorageMigration } from "../../src/storage/base-schema.js";
 import { messagesMigration } from "../../src/storage/schema/messages.js";
+import { runtimeInputsMigration } from "../../src/storage/schema/runtime-inputs.js";
 import { deliveryMigration } from "../../src/storage/schema/delivery.js";
 import { executionMigration } from "../../src/storage/schema/execution.js";
 import { ExecutionAttemptRepository } from "../../src/storage/repositories/execution-attempt-repository.js";
@@ -19,7 +20,7 @@ let replies: ReplyObligationRepository;
 let queue: InputQueueRepository;
 const oldActor = { actorKey: "scope-local-123", memberId: null };
 const modernActor = { actorKey: "mem-modern", memberId: "mem-modern" };
-const migrations = [baseStorageMigration, messagesMigration, deliveryMigration];
+const migrations = [baseStorageMigration, messagesMigration, deliveryMigration, runtimeInputsMigration];
 function repos() {
   deliveries = new DeliveryRepository(db);
   replies = new ReplyObligationRepository(db);

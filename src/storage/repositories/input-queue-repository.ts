@@ -6,6 +6,7 @@ export interface QueuedInput extends DeliveryKey {
   id: number;
   payload: DeliveryJson;
   trigger: string;
+  placement: "front" | "tail";
   status: QueuedInputStatus;
   createdAt: number;
   dispatchedAt: number | null;
@@ -21,7 +22,7 @@ export interface QueuedInput extends DeliveryKey {
 export interface QueuedInputOwner { id: number; scopeId: string; targetActorKey: string }
 type Row = Omit<QueuedInput, "payload" | "result"> & { payloadJson: string; resultJson: string | null };
 const SELECT = `SELECT id,scope_id AS scopeId,message_id AS messageId,target_actor_key AS targetActorKey,
-  delivery_kind AS deliveryKind,payload_json AS payloadJson,trigger,status,created_at AS createdAt,
+  delivery_kind AS deliveryKind,payload_json AS payloadJson,trigger,placement,status,created_at AS createdAt,
   dispatched_at AS dispatchedAt,ended_at AS endedAt,dispatch_token AS dispatchToken,
   execution_attempt_id AS executionAttemptId,outcome,result_json AS resultJson,diagnosis FROM queued_inputs`;
 function decode(row: Row): QueuedInput {
@@ -46,22 +47,41 @@ export class InputQueueRepository {
     return row && decode(row);
   }
 
-  enqueue(input: DeliveryKey & { payload: DeliveryJson; trigger: string }, at: number): { enqueued: boolean; input: QueuedInput } {
+  enqueue(input: DeliveryKey & { payload: DeliveryJson; trigger: string; placement?: "front" | "tail" }, at: number): { enqueued: boolean; input: QueuedInput } {
     deliveryTime(at);
     deliveryText(input.trigger, "input trigger");
+    const placement=input.placement??"tail";
+    if(placement!=="front"&&placement!=="tail")throw new Error("Invalid queued input placement");
     const key = deliveryKeyParams(input);
     const payload = deliveryJson(input.payload);
     return this.db.transaction(tx => {
       if (!new DeliveryRepository(tx).getDelivery(input)) throw new Error("Queued input requires captured delivery acceptance");
       const old = tx.get<Row>(`${SELECT} WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...key);
       if (old) {
-        if (old.payloadJson !== payload || old.trigger !== input.trigger) throw new Error("Conflicting queued input identity");
+        if (old.payloadJson !== payload || old.trigger !== input.trigger || old.placement !== placement) throw new Error("Conflicting queued input identity");
         return { enqueued: false, input: decode(old) };
       }
-      const row = tx.get<{id: number}>(`INSERT INTO queued_inputs(scope_id,message_id,target_actor_key,delivery_kind,payload_json,trigger,status,created_at)
-        VALUES(?,?,?,?,?,?,'pending',?) RETURNING id`, ...key, payload, input.trigger, at)!;
+      const row = tx.get<{id: number}>(`INSERT INTO queued_inputs(scope_id,message_id,target_actor_key,delivery_kind,payload_json,trigger,status,created_at,placement)
+        VALUES(?,?,?,?,?,?,'pending',?,?) RETURNING id`, ...key, payload, input.trigger, at, placement)!;
       return { enqueued: true, input: new InputQueueRepository(tx).get({ id: row.id, scopeId: input.scopeId, targetActorKey: input.targetActorKey })! };
     });
+  }
+
+  getByDelivery(key: DeliveryKey): QueuedInput | undefined {
+    const row=this.db.get<Row>(`${SELECT} WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`,...deliveryKeyParams(key));
+    return row&&decode(row);
+  }
+
+  listReady(actor:{scopeId:string;targetActorKey:string},limit=1000):QueuedInput[]{
+    if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw new Error("Invalid queued input page");
+    deliveryText(actor.scopeId,"scope ID");deliveryText(actor.targetActorKey,"target actor key");
+    return this.db.all<Row>(`${SELECT} WHERE scope_id=? AND target_actor_key=? AND status='pending'
+      ORDER BY CASE placement WHEN 'front' THEN 0 ELSE 1 END,
+      CASE WHEN placement='front' THEN id END DESC,CASE WHEN placement='tail' THEN id END ASC LIMIT ?`,actor.scopeId,actor.targetActorKey,limit).map(decode);
+  }
+
+  countPending(actor:{scopeId:string;targetActorKey:string}):number{
+    return this.db.get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND target_actor_key=? AND status='pending'",actor.scopeId,actor.targetActorKey)!.n;
   }
 
   /** Indexed keyset listing. Omitting actor lists all safe pending inputs; no dispatch. */

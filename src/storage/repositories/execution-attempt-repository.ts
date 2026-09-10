@@ -32,6 +32,11 @@ export class ExecutionAttemptRepository {
       throw new Error(`Execution acknowledgement rejected: ${id}`);
     }
   }
+  /** A failed/cancelled operation is not a successful acknowledgement or safe replay. */
+  interrupt(id:string,memberId:string,at:number,diagnosis:string):boolean{
+    if(!diagnosis.trim())throw new Error("Execution interruption requires a diagnosis");
+    return !!this.db.get("UPDATE execution_attempts SET status='interrupted',ended_at=?,diagnosis=? WHERE id=? AND member_id=? AND status IN ('prepared','dispatched') RETURNING id",at,diagnosis,id,memberId);
+  }
   interruptIncomplete(at: number): number {
     return this.db.transaction(tx => tx.all(`UPDATE execution_attempts SET status='interrupted',ended_at=?,
       diagnosis='completion uncertain after service restart; not replayed' WHERE status IN ('prepared','dispatched') RETURNING id`, at).length);

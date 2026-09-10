@@ -1,6 +1,8 @@
 import type { Database } from "../database.js";
 import { DeliveryRepository, deliveryJson, deliveryText, deliveryTime, type CapturedMessage } from "./delivery-repository.js";
 
+export type ReplyDisposition = "failed" | "cancelled" | "silent" | "broadcast-skipped" | "continuation-exhausted";
+
 export interface ReplyObligation {
   scopeId: string;
   messageId: string;
@@ -15,6 +17,8 @@ export interface ReplyObligation {
 export type ReplySelection = { mode: "all-pending" } | { mode: "reply-target"; messageId: string };
 const SELECT = `SELECT scope_id AS scopeId,message_id AS messageId,actor_key AS actorKey,member_id AS memberId,
   reason,opened_at AS openedAt,settled_at AS settledAt,settled_by_message_id AS settledByMessageId FROM reply_obligations`;
+
+const ACTIVE=`NOT EXISTS(SELECT 1 FROM reply_obligation_dispositions d WHERE d.scope_id=reply_obligations.scope_id AND d.message_id=reply_obligations.message_id AND d.actor_key=reply_obligations.actor_key)`;
 
 /** No display-name lookup, task/subscription activation, runtime flags or callbacks. */
 export class ReplyObligationRepository {
@@ -45,7 +49,21 @@ export class ReplyObligationRepository {
   }
 
   listPending(scopeId: string, actorKey: string): ReplyObligation[] {
-    return this.db.all<ReplyObligation>(`${SELECT} WHERE scope_id=? AND actor_key=? AND settled_at IS NULL ORDER BY opened_at,message_id`, scopeId, actorKey);
+    return this.db.all<ReplyObligation>(`${SELECT} WHERE scope_id=? AND actor_key=? AND settled_at IS NULL AND ${ACTIVE} ORDER BY opened_at,message_id`, scopeId, actorKey);
+  }
+
+  /** Records a non-reply terminal disposition without fabricating a member chat.
+   * Omit messageIds only for explicit scope-wide cancellation, never prompt failure. */
+  dismissPending(scopeId:string,actorKey:string,disposition:ReplyDisposition,diagnosis:string,at:number,messageIds?:string[]):number{
+    deliveryText(scopeId,"scope ID");deliveryText(actorKey,"reply actor key");deliveryText(diagnosis,"reply diagnosis");deliveryTime(at);
+    if(!["failed","cancelled","silent","broadcast-skipped","continuation-exhausted"].includes(disposition))throw new Error("Invalid reply disposition");
+    if(messageIds?.length===0)return 0;
+    messageIds?.forEach(id=>deliveryText(id,"message ID"));
+    return this.db.transaction(tx=>tx.all(`INSERT INTO reply_obligation_dispositions(scope_id,message_id,actor_key,disposition,diagnosis,recorded_at)
+      SELECT scope_id,message_id,actor_key,?,?,? FROM reply_obligations
+      WHERE scope_id=? AND actor_key=? AND settled_at IS NULL AND ${ACTIVE}
+      ${messageIds?`AND message_id IN (${messageIds.map(()=>"?").join(",")})`:""}
+      ON CONFLICT(scope_id,message_id,actor_key) DO NOTHING RETURNING message_id`,disposition,diagnosis,at,scopeId,actorKey,...(messageIds??[])).length);
   }
 
   /** The reply must already have a capture in this transaction. Only its proven
@@ -71,7 +89,7 @@ export class ReplyObligationRepository {
       const targetSql = input.selection.mode === "reply-target" ? " AND message_id=?" : "";
       const targetParams = input.selection.mode === "reply-target" ? [input.selection.messageId] : [];
       const settled = tx.all(`UPDATE reply_obligations SET settled_at=?,settled_by_message_id=?
-        WHERE scope_id=? AND actor_key=? AND settled_at IS NULL${targetSql} RETURNING message_id`,
+        WHERE scope_id=? AND actor_key=? AND settled_at IS NULL AND ${ACTIVE}${targetSql} RETURNING message_id`,
       at, input.replyMessageId, input.scopeId, input.actorKey, ...targetParams).length;
       tx.run(`INSERT INTO reply_settlements(scope_id,reply_message_id,actor_key,selection_json,settled_count,settled_at)
         VALUES(?,?,?,?,?,?)`, input.scopeId, input.replyMessageId, input.actorKey, selection, settled, at);
