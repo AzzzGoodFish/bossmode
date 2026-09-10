@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   setupTestWorkspace, getTestWorkspace, createTestServer, closeTestServer,
   loginAndGetToken, createMockRoom,
@@ -23,9 +23,13 @@ describe("agent-manager SQL session resume toggle", () => {
       const id = room.globalMemberIds![0];
       const directory = mainSessionDirectory(id, `room:${room.id}`);
       mkdirSync(directory, { recursive: true });
-      const sessionFile = join(directory, "saved.jsonl");
-      writeFileSync(sessionFile, "retained SDK history\n");
-      saveSession(room.id, id, { runtime: "pi-cli", sessionId: "sid-123", sessionFile });
+      const manager = SessionManager.create(getTestWorkspace().root, directory);
+      manager.appendMessage({ role: "user", content: "retained requirement", timestamp: Date.now() });
+      manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "retained answer" }], api: "openai-completions", provider: "mock", model: "model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() });
+      const sessionFile = manager.getSessionFile()!;
+      const sessionId = manager.getSessionId();
+      const history = readFileSync(sessionFile, "utf8");
+      saveSession(room.id, id, { runtime: "pi-cli", sessionId, sessionFile });
       updateMemberIdentity(id, { name: `renamed-${sessionResume}` });
       writeConfig({ ...readConfig(), runtime: sessionResume === undefined ? {} : { sessionResume } });
       getTestWorkspace().reopen();
@@ -35,10 +39,11 @@ describe("agent-manager SQL session resume toggle", () => {
       const args = create.mock.calls[0][0];
       expect(args.member.id).toBe(id);
       expect(args.member.name).toBe(`renamed-${sessionResume}`);
-      expect(args.resumeSession).toEqual(sessionResume === false ? undefined : { sessionId: "sid-123", sessionFile });
+      expect(args.resumeSession).toEqual(sessionResume === false ? undefined : { sessionId, sessionFile });
       await shutdownAll();
-      expect(getSessions(room.id, id)[id]).toMatchObject({ sessionId: "sid-123", sessionFile });
-      expect(readFileSync(sessionFile, "utf8")).toBe("retained SDK history\n");
+      expect(getSessions(room.id, id)[id]).toMatchObject({ sessionId, sessionFile });
+      expect(readFileSync(sessionFile, "utf8")).toBe(history);
+      expect(SessionManager.open(sessionFile).getSessionId()).toBe(sessionId);
     } finally { await closeTestServer(server); }
   });
 });

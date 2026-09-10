@@ -9,9 +9,8 @@
  * ownership + scope authorization.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 let dir: string;
@@ -28,6 +27,9 @@ let roomId = "";
 let scopeId = "";
 let promptDeferred: (() => void) | null = null;
 let parentManager: SessionManager;
+let releaseCreate: (() => void) | null = null;
+let releaseCleanup: (() => void) | null = null;
+let childCreationGate: Promise<void> | null = null;
 
 const FAKE_PROMPT = vi.fn(async () => {
   await new Promise<void>((resolve) => { promptDeferred = resolve; });
@@ -51,6 +53,14 @@ const fakeHandle = {
   },
 };
 
+// The live parent and child have independent subscriptions and teardown owners.
+const parentHandle = {
+  ...fakeHandle,
+  subscribe: vi.fn(() => () => {}),
+  destroyAndWait: vi.fn(async () => {}),
+  forkSnapshot: () => fakeHandle.forkSnapshot(),
+};
+
 beforeEach(async () => {
   vi.resetModules();
   const {coreFixture}=await import("../helpers/core-fixture.js");
@@ -59,6 +69,12 @@ beforeEach(async () => {
   promptDeferred = null;
   lastCreateOpts = null;
   FAKE_PROMPT.mockClear();
+  parentHandle.destroyAndWait.mockClear();
+  fakeHandle.destroyAndWait.mockReset().mockResolvedValue(undefined);
+  fakeHandle.subscribe.mockReset().mockImplementation((fn) => { handleEmit = fn; return () => { handleEmit = null; }; });
+  releaseCreate = null;
+  releaseCleanup = null;
+  childCreationGate = null;
   (fakeHandle.abort as any).mockClear();
   (fakeHandle.destroy as any).mockClear();
   fakeHandle.subscribe.mockClear();
@@ -90,25 +106,27 @@ beforeEach(async () => {
     content: [{ type: "toolCall", id: "tc1", name: "recall", arguments: {} }],
   });
 
-  agentManager.initAgentManager({
-    getAll:()=>[],
-    get: (name: string) => (name === "pi-cli" ? {
+  const runtime = {
       name: "pi-cli",
       capabilities: {},
       detect: async () => ({ available: true }),
       createAgent: async (opts: any) => {
         lastCreateOpts = opts;
         if (opts.background) {
+          if (childCreationGate) await childCreationGate;
           expect(opts.background.sessionDir).toBeTruthy();
           // the child binds tools with the SAME id format the live parent used
           // (bare room id for rooms) — scope-keyed callbacks must not see a
           // normalized "room:<id>" the parent never used
           expect(opts.roomId).toBe(roomId);
         }
-        return fakeHandle as any;
+        return (opts.background ? fakeHandle : parentHandle) as any;
       },
-      shutdownAll: async () => {},
-    } : undefined),
+      shutdownAll: async () => { await parentHandle.destroyAndWait(); },
+  };
+  agentManager.initAgentManager({
+    getAll: () => [runtime],
+    get: (name: string) => name === "pi-cli" ? runtime : undefined,
   } as any);
 
   // real parent instance through the real assembly path (sessionSources)
@@ -117,20 +135,25 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  releaseCreate?.();
+  releaseCleanup?.();
   promptDeferred?.();
   try {
     if(expectedCleanupFailure) await expect(agentManager.shutdownAll()).rejects.toThrow("Runtime shutdown incomplete");
     else await agentManager.shutdownAll();
-  } finally {fixture.close();}
+    expect(parentHandle.destroyAndWait).toHaveBeenCalled();
+  } finally { vi.restoreAllMocks(); fixture.close(); }
 });
 
 async function runToCompletion() {
-  for (let i = 0; i < 200 && !(handleEmit && promptDeferred); i++) {
-    await new Promise((r) => setTimeout(r, 5));
-  }
+  await vi.waitFor(() => { expect(handleEmit).toBeTruthy(); expect(promptDeferred).toBeTruthy(); });
   handleEmit?.({ type: "message_end", text: "THE ANSWER", stopReason: "stop" });
   promptDeferred?.();
-  await new Promise((r) => setTimeout(r, 5));
+  await vi.waitFor(() => {
+    const records = store.listBackgroundTasks(memberId);
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every(record => store.isTerminalBackgroundTaskStatus(record.status))).toBe(true);
+  });
 }
 
 describe("forkCutLeafId", () => {
@@ -165,6 +188,19 @@ describe("forkCutLeafId", () => {
 });
 
 describe("background runner + tool dispatch", () => {
+  it("rejects reinitialization while a live parent owns resources", () => {
+    expect(() => agentManager.initAgentManager({ getAll: () => [] } as any))
+      .toThrow("Runtime initialization requires completed teardown");
+    expect(agentManager.getAgentInstanceForScope(scopeId, memberId)).toBeTruthy();
+  });
+
+  it("allows reinitialization only after the previous parent teardown settles", async () => {
+    await agentManager.shutdownAll();
+    expect(parentHandle.destroyAndWait).toHaveBeenCalledOnce();
+    expect(agentManager.getAgentInstanceForScope(scopeId, memberId)).toBeNull();
+    expect(() => agentManager.initAgentManager({ getAll: () => [] } as any)).not.toThrow();
+  });
+
   it("start requires a live parent instance in that scope", () => {
     const result = runner.startBackgroundTask({ memberId, scopeId: "room:nonexistent", kind: "generic", sessionMode: "new", prompt: "x" });
     expect(result.ok).toBe(false);
@@ -175,7 +211,8 @@ describe("background runner + tool dispatch", () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "do a thing" });
     if (!started.ok) { expect(started.error).toBeTruthy(); }
     expect(started.ok).toBe(true);
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     expect(["starting", "running"]).toContain(started.status);
     await runToCompletion();
     const record = store.getBackgroundTask(memberId, started.taskId);
@@ -188,7 +225,8 @@ describe("background runner + tool dispatch", () => {
   it("fork mode: child resumes a forked file in the task dir, cut before the in-flight call (latest user kept)", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "recall", sessionMode: "fork" });
     expect(started.ok).toBe(true);
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     await runToCompletion();
     const record = store.getBackgroundTask(memberId, started.taskId);
     expect(record?.status).toBe("done");
@@ -212,12 +250,12 @@ describe("background runner + tool dispatch", () => {
     // sabotage the fork source: snapshot points at a non-session file
     const garbage = join(dir, "garbage-parent.jsonl");
     writeFileSync(garbage, "this is not a session file\n", "utf-8");
-    const originalForkSnapshot = fakeHandle.forkSnapshot;
-    (fakeHandle as any).forkSnapshot = () => ({ sessionFile: garbage, branchEntries: [] });
+    const snapshot = vi.spyOn(fakeHandle, "forkSnapshot").mockReturnValue({ sessionFile: garbage, branchEntries: [] });
     lastCreateOpts = null; // only child calls (opts.background) count from here
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "recall", sessionMode: "fork" });
     expect(started.ok).toBe(true);
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 40 && store.getBackgroundTask(memberId, started.taskId)?.status === "starting"; i++) {
       await new Promise((r) => setTimeout(r, 5));
     }
@@ -226,12 +264,13 @@ describe("background runner + tool dispatch", () => {
     expect(record?.error).toContain("fork");
     // no child session was started
     expect(lastCreateOpts).toBeNull();
-    (fakeHandle as any).forkSnapshot = originalForkSnapshot;
+    snapshot.mockRestore();
   });
 
   it("no successful final (error-ended turn) → failed, never stale text as success", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !(handleEmit && promptDeferred); i++) await new Promise((r) => setTimeout(r, 5));
     handleEmit?.({ type: "message_end", text: "partial text", stopReason: "error", errorMessage: "provider exploded" });
     promptDeferred?.();
@@ -245,7 +284,8 @@ describe("background runner + tool dispatch", () => {
 
   it("intermediate tool-turn text does not become the result; only the final stop counts", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !handleEmit; i++) await new Promise((r) => setTimeout(r, 5));
     handleEmit?.({ type: "message_end", text: "let me check the files", stopReason: "toolUse" });
     await runToCompletion();
@@ -256,7 +296,8 @@ describe("background runner + tool dispatch", () => {
 
   it("cancel is independent and idempotent; only background_cancel aborts", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "recall", sessionMode: "new" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !promptDeferred; i++) await new Promise((r) => setTimeout(r, 5));
     expect(fakeHandle.abort).not.toHaveBeenCalled();
 
@@ -283,21 +324,12 @@ describe("background runner + tool dispatch", () => {
   it.each([false,true])("cancel during child creation skips prompts and preserves cleanup failure=%s", async (cleanupFails) => {
     expectedCleanupFailure=cleanupFails;
     if(cleanupFails)fakeHandle.destroyAndWait.mockImplementationOnce(async()=>{throw new Error("creation cancellation cleanup failed");});
-    // gate createAgent so the cancel lands while the child is being built
-    let releaseCreate: (() => void) | null = null;
-    const gatedCreate = new Promise<void>((resolve) => { releaseCreate = resolve; });
-    const registry = {
-      getAll:()=>[],
-      get: (name: string) => (name === "pi-cli" ? {
-        name: "pi-cli", capabilities: {}, detect: async () => ({ available: true }),
-        createAgent: async (opts: any) => { lastCreateOpts = opts; await gatedCreate; return fakeHandle as any; },
-        shutdownAll: async () => {},
-      } : undefined),
-    };
-    (agentManager as any).initAgentManager(registry as any);
-
+    // Keep the initialized owner alive. Gate only child creation, not manager init.
+    childCreationGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
+    await vi.waitFor(() => expect(lastCreateOpts?.background).toBeTruthy());
     runner.cancelBackgroundTask(memberId, started.taskId);
     releaseCreate?.();
     for (let i = 0; i < 40 && !["cancelled", "failed", "done"].includes(store.getBackgroundTask(memberId, started.taskId)?.status ?? ""); i++) {
@@ -314,11 +346,11 @@ describe("background runner + tool dispatch", () => {
   });
 
   it("terminal is published only after the awaited cleanup completes", async () => {
-    let releaseCleanup: (() => void) | null = null;
     const gate = new Promise<void>((r) => { releaseCleanup = r; });
     (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { await gate; });
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !promptDeferred; i++) await new Promise((r) => setTimeout(r, 5));
     handleEmit?.({ type: "message_end", text: "DONE TEXT", stopReason: "stop" });
     promptDeferred?.();
@@ -338,7 +370,8 @@ describe("background runner + tool dispatch", () => {
     expectedCleanupFailure=true;
     (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { throw new Error("teardown incomplete (1): dispose: ws pool refused to close"); });
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     await runToCompletion();
     const record = store.getBackgroundTask(memberId, started.taskId);
     expect(record?.status).toBe("failed");
@@ -349,7 +382,8 @@ describe("background runner + tool dispatch", () => {
 
   it("background_wait: timeout returns the real non-terminal status without the answer; repeat read after done", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "slow" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !promptDeferred; i++) await new Promise((r) => setTimeout(r, 5));
 
     const timeoutView = await tools.handleToolCallback("background_wait", roomId, "bgrunner", { taskId: started.taskId, blockMs: 30 }) as any;
@@ -369,7 +403,8 @@ describe("background runner + tool dispatch", () => {
 
   it("background_wait ends on member interrupt with the real status; the task keeps running", async () => {
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
-    if (!started.ok) return;
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error(started.error);
     for (let i = 0; i < 200 && !promptDeferred; i++) await new Promise((r) => setTimeout(r, 5));
     const waitP = tools.handleToolCallback("background_wait", roomId, "bgrunner", { taskId: started.taskId, blockMs: 0 }) as any;
     await new Promise((r) => setTimeout(r, 10));
@@ -419,12 +454,17 @@ describe("background runner + tool dispatch", () => {
   });
 });
 
-it("an exception after obtaining a child still awaits its teardown before publishing failure",async()=>{
-  fakeHandle.subscribe.mockImplementationOnce(()=>{throw new Error("subscription failed");});
-  const started=runner.startBackgroundTask({memberId,scopeId,kind:"generic",sessionMode:"new",prompt:"x"});
-  expect(started.ok).toBe(true);if(!started.ok)throw new Error(started.error);
-  await vi.waitFor(()=>expect(store.getBackgroundTask(memberId,started.taskId)?.status).toBe("failed"));
-  expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
-  expect(store.getBackgroundTask(memberId,started.taskId)?.error).toContain("subscription failed");
+it("an exception after obtaining a child still awaits its teardown before publishing failure", async () => {
+  fakeHandle.subscribe.mockImplementationOnce(() => { throw new Error("subscription failed"); });
+  const gate = new Promise<void>(resolve => { releaseCleanup = resolve; });
+  fakeHandle.destroyAndWait.mockImplementationOnce(() => gate);
+  const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
+  expect(started.ok).toBe(true);
+  if (!started.ok) throw new Error(started.error);
+  await vi.waitFor(() => expect(fakeHandle.destroyAndWait).toHaveBeenCalledOnce());
+  expect(store.getBackgroundTask(memberId, started.taskId)?.status).toBe("running");
+  releaseCleanup?.();
+  await vi.waitFor(() => expect(store.getBackgroundTask(memberId, started.taskId)?.status).toBe("failed"));
+  expect(store.getBackgroundTask(memberId, started.taskId)?.error).toContain("subscription failed");
   await runner.shutdownBackgroundTasks(memberId);
 });

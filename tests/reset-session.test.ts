@@ -1,258 +1,140 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-
-vi.mock("../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
-
-const mockHandle = {
-  prompt: vi.fn(async () => {}),
-  steer: vi.fn(),
-  abort: vi.fn(),
-  destroy: vi.fn(),
-  waitForIdle: vi.fn(async () => {}),
-  subscribe: vi.fn(() => () => {}),
-  isWorking: false,
-  runtimeName: "pi-cli",
-};
-
-let sessionResumeEnabled = true;
-let mockRoom: any;
-
-const mockRuntime = {
-  name: "pi-cli",
-  capabilities: {
-    streaming: true,
-    toolEvents: true,
-    thinking: true,
-    usage: true,
-    dynamicModel: true,
-    dynamicThinking: true,
-    permissionControl: false,
-    sessionResume: true,
-    contextUsage: false,
-  },
-  detect: vi.fn(async () => ({ available: true })),
-  createAgent: vi.fn(async ({ onSessionChanged }: any) => {
-    onSessionChanged?.({ sessionId: "session-123", sessionFile: "/tmp/session.json" });
-    return mockHandle;
-  }),
-  shutdownAll: vi.fn(async () => {}),
-};
-
-vi.mock("../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-}));
-
-vi.mock("../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn(() => ({
-    name: "pm",
-    model: "mock-model",
-    description: "PM",
-    systemPrompt: "You are pm.",
-    skills: [],
-    tags: [],
-  })),
-}));
-
-
-
-vi.mock("../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
-  readConfig: () => ({
-    auth: { username: "u", passwordHash: "h" },
-    apiKeys: {},
-    defaults: { host: "127.0.0.1", port: 8080 },
-    sessionResume: sessionResumeEnabled,
-  }),
-}));
-
-vi.mock("../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => mockRoom),
-  resolveRoomMemberRef: vi.fn((roomId: string, ref: string) => (mockRoom?.roomMembers || []).find((member: any) => member.id === ref || member.name === ref) || null),
-  getCursors: vi.fn(() => ({ pm: "msg-1" })),
-  setCursor: vi.fn(),
-  deleteCursor: vi.fn(),
-}));
-
-vi.mock("../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } })),
-  saveSession: vi.fn(),
-  clearSession: vi.fn(),
-  deleteSessionEntry: vi.fn(),
-}));
-
-vi.mock("../src/knowledge/store.js", () => ({
-  listEntries: vi.fn(() => []),
-  getEntry: vi.fn(),
-  getDocumentTree: vi.fn(() => ({ path: "", name: "docs", kind: "folder", children: [] })),
-}));
-
-vi.mock("../src/communication/message-bus.js", () => ({
-  postMessage: vi.fn(),
-  getMessagesSince: vi.fn(() => [{ id: "msg-1", sender: "user", content: "hello", mentions: [], ts: Date.now() }]),
-  getLatestMessageId: vi.fn(() => "msg-1"),
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { coreFixture } from "./helpers/core-fixture.js";
+import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
+import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
+import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
+import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
+import { saveAgentDefinition } from "../src/workforce/agent-store.js";
+import { createMember, updateMemberIdentity } from "../src/workspace/member-registry.js";
+import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/workspace/room-store.js";
+import { createTopic } from "../src/workspace/topic-store.js";
+import { addMessage } from "../src/workspace/message-store.js";
+import * as sessionStore from "../src/workspace/session-store.js";
+import { loadEventsFromDisk } from "../src/engine/event-handler.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/communication/ws.js";
 
 vi.mock("../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-vi.mock("../src/engine/prompt-assembler.js", () => ({
-  buildAgentPrompt: vi.fn(() => ({ agentPrompt: "", envPrompt: "", fullPrompt: "" })),
-}));
+let fixture: ReturnType<typeof coreFixture>;
+let roomId: string;
+let memberId: string;
+let runtime: MockRuntime;
+let saved: { sessionId: string; sessionFile: string };
 
-vi.mock("../src/engine/event-handler.js", () => ({
-  handleAgentEvent: vi.fn(),
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
-}));
+function retainSession(id: string, scope: string) {
+  const directory = sessionStore.mainSessionDirectory(id, scope);
+  mkdirSync(directory, { recursive: true });
+  const manager = SessionManager.create(fixture.root, directory);
+  manager.appendMessage({ role: "user", content: "retained requirement", timestamp: Date.now() });
+  manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "retained answer" }], api: "openai-completions", provider: "mock", model: "model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() });
+  const session = { sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()! };
+  sessionStore.saveSession(scope, id, { runtime: "pi-cli", ...session });
+  return session;
+}
 
-import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
-import { initAgentManager, activateAgent, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
-import * as roomStore from "../src/workspace/room-store.js";
-import * as sessionStore from "../src/workspace/session-store.js";
-import { appendEventToDisk } from "../src/engine/event-handler.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/communication/ws.js";
+beforeEach(() => {
+  fixture = coreFixture();
+  resetMocks();
+  vi.clearAllMocks();
+  writeConfig(getDefaultConfig());
+  saveAgentDefinition("general", "---\nname: general\nskills: []\n---\nGeneral");
+  memberId = createMember({ name: "pm", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" }).id;
+  roomId = createRoom("Reset", undefined, []).id;
+  stampGlobalMemberIds(roomId, [memberId], memberId);
+  const message = addMessage(roomId, { sender: "user", content: "hello", mentions: [] });
+  setCursor(roomId, memberId, message.id);
+  saved = retainSession(memberId, `room:${roomId}`);
+  runtime = new MockRuntime("pi-cli");
+  const registry = new RuntimeRegistry();
+  registry.register(runtime);
+  initAgentManager(registry);
+});
+
+afterEach(async () => {
+  try { await shutdownAll(); }
+  finally { vi.restoreAllMocks(); fixture.close(); }
+});
 
 describe("resetAgentSession", () => {
-  beforeEach(async () => {
-    await shutdownAll();
-    vi.clearAllMocks();
-    sessionResumeEnabled = true;
-    mockRoom = { id: "room1", name: "Room 1", cwd: "/tmp", members: ["pm"], roomMembers: [{ id: "pm", name: "pm", sourceAgent: "pm", config: { model: "mock-model", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1 }], createdAt: Date.now() };
-    vi.mocked(sessionStore.getSessions).mockReturnValue({ pm: { runtime: "pi-cli", sessionId: "session-123", sessionFile: "/tmp/session.json" } });
-    mockHandle.destroy.mockClear();
-    mockHandle.abort.mockClear();
-    mockHandle.subscribe.mockReturnValue(() => {});
-    const registry = new RuntimeRegistry();
-    registry.register(mockRuntime as any);
-    initAgentManager(registry);
+  it.each([true, false])("passes resumeSession only when enabled=%s", async enabled => {
+    writeConfig({ ...getDefaultConfig(), runtime: { sessionResume: enabled } });
+    const create = vi.spyOn(runtime, "createAgent");
+    await activateAgent(roomId, memberId);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].resumeSession).toEqual(enabled ? saved : undefined);
   });
 
-  it("passes resumeSession to runtime when sessionResume is enabled", async () => {
-    sessionResumeEnabled = true;
-
-    await activateAgent("room1", "pm");
-
-    const createOpts = mockRuntime.createAgent.mock.calls[0][0];
-    expect(createOpts.resumeSession).toEqual({
-      sessionId: "session-123",
-      sessionFile: "/tmp/session.json",
-    });
-  });
-
-  it("does not pass resumeSession when sessionResume is disabled", async () => {
-    sessionResumeEnabled = false;
-
-    await activateAgent("room1", "pm");
-
-    const createOpts = mockRuntime.createAgent.mock.calls[0][0];
-    expect(createOpts.resumeSession).toBeUndefined();
-  });
-
-  it("does not resume from legacy name-key sessions for migrated room members", async () => {
-    mockRoom = {
-      id: "room1",
-      name: "Room 1",
-      cwd: "/tmp",
-      members: ["architect"],
-      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1 }],
-      createdAt: Date.now(),
-    };
-    vi.mocked(sessionStore.getSessions).mockReturnValue({ architect: { runtime: "pi-cli", sessionId: "legacy", sessionFile: "/tmp/legacy.json" } });
-
-    await activateAgent("room1", "architect");
-
-    const createOpts = mockRuntime.createAgent.mock.calls[0][0];
-    expect(createOpts.member.id).toBe("rm_architect");
-    expect(createOpts.resumeSession).toBeUndefined();
-    expect(sessionStore.saveSession).toHaveBeenCalledWith("room1", "rm_architect", expect.objectContaining({ sessionId: "session-123" }));
+  it("does not resume another owner's session after taking their old display name", async () => {
+    updateMemberIdentity(memberId, { name: "renamed-owner" });
+    const other = createMember({ name: "pm", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" });
+    stampGlobalMemberIds(roomId, [memberId, other.id], memberId);
+    const create = vi.spyOn(runtime, "createAgent");
+    await activateAgent(roomId, "pm");
+    expect(create.mock.calls[0][0].member.id).toBe(other.id);
+    expect(create.mock.calls[0][0].resumeSession).toBeUndefined();
+    expect(sessionStore.getSessions(roomId, memberId)[memberId]).toMatchObject(saved);
   });
 
   it("explicit reset clears a missing-file reference without reading it", () => {
-    vi.mocked(sessionStore.getSessions).mockImplementation(() => { throw new Error("Session file referenced by current.json is missing"); });
-    expect(resetAgentSession("room1", "pm")).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
-    expect(sessionStore.getSessions).not.toHaveBeenCalled();
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "pm", "pi-cli");
+    rmSync(saved.sessionFile);
+    expect(() => sessionStore.getSessions(roomId, memberId)).toThrow("referenced by database is missing");
+    const read = vi.spyOn(sessionStore, "getSessions");
+    expect(resetAgentSession(roomId, memberId)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
+    expect(read).not.toHaveBeenCalled();
+    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
   });
 
-  it("destroys instance, clears session, resets cursor to null, and emits system event", async () => {
-    await activateAgent("room1", "pm");
-
-    const result = resetAgentSession("room1", "pm");
-
+  it("destroys instance, clears SQL session and cursor, emits the visible event, and retains SDK history", async () => {
+    const history = readFileSync(saved.sessionFile, "utf8");
+    const instance = await buildMemberAgentSession(memberId, `room:${roomId}`);
+    const destroy = vi.spyOn(instance!.handle, "destroy");
+    const result = resetAgentSession(roomId, memberId);
     expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
-    expect(mockHandle.destroy).toHaveBeenCalledTimes(1);
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "pm", "pi-cli");
-    expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "pm", null);
-    expect(appendEventToDisk).toHaveBeenCalledWith(
-      "room1",
-      "pm",
-      expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh." }),
-    );
-    expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(
-      "room1",
-      "pm",
-      expect.objectContaining({
-        type: "agent:event",
-        roomId: "room1",
-        agent: "pm",
-        event: expect.objectContaining({ type: "system" }),
-      }),
-    );
-    expect(broadcastToRoom).toHaveBeenCalledWith("room1", {
-      type: "agent:status",
-      roomId: "room1",
-      agent: "pm",
-      status: "inactive",
-    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
+    expect(getCursors(roomId)[memberId]).toBeNull();
+    expect(loadEventsFromDisk(roomId, memberId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "system", text: result.message }),
+    ]));
+    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(roomId, "pm", expect.objectContaining({
+      type: "agent:event", roomId, agent: "pm", memberId, event: expect.objectContaining({ type: "system", text: result.message }),
+    })));
+    expect(broadcastToRoom).toHaveBeenCalledWith(roomId, expect.objectContaining({ type: "agent:status", roomId, agent: "pm", memberId, status: "inactive" }));
+    expect(readFileSync(saved.sessionFile, "utf8")).toBe(history);
   });
 
-  it.each([
-    ["dm:mem_worker", "mem_worker"],
-    ["topic:topic_a", "rm_worker"],
-  ])("preserves the full %s scope for non-room reset state and events", (scopeId, memberId) => {
-    vi.mocked(sessionStore.getSessions).mockReturnValue({ [memberId]: { runtime: "pi-cli", sessionId: "saved" } });
-
-    resetAgentSession(scopeId, memberId);
-
-    expect(sessionStore.clearSession).toHaveBeenCalledWith(scopeId, memberId, "pi-cli");
-    expect(roomStore.setCursor).not.toHaveBeenCalled();
-    expect(appendEventToDisk).toHaveBeenCalledWith(scopeId, memberId, expect.objectContaining({ type: "system" }));
-    const status = expect.objectContaining({ type: "agent:status", roomId: scopeId, status: "inactive" });
-    if (scopeId.startsWith("dm:")) expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scopeId, expect.any(String), status);
-    else expect(broadcastToRoom).toHaveBeenCalledWith(scopeId, status);
+  it.each(["dm", "topic"])("preserves the full %s scope for non-room reset state and events", kind => {
+    const topic = kind === "topic" ? createTopic({ roomId, title: "Reset topic", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
+    const scope = topic ? `topic:${topic.id}` : `dm:${memberId}`;
+    const retained = retainSession(memberId, scope);
+    const roomCursor = getCursors(roomId)[memberId];
+    resetAgentSession(scope, memberId);
+    expect(sessionStore.getSessions(scope, memberId)).toEqual({});
+    expect(sessionStore.getSessions(roomId, memberId)[memberId]).toMatchObject(saved);
+    expect(getCursors(roomId)[memberId]).toBe(roomCursor);
+    expect(loadEventsFromDisk(scope, memberId)).toEqual(expect.arrayContaining([expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh." })]));
+    const status = expect.objectContaining({ type: "agent:status", roomId: scope, memberId, status: "inactive" });
+    if (kind === "dm") expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scope, "pm", status);
+    else expect(broadcastToRoom).toHaveBeenCalledWith(scope, status);
+    expect(readFileSync(retained.sessionFile, "utf8")).toContain("retained requirement");
   });
 
-  it("deletes legacy name-key session and cursor entries when resetting a migrated member", () => {
-    mockRoom = {
-      id: "room1",
-      name: "Room 1",
-      cwd: "/tmp",
-      members: ["architect"],
-      roomMembers: [{ id: "rm_architect", roomId: "room1", name: "architect", sourceAgent: "architect", createdAt: 1, updatedAt: 1 }],
-      createdAt: Date.now(),
-    };
-    vi.mocked(sessionStore.getSessions).mockReturnValue({
-      rm_architect: { runtime: "pi-cli", sessionId: "current", sessionFile: "/tmp/current.json" },
-      architect: { runtime: "pi-cli", sessionId: "legacy", sessionFile: "/tmp/legacy.json" },
-    });
-
-    resetAgentSession("room1", "architect");
-
-    expect(sessionStore.clearSession).toHaveBeenCalledWith("room:room1", "rm_architect", "pi-cli");
-    expect(sessionStore.clearSession).not.toHaveBeenCalledWith("room:room1", "architect", expect.any(String));
-    expect(sessionStore.deleteSessionEntry).toHaveBeenCalledWith("room:room1", "architect");
-    expect(roomStore.setCursor).toHaveBeenCalledWith("room1", "rm_architect", null);
-    expect(roomStore.setCursor).not.toHaveBeenCalledWith("room1", "architect", null);
-    expect(roomStore.deleteCursor).toHaveBeenCalledWith("room1", "architect");
+  it("reset targets the stable owner, never a different owner whose ID equals its display name", () => {
+    const other = createMember({ name: "other", agentTemplate: "general" });
+    stampGlobalMemberIds(roomId, [memberId, other.id], memberId);
+    const otherSaved = retainSession(other.id, `room:${roomId}`);
+    const message = addMessage(roomId, { sender: "user", content: "other cursor", mentions: [] });
+    setCursor(roomId, other.id, message.id);
+    updateMemberIdentity(memberId, { name: other.id });
+    resetAgentSession(roomId, memberId);
+    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
+    expect(getCursors(roomId)[memberId]).toBeNull();
+    expect(sessionStore.getSessions(roomId, other.id)[other.id]).toMatchObject(otherSaved);
+    expect(getCursors(roomId)[other.id]).toBe(message.id);
   });
 });

@@ -1,98 +1,79 @@
-vi.mock("../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn(),
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { coreFixture } from "./helpers/core-fixture.js";
+import { MockRuntime, resetMocks, setMockPromptFn } from "./helpers/mock-runtime.js";
+import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
+import { abortAgent, activateAgent, buildMemberAgentSession, getAgentInstanceForScope, initAgentManager, shutdownAll } from "../src/engine/agent-manager.js";
+import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
+import { saveAgentDefinition } from "../src/workforce/agent-store.js";
+import { createMember } from "../src/workspace/member-registry.js";
+import { createRoom, stampGlobalMemberIds } from "../src/workspace/room-store.js";
+import { addMessage } from "../src/workspace/message-store.js";
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+let fixture: ReturnType<typeof coreFixture>;
+let roomId: string;
+let memberId: string;
+let release = () => {};
+let activation: Promise<void> | undefined;
 
-// Mock dependencies before importing agent-manager
-vi.mock("../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-}));
-
-vi.mock("../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn(),
-}));
-
-
-
-vi.mock("../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
-}));
-
-vi.mock("../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(),
-  getCursors: vi.fn(() => ({})),
-  setCursor: vi.fn(),
-}));
-
-vi.mock("../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({})),
-  saveSession: vi.fn(),
-  clearSession: vi.fn(),
-}));
-
-vi.mock("../src/knowledge/store.js", () => ({
-  listEntries: vi.fn(() => []),
-  getEntry: vi.fn(),
-}));
-
-vi.mock("../src/communication/message-bus.js", () => ({
-  postMessage: vi.fn(),
-  getMessagesSince: vi.fn(() => []),
-  getLatestMessageId: vi.fn(),
-}));
-
-vi.mock("../src/communication/ws.js", () => ({
-  broadcastToRoom: vi.fn(),
-  broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../src/engine/prompt-assembler.js", () => ({
-  buildAgentPrompt: vi.fn(() => ({ agentPrompt: "", envPrompt: "", fullPrompt: "" })),
-}));
-
-vi.mock("../src/engine/event-handler.js", () => ({
-  handleAgentEvent: vi.fn(),
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
-}));
-
-import { abortAgent } from "../src/engine/agent-manager.js";
-import { broadcastToRoom } from "../src/communication/ws.js";
-
-describe("abortAgent", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns not_found when no instance exists", () => {
-    const result = abortAgent("room1", "nonexistent");
-    expect(result).toEqual({ ok: false, action: "not_found" });
-  });
-
-  it("returns already_idle for non-working agent (no instance = not_found)", () => {
-    // Without a running instance, it's not_found
-    const result = abortAgent("room1", "agent1");
-    expect(result.ok).toBe(false);
-    expect(result.action).toBe("not_found");
-  });
+beforeEach(() => {
+  fixture = coreFixture();
+  resetMocks();
+  release = () => {};
+  activation = undefined;
+  writeConfig(getDefaultConfig());
+  saveAgentDefinition("general", "---\nname: general\nskills: []\n---\nGeneral");
+  memberId = createMember({ name: "worker", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" }).id;
+  roomId = createRoom("Abort", undefined, []).id;
+  stampGlobalMemberIds(roomId, [memberId], memberId);
+  const registry = new RuntimeRegistry();
+  registry.register(new MockRuntime("pi-cli"));
+  initAgentManager(registry);
 });
 
-describe("abortAgent — with mocked instances", () => {
-  // Test the abort logic through the exported function by directly manipulating
-  // the instances Map. We access it via a known activation flow.
-  // Since we can't easily inject instances, we test the API route level in acceptance tests.
-  // Here we verify the function signature and edge cases.
+afterEach(async () => {
+  release();
+  try { await activation; }
+  finally {
+    try { await shutdownAll(); }
+    finally { vi.restoreAllMocks(); fixture.close(); }
+  }
+});
+
+describe("abortAgent", () => {
+  it("returns the not_found shape when no instance exists", () => {
+    expect(abortAgent(roomId, memberId)).toEqual({ ok: false, action: "not_found" });
+  });
+
+  it("returns already_idle without aborting an idle instance", async () => {
+    const instance = await buildMemberAgentSession(memberId, `room:${roomId}`);
+    const abort = vi.spyOn(instance!.handle, "abort");
+    expect(abortAgent(roomId, memberId)).toEqual({ ok: true, action: "already_idle" });
+    expect(abort).not.toHaveBeenCalled();
+  });
 
   it("abort function is exported and callable", () => {
     expect(typeof abortAgent).toBe("function");
   });
 
-  it("returns correct shape for not_found", () => {
-    const result = abortAgent("any-room", "any-agent");
-    expect(result).toHaveProperty("ok");
-    expect(result).toHaveProperty("action");
-    expect(typeof result.ok).toBe("boolean");
-    expect(typeof result.action).toBe("string");
+  it("stops native work without claiming idle before the prompt settles", async () => {
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const prompt = vi.fn(() => gate);
+    setMockPromptFn(prompt);
+    addMessage(roomId, { sender: "user", content: "@worker work", mentions: ["worker"] });
+    activation = activateAgent(roomId, memberId);
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    const instance = getAgentInstanceForScope(`room:${roomId}`, memberId)!;
+    const abort = vi.spyOn(instance.handle, "abort");
+    expect(abortAgent(roomId, memberId)).toEqual({ ok: true, action: "aborted" });
+    expect(abort).toHaveBeenCalledOnce();
+    expect(instance.status).toBe("working");
+    expect(instance.promptInFlight).toBe(true);
+    release();
+    await activation;
+    await vi.waitFor(() => {
+      expect(instance.promptInFlight).toBe(false);
+      expect(instance.status).toBe("idle");
+    });
+    expect(getAgentInstanceForScope(`room:${roomId}`, memberId)).toBe(instance);
   });
 });

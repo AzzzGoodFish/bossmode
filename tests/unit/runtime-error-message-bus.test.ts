@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 let tempDir: string;
+let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
 
 vi.mock("../../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,
@@ -19,19 +17,19 @@ describe("runtime error Room boundary", () => {
   let messageBus: typeof import("../../src/communication/message-bus.js");
 
   beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bossmode-runtime-error-room-"));
-    mkdirSync(join(tempDir, "agents"), { recursive: true });
-    writeFileSync(join(tempDir, "agents", "pm.md"), "---\nname: pm\n---\nPM", "utf-8");
-    wsMocks.broadcastToRoom.mockReset();
     vi.resetModules();
+    const { coreFixture } = await import("../helpers/core-fixture.js");
+    fixture = coreFixture();
+    tempDir = fixture.root;
+    wsMocks.broadcastToRoom.mockReset();
     roomStore = await import("../../src/workspace/room-store.js");
     messageBus = await import("../../src/communication/message-bus.js");
   });
 
-  afterEach(() => rmSync(tempDir, { recursive: true, force: true }));
+  afterEach(() => fixture.close());
 
-  it("caps runtime errors before Room persistence and WS publication only", () => {
-    const room = roomStore.createRoom("test", "/tmp", [{ agent: "pm", name: "pm" }]);
+  it("caps runtime errors before Room persistence and WS publication only", async () => {
+    const room = roomStore.createRoom("test", undefined, []);
     const failure = `Member "pm" request failed. Error: ${"e".repeat(5_763)}`;
     const userContent = "u".repeat(5_763);
 
@@ -41,6 +39,7 @@ describe("runtime error Room boundary", () => {
     expect(Array.from(errorMessage.content)).toHaveLength(300);
     expect(errorMessage.content.endsWith("…")).toBe(true);
     expect(userMessage.content).toBe(userContent);
+    await vi.waitFor(() => expect(wsMocks.broadcastToRoom).toHaveBeenCalledTimes(2));
     expect(wsMocks.broadcastToRoom).toHaveBeenNthCalledWith(1, room.id, {
       type: "room:message",
       roomId: room.id,
@@ -52,8 +51,11 @@ describe("runtime error Room boundary", () => {
       message: expect.objectContaining({ content: userContent }),
     });
 
-    const persisted = readFileSync(join(tempDir, "rooms", room.id, "messages.jsonl"), "utf-8").trim().split("\n").map(JSON.parse);
+    fixture.reopen();
+    const persisted = fixture.db.all<{ content: string }>("SELECT content FROM messages WHERE scope_id=? ORDER BY seq", room.id);
+    expect(persisted).toHaveLength(2);
     expect(persisted[0].content).toBe(errorMessage.content);
     expect(persisted[1].content).toBe(userContent);
+    expect(messageBus.getMessagesSince(room.id, null).map(message => message.content)).toEqual([errorMessage.content, userContent]);
   });
 });

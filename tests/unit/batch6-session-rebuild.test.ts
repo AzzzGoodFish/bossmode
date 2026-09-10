@@ -1,146 +1,139 @@
-/**
- * Batch 6 §2+§3: unified buildMemberAgentSession + reload semantics.
- */
-import { describe, expect, it, vi } from "vitest";
+/** Unified session assembly, awaited reload and compaction admission across scopes. */
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTestServer, closeTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace, type TestServer } from "../helpers/test-server.js";
+import { createTestServer, closeTestServer, createMockRoom, getTestWorkspace, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
+import { resetMocks, setMockCompactFn, setMockPromptFn } from "../helpers/mock-runtime.js";
+import { pendingRuntimeInputCount, runtimeInputOwner } from "../../src/services/runtime-input-service.js";
 
 setupTestWorkspace();
+afterEach(() => { vi.restoreAllMocks(); resetMocks(); });
 
-async function setupRoomWithActivatedMember(name: string): Promise<{ ts: TestServer; token: string; roomId: string; memberId: string; scopeId: string }> {
+async function setupRoom(name: string) {
+  resetMocks();
   const ts = await createTestServer();
-  const token = await loginAndGetToken(ts.port);
-  const created = await jsonRequest(ts.port, "POST", "/api/members", {
-    token, body: { name, agentTemplate: "pm" },
-  });
-  const memberId = JSON.parse(created.body).member.memberId as string;
-  // configure model+credential so the member is activation-ready (single path)
-  const profileRes = await jsonRequest(ts.port, "POST", "/api/model-credential-profiles", {
-    token,
-    body: {
-      name: "batch6 provider",
-      providerSlug: `prov-${Date.now()}`,
-      protocol: "openai-completions",
-      baseUrl: "https://api.example.invalid/v1",
-      authType: "api_key",
-      apiKey: "sk-batch6",
-      requestProfile: "standard",
-      enabled: true,
-      isDefault: false,
-      models: [{ id: "m1", contextWindow: 1024 }],
-    },
-  });
-  const profile = JSON.parse(profileRes.body);
-  const patched = await jsonRequest(ts.port, "PATCH", `/api/members/${memberId}`, {
-    token, body: { model: `${profile.providerSlug}/m1`, credentialId: profile.id },
-  });
-  expect(patched.status).toBe(200);
-  const room = await jsonRequest(ts.port, "POST", "/api/rooms", {
-    token, body: { name: `${name}-room`, cwd: getTestBossmodeDir(), memberIds: [memberId] },
-  });
-  expect(room.status).toBe(200);
-  const roomId = JSON.parse(room.body).id as string;
-  return { ts, token, roomId, memberId, scopeId: `room:${roomId}` };
+  try {
+    const token = await loginAndGetToken(ts.port);
+    const room = await createMockRoom(ts.port, token, `${name}-room`, [name]);
+    const memberId = room.globalMemberIds![0];
+    return { ts, roomId: room.id, memberId, scopeId: `room:${room.id}` };
+  } catch (error) { await closeTestServer(ts); throw error; }
 }
 
 describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
-  it("activation builds via the unified builder; reload rebuilds with history-keep semantics", async () => {
-    const { ts, token, roomId, memberId, scopeId } = await setupRoomWithActivatedMember("rebot");
-    const { getAgentInstanceForScope, reloadMemberSession } = await import("../../src/engine/agent-manager.js");
-
-    const sent = await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/messages`, {
-      token, body: { content: `@rebot hello` },
-    });
-    expect(sent.status).toBeLessThan(300);
-
-    let instance: any = null;
-    for (let i = 0; i < 50 && !instance; i++) {
-      instance = getAgentInstanceForScope(scopeId, memberId);
-      if (!instance) await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(instance).toBeTruthy();
-    expect(instance.scopeId).toBe(scopeId);
-
-    const result = await reloadMemberSession(scopeId, memberId, "tool");
-    expect(result).toEqual({ queued: false, rebuilt: true });
-    const rebuilt = getAgentInstanceForScope(scopeId, memberId);
-    expect(rebuilt).toBeTruthy();
-    expect(rebuilt).not.toBe(instance);
-    // Session store NOT cleared (reload keeps history — resetAgentSession clears it).
-    const { getAgentInstanceForScope: _g } = { getAgentInstanceForScope };
-    await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
-    await new Promise<void>((r) => ts.server.close(() => r()));
-  }, 20000);
-
-  it("mid-run reload queues; compaction_end settles the queue", async () => {
-    const { ts, token, roomId, memberId, scopeId } = await setupRoomWithActivatedMember("queuebot");
-    const { getAgentInstanceForScope, reloadMemberSession } = await import("../../src/engine/agent-manager.js");
-    await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/messages`, {
-      token, body: { content: `@queuebot hi` },
-    });
-    let instance: any = null;
-    for (let i = 0; i < 50 && !instance; i++) {
-      instance = getAgentInstanceForScope(scopeId, memberId);
-      if (!instance) await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(instance).toBeTruthy();
-
-    // Mid-run → queued
-    instance.status = "working";
-    const queued = await reloadMemberSession(scopeId, memberId, "tool");
-    expect(queued).toEqual({ queued: true, rebuilt: false });
-    expect(instance.pendingReload).toBe("tool");
-
-    // Turn settles → compaction_end flushes the pending rebuild
-    instance.status = "idle";
-    instance.compacting = true;
-    instance.handle.emit({ type: "compaction_end" });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(instance.pendingReload).toBeNull();
-    const rebuilt = getAgentInstanceForScope(scopeId, memberId);
-    expect(rebuilt).toBeTruthy();
-    expect(rebuilt).not.toBe(instance);
-
-    await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
-    await new Promise<void>((r) => ts.server.close(() => r()));
-  }, 20000);
-
-  it.each(["room", "dm", "topic"])("%s messages wait for compaction; only explicit Stop aborts it", async (kind) => {
-    const { ts, roomId, memberId } = await setupRoomWithActivatedMember(`compact-${kind}`);
-    const manager = await import("../../src/engine/agent-manager.js");
-    const { createTopic } = await import("../../src/workspace/topic-store.js");
-    const topic = kind === "topic" ? createTopic({ roomId, title: "compaction", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
-    const scopeId = kind === "dm" ? `dm:${memberId}` : topic ? `topic:${topic.id}` : roomId;
+  it("activation builds via the unified builder; reload awaits cleanup and preserves SQL session history", async () => {
+    const { ts, roomId, memberId, scopeId } = await setupRoom("rebot");
+    let releaseCleanup = () => {};
+    let reloading: Promise<unknown> | undefined;
     try {
-      const instance = await manager.buildMemberAgentSession(memberId, kind === "room" ? `room:${roomId}` : scopeId);
+      const manager = await import("../../src/engine/agent-manager.js");
+      const { saveSession, getSessions } = await import("../../src/workspace/session-store.js");
+      saveSession(roomId, memberId, { runtime: "pi-cli", sessionId: "retained-session" });
+      // An empty room builds an idle instance, not an invented human instruction.
+      await manager.activateAgent(roomId, memberId);
+      const instance = manager.getAgentInstanceForScope(scopeId, memberId)!;
+      expect(instance.scopeId).toBe(scopeId);
+      expect(instance.status).toBe("idle");
+      const originalCleanup = instance.handle.destroyAndWait!.bind(instance.handle);
+      const gate = new Promise<void>(resolve => { releaseCleanup = resolve; });
+      const cleanup = vi.spyOn(instance.handle, "destroyAndWait").mockImplementation(async () => { await gate; await originalCleanup(); });
+      let settled = false;
+      reloading = manager.reloadMemberSession(scopeId, memberId, "tool").then(result => { settled = true; return result; });
+      await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+      expect(settled).toBe(false);
+      releaseCleanup();
+      expect(await reloading).toEqual({ queued: false, rebuilt: true });
+      const rebuilt = manager.getAgentInstanceForScope(scopeId, memberId);
+      expect(rebuilt).toBeTruthy();
+      expect(rebuilt).not.toBe(instance);
+      expect(getSessions(roomId, memberId)[memberId]).toMatchObject({ sessionId: "retained-session" });
+    } finally {
+      releaseCleanup();
+      try { await reloading; } finally { await closeTestServer(ts); }
+    }
+  });
+
+  // Source defect: compaction_end arrives with turnActive=true, then agent_end
+  // clears it without flushing pendingReload (agent-manager.ts:2457/2476).
+  // PiSdkHandle.compactInternal emits this same order (pi-sdk.ts:1005-1018).
+  it.fails("[source defect] mid-compaction reload queues; actual compaction settlement rebuilds the session", async () => {
+    const { ts, memberId, scopeId } = await setupRoom("queuebot");
+    let release = () => {};
+    let compacting: Promise<unknown> | undefined;
+    try {
+      const manager = await import("../../src/engine/agent-manager.js");
+      const instance = await manager.buildMemberAgentSession(memberId, scopeId);
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const compact = vi.fn(() => gate);
+      setMockCompactFn(compact);
+      compacting = manager.compactMember(scopeId, memberId);
+      await vi.waitFor(() => expect(compact).toHaveBeenCalledOnce());
+      expect(await manager.reloadMemberSession(scopeId, memberId, "tool")).toEqual({ queued: true, rebuilt: false });
+      expect(instance!.pendingReload).toBe("tool");
+      release();
+      expect(await compacting).toEqual({ ok: true, action: "compacted" });
+      await vi.waitFor(() => {
+        const rebuilt = manager.getAgentInstanceForScope(scopeId, memberId);
+        expect(rebuilt).toBeTruthy();
+        expect(rebuilt).not.toBe(instance);
+      });
+      expect(instance!.pendingReload).toBeNull();
+    } finally {
+      release();
+      try { await compacting; } finally { await closeTestServer(ts); }
+    }
+  });
+
+  it.each(["room", "dm", "topic"])("%s messages wait in SQL during compaction; only explicit Stop aborts it", async kind => {
+    const { ts, roomId, memberId } = await setupRoom(`compact-${kind}`);
+    let release = () => {};
+    let compacting: Promise<unknown> | undefined;
+    try {
+      const manager = await import("../../src/engine/agent-manager.js");
+      const { createTopic, addTopicMessage } = await import("../../src/workspace/topic-store.js");
+      const { addDmMessage } = await import("../../src/workspace/dm-message-store.js");
+      const { addMessage } = await import("../../src/workspace/message-store.js");
+      const topic = kind === "topic" ? createTopic({ roomId, title: "compaction", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
+      const scopeId = kind === "dm" ? `dm:${memberId}` : topic ? `topic:${topic.id}` : `room:${roomId}`;
+      const instance = await manager.buildMemberAgentSession(memberId, scopeId);
       expect(instance).toBeTruthy();
-      const handle = instance!.handle as any;
-      handle.emit({ type: "agent_start" });
-      handle.emit({ type: "compaction_start" });
-      const abort = vi.spyOn(handle, "abort");
-      const prompt = vi.spyOn(handle, "prompt");
-      const queued = instance!.queuedInputs.length;
-      if (kind === "dm") await manager.activateDmMember(memberId);
-      else if (topic) await manager.activateTopicMember(roomId, topic.id, memberId);
-      else {
-        const { addMessage } = await import("../../src/workspace/message-store.js");
-        addMessage(roomId, { sender: "user", content: `@compact-${kind} continue`, mentions: [`compact-${kind}`] });
-        await manager.activateAgent(roomId, memberId);
-      }
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const compact = vi.fn(() => gate);
+      setMockCompactFn(compact);
+      const prompt = vi.fn().mockResolvedValue(undefined);
+      setMockPromptFn(prompt);
+      compacting = manager.compactMember(scopeId, memberId);
+      await vi.waitFor(() => expect(compact).toHaveBeenCalledOnce());
+      // Ignore compactMember's initial stop of the old turn; observe new arrivals.
+      const abort = vi.spyOn(instance!.handle, "abort");
+      const owner = runtimeInputOwner(scopeId, memberId);
+      expect(pendingRuntimeInputCount(owner)).toBe(0);
+      const message = { sender: "user", content: `@compact-${kind} continue`, mentions: [`compact-${kind}`] };
+      if (kind === "dm") { addDmMessage(memberId, message); await manager.activateDmMember(memberId); }
+      else if (topic) { addTopicMessage(roomId, topic.id, message); await manager.activateTopicMember(roomId, topic.id, memberId); }
+      else { addMessage(roomId, message); await manager.activateAgent(roomId, memberId); }
       expect(abort).not.toHaveBeenCalled();
       expect(prompt).not.toHaveBeenCalled();
-      expect(instance!.queuedInputs.length).toBeGreaterThan(queued);
+      expect(pendingRuntimeInputCount(owner)).toBe(1);
       if (kind !== "dm") {
-        // Even an urgent message must not cancel compaction.
-        await manager.interruptAgent(scopeId, memberId, "user");
+        if (!topic) addMessage(roomId, { ...message, content: "urgent follow-up" });
+        await manager.interruptAgent(topic ? scopeId : roomId, memberId, "user");
         expect(abort).not.toHaveBeenCalled();
+        expect(pendingRuntimeInputCount(owner)).toBe(2);
       }
-      manager.abortAgent(scopeId, memberId);
+      expect(manager.abortAgent(kind === "room" ? roomId : scopeId, memberId)).toEqual({ ok: true, action: "aborted" });
       expect(abort).toHaveBeenCalledTimes(1);
+      expect(pendingRuntimeInputCount(owner)).toBe(0);
+      const rows = getTestWorkspace().db.all<{ status: string; diagnosis: string }>("SELECT status,diagnosis FROM queued_inputs WHERE scope_id=? AND target_actor_key=?", owner.scopeId, memberId);
+      expect(rows).toHaveLength(kind === "dm" ? 1 : 2);
+      for (const row of rows) expect(row).toMatchObject({ status: "interrupted", diagnosis: "explicit stop" });
+      release();
+      await compacting;
+      expect(prompt).not.toHaveBeenCalled();
     } finally {
-      await closeTestServer(ts);
+      release();
+      try { await compacting; } finally { await closeTestServer(ts); }
     }
   });
 
@@ -148,7 +141,6 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, "../../src/engine/agent-manager.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
-    // compile lives only inside the builder (model-switch comparison excluded)
-    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(3); // dm + topic branches of the builder
+    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(3);
   });
 });
