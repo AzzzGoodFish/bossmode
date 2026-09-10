@@ -476,6 +476,8 @@ export interface RoomMessage {
    * Omitted/empty = FYI (no reply debt). User posts omit this; user @ always debts.
    */
   needResponse?: string[];
+  /** Inert historical boolean; retained as provenance, never a recipient list or delivery intent. */
+  legacyNeedResponse?: boolean;
   /** Stable reply-obligation targets, captured when the message is sent. */
   needResponseMemberIds?: string[];
   /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */

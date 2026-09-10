@@ -88,6 +88,45 @@ describe("authoritative message transactions",() => {
 });
 
 describe("history, search and cursors",() => {
+  it("retains historical response booleans as inert provenance in room, DM and topic history",() => {
+    for (const scope of ["room","dm:mem_old","topic:t"]) {
+      for (const [i,flag] of [true,false].entries()) {
+        const raw = {id:`boolean-${i}`,seq:i+1,ts:123,sender:"literal old name",content:"literal 历史",mentions:["unresolved"],mentionMemberIds:[],needResponse:flag,needResponseMemberIds:[]} as unknown as RoomMessage;
+        const expected = {...raw,legacyNeedResponse:flag}; delete expected.needResponse;
+        importMessage(db,scope,raw);
+        expect(readMessages(scope)[i]).toEqual(expected);
+        expect(pageMessages(scope)).toContainEqual(expected);
+        expect(searchMessageFacts(scope,{query:"历史"}).messages).toContainEqual(expected);
+        expect(patchMessage(scope,raw.id,{content:"edited"})).toEqual({...expected,content:"edited"});
+        importArchivedMessage(db,scope,900,i,raw);
+        expect(readArchivedMessages(scope,900)[i]).toEqual(expected);
+        expect((raw as any).needResponse).toBe(flag);
+      }
+      expect(db.get<{n:number}>("SELECT COUNT(*) n FROM message_mentions WHERE scope_id=? AND kind='response'",scope)!.n).toBe(0);
+      archiveMessagesInTransaction(db,scope,0,1000);
+      expect(readArchivedMessages(scope,1000).map(m=>m.legacyNeedResponse)).toEqual([true,false]);
+    }
+    db=fixture.reopen();
+    expect(readArchivedMessages("room",900).map(m=>m.legacyNeedResponse)).toEqual([true,false]);
+    for(const table of ["outbox","reply_obligations","queued_inputs","execution_attempts"]) expect(db.get<{n:number}>(`SELECT COUNT(*) n FROM ${table}`)!.n).toBe(0);
+  });
+  it("keeps response absence and explicit lists distinct and rejects malformed current input or provenance collisions",() => {
+    const base = {id:"source",ts:1,sender:"user",content:"inert",mentions:[]};
+    for(const [i,value] of [undefined,[],["literal"]].entries()) {
+      const raw={...base,id:`list-${i}`,...(value===undefined?{}:{needResponse:value})};
+      importMessage(db,"room",raw);expect(readMessages("room")[i]).toEqual(raw);
+    }
+    expect(() => appendMessage("room",{...input,needResponse:true} as any)).toThrow("Invalid needResponse");
+    expect(() => appendMessage("room",{...input,legacyNeedResponse:true} as any)).toThrow("Historical response metadata is import-only");
+    expect(() => importMessage(db,"room",{...base,legacyNeedResponse:"true"} as any)).toThrow("Invalid historical response metadata");
+    const normalized={...base,id:"normalized",legacyNeedResponse:false,needResponseMemberIds:["mem_gone","mem_gone"]};
+    importMessage(db,"room",normalized);expect(readMessages("room").at(-1)).toEqual(normalized);
+    replaceMessages("room",readMessages("room"));expect(readMessages("room").at(-1)).toEqual(normalized);
+    for(const value of [null,1,"literal",{}]) expect(() => importMessage(db,"room",{...base,needResponse:value} as any)).toThrow("Invalid needResponse");
+    expect(() => importMessage(db,"room",{...base,needResponse:true,legacyNeedResponse:false} as any)).toThrow("Conflicting historical needResponse metadata");
+    expect(() => importArchivedMessage(db,"room",900,0,{...base,needResponse:true,legacyNeedResponse:true} as any)).toThrow("Conflicting historical needResponse metadata");
+    expect(db.get<{n:number}>("SELECT COUNT(*) n FROM outbox")!.n).toBe(0);
+  });
   it("strictly preserves raw metadata, missing seq, snapshots and full unbounded historical content",() => {
     const raw: RoomMessage = {id:"raw-id",ts:123,sender:"old",content:"数据".repeat(200000),mentions:[],needResponse:[],urgentMentionMemberIds:[],replyTo:{messageId:"gone",seq:27},attachments:[{id:"a",originalName:"old.txt",storedName:"a.txt",mimeType:"text/plain",size:3} as any]};
     importMessage(db,"room",raw); expect(readMessages("room")).toEqual([raw]);

@@ -10,7 +10,7 @@ const lists = {
   needResponse: ["response", "label"], needResponseMemberIds: ["response", "id"],
 } as const;
 type Row = { position: number; scope_id: string; id: string; seq: number | null; ts: number; sender: string; sender_member_id: string | null; content: string; type: RoomMessage["type"] | null; extra_json: string };
-export type MessageInput = Omit<RoomMessage, "id" | "ts" | "seq">;
+export type MessageInput = Omit<RoomMessage, "id" | "ts" | "seq" | "legacyNeedResponse">;
 export type MessagePageOptions = { limit?: number; before?: string; around?: string; fromSeq?: number };
 
 function hydrate(db: Database, row: Row): RoomMessage {
@@ -33,6 +33,7 @@ function validate(message: RoomMessage): void {
   if (message.senderMemberId !== undefined && typeof message.senderMemberId !== "string") throw new Error("Invalid sender member ID");
   if (message.replyTo && (typeof message.replyTo.messageId !== "string" || !Number.isSafeInteger(message.replyTo.seq))) throw new Error("Invalid reply identity");
   if (message.seq !== undefined && (!Number.isSafeInteger(message.seq) || message.seq < 1)) throw new Error("Invalid message sequence");
+  if (message.legacyNeedResponse !== undefined && typeof message.legacyNeedResponse !== "boolean") throw new Error("Invalid historical response metadata");
   for (const key of Object.keys(lists) as (keyof typeof lists)[]) if (message[key] !== undefined && (!Array.isArray(message[key]) || message[key]!.some(v => typeof v !== "string"))) throw new Error(`Invalid ${key}`);
 }
 function insert(db: Database, scopeId: string, message: RoomMessage): void {
@@ -53,6 +54,7 @@ function insert(db: Database, scopeId: string, message: RoomMessage): void {
  * The caller may compose this in its task/business transaction. Always records dispatch intent.
  */
 export function appendMessageInTransaction(db: Database, scopeId: string, input: MessageInput): RoomMessage {
+  if (Object.hasOwn(input, "legacyNeedResponse")) throw new Error("Historical response metadata is import-only");
   return db.transaction(tx => {
     const seq = tx.get<{ next_seq: number }>("SELECT next_seq FROM scope_sequences WHERE scope_id=?",scopeId)?.next_seq ?? 1;
     const message = { ...limitRuntimeFailureRoomMessage(input), id: `msg-${randomUUID().slice(0,8)}`, seq, ts: Date.now() };
@@ -63,8 +65,20 @@ export function appendMessageInTransaction(db: Database, scopeId: string, input:
 }
 export function appendMessage(scopeId: string, input: MessageInput): RoomMessage { return appendMessageInTransaction(getDatabase(),scopeId,input); }
 
+/** Old persisted booleans are not recipient lists. Retain the source value as
+ * inert provenance rather than guessing recipients, FYI semantics, or delivery.
+ * New messages still pass the strict list validation above.
+ */
+function normalizeHistoricalMessage(message: RoomMessage): RoomMessage {
+  const raw = message as unknown as Record<string, unknown>;
+  if (typeof raw.needResponse !== "boolean") return message;
+  if (Object.hasOwn(raw, "legacyNeedResponse")) throw new Error("Conflicting historical needResponse metadata");
+  const { needResponse, ...rest } = message;
+  return { ...rest, legacyNeedResponse: raw.needResponse };
+}
+
 /** Strict import, no runtime limiting or name resolution, and no historical activation. */
-export function importMessage(db: Database, scopeId: string, message: RoomMessage): void { db.transaction(tx => insert(tx,scopeId,message)); }
+export function importMessage(db: Database, scopeId: string, message: RoomMessage): void { db.transaction(tx => insert(tx,scopeId,normalizeHistoricalMessage(message))); }
 export function importMessageNextSequence(db: Database, scopeId: string, nextSeq: number): void {
   if (!Number.isSafeInteger(nextSeq) || nextSeq < 1) throw new Error("Invalid next message sequence");
   db.run("INSERT INTO scope_sequences VALUES(?,?) ON CONFLICT(scope_id) DO UPDATE SET next_seq=MAX(next_seq,excluded.next_seq)",scopeId,nextSeq);
@@ -151,6 +165,7 @@ export function readMemberCursors(scopeId: string): Record<string,string | null>
  * Parent owns archive summaries/metadata and replaces archive-store's filesystem orchestration.
  */
 export function importArchivedMessage(db: Database,scopeId: string,archiveTs: number,ordinal: number,message: RoomMessage): void {
+  message = normalizeHistoricalMessage(message);
   validate(message);
   if (!Number.isFinite(archiveTs) || !Number.isSafeInteger(ordinal) || ordinal < 0) throw new Error("Invalid archive identity");
   db.run("INSERT INTO message_archive_entries VALUES(?,?,?,?,?,?,?,?,?,?)",scopeId,archiveTs,ordinal,message.id,message.seq ?? null,message.ts,message.sender,message.senderMemberId ?? null,message.content,JSON.stringify(message));
