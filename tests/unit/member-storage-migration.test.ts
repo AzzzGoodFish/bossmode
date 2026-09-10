@@ -103,8 +103,7 @@ describe("automatic member storage conversion and recovery", () => {
     seed(); file("bossmode.pid",String(process.ppid)); await expect(start()).rejects.toThrow("Another Bossmode process");
     expect(existsSync(join(root,"bossmode.db"))).toBe(false); expect(existsSync(join(root,"backups"))).toBe(false);
   });
-  // This desired recovery contract exposes an importer/runner defect outside this PR's source ownership.
-  it.fails("BLOCKED: retries normal startup after persona publication but before database cutover", async () => {
+  it("retries normal startup after persona publication but before database cutover", async () => {
     seed(); fault.phase="before-cutover"; await expect(start()).rejects.toThrow("injected before cutover");
     expect(existsSync(join(root,"bossmode.db"))).toBe(false); expect(existsSync(join(root,"members/mem_a/member.json"))).toBe(true);
     expect(readFileSync(join(root,"members/mem_a/persona.md"),"utf8")).toBe("\n# 自由正文\n\n");

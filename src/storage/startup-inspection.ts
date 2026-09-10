@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, isAbsolute } from "node:path";
 import { requireRegularFile } from "./upgrade-files.js";
+import { assertNoMissingMemberDatabase } from "./startup-member-verification.js";
 
 export interface StartupSettingsSnapshot { configured: boolean; host?: string; port?: number; source: "empty" | "legacy" | "database"; }
 export const CORE_STORAGE_FORMAT = 1;
@@ -17,6 +18,7 @@ function address(value: {host?: unknown; port?: unknown}, source: StartupSetting
  */
 export function inspectStartupSettings(root: string): StartupSettingsSnapshot {
   if (!isAbsolute(root)) throw new Error("Startup data root must be absolute");
+  assertNoMissingMemberDatabase(root);
   const path=join(root,"bossmode.db");
   if (existsSync(path)) {
     requireRegularFile(path);

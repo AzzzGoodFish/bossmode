@@ -30,6 +30,8 @@ export interface UpgradeOptions {
   importData(context: UpgradeImportContext): Promise<void>;
   validate(context: UpgradeImportContext): Promise<void>;
   onProgress?(progress: UpgradeProgress): void;
+  /** Read-only live-asset checks before retirement/activation, including current-generation reopen. */
+  verifyReady?(db: Database): void;
   /** Production binds/starts consumers and publishes PID ownership before the lease is released. */
   activate?(db: Database): Promise<void>;
   /** Dependency-injected failure hook for isolated tests, never read from environment. */
@@ -155,6 +157,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     if (previous?.format === expected.format && previous.schema === expected.schema) {
       db = openDatabase(main);
       validateStorageMigrationHistory(db, options.migrations);
+      options.verifyReady?.(db);
       await retireSources(root, db, warnings, report);
       await options.activate?.(db);
       report({ phase: "ready" });
@@ -261,6 +264,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     renameSync(stage, main); syncDirectory(root); syncDirectory(join(root, "upgrades"));
     options.checkpoint?.("activated");
     db = openDatabase(main);
+    options.verifyReady?.(db);
     await retireSources(root, db, warnings, report);
     await options.activate?.(db);
     report({ phase: "ready" });

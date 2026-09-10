@@ -63,19 +63,18 @@ describe("historical authority-loss guards", () => {
   beforeEach(() => {root=process.env.BOSSMODE_DIR!;opened=[];mkdirSync(join(root,"knowledge"),{recursive:true});});
   afterEach(() => {for(const db of opened)db.close();rmSync(root,{recursive:true,force:true});});
   async function start() {const result=await prepareCoreStorage({root,initialConfig:getDefaultConfig(),bundledCatalog:[]});opened.push(result.db);return result;}
-  // Verified ordinary failures: /tmp/bm-core-identity-authority-red.log. Not implemented.
-  it.fails.each(["{invalid",JSON.stringify({status:"prepared"}),JSON.stringify({status:"done"})])("BLOCKED: refuses a historical member-storage journal with missing DB: %s", async marker => {
+  it.each(["{invalid",JSON.stringify({status:"prepared"}),JSON.stringify({status:"done"})])("refuses a historical member-storage journal with missing DB: %s", async marker => {
     mkdirSync(join(root,"migrations"));writeFileSync(join(root,"migrations/member-storage-v1.json"),marker);
     await expect(start()).rejects.toThrow();
     expect(existsSync(join(root,"bossmode.db"))).toBe(false);
   });
-  it.fails("BLOCKED: refuses an orphan member asset directory rather than silently inventing empty authority", async () => {
+  it("refuses an orphan member asset directory rather than silently inventing empty authority", async () => {
     mkdirSync(join(root,"members/mem_orphan"),{recursive:true});
     await expect(start()).rejects.toThrow();
     expect(existsSync(join(root,"bossmode.db"))).toBe(false);
   });
   // Verified ordinary failure: /tmp/bm-core-identity-extra-red.log.
-  it.fails("BLOCKED: refuses missing active member assets on subsequent normal startup", async () => {
+  it("refuses missing active member assets on subsequent normal startup", async () => {
     mkdirSync(join(root,"members/mem_current"),{recursive:true});
     writeFileSync(join(root,"members/mem_current/member.json"),JSON.stringify({id:"mem_current",name:"current",agentTemplate:"general",global:{},createdAt:1,updatedAt:1}));
     const first=await start(); first.db.close();

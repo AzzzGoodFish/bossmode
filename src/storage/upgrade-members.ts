@@ -3,6 +3,7 @@ import {MembersRepository} from "./repositories/members.js";
 import {ConversationsRepository} from "./repositories/conversations.js";
 import {parseLegacyMemberPersona,parseLegacyMemberRecord} from "./upgrade-member-parser.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
+import {assertLegacyMemberDirectories} from "./startup-member-verification.js";
 import type {LegacySourceEntry} from "./legacy-inventory.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import type {MemberRecord} from "../workspace/member-registry.js";
@@ -49,7 +50,22 @@ export function importLegacyMembers(ctx:UpgradeImportContext,entries:readonly Le
   consumed.add(entry.path);if(profile)consumed.add(profilePath);
  }
  for(const entry of legacyEntries)if(!consumed.has(entry.path))throw new Error(`Legacy profile has no identity metadata: ${entry.path}`);
- for(const item of prepared)ctx.stageAsset(item.path,item.body);
+ assertLegacyMemberDirectories(ctx.root,new Set(prepared.map(item=>item.record.id)));
+ for(const item of prepared){
+  if(ctx.sourceFiles.includes(item.path)){
+   // An earlier attempt may have published this generated persona before DB cutover.
+   // Reuse only this importer's ID-owned retained body, byte-identical to conversion
+   // of the verified snapshot's member.json/member.md. Never relax stageAsset's
+   // application-storage/source protection. The runner rechecks all live source
+   // hashes before cutover; the document importer still verifies body ownership.
+   const source=entries.find(e=>e.path===item.path);
+   if(!source||source.kind!=="document-body"||source.format!=="text"||source.retire||source.scopeId!==undefined
+    ||source.memberId!==item.record.id||source.layer!=="persona"||source.layout!=="member"||source.documentPath!==item.path
+    ||!read(item.path).equals(Buffer.from(item.body))){
+    throw new Error(`Existing asset differs or has unverified member ownership: ${item.path}`);
+   }
+  }else ctx.stageAsset(item.path,item.body);
+ }
  ctx.db.transaction(tx=>{
   const registry=new MembersRepository(tx);const scopes=new ConversationsRepository(tx);
   for(const {record}of prepared){registry.insert(record);scopes.ensureDmScope(record.id);}

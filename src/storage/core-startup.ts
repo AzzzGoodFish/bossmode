@@ -13,6 +13,7 @@ import {importAgentTemplates} from "../workforce/template-files.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
+import {assertNoMissingMemberDatabase,verifyActiveMemberAssets} from "./startup-member-verification.js";
 import type {BossmodeConfig} from "../shared/types.js";
 
 function memberAuthority(ctx:UpgradeImportContext):"files"|"database"{
@@ -41,7 +42,8 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
  let entries:LegacySourceEntry[]=[];
  return prepareStorageUpgrade({root:options.root,formatVersion:CORE_STORAGE_FORMAT,migrations:coreStorageMigrations,
   onProgress:options.onProgress,
-  collectLegacySources:async root=>{entries=discoverLegacyInventory(root).entries;return entries;},
+  collectLegacySources:async root=>{assertNoMissingMemberDatabase(root);entries=discoverLegacyInventory(root).entries;return entries;},
+  verifyReady:db=>verifyActiveMemberAssets(options.root,db),
   importData:async ctx=>{
    if(!ctx.legacy)return;
    const consumed=new Set<string>();const add=(paths:Iterable<string>)=>{for(const path of paths)consumed.add(path);};
