@@ -8,7 +8,7 @@
  *     after other stages fail)
  *  T4 repeated destroyAndWait calls all await the SAME settlement (no early return)
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExtensionRunner } from "@earendil-works/pi-coding-agent";
 
 vi.mock("../../src/workspace/extension-store.js", () => ({
@@ -20,6 +20,15 @@ vi.mock("../../src/foundation/logger.js", () => ({
 }));
 
 import { PiSdkAgentHandle } from "../../src/engine/runtime/pi-sdk.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => {
+  fixture = coreFixture();
+  fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('t','Teardown owner','teardown owner','test','{}',1,1)");
+  fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('t','room','t')");
+});
+afterEach(() => { fixture.close(); vi.restoreAllMocks(); });
 
 function realRunner(handler: (event: any, ctx: any) => Promise<void> | void): ExtensionRunner {
   const extensions = [
@@ -52,7 +61,7 @@ function handleWith(runner: ExtensionRunner, disposeImpl?: () => void): Instance
     [],
     { model: "test/m", thinkingLevel: "off" },
     [],
-    { roomId: "room:t", agentName: "t", roomMembers: ["t"] },
+    { roomId: "room:t", memberId: "t", agentName: "Teardown owner", roomMembers: ["Teardown owner"] },
   ) as any;
 }
 
@@ -170,10 +179,12 @@ it("teardown waits for manual compaction unwinding, not merely SDK agent idle", 
   let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
   (handle as any).session.compact=vi.fn(async()=>{await gate;});
   const compact=handle.compact!();let settled=false;
+  expect(fixture.db.get("SELECT status,operation FROM execution_attempts")).toEqual({status:"dispatched",operation:"external"});
   const teardown=handle.destroyAndWait!().then(()=>{settled=true;});
   await new Promise(resolve=>setTimeout(resolve,10));
   expect(settled).toBe(false);expect(disposed).not.toHaveBeenCalled();
   release();expect(await compact).toEqual({aborted:true});await teardown;
   expect(disposed).toHaveBeenCalledOnce();
+  expect(fixture.db.get("SELECT status FROM execution_attempts")).toEqual({status:"interrupted"});
   await expect(handle.compact!()).rejects.toThrow("destroyed");
 });

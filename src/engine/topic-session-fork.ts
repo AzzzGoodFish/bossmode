@@ -1,15 +1,17 @@
 /**
  * Topic batch 2 — prefix-fork a room session into a topic session file.
  * plan-topic-threads-v1 §2.2: borrow SessionManager file-layer primitives
- * (open + createBranchedSession) so the room instance is never replaced.
+ * (open + forkFrom + branch) so the room instance is never replaced.
  *
- * Degradation: no room session / empty / fork failure → { mode: "fresh" }.
+ * Only absent/unforkable sources degrade to fresh. Failed forks remain visible.
  */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { logger } from "../foundation/logger.js";
 import { getCurrentSession, mainSessionDirectory, saveCurrentSession } from "../workspace/session-store.js";
+import { SdkExecutionService } from "../services/sdk-execution-service.js";
 import type { TopicSeedMode } from "../workspace/topic-store.js";
 
 export interface TopicForkResult {
@@ -126,59 +128,57 @@ export function forkRoomSessionPrefix(args: {
     return { mode: "fresh", prefixSummary: "", reason: "no-room-session" };
   }
 
+  const sessionDir = mainSessionDirectory(args.memberId, `topic:${args.topicId}`);
+  // An ID supplied through the public SDK API makes a partial fork discoverable
+  // from durable provenance if forkFrom throws before returning its manager.
+  const forkSessionId = randomUUID();
+  const attempt = new SdkExecutionService(args.memberId, `topic:${args.topicId}`).dispatch(
+    "session-fork", JSON.stringify({ operation: "pi-sdk:SessionManager.forkFrom",
+      sourceFile, sourceSessionId: saved?.sessionId, parentRoomId: args.parentRoomId,
+      sessionDir, forkSessionId, anchorExcerpt: args.anchorExcerpt }),
+  );
+  let forkedPath: string | undefined;
   try {
     const source = SessionManager.open(sourceFile, dirname(sourceFile), args.cwd);
-    const entries = typeof source.getEntries === "function" ? source.getEntries() : [];
+    const entries = source.getEntries();
     const leafId = pickForkLeafId(entries, args.anchorExcerpt);
     if (!leafId) {
+      attempt.interrupt("No forkable source entry; fresh fallback selected");
       return { mode: "fresh", prefixSummary: "", reason: "no-forkable-entry" };
     }
-
-    const sessionDir = mainSessionDirectory(args.memberId, `topic:${args.topicId}`);
+    const prefixEntries = source.getBranch(leafId);
     mkdirSync(sessionDir, { recursive: true });
 
-    // forkFrom writes a NEW file under sessionDir (room file untouched).
-    // branch(leafId) moves the leaf so the next turn continues from the anchor
-    // prefix; existing later entries stay on disk but are off the active path.
-    const forked = SessionManager.forkFrom(sourceFile, args.cwd, sessionDir);
-    const forkedPath = forked.getSessionFile?.() || (forked as any).sessionFile;
-    if (!forkedPath || !existsSync(forkedPath)) {
-      return { mode: "fresh", prefixSummary: "", reason: "fork-write-failed" };
+    // The SDK alone writes the new archive. Keep its in-memory branch cut:
+    // reopening before the next append would restore the original file leaf.
+    const forked = SessionManager.forkFrom(sourceFile, args.cwd, sessionDir, { id: forkSessionId });
+    forkedPath = forked.getSessionFile();
+    const sessionId = forked.getSessionId();
+    if (!forkedPath || forkedPath === sourceFile || !existsSync(forkedPath)
+      || sessionId !== forkSessionId || sessionId === source.getSessionId()
+      || forked.getHeader()?.parentSession !== sourceFile) {
+      throw new Error("Fork file or SDK identity verification failed");
     }
-    try {
-      if (leafId && typeof forked.branch === "function") forked.branch(leafId);
-    } catch (branchErr) {
-      logger.warn("topic", "fork branch(leaf) failed; keeping full copy", {
-        leafId, error: String(branchErr),
-      });
+    forked.branch(leafId);
+    if (forked.getLeafId() !== leafId
+      || JSON.stringify(forked.getBranch()) !== JSON.stringify(prefixEntries)) {
+      throw new Error("Fork prefix branch verification failed");
     }
-
-    // Prefix for summary: path from root to leaf.
-    const prefixEntries = typeof source.getBranch === "function" ? source.getBranch(leafId) : entries;
     const prefixSummary = extractPrefixSummary(prefixEntries);
-
-    const sessionId = forked.getSessionId?.() || (forked as any).sessionId;
-
-    saveTopicSession(args.parentRoomId, args.topicId, args.memberId, {
-      sessionId,
-      sessionFile: forkedPath,
-    });
-
+    saveTopicSession(args.parentRoomId, args.topicId, args.memberId, { sessionId, sessionFile: forkedPath });
+    const associated = getTopicSession(args.parentRoomId, args.topicId, args.memberId);
+    if (associated?.sessionId !== sessionId || associated.sessionFile !== forkedPath) {
+      throw new Error("Fork session association verification failed");
+    }
+    attempt.settle();
     logger.info("topic", "forked room session prefix", {
-      parentRoomId: args.parentRoomId,
-      topicId: args.topicId,
-      memberId: args.memberId,
-      leafId,
-      sessionFile: forkedPath,
+      parentRoomId: args.parentRoomId, topicId: args.topicId, memberId: args.memberId,
+      leafId, sessionFile: forkedPath, attemptId: attempt.id,
     });
     return { mode: "fork", sessionFile: forkedPath, sessionId, sessionManager: forked, prefixSummary };
-  } catch (err) {
-    logger.warn("topic", "fork failed, degrading to fresh", {
-      parentRoomId: args.parentRoomId,
-      topicId: args.topicId,
-      memberId: args.memberId,
-      error: String(err),
-    });
-    return { mode: "fresh", prefixSummary: "", reason: `fork-error:${String(err)}` };
+  } catch (error) {
+    // Never erase a partial SDK artifact or turn SQL/branch failures into a
+    // successful fresh session. The dispatched reference survives a crash too.
+    return attempt.fail(new Error(`Topic prefix fork failed (attempt=${attempt.id}, sessionId=${forkSessionId}, directory=${sessionDir}, file=${forkedPath ?? "not returned"}): ${String(error)}`, { cause: error }));
   }
 }

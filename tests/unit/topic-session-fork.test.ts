@@ -1,6 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ dir: "" }));
@@ -19,6 +18,8 @@ import {
   extractPrefixSummary,
   forkRoomSessionPrefix,
 } from "../../src/engine/topic-session-fork.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { saveSession } from "../../src/workspace/session-store.js";
 import { createTopic, getTopic, normalizeAnchorExcerpt } from "../../src/workspace/topic-store.js";
 
@@ -78,12 +79,15 @@ describe("pickForkLeafId / extractPrefixSummary", () => {
 });
 
 describe("forkRoomSessionPrefix degrade + fork", () => {
+  let fixture: ReturnType<typeof coreFixture>;
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-fork-"));
-    mkdirSync(join(state.dir, "rooms", "roomA"), { recursive: true });
+    fixture = coreFixture(); state.dir = fixture.root;
+    fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('rm_dev','Developer','developer','test','{}',1,1)");
+    new ConversationsRepository(fixture.db).upsertRoom({ id: "roomA", name: "Room A", createdAt: 1, members: ["Developer"], globalMemberIds: ["rm_dev"] });
+    fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('topic:topic_x','topic','roomA'),('topic:topic_fork','topic','roomA')");
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("fresh seedMode does not touch sessions", () => {
@@ -124,6 +128,7 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
 
     saveSession("roomA", "rm_dev", { runtime: "pi-cli", sessionFile: srcFile, sessionId: src.getSessionId() });
 
+    const sourceBytes = readFileSync(srcFile!);
     const r = forkRoomSessionPrefix({
       parentRoomId: "roomA",
       topicId: "topic_fork",
@@ -140,8 +145,12 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
     expect(r.sessionFile).toContain(join("members", "rm_dev", "sessions"));
     expect(r.sessionFile).toContain(join("topics", "topic_fork"));
     expect(r.prefixSummary).toMatch(/flaky test|User:/);
-    // Room source file still exists untouched (at least same path).
-    expect(existsSync(srcFile!)).toBe(true);
+    expect(readFileSync(srcFile!)).toEqual(sourceBytes);
+    expect(r.sessionManager!.getLeafId()).toBe(src.getEntries()[0].id);
+    expect(r.prefixSummary).not.toContain("after the fork point");
+    expect(fixture.db.get("SELECT status,operation,member_id,scope_id FROM execution_attempts")).toEqual({
+      status: "acknowledged", operation: "session-fork", member_id: "rm_dev", scope_id: "topic:topic_fork",
+    });
   });
 
   it("createTopic stores 80-char anchorExcerpt; that excerpt hits the mid entry, not last", () => {

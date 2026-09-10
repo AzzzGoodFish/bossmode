@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 
@@ -161,7 +160,12 @@ const createdHandles: any[] = [];
 beforeEach(async () => {
   fixture = coreFixture(); dir = fixture.root;
   hostedMcpLoaded = true;
+  // Each binding wraps the runtime public auth methods; never reuse an attached runtime.
+  modelRuntime.refresh = modelRegistryRefresh;
+  modelRuntime.getAuth = vi.fn();
+  modelRuntime.checkAuth = vi.fn();
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('pm','pm','pm','general','{}',0,0)");
+  fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('room-a','room','room-a')");
   const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
   const create = PiSdkRuntime.prototype.createAgent;
   vi.spyOn(PiSdkRuntime.prototype, "createAgent").mockImplementation(async function(opts) {
@@ -391,7 +395,7 @@ describe("PiSdkRuntime", () => {
     expect(resourceLoaderCtor.mock.calls[0][0].extensionFactories).toEqual([mcpFactory]);
   });
 
-  it("no member mcp.json → adapter bound with empty scoped config", async () => {
+  it("no member SQL MCP configuration → adapter bound with empty scoped config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -408,7 +412,7 @@ describe("PiSdkRuntime", () => {
   it("member SQL MCP configuration is the source — every configured server is enabled", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    // Batch 6 §1.2: member-owned mcp.json; the registry enable list is retired.
+    // Member-owned SQL configuration; the registry enable list is retired.
     const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
     writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } });
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -424,7 +428,7 @@ describe("PiSdkRuntime", () => {
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(existsSync(scopedPath)).toBe(true);
     const scoped = JSON.parse(readFileSync(scopedPath, "utf-8"));
-    // File present = enabled: BOTH servers pass; the mcpServers list is ignored.
+    // Both configured servers pass; the retired mcpServers list is ignored.
     expect(Object.keys(scoped.mcpServers).sort()).toEqual(["github", "playwright"]);
     expect(sessionBindExtensions).toHaveBeenCalledWith(expect.objectContaining({ mode: "print", onError: expect.any(Function) }));
     expect(process.env.MCP_DIRECT_TOOLS).toBe("__none__");
@@ -434,6 +438,7 @@ describe("PiSdkRuntime", () => {
   it("refreshes prompt sources with the supported API without reloading resources or resetting the session", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem-stable','old-name','old-name','general','{}',0,0)");
     const opts = baseOpts({ member: { ...baseOpts().member, id: "mem-stable", name: "old-name" } });
     const handle = await new PiSdkRuntime().createAgent(opts);
     const session = (handle as any).session;
@@ -495,13 +500,13 @@ describe("PiSdkRuntime", () => {
   it("activates newly assigned MCP on reload without replacing the session", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
-    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     const runtime = new PiSdkRuntime();
     const handle = await runtime.createAgent(baseOpts());
     const sessionId = (handle as any).session.sessionId;
 
+    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
     // Simulate registry after reload including extension + mcp tools
     activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
     await handle.reloadResources!({
@@ -516,6 +521,8 @@ describe("PiSdkRuntime", () => {
     expect((handle as any).session.sessionId).toBe(sessionId);
     expect(activeToolNames).toContain("mcp");
     expect(activeToolNames).toContain("web_search");
+    const scopedPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
+    expect(Object.keys(JSON.parse(readFileSync(scopedPath, "utf8")).mcpServers)).toEqual(["playwright"]);
     expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
   });
 
@@ -620,7 +627,7 @@ describe("PiSdkRuntime", () => {
     await handle.destroyAndWait!(); expect(paths.some(existsSync)).toBe(false);
   });
 
-  it("keeps the mcp tool after a reload even with no member mcp.json (adapter is platform infrastructure)", async () => {
+  it("keeps the mcp tool after a reload even with no member SQL MCP configuration (adapter is platform infrastructure)", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -643,10 +650,10 @@ describe("PiSdkRuntime", () => {
   });
 
   it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
+    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    mkdirSync(join(dir, ".bossmode", "mcp"), { recursive: true });
-    writeFileSync(join(dir, ".bossmode", "mcp", "mcp.json"), JSON.stringify({ mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } }));
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const previousPrompt = (handle.runtimeParams as any).systemPrompt;
