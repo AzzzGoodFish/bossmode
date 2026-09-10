@@ -398,6 +398,8 @@ export class PiSdkAgentHandle implements AgentHandle {
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private promptAttempt: SdkExecutionAttempt | null = null;
+  /** Outlives SDK preflight, where Agent.abort() has no active controller yet. */
+  private promptAbortIntent: { aborted: boolean } | null = null;
   private compactAttempts = new Set<SdkExecutionAttempt>();
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
   private watchdogTurn: WatchdogTurnState | null = null;
@@ -445,6 +447,15 @@ export class PiSdkAgentHandle implements AgentHandle {
       }
       const mapped = mapPiAgentEvent(raw);
       if (mapped) this.emit(mapped);
+      if (raw.type === "agent_start" && (this.promptAbortIntent?.aborted || this.destroyed)) {
+        // SDK 0.82.1 creates activeRun before awaiting this public event. Re-abort
+        // its NEW controller, then reject the awaited listener: the native loop
+        // does not check the signal before calling streamFunction, so abort alone
+        // is insufficient. Its lifecycle catch emits/persists the aborted receipt.
+        // Check after forwarding too: a listener can request Stop on agent_start.
+        this.session.agent.abort();
+        throw new DOMException("Runtime prompt cancelled before agent execution", "AbortError");
+      }
     });
     this.publishSessionReferenceIfMaterialized();
   }
@@ -672,6 +683,7 @@ export class PiSdkAgentHandle implements AgentHandle {
       let dispatchIndex = 0;
       while (next !== null && !this.destroyed && this.watchdogTurn !== null) {
         this.startCompactionWatchdogRun();
+        this.promptAbortIntent = { aborted: false };
         let settled: CompactionWatchdogRun | null = null;
         try {
           const dispatchMessage: string = next;
@@ -683,6 +695,9 @@ export class PiSdkAgentHandle implements AgentHandle {
             : undefined);
           dispatchIndex++;
           this.promptAttempt = attempt;
+          // A synchronous dispatch hook may itself request Stop before this
+          // attempt is assigned. Record that intent after its SQL commit.
+          if (this.promptAbortIntent.aborted || this.destroyed) attempt.interrupt("Runtime abort requested before SDK preflight");
           const run = attempt.run(() => this.session.prompt(dispatchMessage, { source: "external" as any })).catch((err) => {
             this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
             throw err;
@@ -693,6 +708,7 @@ export class PiSdkAgentHandle implements AgentHandle {
           await run;
         } finally {
           this.promptAttempt = null;
+          this.promptAbortIntent = null;
           settled = this.finishCompactionWatchdogRun();
         }
         next = await this.afterWatchdogRun(settled);
@@ -704,6 +720,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   abort(options?: { preserveCompaction?: boolean }): void {
+    if (this.promptAbortIntent) this.promptAbortIntent.aborted = true;
     this.interruptAttempts("Runtime abort requested", !options?.preserveCompaction);
     // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
@@ -736,6 +753,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   async destroyAndWait(): Promise<void> {
     if (!this.destroyPromise) {
       this.destroyed = true;
+      if (this.promptAbortIntent) this.promptAbortIntent.aborted = true;
       this.interruptAttempts("Runtime teardown requested", true);
       this.destroyPromise = this.runTeardown();
     }
