@@ -337,14 +337,14 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
   // ── T2.6: Dynamic member addition + cursor ──
 
   describe("T2.6: Add member — cursor initialized to latest (F16)", () => {
-    it("invites distinct global IDs from one template and excludes pre-invite history from activation", async () => {
+    it("invites distinct existing contacts and excludes pre-invite history from activation", async () => {
       const room = await createRoom("global-invite", ["pm"]);
       const historical = `history-before-invite-${room.id}`;
       await sendMessage(room.id, historical);
       const ids: string[] = [];
       for (const name of ["dev-a", "dev-b"]) {
         const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: {
-          name, agentTemplate: "developer", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
+          name, model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
         } });
         expect(created.status, created.body).toBe(200);
         const id = JSON.parse(created.body).member.memberId;
@@ -366,10 +366,9 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
     it("tasks bind to room member id and display name follows rename", async () => {
       const registry = await import("../../src/workspace/member-registry.js");
       const rooms = await import("../../src/workspace/room-store.js");
-      const creator = registry.createMember({ name: "task-id-creator", agentTemplate: "pm" });
-      const member = registry.createMember({ name: "task-id-developer", agentTemplate: "developer" });
-      const room = rooms.createRoom("t26-task-member-id", undefined, []);
-      rooms.stampGlobalMemberIds(room.id, [creator.id, member.id], creator.id);
+      const creator = registry.createMember({ name: "task-id-creator" });
+      const member = registry.createMember({ name: "task-id-developer" });
+      const room = rooms.createRoom("t26-task-member-id", undefined, [creator.id, member.id], undefined, { promptLeaderMemberId: creator.id });
 
       const createTaskRes = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/tasks`, {
         token,

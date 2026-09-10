@@ -11,11 +11,14 @@ setupTestWorkspace();
 describe("Acceptance: topic attachments", () => {
   let ts: TestServer;
   let token: string;
+  let memberId: string;
 
   beforeAll(async () => {
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
-    await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    expect(created.status, created.body).toBe(200);
+    memberId = JSON.parse(created.body).member.memberId;
   });
   afterAll(async () => {
     if (ts) await closeTestServer(ts);
@@ -28,7 +31,7 @@ describe("Acceptance: topic attachments", () => {
   async function makeRoom(name: string) {
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name, cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
+      body: { name, memberIds: [memberId], leaderMemberId: memberId },
     });
     expect(res.status).toBe(200);
     return JSON.parse(res.body);

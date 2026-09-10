@@ -210,7 +210,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
   describe("DM reset through the conversation API", () => {
     it("delivers reset event/status under the member name and activates again", async () => {
       const created = await jsonRequest(ts.port, "POST", "/api/members", {
-        token, body: { name: "dm-reset-member", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID },
+        token, body: { name: "dm-reset-member", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID },
       });
       expect(created.status).toBe(200);
       const payload = JSON.parse(created.body);

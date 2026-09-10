@@ -5,7 +5,7 @@
  * and are auth-protected. Route existence tests accept 404 (resource not found)
  * as valid — it means the route is handled, just the resource doesn't exist.
  *
- * Coverage: F3 (rooms), F4 (agents), F5 (messages)
+ * Coverage: F3 (rooms), F4 (contacts), F5 (messages)
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken } from "../helpers/test-server.js";
@@ -29,7 +29,7 @@ describe("Acceptance: API Stubs & Routing", () => {
   // ── All protected endpoints require auth ──
 
   const protectedEndpoints = [
-    ["GET", "/api/agents"],
+    ["GET", "/api/members"],
     ["GET", "/api/rooms"],
     ["POST", "/api/rooms"],
     ["GET", "/api/rooms/test-1"],
@@ -46,25 +46,25 @@ describe("Acceptance: API Stubs & Routing", () => {
 
   // ── Endpoints exist (auth works, returns non-401) ──
 
-  it("GET /api/agents — exists and responds", async () => {
-    const res = await jsonRequest(ts.port, "GET", "/api/agents", { token });
-    expect(res.status).not.toBe(401);
-    expect(res.status).not.toBe(404);
+  it("GET /api/members — exists and responds", async () => {
+    const res = await jsonRequest(ts.port, "GET", "/api/members", { token });
+    expect(res.status).toBe(200);
   });
 
   it("GET /api/rooms — exists and responds", async () => {
     const res = await jsonRequest(ts.port, "GET", "/api/rooms", { token });
-    expect(res.status).not.toBe(401);
-    expect(res.status).not.toBe(404);
+    expect(res.status).toBe(200);
   });
 
   it("POST /api/rooms — exists and responds", async () => {
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "routing-contact" } });
+    expect(created.status, created.body).toBe(200);
+    const memberId = JSON.parse(created.body).member.memberId;
     const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name: "test", cwd: "/tmp", members: ["pm"], promptLeaderMemberName: "pm" },
+      body: { name: "test", memberIds: [memberId], leaderMemberId: memberId },
     });
-    expect(res.status).not.toBe(401);
-    expect(res.status).not.toBe(404);
+    expect(res.status).toBe(200);
   });
 
   it("GET /api/rooms/:id — route handled (404 = room not found, not unrouted)", async () => {
@@ -87,6 +87,34 @@ describe("Acceptance: API Stubs & Routing", () => {
     });
     expect(res.status).not.toBe(401);
     expect([200, 404]).toContain(res.status);
+  });
+
+  // Agent templates have no live API; contacts keep the authenticated CRUD surface.
+  for (const base of ["/api/agents", "/api/templates"]) {
+    for (const [method, path] of [["GET", base], ["POST", base], ["GET", `${base}/pm`], ["PUT", `${base}/pm`], ["PATCH", `${base}/pm`], ["DELETE", `${base}/pm`]]) {
+      it(`${method} ${path} — retired endpoint returns 404`, async () => {
+        const res = await jsonRequest(ts.port, method, path, { token, body: { name: "pm", content: "retired template" } });
+        expect(res.status, res.body).toBe(404);
+      });
+    }
+  }
+
+  it("rejects retired template binding on contact creation and edits without changing contacts", async () => {
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "direct-contact" } });
+    expect(created.status, created.body).toBe(200);
+    const member = JSON.parse(created.body).member;
+    const before = await jsonRequest(ts.port, "GET", "/api/members", { token });
+    expect(before.status).toBe(200);
+    for (const agentTemplate of ["pm", "", null]) {
+      for (const [method, path] of [["POST", "/api/members"], ["PATCH", `/api/members/${member.memberId}`]]) {
+        const rejected = await jsonRequest(ts.port, method, path, { token, body: { name: "should-not-exist", agentTemplate } });
+        expect(rejected.status, rejected.body).toBe(400);
+        expect(JSON.parse(rejected.body).error).toBe("agent_templates_retired");
+      }
+    }
+    const after = await jsonRequest(ts.port, "GET", "/api/members", { token });
+    expect(after.status).toBe(200);
+    expect(JSON.parse(after.body)).toEqual(JSON.parse(before.body));
   });
 
   // ── Unknown routes return 404 ──

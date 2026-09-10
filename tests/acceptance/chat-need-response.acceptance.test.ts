@@ -7,7 +7,7 @@
  * ⑤ DM 同规则：用户消息带期待，裸文本兜底投递
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
+import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
 import { mockPromptFn, resetMocks, setMockPromptFn, emitMockEvent } from "../helpers/mock-runtime.js";
 
@@ -30,20 +30,13 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
   });
 
   async function createRoomWithMembers(name: string, members: string[]) {
-    for (const m of members) {
-      await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: m, agentTemplate: m, model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
-    }
-    const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token,
-      body: { name, cwd: "/tmp", members: members.map((m) => ({ agent: m, name: m })), promptLeaderMemberName: members[0] },
-    });
-    return JSON.parse(roomRes.body);
+    return createMockRoom(ts.port, token, name, members);
   }
 
-  async function waitFor(predicate: () => boolean, timeoutMs = 10_000) {
+  async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 10_000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      if (predicate()) return;
+      if (await predicate()) return;
       await new Promise((r) => setTimeout(r, 100));
     }
     throw new Error("waitFor timeout");
@@ -140,7 +133,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
   });
 
   it("⑤ DM same rule: user DM message expects a reply → bare text fallback-delivered into the DM", async () => {
-    const memberRes = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "architect", agentTemplate: "architect", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    const memberRes = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "architect", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
     const memberId = JSON.parse(memberRes.body).member.memberId;
 
     setMockPromptFn(async () => {

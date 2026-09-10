@@ -25,7 +25,7 @@ describe("Acceptance: topic activity scope", () => {
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
     await jsonRequest(ts.port, "POST", "/api/members", {
-      token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID },
+      token, body: { name: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID },
     });
   });
   afterAll(async () => {

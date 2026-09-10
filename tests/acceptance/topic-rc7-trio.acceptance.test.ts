@@ -28,7 +28,7 @@ describe("Acceptance: topic rc.7 trio", () => {
   beforeAll(async () => {
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
     memberId = JSON.parse(created.body).member.memberId;
   });
   afterAll(async () => {

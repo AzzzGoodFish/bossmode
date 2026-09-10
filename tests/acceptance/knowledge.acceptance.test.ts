@@ -31,10 +31,14 @@ function uid(prefix: string): string { return `${prefix}-${Date.now()}-${_c++}`;
 describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
   let ts: TestServer;
   let token: string;
+  let memberId: string;
 
   beforeAll(async () => {
     ts = await createTestServer();
     token = await loginAndGetToken(ts.port);
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm" } });
+    expect(created.status, created.body).toBe(200);
+    memberId = JSON.parse(created.body).member.memberId;
   });
 
   afterAll(async () => {
@@ -156,7 +160,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("rulesroom"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
+        body: { name: uid("rulesroom"), memberIds: [memberId], leaderMemberId: memberId, ruleDocs: [rulePath] },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -167,7 +171,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
     it("POST /api/rooms without ruleDocs creates a plain room", async () => {
       const res = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("plainroom"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
+        body: { name: uid("plainroom"), memberIds: [memberId], leaderMemberId: memberId },
       });
       expect(res.status).toBe(200);
       const room = JSON.parse(res.body);
@@ -185,7 +189,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-move"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [oldPath] },
+        body: { name: uid("room-move"), memberIds: [memberId], leaderMemberId: memberId, ruleDocs: [oldPath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string; ruleDocs?: string[] };
@@ -212,7 +216,7 @@ describe("Acceptance: Knowledge (0.8.0 single-namespace)", () => {
 
       const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
         token,
-        body: { name: uid("room-delete"), cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm", ruleDocs: [rulePath] },
+        body: { name: uid("room-delete"), memberIds: [memberId], leaderMemberId: memberId, ruleDocs: [rulePath] },
       });
       expect(roomRes.status).toBe(200);
       const room = JSON.parse(roomRes.body) as { id: string };

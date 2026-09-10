@@ -26,12 +26,14 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
   });
 
   it("hint on first activation → read-to-clear → no hint on second activation", async () => {
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
+    expect(created.status, created.body).toBe(200);
     const memberId = JSON.parse(created.body).member.memberId;
     const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
       token,
-      body: { name: "hybrid-room", cwd: "/tmp", members: [{ agent: "pm", name: "pm" }], promptLeaderMemberName: "pm" },
+      body: { name: "hybrid-room", memberIds: [memberId], leaderMemberId: memberId },
     });
+    expect(roomRes.status, roomRes.body).toBe(200);
     const room = JSON.parse(roomRes.body);
 
     // Two backlog messages, then an @pm trigger (each POST activates pm)

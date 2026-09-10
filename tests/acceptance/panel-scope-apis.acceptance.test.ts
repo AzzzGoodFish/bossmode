@@ -36,7 +36,7 @@ describe("Authenticated member panel scope APIs", () => {
   async function createMember(name: string): Promise<{ memberId: string; name: string }> {
     const res = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name, agentTemplate: "pm" },
+      body: { name },
     });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);

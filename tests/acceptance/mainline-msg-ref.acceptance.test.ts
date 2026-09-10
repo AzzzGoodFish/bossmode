@@ -38,7 +38,7 @@ describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
   });
 
   it("resolves a DM message jump by ID and returns an empty window for a missing target", async () => {
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "dm-jump", agentTemplate: "pm" } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "dm-jump" } });
     expect(created.status).toBe(200);
     const memberId = JSON.parse(created.body).member.memberId;
     let targetId = "";
@@ -58,7 +58,7 @@ describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
   });
 
   it("room mainline route enriches msg entries (msgId+summary) for the panel", async () => {
-    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm", agentTemplate: "pm" } });
+    const created = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "pm" } });
     const memberId = JSON.parse(created.body).member.memberId;
 
     const roomRes = await jsonRequest(ts.port, "POST", "/api/rooms", {
