@@ -155,11 +155,20 @@ function savedSessionFile(): string {
   return path;
 }
 
-beforeEach(() => {
+const createdHandles: any[] = [];
+beforeEach(async () => {
   fixture = coreFixture(); dir = fixture.root;
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('pm','pm','pm','general','{}',0,0)");
+  const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+  const create = PiSdkRuntime.prototype.createAgent;
+  vi.spyOn(PiSdkRuntime.prototype, "createAgent").mockImplementation(async function(opts) {
+    const handle = await create.call(this, opts); createdHandles.push(handle); return handle;
+  });
 });
-afterEach(() => fixture.close());
+afterEach(async () => {
+  try { for (const handle of createdHandles) await handle.destroyAndWait(); }
+  finally { createdHandles.length = 0; vi.restoreAllMocks(); fixture.close(); }
+});
 
 describe("PiSdkRuntime", () => {
   beforeEach(() => {
@@ -185,7 +194,7 @@ describe("PiSdkRuntime", () => {
         abortCompaction: vi.fn(),
         abortBranchSummary: vi.fn(),
         dispose: vi.fn(),
-        reload: vi.fn(),
+        reload: vi.fn(async (options?: any) => { await options?.beforeSessionStart?.(); }),
         compact: vi.fn(),
         setModel: vi.fn(),
         setThinkingLevel: vi.fn(),
@@ -507,6 +516,73 @@ describe("PiSdkRuntime", () => {
     expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
   });
 
+  it("replaces the derived config before reload start and releases each config after shutdown", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    const oldPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
+    writeMemberMcpConfig("pm", { mcpServers: { added: { url: "http://127.0.0.1:1/mcp" } } });
+    activeToolNames = ["mcp"];
+    const session = (handle as any).session;
+    session.reload.mockImplementationOnce(async (options: any) => {
+      expect(existsSync(oldPath)).toBe(true);
+      await options.beforeSessionStart();
+      const newPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
+      expect(newPath).not.toBe(oldPath);
+      expect(Object.keys(JSON.parse(readFileSync(newPath, "utf8")).mcpServers)).toEqual(["added"]);
+    });
+    await handle.reloadResources!({roomId: "room-a", member: baseOpts().member, agentPrompt: "updated", appendSystemPrompt: [], skillPaths: []});
+    const newPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
+    expect(existsSync(oldPath)).toBe(false);
+    expect(existsSync(newPath)).toBe(true);
+    expect(sessionBindExtensions).toHaveBeenCalledTimes(1);
+    await handle.destroyAndWait!();
+    expect(existsSync(newPath)).toBe(false);
+  });
+
+  it("shuts down an obtained session and removes derived config when binding fails", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    sessionBindExtensions.mockRejectedValueOnce(new Error("bind failed"));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("bind failed");
+    const session = (await createAgentSession.mock.results.at(-1)!.value).session;
+    expect(session.abort).toHaveBeenCalled();
+    expect(session.dispose).toHaveBeenCalled();
+    expect(existsSync(sessionExtensionSetFlagValue.mock.calls.at(-1)![1])).toBe(false);
+  });
+
+  it("removes derived config when the hosted factory cannot load", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const settings = await import("../../src/shared/mcp-settings.js");
+    const materialize = settings.writeMemberScopedMcpConfig;
+    let path = "";
+    vi.spyOn(settings, "writeMemberScopedMcpConfig").mockImplementation(args => {
+      const config = materialize(args); path = config.configPath; return config;
+    });
+    loadDatabaseMcpFactory.mockRejectedValueOnce(new Error("factory failed"));
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("factory failed");
+    expect(path).not.toBe(""); expect(existsSync(path)).toBe(false);
+    expect(createAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("retains uncertain config generations after reload failure until session teardown", async () => {
+    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
+    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const settings = await import("../../src/shared/mcp-settings.js");
+    const materialize = settings.writeMemberScopedMcpConfig;
+    const paths: string[] = [];
+    vi.spyOn(settings, "writeMemberScopedMcpConfig").mockImplementation(args => {
+      const config = materialize(args); paths.push(config.configPath); return config;
+    });
+    const handle = await new PiSdkRuntime().createAgent(baseOpts());
+    (handle as any).session.reload.mockRejectedValueOnce(new Error("reload failed"));
+    await expect(handle.reloadResources!({roomId:"room-a",member:baseOpts().member,agentPrompt:"x",appendSystemPrompt:[],skillPaths:[]})).rejects.toThrow("reload failed");
+    expect(paths).toHaveLength(2); expect(paths.every(existsSync)).toBe(true);
+    await handle.destroyAndWait!(); expect(paths.some(existsSync)).toBe(false);
+  });
+
   it("keeps the mcp tool after a reload even with no member mcp.json (adapter is platform infrastructure)", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
@@ -762,7 +838,7 @@ describe("PiSdkRuntime", () => {
         modelRuntime,
         subscribe: vi.fn(() => vi.fn()),
         prompt: vi.fn(), steer: vi.fn(), abort: vi.fn(), abortCompaction: vi.fn(), abortBranchSummary: vi.fn(), dispose: vi.fn(),
-        reload: vi.fn(), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(),
+        reload: vi.fn(async (options?: any) => { await options?.beforeSessionStart?.(); }), compact: vi.fn(), setModel: vi.fn(), setThinkingLevel: vi.fn(),
         setActiveToolsByName: vi.fn((names: string[]) => { activeToolNames = names; }),
         getActiveToolNames: vi.fn(() => activeToolNames),
         getAllTools: vi.fn(() => [
@@ -839,7 +915,7 @@ function makeWatchdogSession(opts: {
     abortCompaction: vi.fn(),
     abortBranchSummary: vi.fn(),
     dispose: vi.fn(),
-    reload: vi.fn(),
+    reload: vi.fn(async (options?: any) => { await options?.beforeSessionStart?.(); }),
     compact: vi.fn(async () => ({ summary: "s", firstKeptEntryId: "x", tokensBefore: 1 })),
     setModel: vi.fn(),
     setThinkingLevel: vi.fn(),

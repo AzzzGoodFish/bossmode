@@ -169,6 +169,7 @@ interface McpRuntimeSettings {
   configPath: string;
   runtimeDir: string;
   serverNames: string[];
+  dispose(): void;
 }
 
 
@@ -199,7 +200,7 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
     process.env.PI_CODING_AGENT_DIR = runtimeDir;
   }
-  return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames };
+  return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames, dispose: scoped.dispose };
 }
 
 async function bindMcpExtension(session: AgentSession, opts: { configPath: string; agent: string }): Promise<void> {
@@ -311,12 +312,60 @@ function assistantHasToolCalls(message: any): boolean {
   return Array.isArray(message?.content) && message.content.some((c: any) => c?.type === "toolCall");
 }
 
+/** Complete every supported shutdown stage, even after an earlier failure. */
+async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => void): Promise<string[]> {
+  const errors: string[] = [];
+  // The SDK's AgentSession.abort() awaits waitForIdle itself — awaiting ITS
+  // promise here is the awaitable run-end, unlike the void handle.abort().
+  try {
+    await session.abort();
+  } catch (err: any) {
+    errors.push(`abort: ${err?.message || String(err)}`);
+  }
+  try {
+    session.abortCompaction();
+    session.abortBranchSummary();
+  } catch {}
+  const runner: any = session.extensionRunner;
+  if (typeof runner?.hasHandlers === "function" && runner.hasHandlers("session_shutdown")) {
+    // Handler failures surface via onError ({extensionPath, event, error}),
+    // never as emit() rejections — collect them for THIS shutdown only.
+    const shutdownErrors: string[] = [];
+    const off = typeof runner.onError === "function"
+      ? runner.onError((e: any) => {
+          if (e?.event === "session_shutdown") shutdownErrors.push(`${e?.extensionPath ?? "extension"}: ${e?.error ?? "unknown error"}`);
+        })
+      : null;
+    try {
+      await runner.emit({ type: "session_shutdown" } as any);
+    } catch (err: any) {
+      errors.push(`session_shutdown emit: ${err?.message || String(err)}`);
+    } finally {
+      try { off?.(); } catch {}
+    }
+    errors.push(...shutdownErrors);
+  }
+  try { beforeDispose?.(); } catch {}
+  // Always runs, even when earlier stages failed. dispose() is synchronous
+  // and throws AggregateError when a registered resource cleanup fails.
+  try {
+    session.dispose();
+  } catch (err: any) {
+    const detail = err instanceof AggregateError && Array.isArray(err.errors)
+      ? err.errors.map((e: any) => e?.message || String(e)).join(", ")
+      : err?.message || String(err);
+    errors.push(`dispose: ${detail}`);
+  }
+  return errors;
+}
+
 export class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
   /** SDK session id (background runner records it; live path reports via onSessionChanged). */
   readonly sessionId: string | undefined;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
+  private mcpConfigs = new Set<McpRuntimeSettings>();
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
@@ -344,7 +393,9 @@ export class PiSdkAgentHandle implements AgentHandle {
     toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
     onTeardownSuccess?: () => void,
     private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
+    initialMcpConfig?: McpRuntimeSettings,
   ) {
+    if (initialMcpConfig) this.mcpConfigs.add(initialMcpConfig);
     this.runtimeParams = runtimeParams;
     this.sessionId = session.sessionId;
     this.onTeardownSuccess = onTeardownSuccess;
@@ -592,49 +643,12 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   private async runTeardown(): Promise<void> {
-    const errors: string[] = [];
-    // The SDK's AgentSession.abort() awaits waitForIdle itself — awaiting ITS
-    // promise here is the awaitable run-end, unlike the void handle.abort().
-    try {
-      await this.session.abort();
-    } catch (err: any) {
-      errors.push(`abort: ${err?.message || String(err)}`);
+    if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
+    const errors = await shutdownSdkSession(this.session, () => this.unsubscribeSession?.());
+    for (const config of this.mcpConfigs) {
+      try { config.dispose(); } catch (err) { errors.push(`MCP config cleanup: ${String(err)}`); }
     }
-    try {
-      if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
-      this.session.abortCompaction();
-      this.session.abortBranchSummary();
-    } catch {}
-    const runner: any = this.session.extensionRunner;
-    if (typeof runner?.hasHandlers === "function" && runner.hasHandlers("session_shutdown")) {
-      // Handler failures surface via onError ({extensionPath, event, error}),
-      // never as emit() rejections — collect them for THIS shutdown only.
-      const shutdownErrors: string[] = [];
-      const off = typeof runner.onError === "function"
-        ? runner.onError((e: any) => {
-            if (e?.event === "session_shutdown") shutdownErrors.push(`${e?.extensionPath ?? "extension"}: ${e?.error ?? "unknown error"}`);
-          })
-        : null;
-      try {
-        await runner.emit({ type: "session_shutdown" } as any);
-      } catch (err: any) {
-        errors.push(`session_shutdown emit: ${err?.message || String(err)}`);
-      } finally {
-        try { off?.(); } catch {}
-      }
-      errors.push(...shutdownErrors);
-    }
-    try { this.unsubscribeSession?.(); } catch {}
-    // Always runs, even when earlier stages failed. dispose() is synchronous
-    // and throws AggregateError when a registered resource cleanup fails.
-    try {
-      this.session.dispose();
-    } catch (err: any) {
-      const detail = err instanceof AggregateError && Array.isArray(err.errors)
-        ? err.errors.map((e: any) => e?.message || String(e)).join(", ")
-        : err?.message || String(err);
-      errors.push(`dispose: ${detail}`);
-    }
+    this.mcpConfigs.clear();
     this.listeners.clear();
     if (errors.length > 0) {
       throw new Error(`teardown incomplete (${errors.length}): ${errors.join("; ")}`);
@@ -752,6 +766,8 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     await this.waitForIdle();
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
+    // A failed reload can leave either generation active; retain both until teardown.
+    this.mcpConfigs.add(mcpSettings);
     // Batch 6 §1: member dir assets re-resolved on every reload.
     const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
     // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
@@ -771,8 +787,11 @@ export class PiSdkAgentHandle implements AgentHandle {
     loader.additionalSkillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
     loader.additionalExtensionPaths = activeExtensionPaths;
 
-    if (typeof (this.session as any).reload === "function") await (this.session as any).reload();
-    else await this.resourceLoader.reload();
+    await this.session.reload({
+      beforeSessionStart: async () => {
+        this.session.extensionRunner.setFlagValue("mcp-config", mcpSettings.configPath);
+      },
+    });
     // Agent/session reload re-reads settings and clears in-memory overrides.
     // Reapply runtime transport only after it completes so explicit Codex SSE/WS
     // and timeout configuration remains effective for the next provider call.
@@ -783,7 +802,6 @@ export class PiSdkAgentHandle implements AgentHandle {
       websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
       httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
     });
-    await bindMcpExtension(this.session, { configPath: mcpSettings.configPath, agent: opts.member.name });
     // Refresh bossmode tool name set from the same factory that builds customTools (leader gate, new tools).
     this.toolAssembly = {
       roomId: opts.roomId,
@@ -824,6 +842,11 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.runtimeParams.systemPrompt = [opts.agentPrompt.trim(), ...appendBase].filter(Boolean).join("\n\n");
     this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
     this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"];
+    for (const config of this.mcpConfigs) {
+      if (config === mcpSettings) continue;
+      config.dispose();
+      this.mcpConfigs.delete(config);
+    }
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
@@ -970,47 +993,47 @@ export class PiSdkRuntime implements AgentRuntime {
     const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
     const skillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    // Managed extensions = member dir (unconditional) + platform packages on
-    // the member's enable list (§1.3: list serves the two platform packs only).
-    // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
-    // member-owned extensions/ dir entries are the only managed extensions.
-    const managedExtensions = [...memberAssets.extensions];
-    const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
-    const activeExtensionPaths = extensionPaths;
-    const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
-    const resourceLoader = new BossmodeResourceLoader({
-      cwd: opts.cwd,
-      agentDir: runtimeAgentDir,
-      settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      additionalSkillPaths: skillPaths,
-      additionalExtensionPaths: activeExtensionPaths,
-      extensionFactories: [mcpFactory],
-      systemPrompt: promptSources.systemPrompt,
-      appendSystemPrompt,
-    }, promptSources);
-    await resourceLoader.reload();
-    // DefaultResourceLoader.reload() reloads SettingsManager and clears its
-    // in-memory overrides. Apply runtime transport afterwards, immediately
-    // before the SDK session is created.
-    const transportSettings = applyRuntimeTransportSettings(settingsManager);
-
-    const customTools = createBossmodeSdkTools({
-    roomId: opts.roomId,
-    memberId: opts.member.id,
-    scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-    execution: opts.background ? "background" : "live"
-});
-    const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
-    // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
-    // when tools is provided it becomes a lifetime allowlist and strips extension
-    // tools like web_search/fetch_content). MCP is loaded once through its
-    // SQL-bound inline factory, not through the standalone file-storage entry.
-    // Once the SDK session exists, any later failure (MCP bind or setModel)
-    // must not leak it — dispose before rethrowing.
     let sessionObtained: AgentSession | null = null;
     try {
+      // Managed extensions = member dir (unconditional) + platform packages on
+      // the member's enable list (§1.3: list serves the two platform packs only).
+      // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
+      // member-owned extensions/ dir entries are the only managed extensions.
+      const managedExtensions = [...memberAssets.extensions];
+      const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
+      const activeExtensionPaths = extensionPaths;
+      const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
+      const resourceLoader = new BossmodeResourceLoader({
+        cwd: opts.cwd,
+        agentDir: runtimeAgentDir,
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        additionalSkillPaths: skillPaths,
+        additionalExtensionPaths: activeExtensionPaths,
+        extensionFactories: [mcpFactory],
+        systemPrompt: promptSources.systemPrompt,
+        appendSystemPrompt,
+      }, promptSources);
+      await resourceLoader.reload();
+      // DefaultResourceLoader.reload() reloads SettingsManager and clears its
+      // in-memory overrides. Apply runtime transport afterwards, immediately
+      // before the SDK session is created.
+      const transportSettings = applyRuntimeTransportSettings(settingsManager);
+
+      const customTools = createBossmodeSdkTools({
+      roomId: opts.roomId,
+      memberId: opts.member.id,
+      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
+      execution: opts.background ? "background" : "live"
+  });
+      const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
+      // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
+      // when tools is provided it becomes a lifetime allowlist and strips extension
+      // tools like web_search/fetch_content). MCP is loaded once through its
+      // SQL-bound inline factory, not through the standalone file-storage entry.
+      // Once the SDK session exists, any later failure (MCP bind or setModel)
+      // must not leak it — dispose before rethrowing.
       const { session } = await createAgentSession({
         cwd: opts.cwd,
         agentDir: runtimeAgentDir,
@@ -1057,6 +1080,7 @@ export class PiSdkRuntime implements AgentRuntime {
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
         () => this.handles.delete(handle),
         opts.background ? undefined : opts.onSessionChanged,
+        mcpSettings,
       );
       this.handles.add(handle);
       logger.info("runtime:pi-sdk", "createAgent", {
@@ -1073,14 +1097,9 @@ export class PiSdkRuntime implements AgentRuntime {
       });
       return handle;
     } catch (err) {
-      if (sessionObtained) {
-        try { sessionObtained.dispose(); } catch (disposeErr: any) {
-          logger.error("runtime:pi-sdk", "post-failure session dispose also failed", {
-            agent: opts.member.name,
-            error: disposeErr?.message || String(disposeErr),
-          });
-        }
-      }
+      const cleanupErrors = sessionObtained ? await shutdownSdkSession(sessionObtained) : [];
+      try { mcpSettings.dispose(); } catch (error) { cleanupErrors.push(`MCP config cleanup: ${String(error)}`); }
+      if (cleanupErrors.length) throw new AggregateError([err, ...cleanupErrors.map(message => new Error(message))], "Runtime creation and cleanup failed");
       throw err;
     }
   }
