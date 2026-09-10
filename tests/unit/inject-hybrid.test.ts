@@ -1,12 +1,14 @@
+import { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 聊天机制优化 — 注入混合制 (fish-approved spec msg:#14818):
  * 触发消息全量注入；游标到触发点之间的背 log 压成一行提示；游标只推进到
  * 触发消息（读到即清：query_room_messages 覆盖区间 → 游标推进）。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 let dir: string;
 
@@ -19,21 +21,14 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
   };
 });
 
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
-}
-
 describe("inject hybrid — hint shape + cursor semantics", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-inject-hybrid-"));
+    fixture = coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    seedAgent("pm");
-    seedAgent("architect");
-    vi.resetModules();
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => fixture.close());
 
   it("hint: senders user-first + event clause omitted when zero + from_seq points at first-1", async () => {
     const { buildUnreadBacklogHint } = await import("../../src/engine/agent-manager.js");
@@ -69,23 +64,19 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     expect(hint).not.toContain("you have 50 unread messages");
   });
 
-  it("cursor: activation advances only to the trigger; next activation re-hints the still-unread backlog", async () => {
+  it("message-store cursor primitives: unread history and strict from_seq retain the trigger", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const reg = await import("../../src/workspace/member-registry.js");
     const msgStore = await import("../../src/workspace/message-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const room = roomStore.createRoom("r", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
     // Seed messages: m1 (backlog), m2 (backlog), m3 (@pm trigger)
     const m1 = msgStore.addMessage(room.id, { sender: "user", content: "backlog one", mentions: [] } as any);
     const m2 = msgStore.addMessage(room.id, { sender: "architect", content: "backlog two", mentions: [] } as any);
     const m3 = msgStore.addMessage(room.id, { sender: "user", content: "@pm status", mentions: ["pm"] } as any);
 
-    // First activation: cursor lands on the trigger only
-    const { activateAgent } = await import("../../src/engine/agent-manager.js");
-    // activateAgent needs a runtime — exercise the cursor logic directly via
-    // the exported internals: read cursor after activation requires runtime.
-    // Instead assert message-store semantics used by the pipeline:
+    // These are the message-store primitives used by trigger/backlog selection.
     const since = msgStore.getMessagesSince(room.id, null);
     expect(since.map((m) => m.id)).toEqual([m1.id, m2.id, m3.id]);
     // from_seq primitive: reads strictly after a seq, ascending
@@ -101,7 +92,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     const msgStore = await import("../../src/workspace/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const room = roomStore.createRoom("r", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
     const m1 = msgStore.addMessage(room.id, { sender: "user", content: "one", mentions: [] } as any);
     const m2 = msgStore.addMessage(room.id, { sender: "user", content: "two", mentions: [] } as any);
@@ -110,7 +101,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     roomStore.setCursor(room.id, pm.id, null);
 
     // Backlog read via from_seq → covers the range → cursor advances to m2
-    const res = await handleToolCallback("query_room_messages", room.id, "pm", { from_seq: 0, limit: 50 });
+    const res = await handleToolCallback("query_room_messages", room.id, "pm", { from_seq: 0, limit: 50 }, { memberId: pm.id });
     expect(Array.isArray(res)).toBe(true);
     expect((res as any[]).length).toBe(2);
     const cursors = roomStore.getCursors(room.id);
@@ -123,16 +114,16 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     const msgStore = await import("../../src/workspace/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const roomA = roomStore.createRoom("ra", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const roomA = roomStore.createRoom("ra", dir, [], undefined);
     roomStore.stampGlobalMemberIds(roomA.id, [pm.id], pm.id);
-    const roomB = roomStore.createRoom("rb", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const roomB = roomStore.createRoom("rb", dir, [], undefined);
     roomStore.stampGlobalMemberIds(roomB.id, [pm.id], pm.id);
     msgStore.addMessage(roomA.id, { sender: "user", content: "in A", mentions: [] } as any);
     msgStore.addMessage(roomB.id, { sender: "user", content: "in B", mentions: [] } as any);
     roomStore.setCursor(roomA.id, pm.id, null);
 
     // Reading room B from room A (cross-scope) must not clear A's backlog cursor
-    const res = await handleToolCallback("query_room_messages", roomA.id, "pm", { scope: `room:${roomB.id}`, limit: 50 });
+    const res = await handleToolCallback("query_room_messages", roomA.id, "pm", { scope: `room:${roomB.id}`, limit: 50 }, { memberId: pm.id });
     expect(Array.isArray(res)).toBe(true);
     const cursorsA = roomStore.getCursors(roomA.id);
     expect(cursorsA[pm.id]).toBeNull();

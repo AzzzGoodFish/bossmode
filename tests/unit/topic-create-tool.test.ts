@@ -1,7 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { mkdirSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 const state = vi.hoisted(() => ({ dir: "" }));
 
@@ -24,37 +27,41 @@ import { handleToolCallback } from "../../src/engine/tools.js";
 import { buildTopicGuideText, getTopic, readAllTopicMessages } from "../../src/workspace/topic-store.js";
 import { readAllMessages } from "../../src/workspace/message-store.js";
 
-function writeRoom(roomId: string, leaderId = "rm_pm") {
-  const roomDir = join(state.dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify({
+function seedRoom(roomId: string, leaderId = "mem_pm") {
+  const room = {
     id: roomId,
     name: "R",
     cwd: "/tmp",
     members: ["pm", "qa"],
     promptLeaderMemberId: leaderId,
     roomMembers: [
-      { id: "rm_pm", name: "pm", sourceAgent: "pm", roomId, createdAt: 1, updatedAt: 1 },
-      { id: "rm_qa", name: "qa", sourceAgent: "qa", roomId, createdAt: 1, updatedAt: 1 },
+      { id: "mem_pm", name: "pm", sourceAgent: "pm", roomId, createdAt: 1, updatedAt: 1 },
+      { id: "mem_qa", name: "qa", sourceAgent: "qa", roomId, createdAt: 1, updatedAt: 1 },
     ],
     createdAt: 1,
-  }), "utf-8");
+  };
+  for (const member of room.roomMembers) {
+    new MembersRepository(fixture.db).insert({ id: member.id, name: member.name, agentTemplate: member.sourceAgent,
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+  }
+  new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: room.roomMembers.map(m => m.id) });
 }
 
 describe("create_topic tool", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-create-topic-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("leader creates with brief before concurrency; title from first line", async () => {
-    writeRoom("roomA");
+    seedRoom("roomA");
     const result = await handleToolCallback("create_topic", "roomA", "pm", {
       message: "@qa please only research, do not merge",
       brief: "Research only — do not touch main",
-    }) as any;
+    }, { memberId: "mem_pm" }) as any;
     expect(result.ok).toBe(true);
     expect(result.title).toBe("please only research, do not merge");
     expect(result.scopeId).toMatch(/^topic:/);
@@ -74,10 +81,10 @@ describe("create_topic tool", () => {
   });
 
   it("allows non-leader to create a topic (leader gate retired)", async () => {
-    writeRoom("roomB", "rm_pm");
+    seedRoom("roomB", "mem_pm");
     const result = await handleToolCallback("create_topic", "roomB", "qa", {
       message: "Non-leader topic",
-    }) as any;
+    }, { memberId: "mem_qa" }) as any;
     expect(result.ok).toBe(true);
     expect(result.title).toBeTruthy();
   });

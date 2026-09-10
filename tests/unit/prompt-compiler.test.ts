@@ -1,8 +1,12 @@
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 let tmpDir = "";
 
@@ -11,14 +15,23 @@ vi.mock("../../src/shared/config.js", () => ({
 }));
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-prompt-compiler-"));
-  mkdirSync(join(tmpDir, "rooms", "room-a"), { recursive: true });
-  mkdirSync(join(tmpDir, "members", "rm_qa"), { recursive: true });
+  fixture = coreFixture();
+  tmpDir = fixture.root;
+  for (const m of room().roomMembers!) {
+    new MembersRepository(fixture.db).insert({ id: m.id, name: m.name, agentTemplate: m.sourceAgent,
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    new ConversationsRepository(fixture.db).ensureDmScope(m.id);
+  }
+  new ConversationsRepository(fixture.db).upsertRoom(room());
+  for (const id of ["topic_abc", "topic_x"]) {
+    new ConversationsRepository(fixture.db).upsertTopic({ id, roomId: "room-a", title: "T", anchorMessageId: "",
+      createdBy: "user", participants: ["mem_qa"], status: "active", createdAt: 1, seedMode: "fresh" });
+  }
+  mkdirSync(join(tmpDir, "members", "mem_qa"), { recursive: true });
 });
 
 afterEach(() => {
-  vi.resetModules();
-  rmSync(tmpDir, { recursive: true, force: true });
+  fixture.close();
 });
 
 function room(): Room {
@@ -27,11 +40,12 @@ function room(): Room {
     name: "Prompt Lab",
     cwd: "/tmp/project",
     members: ["pm", "qa"],
-    promptLeaderMemberId: "rm_pm",
+    globalMemberIds: ["mem_pm", "mem_qa"],
+    promptLeaderMemberId: "mem_pm",
     docsPath: "bossmode/",
     roomMembers: [
-      { id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 },
-      { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1 },
+      { id: "mem_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 },
+      { id: "mem_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1 },
     ],
     createdAt: 1,
     ruleDocs: ["bossmode/rules/old.md"],
@@ -39,14 +53,14 @@ function room(): Room {
 }
 
 const agentDef: AgentDefinition = { name: "qa", description: "QA", systemPrompt: "QA ROLE", tags: [] };
-const member: AgentMemberConfig = { id: "rm_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
+const member: AgentMemberConfig = { id: "mem_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
 
 describe("prompt compiler (three-segment)", () => {
   it("assembles Member → Communication → Environment in order", async () => {
     const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
-    writeMemberProfileSkeleton("rm_qa");
+    writeMemberProfileSkeleton("mem_qa");
     writeFileSync(
-      join(tmpDir, "members", "rm_qa", "persona.md"),
+      join(tmpDir, "members", "mem_qa", "persona.md"),
       "---\nname: qa\n---\n\nI prefer short answers.\n",
       "utf-8",
     );
@@ -83,8 +97,8 @@ describe("prompt compiler (three-segment)", () => {
   it("DM first line and topic first line variants", async () => {
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const dm = compileMemberPromptForScope({
-      scopeId: "dm:rm_qa",
-      memberId: "rm_qa",
+      scopeId: "dm:mem_qa",
+      memberId: "mem_qa",
       memberName: "qa",
       agentDef,
       docsRoot: "/docs",
@@ -94,7 +108,7 @@ describe("prompt compiler (three-segment)", () => {
 
     const topic = compileMemberPromptForScope({
       scopeId: "topic:topic_abc",
-      memberId: "rm_qa",
+      memberId: "mem_qa",
       memberName: "qa",
       agentDef,
       room: room(),
@@ -106,14 +120,14 @@ describe("prompt compiler (three-segment)", () => {
 
   it("Member + Communication are byte-identical between room and topic (cache invariant)", async () => {
     writeFileSync(
-      join(tmpDir, "members", "rm_qa", "persona.md"),
+      join(tmpDir, "members", "mem_qa", "persona.md"),
       "---\nname: qa\n---\n\nSteady.\n",
       "utf-8",
     );
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const roomC = compileMemberPromptForScope({
       scopeId: "room:room-a",
-      memberId: "rm_qa",
+      memberId: "mem_qa",
       memberName: "qa",
       agentDef,
       room: room(),
@@ -121,7 +135,7 @@ describe("prompt compiler (three-segment)", () => {
     });
     const topicC = compileMemberPromptForScope({
       scopeId: "topic:topic_x",
-      memberId: "rm_qa",
+      memberId: "mem_qa",
       memberName: "qa",
       agentDef,
       room: room(),
@@ -140,7 +154,7 @@ describe("prompt compiler (three-segment)", () => {
 
   it("persona is literal Markdown; identity comes only from the current member name", async () => {
     const raw = "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n";
-    writeFileSync(join(tmpDir, "members", "rm_qa", "persona.md"), raw, "utf-8");
+    writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), raw, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     const section = compiled.sections.find((s) => s.id === "member")!.content;
@@ -155,27 +169,27 @@ describe("prompt compiler (three-segment)", () => {
     [" \t\r\n\uFEFF", ""],
     ["", ""],
   ])("normalizes only the prompt boundary across room, DM and topic (%j)", async (raw, body) => {
-    const path = join(tmpDir, "members", "rm_qa", "persona.md");
+    const path = join(tmpDir, "members", "mem_qa", "persona.md");
     writeFileSync(path, raw, "utf-8");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const { readMemberProfile } = await import("../../src/workspace/member-profile.js");
     const expected = `# Member\n\nI am qa.${body ? `\n\n${body}` : ""}`;
-    for (const scopeId of ["room:room-a", "dm:rm_qa", "topic:topic_x"] as const) {
+    for (const scopeId of ["room:room-a", "dm:mem_qa", "topic:topic_x"] as const) {
       const compiled = compileMemberPromptForScope({
-        scopeId, memberId: "rm_qa", memberName: "qa", agentDef,
+        scopeId, memberId: "mem_qa", memberName: "qa", agentDef,
         ...(scopeId.startsWith("dm:") ? {} : { room: room() }), docsRoot: "/docs",
       });
       expect(Buffer.from(compiled.sections.find((s) => s.id === "member")!.content)).toEqual(Buffer.from(expected));
     }
     // Reads and compilation do not trim or otherwise rewrite the file.
-    expect(readMemberProfile("rm_qa").body).toBe(raw);
-    expect(readMemberProfile("rm_qa").raw).toBe(raw);
+    expect(readMemberProfile("mem_qa").body).toBe(raw);
+    expect(readMemberProfile("mem_qa").raw).toBe(raw);
     expect(readFileSync(path, "utf-8")).toBe(raw);
   });
 
   it("marks profileOverBudget when persona.md exceeds 4000 chars without truncating", async () => {
     const body = "x".repeat(4500);
-    writeFileSync(join(tmpDir, "members", "rm_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
+    writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(compiled.profileOverBudget).toBe(true);
@@ -183,11 +197,11 @@ describe("prompt compiler (three-segment)", () => {
   });
 
   it("shows archive line only when archive is non-empty", async () => {
-    mkdirSync(join(tmpDir, "members", "rm_qa", "archive"), { recursive: true });
-    writeFileSync(join(tmpDir, "members", "rm_qa", "archive", "old.md"), "legacy", "utf-8");
+    mkdirSync(join(tmpDir, "members", "mem_qa", "archive"), { recursive: true });
+    writeFileSync(join(tmpDir, "members", "mem_qa", "archive", "old.md"), "legacy", "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const withArch = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(withArch.fullPrompt).toContain("Legacy notes from the old system");
-    expect(withArch.fullPrompt).toContain(join(tmpDir, "members", "rm_qa", "archive"));
+    expect(withArch.fullPrompt).toContain(join(tmpDir, "members", "mem_qa", "archive"));
   });
 });

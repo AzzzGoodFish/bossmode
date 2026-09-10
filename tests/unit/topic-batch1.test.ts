@@ -1,7 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 const state = vi.hoisted(() => ({ dir: "" }));
 
@@ -27,7 +31,6 @@ import {
   createTopic,
   getTopic,
   listTopics,
-  addTopicMessage,
   readAllTopicMessages,
   resolveTopicRoomId,
   buildTopicGuideText,
@@ -37,21 +40,24 @@ import * as messageStore from "../../src/workspace/message-store.js";
 import { compileMemberPromptForScope } from "../../src/engine/prompt-compiler.js";
 import type { Room } from "../../src/shared/types.js";
 
-function writeRoom(roomId: string, name = "Test Room"): Room {
-  const roomDir = join(state.dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
+function seedRoom(roomId: string, name = "Test Room"): Room {
   const room: Room = {
     id: roomId,
     name,
     cwd: "/tmp",
     members: ["pm", "developer"],
     roomMembers: [
-      { id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 },
-      { id: "rm_dev", name: "developer", sourceAgent: "developer", createdAt: 1, updatedAt: 1 },
+      { id: "mem_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 },
+      { id: "mem_dev", name: "developer", sourceAgent: "developer", createdAt: 1, updatedAt: 1 },
     ],
     createdAt: 1,
   } as Room;
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+  for (const member of room.roomMembers ?? []) {
+    new MembersRepository(fixture.db).insert({ id: member.id, name: member.name, agentTemplate: member.sourceAgent,
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+  }
+  room.globalMemberIds = room.roomMembers!.map(m => m.id);
+  new ConversationsRepository(fixture.db).upsertRoom(room);
   return room;
 }
 
@@ -63,22 +69,23 @@ describe("conversation-ref topic kind", () => {
     expect(parsed?.kind).toBe("topic");
     if (parsed?.kind === "topic") expect(parsed.topicId).toBe("topic_abc");
     expect(scopeDirName(id)).toBe("topic-topic_abc");
-    const key = instanceKey(id, "rm_dev");
-    expect(key).toBe("topic:topic_abc:rm_dev");
-    expect(parseInstanceKey(key)).toEqual({ scopeId: "topic:topic_abc", memberId: "rm_dev" });
+    const key = instanceKey(id, "mem_dev");
+    expect(key).toBe("topic:topic_abc:mem_dev");
+    expect(parseInstanceKey(key)).toEqual({ scopeId: "topic:topic_abc", memberId: "mem_dev" });
   });
 });
 
 describe("topic-store + message isolation", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("creates topic, routes messages to topic store only", () => {
-    const room = writeRoom("roomA");
+    const room = seedRoom("roomA");
     // Seed an anchor message in the room
     const anchor = messageStore.addMessage(room.id, {
       sender: "user",
@@ -143,16 +150,17 @@ describe("topic-store + message isolation", () => {
 
 describe("prompt cache invariant (topic == parent room compile)", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-pc-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
     // Minimal memory dirs
     mkdirSync(join(state.dir, "members"), { recursive: true });
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("compileMemberPromptForScope topic shares Member+Communication with room (cache invariant)", () => {
-    const room = writeRoom("roomB", "Boss Room");
+    const room = seedRoom("roomB", "Boss Room");
     const agentDef = {
       name: "developer",
       description: "dev",
@@ -171,8 +179,9 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
       room,
       docsRoot,
     });
+    const topic = createTopic({ roomId: room.id, title: "xyz", anchorMessageId: "", seedMode: "fresh" });
     const topicCompiled = compileMemberPromptForScope({
-      scopeId: `topic:topic_xyz`,
+      scopeId: `topic:${topic.id}`,
       memberId: "mem_dev",
       memberName: "developer",
       agentDef,

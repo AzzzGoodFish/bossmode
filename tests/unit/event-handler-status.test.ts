@@ -1,20 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { importAgentEvent, readAgentEvents } from "../../src/storage/event-repository.js";
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+let fixture: ReturnType<typeof coreFixture>;
 
 vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
+  getBossmodeDir: () => process.env.BOSSMODE_DIR!,
 }));
 
 vi.mock("../../src/communication/ws.js", () => ({
@@ -34,11 +28,17 @@ import { broadcastToAgentSubscribers } from "../../src/communication/ws.js";
 
 describe("event-handler status authority", () => {
   beforeEach(() => {
+    fixture = coreFixture();
+    new MembersRepository(fixture.db).insert({ id: "mem_dev", name: "developer", agentTemplate: "developer",
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    new ConversationsRepository(fixture.db).upsertRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 });
     agentManagerMocks.refreshContextUsage.mockReset();
+    vi.mocked(broadcastToAgentSubscribers).mockClear();
   });
+  afterEach(async () => { await Promise.resolve(); fixture.close(); });
   it("maps runtime agent_start to public working status", () => {
     const buffer: AgentHistoryEvent[] = [];
-    const status = handleAgentEvent("room1", "developer", "room1:developer", { type: "agent_start" }, buffer);
+    const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "agent_start" }, buffer, "mem_dev");
 
     expect(status).toBe("working");
     expect(buffer).toContainEqual(expect.objectContaining({ type: "agent_start" }));
@@ -46,7 +46,7 @@ describe("event-handler status authority", () => {
 
   it("maps runtime agent_end to public idle status", () => {
     const buffer: AgentHistoryEvent[] = [];
-    const status = handleAgentEvent("room1", "developer", "room1:developer", { type: "agent_end" }, buffer);
+    const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "agent_end" }, buffer, "mem_dev");
 
     expect(status).toBe("idle");
     expect(buffer).toContainEqual(expect.objectContaining({ type: "agent_end" }));
@@ -54,96 +54,89 @@ describe("event-handler status authority", () => {
 
   it("refreshes context usage on message_end before the turn ends", () => {
     const buffer: AgentHistoryEvent[] = [];
-    const status = handleAgentEvent("room1", "developer", "room1:developer", { type: "message_end", text: "done" }, buffer, "rm_dev");
+    const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "message_end", text: "done" }, buffer, "mem_dev");
 
     expect(status).toBeUndefined();
-    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "rm_dev");
+    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "mem_dev");
   });
 
   it("forces and retries context usage refresh on compaction_end", () => {
     const buffer: AgentHistoryEvent[] = [];
-    const status = handleAgentEvent("room1", "developer", "room1:developer", { type: "compaction_end", reason: "manual", aborted: false, willRetry: false }, buffer, "rm_dev");
+    const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "compaction_end", reason: "manual", aborted: false, willRetry: false }, buffer, "mem_dev");
 
     expect(status).toBeUndefined();
-    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "rm_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
+    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "mem_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
   });
 
-  it("stamps numeric ts on WS agent:event and disk with the same identity", () => {
-    const roomId = `ws-ts-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const memberId = "rm_dev";
+  it("stamps numeric ts on WS agent:event and SQL with the same identity", async () => {
+    const roomId = "room1";
+    const memberId = "mem_dev";
     const buffer: AgentHistoryEvent[] = [];
     vi.mocked(broadcastToAgentSubscribers).mockClear();
 
-    try {
-      handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "agent_start" }, buffer, memberId);
+    handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "agent_start" }, buffer, memberId);
 
-      const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { type?: string; ts?: number } };
-      const wsTs = wsPayload?.event?.ts;
-      expect(typeof wsTs).toBe("number");
-      expect(Number.isFinite(wsTs)).toBe(true);
-      expect(wsTs).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
+    const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { type?: string; ts?: number } };
+    const wsTs = wsPayload?.event?.ts;
+    expect(typeof wsTs).toBe("number");
+    expect(Number.isFinite(wsTs)).toBe(true);
+    expect(wsTs).toBeGreaterThan(0);
 
-      const disk = loadEventsFromDisk(roomId, memberId);
-      const start = disk.find((e) => e.type === "agent_start") as { ts?: number } | undefined;
-      expect(start?.ts).toBe(wsTs);
-      expect((buffer[0] as { ts?: number }).ts).toBe(wsTs);
-    } finally {
-      rmSync(join("/tmp/bossmode-test", "rooms", roomId), { recursive: true, force: true });
-    }
+    const persisted = loadEventsFromDisk(roomId, memberId);
+    const start = persisted.find((e) => e.type === "agent_start") as { ts?: number } | undefined;
+    expect(start?.ts).toBe(wsTs);
+    expect((buffer[0] as { ts?: number }).ts).toBe(wsTs);
   });
 
-  it("does not overwrite an event that already carries ts", () => {
-    const roomId = `ws-ts-keep-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const memberId = "rm_dev";
+  it("does not overwrite an event that already carries ts", async () => {
+    const roomId = "room1";
+    const memberId = "mem_dev";
     const buffer: AgentHistoryEvent[] = [];
     const fixedTs = 1_700_000_000_123;
     vi.mocked(broadcastToAgentSubscribers).mockClear();
 
-    try {
-      handleAgentEvent(
-        roomId,
-        "developer",
-        `${roomId}:${memberId}`,
-        { type: "tool_start", toolCallId: "t1", toolName: "bash", args: {}, ts: fixedTs } as any,
-        buffer,
-        memberId,
-      );
+    handleAgentEvent(
+      roomId,
+      "developer",
+      `${roomId}:${memberId}`,
+      { type: "tool_start", toolCallId: "t1", toolName: "bash", args: {}, ts: fixedTs } as any,
+      buffer,
+      memberId,
+    );
 
-      const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { ts?: number } };
-      expect(wsPayload?.event?.ts).toBe(fixedTs);
-      const disk = loadEventsFromDisk(roomId, memberId);
-      expect((disk.find((e) => e.type === "tool_start") as { ts?: number } | undefined)?.ts).toBe(fixedTs);
-    } finally {
-      rmSync(join("/tmp/bossmode-test", "rooms", roomId), { recursive: true, force: true });
-    }
+    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
+    const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { ts?: number } };
+    expect(wsPayload?.event?.ts).toBe(fixedTs);
+    const persisted = loadEventsFromDisk(roomId, memberId);
+    expect((persisted.find((e) => e.type === "tool_start") as { ts?: number } | undefined)?.ts).toBe(fixedTs);
   });
 
-  it("caps runtime errors before buffering, persistence, WS publication, and legacy reads", () => {
-    const roomId = `error-cap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const memberId = "rm_dev";
-    const eventsDir = join("/tmp/bossmode-test", "rooms", roomId, "agent-events");
-    const path = join(eventsDir, `${memberId}.jsonl`);
+  it("caps runtime errors before buffering, persistence, WS publication, and imported historical reads", async () => {
+    const roomId = "room1";
+    const memberId = "mem_dev";
     const errorMessage = "e".repeat(5_763);
     const buffer: AgentHistoryEvent[] = [];
 
-    try {
-      handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "message_end", text: "", stopReason: "error", errorMessage }, buffer, memberId);
+    handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "message_end", text: "", stopReason: "error", errorMessage }, buffer, memberId);
 
-      const buffered = buffer[0] as Extract<AgentHistoryEvent, { type: "message_end" }>;
-      expect(Array.from(buffered.errorMessage || "")).toHaveLength(300);
-      expect(buffered.errorMessage?.endsWith("…")).toBe(true);
-      expect(JSON.parse(readFileSync(path, "utf-8")).errorMessage).toBe(buffered.errorMessage);
-      expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(roomId, "developer", expect.objectContaining({
-        event: expect.objectContaining({ errorMessage: buffered.errorMessage }),
-      }));
+    const buffered = buffer[0] as Extract<AgentHistoryEvent, { type: "message_end" }>;
+    expect(Array.from(buffered.errorMessage || "")).toHaveLength(300);
+    expect(buffered.errorMessage?.endsWith("…")).toBe(true);
+    const stored = readAgentEvents<{ errorMessage: string }>(roomId, memberId)[0];
+    expect(stored.errorMessage).toBe(buffered.errorMessage);
+    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
+    expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(roomId, "developer", expect.objectContaining({
+      event: expect.objectContaining({ errorMessage: buffered.errorMessage }),
+    }));
 
-      mkdirSync(eventsDir, { recursive: true });
-      writeFileSync(path, JSON.stringify({ type: "compaction_end", aborted: false, willRetry: false, errorMessage }) + "\n", "utf-8");
-      const legacy = loadEventsFromDisk(roomId, memberId)[0] as Extract<AgentHistoryEvent, { type: "compaction_end" }>;
-      expect(Array.from(legacy.errorMessage || "")).toHaveLength(300);
-      expect(legacy.errorMessage?.endsWith("…")).toBe(true);
-    } finally {
-      rmSync(join("/tmp/bossmode-test", "rooms", roomId), { recursive: true, force: true });
-    }
+    // Historical payloads enter through the supported explicit importer, never a live JSONL reader.
+    const historicalEvent = { type: "compaction_end", aborted: false, willRetry: false, errorMessage };
+    importAgentEvent(fixture.db, { id: "historical-error", scopeId: roomId, ownerKey: "historical-developer",
+      memberId: null, seq: 1, ts: 1, event: historicalEvent });
+    expect(readAgentEvents(roomId, "historical-developer")).toEqual([historicalEvent]);
+    const legacy = loadEventsFromDisk(roomId, "historical-developer")[0] as Extract<AgentHistoryEvent, { type: "compaction_end" }>;
+    expect(Array.from(legacy.errorMessage || "")).toHaveLength(300);
+    expect(legacy.errorMessage?.endsWith("…")).toBe(true);
   });
 });

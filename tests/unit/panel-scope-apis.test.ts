@@ -1,16 +1,19 @@
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 flagship ② — unified member panel scope plumbing (backend half).
  *
  * applyMemberConfigPatch is the single write authority for member config
- * patches: unifiedModel/unifiedExtensions fields go global, everything else
- * lands in the target scope's override — for BOTH room and dm scopes. The
+ * patches: every field goes global regardless of retired unified flags,
+ * with no scope override — for BOTH room and dm scopes. The
  * members-shaped PATCH route and the room PATCH route delegate here, so a
  * model switch from the DM panel and from the room panel persist identically.
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 let dir: string;
 
@@ -25,8 +28,6 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
 
 async function seedMember(name: string, flags?: { unifiedModel?: boolean; unifiedExtensions?: boolean }) {
   const reg = await import("../../src/workspace/member-registry.js");
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
   const member = reg.createMember({ name, agentTemplate: name });
   if (flags) reg.updateMember(member.id, flags);
   return { reg, member: reg.getMember(member.id)! };
@@ -34,10 +35,11 @@ async function seedMember(name: string, flags?: { unifiedModel?: boolean; unifie
 
 describe("applyMemberConfigPatch — unified write authority", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-panel-scope-"));
+    fixture = coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => fixture.close());
 
   it("unifiedModel member: model/thinking go global, no scope override written", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: true });
@@ -61,6 +63,7 @@ describe("applyMemberConfigPatch — unified write authority", () => {
   it("batch-5b: mixed-flag member writes everything global", async () => {
     const { reg, member } = await seedMember("mixedflow", { unifiedModel: true, unifiedExtensions: false });
     const memberId = member.id;
+    new ConversationsRepository(fixture.db).upsertRoom({ id: "room-1", name: "Room", members: [member.name], globalMemberIds: [memberId], createdAt: 1 });
     reg.applyMemberConfigPatch(memberId, "room:room-1", { model: "m1", mcpServers: ["web"] });
     const rec = reg.getMember(memberId)!;
     expect(rec.global.model).toBe("m1");
@@ -95,20 +98,19 @@ describe("applyMemberConfigPatch — unified write authority", () => {
   });
 });
 
-describe("batch-5b disk peel + scopeless config PATCH", () => {
+describe("batch-5b SQL field peel + global config PATCH", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-panel-scope2-"));
+    fixture = coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => fixture.close());
 
-  it("writeRecord peels unified flags + scopeOverrides from disk", async () => {
-    const { readFileSync } = await import("node:fs");
+  it("writes omit retired unified flags + scopeOverrides from SQL", async () => {
     const { reg, member } = await seedMember("peelcheck", { unifiedModel: false });
-    // Any write (title patch path) strips legacy fields from disk.
+    // Current SQL records do not persist the retired scope configuration fields.
     reg.updateMember(member.id, { global: { thinkingLevel: "high" } });
-    const { openDb } = await import("../../src/workspace/db/sqlite.js");
-    const raw = JSON.stringify(openDb().get("SELECT * FROM members WHERE id = ?", member.id));
+    const raw = JSON.stringify(fixture.db.get("SELECT * FROM members WHERE id = ?", member.id));
     expect(raw).not.toContain("unifiedModel");
     expect(raw).not.toContain("unifiedExtensions");
     expect(raw).not.toContain("scopeOverrides");

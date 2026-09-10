@@ -1,3 +1,4 @@
+import { coreFixture } from "./helpers/core-fixture.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
@@ -29,7 +30,7 @@ vi.mock("../src/shared/config.js", () => ({
   writePidFile: () => {},
   removePidFile: () => {},
   configExists: () => true,
-  getBossmodeDir: () => "/tmp/bossmode-test",
+  getBossmodeDir: () => process.env.BOSSMODE_DIR!,
 }));
 
 function request(
@@ -54,18 +55,15 @@ function request(
 }
 
 describe("HTTP server", () => {
+  let fixture: ReturnType<typeof coreFixture>;
   let server: http.Server;
   let port: number;
   let authToken: string;
 
   beforeAll(async () => {
-    const { startServer } = await import("../src/server/index.js");
+    fixture = coreFixture();
 
-    // Use a random available port
-    port = 10000 + Math.floor(Math.random() * 50000);
-
-    // Start server (we need to get the http.Server instance)
-    // For testing, let's create server directly
+    // Exercise the API on a local ephemeral HTTP listener.
     const { handleApiRequest } = await import("../src/api/index.js");
 
     server = http.createServer(async (req, res) => {
@@ -77,8 +75,10 @@ describe("HTTP server", () => {
     });
 
     await new Promise<void>((resolve) => {
-      server.listen(port, "127.0.0.1", resolve);
+      server.listen(0, "127.0.0.1", resolve);
     });
+
+    port = (server.address() as import("node:net").AddressInfo).port;
 
     // Login to get token
     const loginRes = await request({
@@ -89,14 +89,17 @@ describe("HTTP server", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "testuser", password: "testpass" }),
     });
+    expect(loginRes.status).toBe(200);
     const loginData = JSON.parse(loginRes.body);
     authToken = loginData.token;
   });
 
   afterAll(async () => {
     if (server) {
+      server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+    fixture.close();
   });
 
   it("POST /api/auth/login with correct credentials returns token", async () => {

@@ -1,7 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { mkdirSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let fixture: ReturnType<typeof coreFixture>;
 
 const state = vi.hoisted(() => ({ dir: "", seed: "fork" as "fork" | "fresh" }));
 
@@ -23,18 +26,21 @@ vi.mock("../../src/shared/config.js", async () => {
 import { titleFromMessage, createTopic } from "../../src/workspace/topic-store.js";
 import type { Room } from "../../src/shared/types.js";
 
-function writeRoom(roomId: string): Room {
-  const roomDir = join(state.dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
+function seedRoom(roomId: string): Room {
   const room = {
     id: roomId,
     name: "R",
     cwd: "/tmp",
     members: ["pm"],
-    roomMembers: [{ id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 }],
+    roomMembers: [{ id: "mem_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 }],
     createdAt: 1,
   } as Room;
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+  for (const member of room.roomMembers ?? []) {
+    new MembersRepository(fixture.db).insert({ id: member.id, name: member.name, agentTemplate: member.sourceAgent,
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+  }
+  room.globalMemberIds = room.roomMembers!.map(m => m.id);
+  new ConversationsRepository(fixture.db).upsertRoom(room);
   return room;
 }
 
@@ -47,21 +53,22 @@ describe("titleFromMessage", () => {
 
 describe("createTopic seed default is fork", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-v2-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
     state.seed = "fork";
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("omitted seedMode writes fork", () => {
-    writeRoom("roomA");
+    seedRoom("roomA");
     const t = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1" });
     expect(t.seedMode).toBe("fork");
   });
 
   it("explicit fresh still wins on the store", () => {
-    writeRoom("roomA");
+    seedRoom("roomA");
     const t = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1", seedMode: "fresh" });
     expect(t.seedMode).toBe("fresh");
   });
