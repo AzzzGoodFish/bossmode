@@ -6,7 +6,7 @@ import { getBossmodeDir, getConfigPath, readPidFile, readConfig, configExists } 
 import { readMcpConfigText, readMemberMcpConfig } from "../../src/shared/mcp-settings.js";
 import { getCatalog } from "../../src/engine/model-catalog.js";
 import { loadModelCredentialProfiles } from "../../src/engine/model-credentials.js";
-import { validateToken } from "../../src/api/auth.js";
+import { validateToken } from "../../src/services/auth-service.js";
 import { readWorkspaces } from "../../src/workspace/workspace-registry.js";
 import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/workspace/ssh-keygen.js";
 

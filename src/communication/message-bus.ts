@@ -1,3 +1,4 @@
+import {pendingScopeNotifications} from "../storage/notification-repository.js";
 // Unified message write + broadcast + listener notification
 // All messages (user, agent, system) go through here.
 
@@ -83,6 +84,13 @@ function dispatchPendingMessages(): void {
     }
     if (!failed) markDispatchDelivered(id);
   }
+  const notifications=pendingScopeNotifications();
+  for(const notification of notifications){
+    recordDispatchAttempt(notification.id);
+    broadcastToRoom(notification.scopeId,notification.event);
+    markDispatchDelivered(notification.id);
+  }
+  if(notifications.length===500 && notifications.every(row=>isDispatchDelivered(row.id)))scheduleMessageDispatch();
   // Do not hot-loop on poison deliveries; parent retries on its recovery timer.
   if (pending.length === 500 && pending.every(row => isDispatchDelivered(row.id))) scheduleMessageDispatch();
 }

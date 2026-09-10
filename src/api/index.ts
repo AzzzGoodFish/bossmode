@@ -66,7 +66,7 @@ export async function parseBody(req: IncomingMessage): Promise<unknown> {
 
 // -- Register all domain routes (lazy — called once on first request) --
 
-import { login } from "./auth.js";
+import { login } from "../services/auth-service.js";
 
 let routesRegistered = false;
 

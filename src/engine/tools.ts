@@ -16,7 +16,7 @@ import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages, createTopic, saveTopic, buildTopicGuideText, titleFromMessage, normalizeAnchorExcerpt } from "../workspace/topic-store.js";
 import { scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { getTopicSeedMode } from "../shared/config.js";
-import { emitTaskEvent } from "../api/tasks.js";
+import * as taskService from "../services/task-service.js";
 import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
 import { parseMentions, parseUrgentMentions, parseMentionMemberIds, parseUrgentMentionMemberIds } from "../communication/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
@@ -129,32 +129,6 @@ export function deliverMemberMessage(roomId: string, memberName: string, text: s
   if (meta) postMessage(roomId, memberName, text, info.mentions, meta);
   else postMessage(roomId, memberName, text, info.mentions);
   logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, autoDelivered: opts?.autoDelivered === true });
-}
-
-function resolveTaskAssignee(roomId: string, value: unknown): { name: string; memberId: string } | undefined {
-  const raw = String(value ?? "").trim();
-  if (!raw) return undefined;
-  const member = roomStore.resolveRoomMemberRef(roomId, raw);
-  if (!member) throw new Error(`Assignee is not a room member: ${raw}`);
-  return { name: member.name, memberId: member.id };
-}
-
-function resolveTaskSubscribers(roomId: string, values: unknown): { names: string[]; memberIds: string[] } | undefined {
-  if (!Array.isArray(values)) return undefined;
-  const members: Array<{ id: string; name: string }> = [];
-  let includesUser = false;
-  for (const value of values) {
-    const raw = String(value ?? "").trim();
-    if (!raw) continue;
-    if (raw === "user") {
-      includesUser = true;
-      continue;
-    }
-    const member = roomStore.resolveRoomMemberRef(roomId, raw);
-    if (!member) throw new Error(`Subscriber is not a room member: ${raw}`);
-    if (!members.some((entry) => entry.id === member.id)) members.push(member);
-  }
-  return { names: [...(includesUser ? ["user"] : []), ...members.map((member) => member.name)], memberIds: members.map((member) => member.id) };
 }
 
 function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): boolean {
@@ -609,72 +583,31 @@ export async function handleToolCallback(
       return { ok: true, topicId: topic.id, scopeId, title: topic.title };
     }
     case "create_task": {
-      const title = params?.title ? String(params.title).trim() : "";
-      if (!title) return { ok: false, error: "title is required" };
       try {
-        // Topic tasks belong to the parent room; auto-tag topic:<id> (plan §6).
-        let taskRoomId = roomId;
-        let autoTopicRef: string | undefined;
-        if (roomId.startsWith("topic:")) {
-          const parent = resolveTopicRoomId(roomId.slice("topic:".length));
-          if (!parent) return { ok: false, error: `Unknown topic scope: ${roomId}` };
-          taskRoomId = parent;
-          autoTopicRef = roomId; // "topic:<id>"
+        let taskRoomId=roomId;let autoTopicRef:string|undefined;
+        if(roomId.startsWith("topic:")){
+          const parent=resolveTopicRoomId(roomId.slice("topic:".length));
+          if(!parent)return {ok:false,error:`Unknown topic scope: ${roomId}`};
+          taskRoomId=parent;autoTopicRef=roomId;
         }
-        if (taskRoomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
-        const assignee = resolveTaskAssignee(taskRoomId, params?.assignee);
-        const subscribers = resolveTaskSubscribers(taskRoomId, params?.subscribers);
-        let references = Array.isArray(params?.references) ? params.references.map(String) : [];
-        if (autoTopicRef && !references.includes(autoTopicRef)) references = [...references, autoTopicRef];
-        const task = taskStore.createTask(taskRoomId, {
-          title,
-          createdBy: actorName(),
-          status: (params?.status as TaskStatus) || "todo",
-          priority: (params?.priority as TaskPriority) || "P1",
-          assignee: assignee?.name,
-          assigneeMemberId: assignee?.memberId,
-          description: params?.description ? String(params.description) : undefined,
-          references: references.length ? references : undefined,
-          subscribers: subscribers?.names,
-          subscriberMemberIds: subscribers?.memberIds,
-        });
-        emitTaskEvent(taskRoomId, "created", task, actorName());
-        return { ok: true, taskId: task.id, title: task.title, status: task.status };
-      } catch (err: any) {
-        return { ok: false, error: err.message || String(err) };
-      }
+        if(taskRoomId.startsWith("dm:"))return {ok:false,error:"Tasks are room-scoped — a DM scope has no task list"};
+        let references=Array.isArray(params?.references)?params.references.map(String):[];
+        if(autoTopicRef&&!references.includes(autoTopicRef))references=[...references,autoTopicRef];
+        const task=taskService.createTask(taskRoomId,{...params,references:references.length?references:undefined},
+          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
+        return {ok:true,taskId:task.id,title:task.title,status:task.status};
+      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
     }
     case "update_task": {
-      const taskId = params?.taskId ? String(params.taskId) : "";
-      if (!taskId) return { ok: false, error: "taskId is required" };
-      const taskRoomId = resolveChatScopeRoomId(roomId) || roomId;
-      const before = taskStore.getTask(taskRoomId, taskId);
-      if (!before) return { ok: false, error: `Task not found: ${taskId}` };
+      const taskId=params?.taskId?String(params.taskId):"";
+      if(!taskId)return {ok:false,error:"taskId is required"};
       try {
-        const patch: Parameters<typeof taskStore.updateTask>[2] = {};
-        if (params?.title !== undefined) patch.title = String(params.title);
-        if (params?.status !== undefined) patch.status = params.status as TaskStatus;
-        if (params?.priority !== undefined) patch.priority = params.priority as TaskPriority;
-        if (params?.assignee !== undefined) {
-          const assignee = resolveTaskAssignee(taskRoomId, params.assignee);
-          patch.assignee = assignee?.name ?? null;
-          patch.assigneeMemberId = assignee?.memberId ?? null;
-        }
-        if (params?.description !== undefined) patch.description = String(params.description);
-        if (params?.references !== undefined) patch.references = Array.isArray(params.references) ? params.references.map(String) : [];
-        if (params?.subscribers !== undefined) {
-          const subscribers = resolveTaskSubscribers(taskRoomId, params.subscribers) || { names: [], memberIds: [] };
-          patch.subscribers = subscribers.names;
-          patch.subscriberMemberIds = subscribers.memberIds;
-        }
-        const updated = taskStore.updateTask(taskRoomId, taskId, patch);
-        if (!updated) return { ok: false, error: "Update failed" };
-        const action = before.status !== updated.status ? "status_changed" : "updated";
-        emitTaskEvent(taskRoomId, action, updated, actorName());
-        return { ok: true, taskId: updated.id, status: updated.status, title: updated.title };
-      } catch (err: any) {
-        return { ok: false, error: err.message || String(err) };
-      }
+        const taskRoomId=resolveChatScopeRoomId(roomId)||roomId;
+        const task=taskService.updateTask(taskRoomId,taskId,params,
+          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
+        if(!task)return {ok:false,error:`Task not found: ${taskId}`};
+        return {ok:true,taskId:task.id,title:task.title,status:task.status};
+      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
     }
     case "list_scopes": {
       const actor = resolveMemoryActor(roomId, actorRef);
@@ -716,15 +649,15 @@ export async function handleToolCallback(
       return truncateToolResult(renderTaskAsMarkdown(task));
     }
     case "comment_task": {
-      const taskId = params?.taskId ? String(params.taskId) : "";
-      const comment = params?.comment ? String(params.comment) : "";
-      if (!taskId) return { ok: false, error: "taskId is required" };
-      if (!comment.trim()) return { ok: false, error: "comment is required" };
-      const commentRoomId = resolveChatScopeRoomId(roomId) || roomId;
-      const result = taskStore.addTaskComment(commentRoomId, taskId, { author: actorName(), content: comment });
-      if (!result) return { ok: false, error: `Task not found: ${taskId}` };
-      emitTaskEvent(commentRoomId, "commented", result.task, actorName(), { commentId: result.comment.id });
-      return { ok: true, taskId: result.task.id, commentId: result.comment.id };
+      const taskId=params?.taskId?String(params.taskId):"";
+      if(!taskId)return {ok:false,error:"taskId is required"};
+      try {
+        const taskRoomId=resolveChatScopeRoomId(roomId)||roomId;
+        const result=taskService.commentTask(taskRoomId,taskId,String(params?.comment||""),
+          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
+        if(!result)return {ok:false,error:`Task not found: ${taskId}`};
+        return {ok:true,taskId:result.task.id,commentId:result.comment.id};
+      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
     }
     case "member_status": {
       // Room-scope read-only live status (same source as the member panel lamp).

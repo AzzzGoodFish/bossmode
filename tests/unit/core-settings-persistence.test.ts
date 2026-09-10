@@ -1,3 +1,4 @@
+import {requireAuth} from "../../src/api/auth.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -9,7 +10,7 @@ import { SettingsRepository } from "../../src/storage/repositories/settings.js";
 import { McpSettingsRepository } from "../../src/storage/repositories/mcp-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/storage/repositories/workspace-settings.js";
 import { configExists, readConfig, writeConfig, getDefaultConfig, getConfigPath, getBossmodeDir, hashPassword } from "../../src/shared/config.js";
-import { login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/api/auth.js";
+import { login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/services/auth-service.js";
 import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/shared/mcp-settings.js";
 import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/workspace/workspace-registry.js";
 import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/workspace/ssh-keygen.js";
@@ -43,8 +44,11 @@ describe("settings and auth DB authority",()=>{
     expect(login("u","wrong")).toBeNull();
     const session=login("u","p")!; expect(session.token).toHaveLength(64);
     expect(JSON.stringify(db.all("SELECT * FROM auth_sessions"))).not.toContain(session.token);
+    const originalExpiry=getSessionExpiresAtForTests(session.token);
     db.close();open();expect(validateToken(session.token)).toBe(true);
-    setSessionRemainingForTests(session.token,1000);expect(validateToken(session.token)).toBe(true);
+    expect(getSessionExpiresAtForTests(session.token)).toBe(originalExpiry); // no early renewal
+    expect(requireAuth({})).toBe(false);
+    setSessionRemainingForTests(session.token,1000);expect(requireAuth({authorization:`Bearer ${session.token}`})).toBe(true);
     expect(getSessionExpiresAtForTests(session.token)!).toBeGreaterThan(Date.now()+SESSION_TTL_MS-1000);
     setSessionRemainingForTests(session.token,-1);expect(validateToken(session.token)).toBe(false);
     expect(getSessionExpiresAtForTests(session.token)).toBeNull();

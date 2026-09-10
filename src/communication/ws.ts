@@ -2,7 +2,7 @@ import {logger} from "../foundation/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
-import { validateToken } from "../api/auth.js";
+import { validateToken } from "../services/auth-service.js";
 import { findMemberByName } from "../workspace/member-registry.js";
 
 interface ClientState {
