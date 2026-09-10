@@ -2165,8 +2165,8 @@ function emitAgentLocalEvent(
   event: AgentHistoryEvent,
   identity?: { memberId: string; agentName: string },
 ): void {
-  const scopedMember = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? memberRecordToConfig(memberRef) : null;
-  const member = scopedMember ?? resolveRoomMember(roomId, memberRef);
+  const scopedMember = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? getMember(memberRef) : null;
+  const member = identity ? undefined : scopedMember ?? roomStore.resolveRoomMemberRef(roomId, memberRef);
   // Prefer live instance identity, then the global member record for DM/topic.
   const keyHint = instanceKey(roomId, member?.id || memberRef);
   const instance = instances.get(keyHint)

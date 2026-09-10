@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { applyStorageMigrations, bindDatabase, openDatabase, type Database } from "../../src/storage/database.js";
 import { templatesMigration } from "../../src/storage/schema/templates.js";
 import { TemplateRepository } from "../../src/storage/repositories/templates.js";
-import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, seedAgentTemplates, type TemplateSource } from "../../src/workforce/template-files.js";
+import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, writeTemplateBody, seedAgentTemplates, type TemplateSource } from "../../src/workforce/template-files.js";
 import { deleteAgentDefinition, hasAgentDefinition, listAgentTemplateMetadata, loadAgentDefinition, loadAgentDefinitions, loadAgentDefinitionsStrict, loadAgentTemplates, renderAgentDefinitionMarkdown, saveAgentDefinition } from "../../src/workforce/agent-store.js";
 import { seedBuiltinAssets } from "../../src/workforce/team-updates.js";
 
@@ -169,8 +169,10 @@ describe("DB agent-template registry", () => {
     expect(repository.get("stable")).toEqual(previous);
     expect(readTemplateBody(root, previous)).toBe("old body");
     db.exec("DROP TRIGGER reject_template");
+    expect(() => db.transaction(() => saveAgentDefinition("stable","forbidden body IO"))).toThrow("no enclosing database transaction");
+    const prepared=writeTemplateBody(root,"stable","rolled back body");
     expect(() => db.transaction(() => {
-      saveAgentDefinition("stable", "rolled back body");
+      new TemplateRepository(db).upsert({...previous,personaPath:prepared});
       throw new Error("outer failure");
     })).toThrow("outer failure");
     expect(loadAgentDefinition("stable")!.systemPrompt).toBe("old body");

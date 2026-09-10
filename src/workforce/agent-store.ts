@@ -20,22 +20,28 @@ function parseAgentFile(content: string, slug: string): AgentDefinition {
 }
 
 /** Both list reads are strict: a broken body reference is never a partial successful list. */
-export function loadAgentDefinitions(): AgentDefinition[] { return repository().list().map(definition); }
+export function loadAgentDefinitions(): AgentDefinition[] { getDatabase().assertOutsideTransaction(); return repository().list().map(definition); }
 export function loadAgentDefinitionsStrict(): AgentDefinition[] { return loadAgentDefinitions(); }
 export function loadAgentDefinition(name: string): AgentDefinition | null {
+  getDatabase().assertOutsideTransaction();
   const metadata = repository().get(name);
   return metadata ? definition(metadata) : null;
 }
+
+/** Body-free lookup for identity/configuration transactions. */
+export function getAgentTemplateMetadata(slug: string): TemplateMetadata | null { return repository().get(slug); }
 
 /** Use for API iteration when the lookup slug can differ from the display name. */
 export function listAgentTemplateMetadata(): TemplateMetadata[] { return repository().list(); }
 export function hasAgentDefinition(slug: string): boolean { return repository().has(slug); }
 export function renderAgentDefinitionMarkdown(slug: string): string | null {
+  getDatabase().assertOutsideTransaction();
   const metadata = repository().get(slug);
   return metadata ? renderTemplateMarkdown(metadata, readTemplateBody(getBossmodeDir(), metadata)) : null;
 }
 
 export function saveAgentDefinition(name: string, markdownContent: string): AgentDefinition {
+  getDatabase().assertOutsideTransaction();
   const store = repository();
   const parsed = parseAgentDefinitionMarkdown(name, markdownContent);
   // Fail missing/unavailable schema before preparing a file, then publish only after durable file IO.

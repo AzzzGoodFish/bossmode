@@ -1,4 +1,4 @@
-import { loadAgentDefinition } from "./agent-store.js";
+import { getAgentTemplateMetadata } from "./agent-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getEffectiveConfig, getMember, MemberNotFoundError } from "../workspace/member-registry.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../shared/types.js";
@@ -18,7 +18,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
       type: "agent",
       agent: member.agentTemplate,
       runtime: "pi-cli",
-      avatar: roomMember.avatar || loadAgentDefinition(member.agentTemplate)?.avatar,
+      avatar: roomMember.avatar || getAgentTemplateMetadata(member.agentTemplate)?.avatar,
       model: config.model ?? undefined,
       credentialId: config.credentialId ?? undefined,
       thinkingLevel: config.thinkingLevel || "off",
@@ -31,7 +31,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
 
   // Explicit migrations materialize legacy member configuration in the room.
   const agent = roomMember.sourceAgent || roomMember.name;
-  const agentDef = loadAgentDefinition(agent);
+  const agentDef = getAgentTemplateMetadata(agent);
   if (!agentDef && !roomMember.migratedFrom) return null;
   const config = roomMember.config || {};
   return {
@@ -56,7 +56,7 @@ function resolveDirectAgent(roomId: string, memberName: string): AgentMemberConf
   const room = roomStore.getRoom(roomId);
   // A missing current member must not be revived as a same-named direct agent.
   if (Array.isArray(room?.globalMemberIds)) return null;
-  const agentDef = loadAgentDefinition(memberName);
+  const agentDef = getAgentTemplateMetadata(memberName);
   if (!agentDef) return null;
   const override = room?.memberOverrides?.[memberName] || {};
   return {

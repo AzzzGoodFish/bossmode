@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { latestMessage } from "../storage/message-repository.js";
 import type { CreateRoomMemberInput, Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
-import { loadAgentDefinition } from "../workforce/agent-store.js";
+import { loadAgentDefinition, getAgentTemplateMetadata } from "../workforce/agent-store.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../storage/repositories/conversations.js";
 export { ensureDmScope } from "../storage/repositories/conversations.js";
 import { memberDir } from "./member-profile.js";
@@ -98,7 +98,7 @@ export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
         name: g.name,
         sourceAgent: g.agentTemplate || "general",
         sourceMemberId: gid,
-        avatar: loadAgentDefinition(g.agentTemplate)?.avatar,
+        avatar: getAgentTemplateMetadata(g.agentTemplate)?.avatar,
         // Config lives on global registry (effective-config); do not rehydrate shadow config.
         createdAt: shadow?.createdAt ?? g.createdAt,
         updatedAt: g.updatedAt,
