@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-let agentAuthorityDisplayState: typeof import("../../web/src/components/CreateRoomDialog.js").agentAuthorityDisplayState;
+let contactDisplayState: typeof import("../../web/src/components/MemberPickerDialog.js").contactDisplayState;
 
 beforeAll(async () => {
   vi.stubGlobal("localStorage", {
@@ -8,25 +8,25 @@ beforeAll(async () => {
     setItem: vi.fn(),
     removeItem: vi.fn(),
   });
-  ({ agentAuthorityDisplayState } = await import("../../web/src/components/CreateRoomDialog.js"));
+  ({ contactDisplayState } = await import("../../web/src/components/MemberPickerDialog.js"));
 });
 
-describe("Create Room Agent authority display state", () => {
+describe("Create Room contact authority display state", () => {
   it("keeps loading distinct from empty", () => {
-    expect(agentAuthorityDisplayState("loading", 0)).toBe("loading");
+    expect(contactDisplayState({ status: "loading" })).toBe("loading");
   });
 
-  it("keeps load errors distinct from empty even with zero Agents", () => {
-    expect(agentAuthorityDisplayState("error", 0)).toBe("error");
+  it("keeps load errors distinct from empty even with zero contacts", () => {
+    expect(contactDisplayState({ status: "error", message: "Offline" })).toBe("error");
   });
 
   it("shows empty only after a successful zero-item read", () => {
-    expect(agentAuthorityDisplayState("ready", 0)).toBe("empty");
+    expect(contactDisplayState({ status: "ready", contacts: [] })).toBe("empty");
   });
 
-  it("shows Agent choices after Retry succeeds", () => {
-    expect(agentAuthorityDisplayState("error", 0)).toBe("error");
-    expect(agentAuthorityDisplayState("loading", 0)).toBe("loading");
-    expect(agentAuthorityDisplayState("ready", 2)).toBe("items");
+  it("shows contact choices after Retry succeeds", () => {
+    expect(contactDisplayState({ status: "error", message: "Offline" })).toBe("error");
+    expect(contactDisplayState({ status: "loading" })).toBe("loading");
+    expect(contactDisplayState({ status: "ready", contacts: [{ id: "mem-1", name: "言 实", agent: "", thinkingLevel: "medium" }] })).toBe("items");
   });
 });

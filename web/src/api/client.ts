@@ -76,57 +76,6 @@ export async function login(
   return result;
 }
 
-// -- Agents --
-
-export interface AgentInfo {
-  name: string;
-  model: string;
-  description: string;
-  skills: string[];
-  tags: string[];
-  avatar?: string;
-}
-
-export interface AgentDetail extends AgentInfo {
-  systemPrompt: string;
-}
-
-export async function getAgents(): Promise<AgentInfo[]> {
-  return apiFetch("/api/agents");
-}
-
-export async function getAgent(name: string): Promise<AgentDetail> {
-  return apiFetch(`/api/agents/${name}`);
-}
-
-export async function createAgent(name: string, content: string): Promise<AgentDetail> {
-  return apiFetch("/api/agents", { method: "POST", body: JSON.stringify({ name, content }) });
-}
-
-export async function updateAgent(name: string, content: string): Promise<AgentDetail> {
-  return apiFetch(`/api/agents/${name}`, { method: "PUT", body: JSON.stringify({ content }) });
-}
-
-export async function deleteAgent(name: string): Promise<void> {
-  await apiFetch(`/api/agents/${name}`, { method: "DELETE" });
-}
-
-export async function getAgentTemplates(): Promise<AgentInfo[]> {
-  return apiFetch("/api/agents/templates");
-}
-
-
-export interface TeamAgentSummary {
-  name: string;
-  description?: string;
-  systemPrompt?: string;
-  skills?: string[];
-  tags?: string[];
-  avatar?: string;
-  /** Present when API expands agent markdown body. */
-  rawMarkdown?: string;
-}
-
 export interface TeamSkillSummary {
   name: string;
   description?: string;
@@ -684,11 +633,6 @@ export async function batchDeleteKnowledge(paths: string[]): Promise<{ deleted: 
 
 // -- Rooms --
 
-export interface CreateRoomMemberInput {
-  agent: string;
-  name: string;
-}
-
 export interface RoomMemberRecord {
   id: string;
   roomId?: string;
@@ -773,13 +717,12 @@ export async function getRooms(): Promise<Room[]> {
 
 export async function createRoom(
   name: string,
-  members: CreateRoomMemberInput[],
-  ruleDocs?: string[],
-  promptLeaderMemberName?: string,
+  memberIds: string[],
+  leaderMemberId: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
-    body: JSON.stringify({ name, members, ruleDocs, promptLeaderMemberName }),
+    body: JSON.stringify({ name, memberIds, leaderMemberId }),
   });
 }
 
@@ -1778,24 +1721,6 @@ export async function patchGlobalMember(id: string, patch: Record<string, unknow
     method: "PATCH",
     body: JSON.stringify(patch),
   });
-}
-
-// -- 0.20: templates --
-
-export interface TemplateInfo {
-  name: string;
-  description: string;
-  builtin: boolean;
-  referencedBy: string[];
-}
-
-export async function getTemplates(): Promise<TemplateInfo[]> {
-  const res = await apiFetch<{ templates: TemplateInfo[] } | TemplateInfo[]>("/api/templates");
-  return Array.isArray(res) ? res : res.templates;
-}
-
-export async function forceDeleteAgent(name: string): Promise<void> {
-  await apiFetch(`/api/agents/${encodeURIComponent(name)}?force=true`, { method: "DELETE" });
 }
 
 export async function postConversationRead(scopeId: string): Promise<void> {
