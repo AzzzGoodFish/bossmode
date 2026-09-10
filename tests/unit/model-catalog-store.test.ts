@@ -1,30 +1,31 @@
 /**
- * CatalogStore v2a — last-good semantics, disk hydrate, freshness.
+ * Last-good, SQL restart hydration, freshness and credential consumers.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { coreFixture } from "../helpers/core-fixture.js";
+import * as mod from "../../src/engine/model-catalog.js";
+import { CatalogRepository } from "../../src/storage/repositories/catalog-settings.js";
 
-let dir: string;
+let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-}));
-
-describe("CatalogStore", () => {
+describe("CatalogStore SQL authority", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-catalog-"));
-    vi.resetModules();
+    fixture = coreFixture();
+    mod.clearRemoteCatalogMemoryForTests();
+    mod.setPiCatalogModelsForTests(null);
   });
-
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    mod.clearRemoteCatalogMemoryForTests();
+    mod.setPiCatalogModelsForTests(null);
+    mod.setCatalogNetworkRefreshForTests(null);
+    mod.setBundledCatalogLoader(() => []);
+    vi.restoreAllMocks();
+    fixture.close();
   });
 
   it("getCatalog falls back to bundled when no remote", async () => {
-    const mod = await import("../../src/engine/model-catalog.js");
     mod.clearRemoteCatalogMemoryForTests();
     mod.setBundledCatalogLoader(() => [
       { provider: "anthropic", id: "claude-a" },
@@ -36,8 +37,7 @@ describe("CatalogStore", () => {
     expect(mod.formatCatalogFreshness(snap)).toMatch(/packaged/i);
   });
 
-  it("commitRemoteCatalog writes disk atomically and serves remote", async () => {
-    const mod = await import("../../src/engine/model-catalog.js");
+  it("commitRemoteCatalog persists ordered SQL rows and serves remote", async () => {
     mod.clearRemoteCatalogMemoryForTests();
     mod.setBundledCatalogLoader(() => [{ provider: "x", id: "old" }]);
     mod.commitRemoteCatalog([
@@ -51,14 +51,14 @@ describe("CatalogStore", () => {
     expect(snap.fetchedAt).toBe(1_700_000_000_000);
     expect(snap.models.some((m: any) => m.id === "k3-256k")).toBe(true);
 
-    const disk = JSON.parse(readFileSync(join(dir, "pi-catalog-remote.json"), "utf-8"));
-    expect(disk.models).toHaveLength(2);
-    expect(disk.fetchedAt).toBe(1_700_000_000_000);
-    expect(disk.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
+    const stored = new CatalogRepository(fixture.db).remote()!;
+    expect(stored.models.map((m) => m.id)).toEqual(["k3-256k", "k2"]);
+    expect(stored.fetchedAt).toBe(1_700_000_000_000);
+    expect(stored.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(existsSync(join(fixture.root, "pi-catalog-remote.json"))).toBe(false);
   });
 
   it("retainLastGoodCatalog never clears remote on failure", async () => {
-    const mod = await import("../../src/engine/model-catalog.js");
     mod.clearRemoteCatalogMemoryForTests();
     mod.setBundledCatalogLoader(() => [{ provider: "x", id: "bundled-only" }]);
     mod.commitRemoteCatalog([{ provider: "kimi-coding", id: "k3-256k" }], Date.now());
@@ -69,42 +69,36 @@ describe("CatalogStore", () => {
     expect(mod.getCatalog().source).toBe("remote");
   });
 
-  it("hydrateCatalogFromDisk restores last-good after process memory clear", async () => {
-    const mod = await import("../../src/engine/model-catalog.js");
-    writeFileSync(join(dir, "pi-catalog-remote.json"), JSON.stringify({
-      models: [{ provider: "kimi-coding", id: "k3-256k" }],
-      fetchedAt: 1_700_000_100_000,
-      updatedAt: new Date(1_700_000_100_000).toISOString(),
-    }));
-
+  it("hydrate entry point restores SQL last-good after reopen, ignoring legacy files", () => {
+    const legacyPath = join(fixture.root, "pi-catalog-remote.json");
+    writeFileSync(legacyPath, "malformed legacy cache");
+    mod.commitRemoteCatalog([{ provider: "kimi-coding", id: "k3-256k" }], 1_700_000_100_000);
     mod.clearRemoteCatalogMemoryForTests();
-    mod.setBundledCatalogLoader(() => [{ provider: "x", id: "bundled" }]);
-    expect(mod.getCatalog().source).toBe("bundled");
-
+    fixture.reopen();
     mod.hydrateCatalogFromDisk();
-    const snap = mod.getCatalog();
-    expect(snap.source).toBe("remote");
-    expect(snap.models.map((m: any) => m.id)).toEqual(["k3-256k"]);
-    expect(snap.fetchedAt).toBe(1_700_000_100_000);
+    expect(mod.getCatalog()).toMatchObject({
+      source: "remote", models: [{ provider: "kimi-coding", id: "k3-256k" }],
+      fetchedAt: 1_700_000_100_000,
+    });
+    expect(readFileSync(legacyPath, "utf8")).toBe("malformed legacy cache");
   });
 
-  it("hydrate accepts legacy disk cache without fetchedAt (uses updatedAt)", async () => {
-    const mod = await import("../../src/engine/model-catalog.js");
-    writeFileSync(join(dir, "pi-catalog-remote.json"), JSON.stringify({
-      models: [{ provider: "anthropic", id: "claude-x" }],
-      updatedAt: "2026-07-27T06:43:24.072Z",
-    }));
-    mod.clearRemoteCatalogMemoryForTests();
-    mod.hydrateCatalogFromDisk();
-    const snap = mod.getCatalog();
-    expect(snap.source).toBe("remote");
-    expect(snap.fetchedAt).toBe(Date.parse("2026-07-27T06:43:24.072Z"));
+  it("rejects malformed replacement atomically and ignores empty refresh", () => {
+    mod.commitRemoteCatalog([{ provider: "anthropic", id: "claude-x" }], 100);
+    expect(() => mod.commitRemoteCatalog([
+      { provider: "anthropic", id: "partial" }, { id: "invalid-no-provider" },
+    ], 200)).toThrow("identity");
+    mod.commitRemoteCatalog([], 300);
+    fixture.reopen();
+    expect(mod.getCatalog()).toMatchObject({
+      models: [{ provider: "anthropic", id: "claude-x" }], fetchedAt: 100,
+    });
   });
 
   it("dropdown === validation: listAvailableModels sees new models after refresh", async () => {
     const cred = await import("../../src/engine/model-credentials.js");
 
-    cred.setPiCatalogModelsForTests([
+    mod.commitRemoteCatalog([
       { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
     ]);
 
@@ -113,7 +107,7 @@ describe("CatalogStore", () => {
     expect(cred.listAvailableModels().map((m) => m.ref)).not.toContain("kimi-coding/k3-256k");
 
     cred.setCatalogNetworkRefreshForTests(async () => {
-      cred.setPiCatalogModelsForTests([
+      mod.commitRemoteCatalog([
         { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
         { provider: "kimi-coding", id: "k3-256k", name: "K3 256k", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 256000, input: ["text"] },
       ]);
@@ -123,6 +117,8 @@ describe("CatalogStore", () => {
     const refreshed = await cred.refreshModelCredentialProfileModels(profile.id);
     expect(refreshed.catalogSource).toBe("remote");
 
+    fixture.reopen();
+    expect(new CatalogRepository(fixture.db).remote()?.models.map((m) => m.id)).toContain("k3-256k");
     const available = cred.listAvailableModels().map((m) => m.ref);
     expect(available).toContain("kimi-coding/k3-256k");
     expect(cred.isModelAvailable("kimi-coding/k3-256k")).toBe(true);
@@ -157,8 +153,9 @@ describe("CatalogStore", () => {
       const result = await cred.refreshPiCatalogFromNetwork({ timeoutMs: 500 });
       expect(cat.getCatalog().models.some((m: any) => m.id === "k3-256k")).toBe(true);
       expect(cat.getCatalog().source).toBe("remote");
-      // Should report an error while keeping last-good
-      expect(result.error || result.source === "remote").toBeTruthy();
+      expect(result.error).toContain("ECONNREFUSED");
+      fixture.reopen();
+      expect(cat.getCatalog().models.map((m) => m.id)).toEqual(["k3-256k"]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -166,7 +163,7 @@ describe("CatalogStore", () => {
 
   it("builtin discover serves catalog without hitting provider /models", async () => {
     const cred = await import("../../src/engine/model-credentials.js");
-    cred.setPiCatalogModelsForTests([
+    mod.commitRemoteCatalog([
       { provider: "anthropic", id: "claude-fable-5", name: "Fable", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text"] },
     ]);
 

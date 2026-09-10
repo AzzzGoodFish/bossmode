@@ -1,106 +1,55 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  setupTestWorkspace, getTestWorkspace, createTestServer, closeTestServer,
+  loginAndGetToken, jsonRequest, type TestServer,
+} from "../helpers/test-server.js";
+import { readConfig, writeConfig } from "../../src/shared/config.js";
 
-const routes = new Map<string, any>();
-const sendJsonMock = vi.fn();
-const parseBodyMock = vi.fn();
-const readConfigMock = vi.fn();
-const writeConfigMock = vi.fn();
+setupTestWorkspace();
+let server: TestServer;
+let token: string;
+beforeAll(async () => { server = await createTestServer(); token = await loginAndGetToken(server.port); });
+afterAll(async () => { await closeTestServer(server); });
+beforeEach(() => {
+  writeConfig({ ...readConfig(), runtime: { sessionResume: true, codexTransport: "websocket-cached",
+    websocketConnectTimeoutMs: 60000, httpIdleTimeoutMs: 120000 } });
+});
+const path = "/api/settings/runtime";
+function put(body: unknown) { return jsonRequest(server.port, "PUT", path, { token, body }); }
 
-vi.mock("../../src/api/index.js", () => ({
-  addRoute: vi.fn((method: string, path: string, handler: any) => {
-    routes.set(`${method} ${path}`, handler);
-  }),
-  sendJson: sendJsonMock,
-  parseBody: parseBodyMock,
-}));
-
-vi.mock("../../src/engine/agent-manager.js", () => ({
-  getRegistry: vi.fn(() => null),
-  invalidateModelCredentialProfile: vi.fn(),
-}));
-
-vi.mock("../../src/shared/config.js", () => ({
-  readConfig: readConfigMock,
-  writeConfig: writeConfigMock,
-}));
-
-vi.mock("../../src/engine/model-credentials.js", () => ({
-  cancelOAuthLoginJob: vi.fn(),
-  connectBuiltinProviderApiKey: vi.fn(),
-  deleteModelCredentialProfile: vi.fn(),
-  discoverModelCredentialModels: vi.fn(),
-  getModelCredentialProfile: vi.fn(),
-  getOAuthLoginJob: vi.fn(),
-  listAvailableModels: vi.fn(() => []),
-  listBuiltinModelProviders: vi.fn(() => []),
-  listPublicModelCredentialProfiles: vi.fn(() => []),
-  refreshModelCredentialProfileModels: vi.fn(),
-  saveModelCredentialProfile: vi.fn(),
-  startNativeOAuthConnection: vi.fn(),
-  startOAuthLoginJob: vi.fn(),
-  submitOAuthLoginJobInput: vi.fn(),
-}));
-
-describe("runtime settings routes", () => {
-  beforeEach(async () => {
-    vi.resetModules();
-    routes.clear();
-    sendJsonMock.mockReset();
-    parseBodyMock.mockReset();
-    readConfigMock.mockReset();
-    writeConfigMock.mockReset();
-
-    await import("../../src/api/engine-routes.js");
-  });
-
+describe("runtime settings HTTP with SQL authority", () => {
   it("clears httpIdleTimeoutMs when the client sends null", async () => {
-    const config = {
-      auth: { username: "u", passwordHash: "h" },
-      apiKeys: {},
-      defaults: { host: "127.0.0.1", port: 8080 },
-      runtime: {
-        sessionResume: true,
-        codexTransport: "websocket-cached",
-        websocketConnectTimeoutMs: 60000,
-        httpIdleTimeoutMs: 120000,
-      },
-    };
-    readConfigMock.mockReturnValue(config);
-    parseBodyMock.mockResolvedValue({ httpIdleTimeoutMs: null });
-
-    const handler = routes.get("PUT /api/settings/runtime");
-    await handler({} as any, {} as any, {});
-
-    expect(writeConfigMock).toHaveBeenCalledWith(expect.objectContaining({
-      runtime: expect.not.objectContaining({ httpIdleTimeoutMs: expect.anything() }),
-    }));
-    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, {
-      sessionResume: true,
-      topicSeedMode: "fork",
-      codexTransport: "websocket-cached",
-      websocketConnectTimeoutMs: 60000,
-    });
+    const original = readConfig();
+    const response = await put({ httpIdleTimeoutMs: null });
+    expect(response.status).toBe(200);
+    const expected = { sessionResume: true, topicSeedMode: "fork", codexTransport: "websocket-cached", websocketConnectTimeoutMs: 60000 };
+    expect(JSON.parse(response.body)).toEqual(expected);
+    getTestWorkspace().reopen();
+    const { httpIdleTimeoutMs: _, ...retained } = original.runtime!;
+    expect(readConfig()).toEqual({ ...original, runtime: retained });
+    const fetched = await jsonRequest(server.port, "GET", path, { token });
+    expect(fetched.status).toBe(200);
+    expect(JSON.parse(fetched.body)).toEqual(expected);
   });
 
+  it("persists topicSeedMode toggle in both directions without changing other settings", async () => {
+    const original = readConfig();
+    for (const topicSeedMode of ["fresh", "fork"] as const) {
+      const response = await put({ topicSeedMode });
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body).topicSeedMode).toBe(topicSeedMode);
+      getTestWorkspace().reopen();
+      expect(readConfig()).toEqual({ ...original, runtime: { ...original.runtime, topicSeedMode } });
+    }
+  });
 
-  it("persists topicSeedMode toggle", async () => {
-    const config = {
-      auth: { username: "u", passwordHash: "h" },
-      apiKeys: {},
-      defaults: { host: "127.0.0.1", port: 8080 },
-      runtime: { sessionResume: true },
-    };
-    readConfigMock.mockReturnValue(config);
-    parseBodyMock.mockResolvedValue({ topicSeedMode: "fresh" });
-
-    const handler = routes.get("PUT /api/settings/runtime");
-    await handler({} as any, {} as any, {});
-
-    expect(writeConfigMock).toHaveBeenCalledWith(expect.objectContaining({
-      runtime: expect.objectContaining({ topicSeedMode: "fresh" }),
-    }));
-    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), 200, expect.objectContaining({
-      topicSeedMode: "fresh",
-    }));
+  it.each([
+    { sessionResume: "false" }, { topicSeedMode: "invalid" }, { codexTransport: "invalid" },
+    { httpIdleTimeoutMs: -1 }, { websocketConnectTimeoutMs: "100" },
+  ])("rejects invalid patch %j without persisting partial changes", async invalid => {
+    const before = readConfig();
+    const response = await put({ sessionResume: false, ...invalid });
+    expect(response.status).toBe(400);
+    expect(readConfig()).toEqual(before);
   });
 });

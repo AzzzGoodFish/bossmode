@@ -1,21 +1,19 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { readMcpConfigText, type MaterializedMcpConfig } from "../../src/shared/mcp-settings.js";
 
-let dir: string;
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-}));
-
+let fixture: ReturnType<typeof coreFixture>;
+let materials: MaterializedMcpConfig[];
 describe("mcp-settings helpers", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    dir = mkdtempSync(join(tmpdir(), "bossmode-mcp-settings-helper-"));
+  beforeEach(() => { fixture = coreFixture(); materials = []; });
+  afterEach(() => {
+    for (const material of materials) {
+      material.dispose();
+      expect(existsSync(material.configPath)).toBe(false);
+    }
+    fixture.close();
   });
-
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it("writes scoped config with only assigned servers and drops imports", async () => {
     const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/shared/mcp-settings.js");
@@ -31,6 +29,7 @@ describe("mcp-settings helpers", () => {
     });
 
     const scoped = writeScopedMcpConfig({ roomId: "room/one", memberName: "developer", serverNames: ["playwright", "invalid", "badUrl", "missing"] });
+    materials.push(scoped);
     expect(scoped.serverNames).toEqual(["playwright"]);
     const saved = JSON.parse(readFileSync(scoped.configPath, "utf-8"));
     expect(Object.keys(saved.mcpServers)).toEqual(["playwright"]);
@@ -71,7 +70,9 @@ describe("mcp-settings helpers", () => {
     });
 
     const scoped = writeScopedMcpConfig({ roomId: "room/one", memberName: "developer", serverNames: ["playwright"] });
+    materials.push(scoped);
     const saved = JSON.parse(readFileSync(scoped.configPath, "utf-8"));
+    expect(JSON.parse(readMcpConfigText()).settings.sampling).toBe(true);
     expect(saved.settings.timeout).toBe(1000);
     expect(saved.settings.sampling).toBe(false);
     expect(saved.settings.samplingAutoApprove).toBe(false);

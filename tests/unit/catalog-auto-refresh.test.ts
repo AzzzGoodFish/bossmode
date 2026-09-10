@@ -1,39 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDefaultConfig, readConfig, writeConfig } from "../../src/shared/config.js";
+import * as catalog from "../../src/engine/model-catalog.js";
 
-let dir: string;
+let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  readConfig: () => {
-    try {
-      return JSON.parse(require("node:fs").readFileSync(join(dir, "config.json"), "utf-8"));
-    } catch {
-      return { auth: { username: "u", passwordHash: "h" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } };
-    }
-  },
-  writeConfig: (cfg: any) => {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "config.json"), JSON.stringify(cfg, null, 2));
-  },
-}));
-
-describe("catalog auto-refresh settings", () => {
+describe("catalog auto-refresh SQL settings", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-catalog-sched-"));
-    writeFileSync(join(dir, "config.json"), JSON.stringify({
-      auth: { username: "u", passwordHash: "h" },
-      apiKeys: {},
-      defaults: { host: "127.0.0.1", port: 8080 },
-    }));
-    vi.resetModules();
+    fixture = coreFixture();
+    writeConfig(getDefaultConfig());
+    catalog.clearRemoteCatalogMemoryForTests();
   });
-
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    catalog.clearRemoteCatalogMemoryForTests();
+    catalog.setBundledCatalogLoader(() => []);
+    vi.restoreAllMocks();
+    fixture.close();
   });
 
   it("defaults to 7 days and persists interval changes", async () => {
@@ -42,6 +24,8 @@ describe("catalog auto-refresh settings", () => {
     expect(mod.DEFAULT_CATALOG_AUTO_REFRESH_DAYS).toBe(7);
 
     expect(mod.setCatalogAutoRefreshIntervalDays(30)).toBe(30);
+    fixture.reopen();
+    expect(readConfig().catalog?.autoRefreshIntervalDays).toBe(30);
     expect(mod.getCatalogAutoRefreshIntervalDays()).toBe(30);
 
     expect(mod.setCatalogAutoRefreshIntervalDays(0)).toBe(0);
@@ -62,8 +46,8 @@ describe("catalog auto-refresh settings", () => {
     catalog.commitRemoteCatalog([{ provider: "kimi-coding", id: "k3" }], Date.now());
     expect(mod.isCatalogRefreshDue()).toBe(false);
 
-    // Age the cache beyond 7 days
-    catalog.setRemoteCatalogMemoryForTests([{ provider: "kimi-coding", id: "k3" }], Date.now() - 8 * 24 * 60 * 60 * 1000);
+    // Advance only the clock; freshness still comes from committed SQL.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 8 * 24 * 60 * 60 * 1000);
     expect(mod.isCatalogRefreshDue()).toBe(true);
   });
 
