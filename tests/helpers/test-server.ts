@@ -22,10 +22,6 @@ export function setupTestWorkspace(): void {
     storage = coreFixture(TEST_BOSSMODE_DIR);
     const { getDefaultConfig, hashPassword, writeConfig } = await import("../../src/shared/config.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
-    const { saveAgentDefinition } = await import("../../src/workforce/agent-store.js");
-    for (const slug of ["general", "pm", "qa", "architect", "developer"]) {
-      saveAgentDefinition(slug, `---\nname: ${slug}\nskills: []\ntags: []\n---\n${slug}`);
-    }
   });
   afterAll(async () => {
     const errors: unknown[] = [];
@@ -188,7 +184,7 @@ export async function createMockRoom(port: number, token: string, name: string, 
     let member = existing.find(candidate => candidate.name === memberName);
     if (!member) {
       const created = await jsonRequest(port, "POST", "/api/members", { token, body: {
-        name: memberName, agentTemplate: "general", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
+        name: memberName, model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID,
       } });
       if (created.status !== 200) throw new Error(`Cannot create fixture member: ${created.status} ${created.body}`);
       member = JSON.parse(created.body).member;

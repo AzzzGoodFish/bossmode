@@ -21,7 +21,6 @@ import { pageActivity as queryActivityPage } from "../storage/event-repository.j
 import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
-import { compileMemberPrompt } from "../engine/prompt-compiler.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";

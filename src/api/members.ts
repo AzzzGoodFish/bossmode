@@ -340,7 +340,6 @@ addRoute("POST", "/api/members", async (req, res) => {
   try {
     const body = (await parseBody(req)) as {
       name?: string;
-      agentTemplate?: string;
       model?: string | null;
       credentialId?: string | null;
       thinkingLevel?: string | null;
@@ -348,6 +347,10 @@ addRoute("POST", "/api/members", async (req, res) => {
       mcpServers?: string[];
       importFromArchive?: string;
     };
+    if ("agentTemplate" in body) {
+      sendJson(res, 400, { error: "agent_templates_retired", message: "Agent templates are retired; configure the member directly." });
+      return;
+    }
     // Batch-1 one-click create: name optional → "New Member" (+ suffix).
     let member: MemberRecord;
     if (body.importFromArchive) {
@@ -358,7 +361,6 @@ addRoute("POST", "/api/members", async (req, res) => {
       member = importMemberFromArchive({
         archivePath: body.importFromArchive,
         name: body.name.trim(),
-        agentTemplate: body.agentTemplate,
         credentialId: body.credentialId,
       });
       if (body.model !== undefined) {
@@ -373,7 +375,6 @@ addRoute("POST", "/api/members", async (req, res) => {
     } else {
       member = createMember({
         name: body.name,
-        agentTemplate: body.agentTemplate || "general",
         model: body.model,
         credentialId: body.credentialId,
         thinkingLevel: body.thinkingLevel,
@@ -524,13 +525,16 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       name?: string;
       /** database card field (description retired batch-5 — ignored) */
       title?: string | null;
-      agentTemplate?: string;
       model?: string | null;
       credentialId?: string | null;
       thinkingLevel?: string | null;
       skills?: string[];
       mcpServers?: string[];
     };
+    if ("agentTemplate" in body) {
+      sendJson(res, 400, { error: "agent_templates_retired", message: "Agent templates are retired; configure the member directly." });
+      return;
+    }
     // Single-path model switch (design-model-switch-single-path-v1 §6): the
     // field is either omitted (no change) or a real model ref — null/empty is
     // a parameter error, clearing is not a supported product action.
@@ -590,9 +594,8 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     if (body.thinkingLevel !== undefined) globalPatch.thinkingLevel = body.thinkingLevel ?? "off";
     if (body.skills !== undefined) globalPatch.skills = body.skills;
     if (body.mcpServers !== undefined) globalPatch.mcpServers = body.mcpServers;
-    if (body.agentTemplate !== undefined || Object.keys(globalPatch).length > 0) {
+    if (Object.keys(globalPatch).length > 0) {
       m = updateMember(m.id, {
-        ...(body.agentTemplate !== undefined ? { agentTemplate: body.agentTemplate } : {}),
         global: globalPatch,
       });
     }

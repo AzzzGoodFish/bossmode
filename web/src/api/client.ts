@@ -1597,7 +1597,6 @@ export async function getChats(): Promise<{ chats: ChatEntry[] }> {
 export interface CreateMemberInput {
   /** Omit for one-click birth — the backend assigns "New Member N" (auto-increment). */
   name?: string;
-  agentTemplate?: string;
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;

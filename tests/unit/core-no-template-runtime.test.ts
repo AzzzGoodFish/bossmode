@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -22,10 +22,11 @@ import { TemplateRepository } from "../../src/storage/repositories/templates.js"
 import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";
 import type { AgentMemberConfig } from "../../src/shared/types.js";
 
+import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 setupTestWorkspace();
+beforeEach(() => importHistoricalAgentTemplate(getTestWorkspace(), "general", "---\nname: general\n---\nHistorical template body\n"));
 
-// The unchanged HTTP fixture seeds templates. Damage only that isolated fixture,
-// restoring it after the case; never weaken the SQL/bootstrap helpers.
+// Damage the explicitly imported historical fixture, restoring it after each case.
 function damageHistoricalTemplate(mode: string): () => void {
   const fixture = getTestWorkspace();
   const templates = new TemplateRepository(fixture.db);
