@@ -19,6 +19,7 @@ import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-pro
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
 import { resolveOwningRoomId } from "../../workspace/topic-store.js";
+import { loadDatabaseMcpFactory } from "./mcp-factory.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
@@ -183,9 +184,8 @@ export function memberDirLoaderAssetPaths(memberId: string): { skills: string[];
 }
 
 function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
-  // Batch 6 §1.2+§1.4: members/<id>/mcp.json is the sole source (file present
-  // = enabled); the adapter is platform infrastructure, always bound — an
-  // empty config is harmless.
+  // Member configuration is SQL-owned; the temporary file is derived adapter input.
+  // The adapter is platform infrastructure, including for an empty configuration.
   const runtimeDir = getBossmodeMcpRuntimeDir();
   const adapterPath = builtinMcpAdapterPath();
   if (!existsSync(adapterPath)) {
@@ -198,7 +198,6 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     process.env.MCP_DIRECT_TOOLS = "__none__";
     process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
     process.env.PI_CODING_AGENT_DIR = runtimeDir;
-    process.env.MCP_OAUTH_DIR = join(runtimeDir, "oauth");
   }
   return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames };
 }
@@ -761,7 +760,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     const activeExtensionPaths = [
       ...managedExtensions,
       ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)),
-      mcpSettings.adapterPath!,
     ];
     const loader = this.resourceLoader as any;
     const appendBase = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
@@ -825,7 +823,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     // Panel metadata: bossmode segments only (role + original appends), not pi built-in.
     this.runtimeParams.systemPrompt = [opts.agentPrompt.trim(), ...appendBase].filter(Boolean).join("\n\n");
     this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
-    this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths];
+    this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"];
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
@@ -978,7 +976,8 @@ export class PiSdkRuntime implements AgentRuntime {
     // member-owned extensions/ dir entries are the only managed extensions.
     const managedExtensions = [...memberAssets.extensions];
     const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
-    const activeExtensionPaths = [...extensionPaths, mcpSettings.adapterPath!];
+    const activeExtensionPaths = extensionPaths;
+    const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
     const resourceLoader = new BossmodeResourceLoader({
       cwd: opts.cwd,
       agentDir: runtimeAgentDir,
@@ -987,6 +986,7 @@ export class PiSdkRuntime implements AgentRuntime {
       noSkills: true,
       additionalSkillPaths: skillPaths,
       additionalExtensionPaths: activeExtensionPaths,
+      extensionFactories: [mcpFactory],
       systemPrompt: promptSources.systemPrompt,
       appendSystemPrompt,
     }, promptSources);
@@ -1005,8 +1005,8 @@ export class PiSdkRuntime implements AgentRuntime {
     const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
     // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
     // when tools is provided it becomes a lifetime allowlist and strips extension
-    // tools like web_search/fetch_content). MCP is gated by whether its adapter
-    // is in additionalExtensionPaths, not by a create-time name list.
+    // tools like web_search/fetch_content). MCP is loaded once through its
+    // SQL-bound inline factory, not through the standalone file-storage entry.
     // Once the SDK session exists, any later failure (MCP bind or setModel)
     // must not leak it — dispose before rethrowing.
     let sessionObtained: AgentSession | null = null;
@@ -1039,7 +1039,7 @@ export class PiSdkRuntime implements AgentRuntime {
         // Panel metadata: bossmode-composed segments only (never pi built-in text).
         systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
         skills: opts.skillNames ?? skillPaths,
-        extensions: ["bossmode-sdk-tools", ...activeExtensionPaths],
+        extensions: ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"],
         credentialId: piConfig.profile?.id,
         credentialName: piConfig.profile?.name,
       };

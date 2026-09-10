@@ -10,6 +10,9 @@ vi.mock("../../src/workspace/extension-store.js", () => ({
 }));
 
 import { coreFixture } from "../helpers/core-fixture.js";
+const mcpFactory = { name: "pi-mcp-adapter", factory: vi.fn() };
+const loadDatabaseMcpFactory = vi.fn(async (_path: string) => mcpFactory);
+vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory }));
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 let exportedConfig: any = null;
@@ -345,8 +348,9 @@ describe("PiSdkRuntime", () => {
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
     // Batch 6 §1.4: adapter is unconditionally bound; empty config is harmless.
-    expect(loaderOptions.additionalExtensionPaths).toHaveLength(1);
-    expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
+    expect(loaderOptions.additionalExtensionPaths).toHaveLength(0);
+    expect(loaderOptions.extensionFactories).toEqual([mcpFactory]);
+    expect(loadDatabaseMcpFactory).toHaveBeenCalledWith(expect.stringMatching(/vendor\/pi-mcp-adapter\/index\.ts$/));
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
@@ -371,7 +375,8 @@ describe("PiSdkRuntime", () => {
     expect(paths).toContain(join(extDir, "my-tool.ts"));
     expect(paths).toContain(join(extDir, "pkg", "main.js"));
     expect(paths).not.toContain(extDir);
-    expect(paths.at(-1)).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
+    expect(paths.some((p: string) => p.includes("pi-mcp-adapter"))).toBe(false);
+    expect(resourceLoaderCtor.mock.calls[0][0].extensionFactories).toEqual([mcpFactory]);
   });
 
   it("no member mcp.json → adapter bound with empty scoped config", async () => {
@@ -381,7 +386,8 @@ describe("PiSdkRuntime", () => {
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
-    expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toHaveLength(1);
+    expect(resourceLoaderCtor.mock.calls[0][0].additionalExtensionPaths).toHaveLength(0);
+    expect(resourceLoaderCtor.mock.calls[0][0].extensionFactories).toEqual([mcpFactory]);
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
@@ -399,8 +405,9 @@ describe("PiSdkRuntime", () => {
 
     const loaderOptions = resourceLoaderCtor.mock.calls[0][0];
     expect(loaderOptions.noExtensions).toBe(true);
-    expect(loaderOptions.additionalExtensionPaths).toHaveLength(1);
-    expect(loaderOptions.additionalExtensionPaths[0]).toMatch(/vendor\/pi-mcp-adapter\/index\.ts$/);
+    expect(loaderOptions.additionalExtensionPaths).toHaveLength(0);
+    expect(loaderOptions.extensionFactories).toEqual([mcpFactory]);
+    expect(loadDatabaseMcpFactory).toHaveBeenCalledWith(expect.stringMatching(/vendor\/pi-mcp-adapter\/index\.ts$/));
     expect(createAgentSession.mock.calls[0][0].tools).toBeUndefined();
     const scopedPath = sessionExtensionSetFlagValue.mock.calls.find((call) => call[0] === "mcp-config")?.[1];
     expect(existsSync(scopedPath)).toBe(true);
