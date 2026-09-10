@@ -1,3 +1,4 @@
+import { getDatabase } from "../storage/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
 // Prompt assembly → engine/prompt-assembler.ts
@@ -24,7 +25,7 @@ import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId 
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { handleAgentEvent as processEvent, loadEventsFromDisk, appendEventToDisk } from "./event-handler.js";
+import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
 import { deliverMemberMessage, loadScopeMessages } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
@@ -578,6 +579,7 @@ async function runPromptInternal(
   // Activity panel: emit the full composed prompt for user-facing activations
   // (activate / dm-activate / queued). Steer has its own user_steer event;
   // length_continuation is a system prompt, not a user message.
+  try {
   if (trigger === "activate" || trigger === "dm-activate" || trigger === "queued") {
     emitAgentLocalEvent(instance.roomId, instance.memberId, {
       type: "user_prompt",
@@ -585,7 +587,6 @@ async function runPromptInternal(
       trigger,
     });
   }
-  try {
     if (instance.profilePromptDirty) {
       refreshProfileSources(instance);
       if (!instance.handle.refreshPrompt) throw new Error("Runtime cannot refresh member identity without resetting the session.");
@@ -2172,17 +2173,10 @@ function emitAgentLocalEvent(
     || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
   const memberId = identity?.memberId || member?.id || instance?.memberId || memberRef;
   const agentName = identity?.agentName || member?.name || instance?.agentName || memberRef;
-  // Stamp once so disk + WS share identity (same rule as event-handler, rc.4).
-  const stamped = typeof (event as { ts?: number }).ts === "number" ? event : { ...event, ts: Date.now() };
-  if (instance) instance.eventBuffer.push(stamped);
-  try { appendEventToDisk(roomId, memberId, stamped); } catch (err) { logger.error("agent", "disk write failed", { roomId, agent: agentName, memberId, error: String(err) }); }
-  broadcastToAgentSubscribers(roomId, agentName, {
-    type: "agent:event",
-    roomId,
-    agent: agentName,
-    memberId,
-    event: stamped,
-  });
+  // Use the same authoritative, commit-safe event/outbox path as SDK events.
+  // Failed persistence is not a successful activity notification.
+  processEvent(roomId,agentName,keyHint,event as AgentStreamEvent,instance?.eventBuffer ?? [],memberId);
+
 }
 
 // -- Manual compaction (conversation action) --
@@ -2433,16 +2427,14 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
 
   destroyInstance(scopeId, memberId);
   clearActivationSource(scopeId, memberId);
-  sessionStore.clearSession(scopeId, memberId, runtime);
-  clearRuntimeStateEntry(scopeId, memberId);
-  if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
-  if (ref?.kind === "room" && memberId !== agentName) {
-    sessionStore.deleteSessionEntry(scopeId, agentName);
-    roomStore.deleteCursor(ref.roomId, agentName);
-  }
-
   const message = "Session reset. Next activation will start fresh.";
-  emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId, { type: "system", text: message }, { memberId, agentName });
+  getDatabase().transaction(() => {
+    sessionStore.clearSession(scopeId, memberId, runtime);
+    clearRuntimeStateEntry(scopeId, memberId);
+    if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
+    emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId,
+      {type:"system",text:message},{memberId,agentName});
+  });
   if (ref) {
     const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
     const statusEvent = { type: "agent:status" as const, roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
