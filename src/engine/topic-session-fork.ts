@@ -1,7 +1,7 @@
 /**
  * Topic batch 2 — prefix-fork a room session into a topic session file.
  * plan-topic-threads-v1 §2.2: borrow SessionManager file-layer primitives
- * (open + forkFrom + branch) so the room instance is never replaced.
+ * (open + forkFrom + branch + appendCustomEntry) so the room instance is never replaced.
  *
  * Only absent/unforkable sources degrade to fresh. Failed forks remain visible.
  */
@@ -18,7 +18,7 @@ export interface TopicForkResult {
   mode: TopicSeedMode;
   sessionFile?: string;
   sessionId?: string;
-  /** The cut manager is handed to the first topic activation without re-open. */
+  /** The durably selected manager, freshly reopened before association. */
   sessionManager?: SessionManager;
   /** Extractive prefix summary used in the topic guide. */
   prefixSummary: string;
@@ -149,8 +149,7 @@ export function forkRoomSessionPrefix(args: {
     const prefixEntries = source.getBranch(leafId);
     mkdirSync(sessionDir, { recursive: true });
 
-    // The SDK alone writes the new archive. Keep its in-memory branch cut:
-    // reopening before the next append would restore the original file leaf.
+    // The SDK owns the full retained tree; only its active branch is selected.
     const forked = SessionManager.forkFrom(sourceFile, args.cwd, sessionDir, { id: forkSessionId });
     forkedPath = forked.getSessionFile();
     const sessionId = forked.getSessionId();
@@ -164,6 +163,27 @@ export function forkRoomSessionPrefix(args: {
       || JSON.stringify(forked.getBranch()) !== JSON.stringify(prefixEntries)) {
       throw new Error("Fork prefix branch verification failed");
     }
+    const prefixContext = forked.buildSessionContext();
+    // branch() alone is volatile. The full fork is already persisted, so this
+    // SDK-native non-message entry durably selects the anchor as its parent.
+    // It is excluded from buildSessionContext; SQL remains execution authority.
+    const customType = "bossmode:topic-fork";
+    const data = { attemptId: attempt.id };
+    const markerId = forked.appendCustomEntry(customType, data);
+    const marker = forked.getEntry(markerId);
+    if (marker?.type !== "custom" || marker.parentId !== leafId
+      || marker.customType !== customType || JSON.stringify(marker.data) !== JSON.stringify(data)) {
+      throw new Error("Fork provenance entry verification failed");
+    }
+    // Verify disk, not just the live manager, before association/acknowledgement
+    // or any provider prompt, tool, user, assistant or custom-message append.
+    const reopened = SessionManager.open(forkedPath, sessionDir, args.cwd);
+    if (reopened.getSessionId() !== sessionId || reopened.getHeader()?.parentSession !== sourceFile
+      || reopened.getLeafId() !== markerId
+      || JSON.stringify(reopened.getBranch()) !== JSON.stringify([...prefixEntries, marker])
+      || JSON.stringify(reopened.buildSessionContext()) !== JSON.stringify(prefixContext)) {
+      throw new Error("Fork durable prefix verification failed");
+    }
     const prefixSummary = extractPrefixSummary(prefixEntries);
     saveTopicSession(args.parentRoomId, args.topicId, args.memberId, { sessionId, sessionFile: forkedPath });
     const associated = getTopicSession(args.parentRoomId, args.topicId, args.memberId);
@@ -175,7 +195,7 @@ export function forkRoomSessionPrefix(args: {
       parentRoomId: args.parentRoomId, topicId: args.topicId, memberId: args.memberId,
       leafId, sessionFile: forkedPath, attemptId: attempt.id,
     });
-    return { mode: "fork", sessionFile: forkedPath, sessionId, sessionManager: forked, prefixSummary };
+    return { mode: "fork", sessionFile: forkedPath, sessionId, sessionManager: reopened, prefixSummary };
   } catch (error) {
     // Never erase a partial SDK artifact or turn SQL/branch failures into a
     // successful fresh session. The dispatched reference survives a crash too.

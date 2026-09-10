@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("topic SDK prefix-fork execution boundary", () => {
-  it("commits dispatch before open/fork/branch and acknowledges only the verified branch plus committed association", () => {
+  it("commits dispatch before SDK IO and acknowledges only durable provenance, reopened prefix and committed association", () => {
     const observer = openDatabase(f.path);
     const originalOpen = SessionManager.open;
     const originalFork = SessionManager.forkFrom;
@@ -83,10 +83,12 @@ describe("topic SDK prefix-fork execution boundary", () => {
       order.push("fork"); dispatched(); forked = originalFork(...a);
       const branch = forked.branch.bind(forked);
       vi.spyOn(forked, "branch").mockImplementation(id => { order.push("branch"); dispatched(); branch(id); });
+      const append = forked.appendCustomEntry.bind(forked);
+      vi.spyOn(forked, "appendCustomEntry").mockImplementation((...a) => { order.push("provenance"); dispatched(); return append(...a); });
       return forked;
     });
     vi.spyOn(SessionRepository.prototype, "importAssociation").mockImplementation(function(a) {
-      order.push("associate"); dispatched(); expect(forked.getLeafId()).toBe(leafId); return originalAssociate.call(this, a);
+      order.push("associate"); dispatched(); expect(forked.getLeafEntry()?.parentId).toBe(leafId); return originalAssociate.call(this, a);
     });
     vi.spyOn(ExecutionAttemptRepository.prototype, "acknowledge").mockImplementation(function(...a) {
       order.push("ack"); dispatched();
@@ -95,20 +97,22 @@ describe("topic SDK prefix-fork execution boundary", () => {
     });
     try {
       const result = forkRoomSessionPrefix(args());
-      expect(order).toEqual(["open", "fork", "branch", "associate", "ack"]);
-      expect(result.mode).toBe("fork"); expect(result.sessionManager).toBe(forked!);
+      expect(order).toEqual(["open", "fork", "branch", "provenance", "open", "associate", "ack"]);
+      expect(result.mode).toBe("fork"); expect(result.sessionManager).not.toBe(forked!);
+      expect(result.sessionManager!.getBranch()).toEqual(forked!.getBranch());
       expect(result.prefixSummary).toContain("investigate the flaky test");
       expect(result.prefixSummary).not.toContain("later unrelated");
-      expect(result.sessionManager!.getBranch().map(e => e.id)).toEqual([leafId]);
+      const marker = result.sessionManager!.getLeafEntry()!;
+      expect(marker).toMatchObject({ type: "custom", customType: "bossmode:topic-fork", parentId: leafId, data: { attemptId: rows()[0].id } });
+      expect(result.sessionManager!.getBranch().map(e => e.id)).toEqual([leafId, marker.id]);
       expect(association()).toMatchObject({ sessionId: result.sessionId, sessionFile: result.sessionFile });
       expect(rows()[0].status).toBe("acknowledged");
       expect(JSON.parse(rows()[0].external_reference)).toMatchObject({ operation: "pi-sdk:SessionManager.forkFrom", sourceFile, sourceSessionId: source.getSessionId(), parentRoomId: room, forkSessionId: result.sessionId });
-      // Existing SDK contract: the file retains its old leaf until that first append.
-      expect(originalOpen(result.sessionFile!, mainSessionDirectory(owner, scope), f.root).getLeafId()).toBe(source.getLeafId());
-      // First append through the returned manager persists the cut using SDK IO.
+      // The non-message SDK provenance commits the cut before any conversation append.
+      expect(originalOpen(result.sessionFile!, mainSessionDirectory(owner, scope), f.root).getLeafId()).toBe(marker.id);
       const nextId = result.sessionManager!.appendMessage({ role: "user", content: "topic continuation", timestamp: 3 });
       const reopened = originalOpen(result.sessionFile!, mainSessionDirectory(owner, scope), f.root);
-      expect(reopened.getBranch().map(e => e.id)).toEqual([leafId, nextId]);
+      expect(reopened.getBranch().map(e => e.id)).toEqual([leafId, marker.id, nextId]);
       expect(readFileSync(sourceFile)).toEqual(sourceBytes);
     } finally { observer.close(); }
   });
@@ -130,7 +134,7 @@ describe("topic SDK prefix-fork execution boundary", () => {
 
   it("uses the last SDK user entry when the anchor misses", () => {
     const result = forkRoomSessionPrefix({ ...args(), anchorExcerpt: "no such anchor excerpt" });
-    expect(result.sessionManager!.getLeafId()).toBe(source.getLeafId());
+    expect(result.sessionManager!.getLeafEntry()?.parentId).toBe(source.getLeafId());
     expect(result.prefixSummary).toContain("later unrelated chatter");
   });
 
@@ -202,6 +206,54 @@ describe("topic SDK prefix-fork execution boundary", () => {
     expect(rows()[0].diagnosis).toContain(artifacts()[0]);
   });
 
+  it.each(["throw", "post-write throw", "no-op", "memory-only"])("provenance %s cannot be acknowledged and preserves discoverable evidence", fault => {
+    saveCurrentSession(owner, scope, { runtime: "pi-sdk", sessionId: "previous" });
+    const original = SessionManager.forkFrom;
+    vi.spyOn(SessionManager, "forkFrom").mockImplementation((...a) => {
+      const manager = original(...a);
+      const append = manager.appendCustomEntry.bind(manager);
+      vi.spyOn(manager, "appendCustomEntry").mockImplementation((customType, data) => {
+        if (fault === "post-write throw") { append(customType, data); throw new Error("provenance post-write failed"); }
+        if (fault === "throw") throw new Error("provenance failed");
+        if (fault === "no-op") return leafId;
+        // Simulate a public method reporting success with only in-memory state.
+        // No JSONL edits or SDK private state: fresh open must reject the absence.
+        const marker = { type: "custom" as const, customType, data, id: "unpersisted-marker", parentId: leafId, timestamp: new Date().toISOString() };
+        const getEntry = manager.getEntry.bind(manager);
+        vi.spyOn(manager, "getEntry").mockImplementation(id => id === marker.id ? marker : getEntry(id));
+        return marker.id;
+      });
+      return manager;
+    });
+    expect(() => forkRoomSessionPrefix(args())).toThrow(/provenance|durable prefix/);
+    assertInterrupted(); expect(association()?.sessionId).toBe("previous"); expect(artifacts()).toHaveLength(1);
+    const reopened = SessionManager.open(artifacts()[0]);
+    if (fault === "post-write throw") {
+      expect(reopened.getLeafEntry()).toMatchObject({ type: "custom", customType: "bossmode:topic-fork", parentId: leafId, data: { attemptId: rows()[0].id } });
+      expect(JSON.stringify(reopened.buildSessionContext())).not.toContain("later unrelated");
+    } else expect(reopened.getLeafId()).toBe(source.getLeafId());
+    f.reopen();
+    expect(rows()[0].status).toBe("interrupted");
+    expect(association()?.sessionId).toBe("previous");
+  });
+
+  it.each(["throw", "wrong branch", "wrong context"])("fresh reopen %s is interrupted before association even with a persisted marker", fault => {
+    const original = SessionManager.open;
+    vi.spyOn(SessionManager, "open").mockImplementation((...a) => {
+      if (a[0] === sourceFile) return original(...a);
+      if (fault === "throw") throw new Error("reopen failed");
+      const manager = original(...a);
+      if (fault === "wrong branch") manager.branch(source.getLeafId()!);
+      else vi.spyOn(manager, "buildSessionContext").mockReturnValue(source.buildSessionContext());
+      return manager;
+    });
+    expect(() => forkRoomSessionPrefix(args())).toThrow(/reopen failed|durable prefix/);
+    assertInterrupted(); expect(association()).toBeUndefined(); expect(artifacts()).toHaveLength(1);
+    const reopened = original(artifacts()[0]);
+    expect(reopened.getLeafEntry()).toMatchObject({ type: "custom", customType: "bossmode:topic-fork", parentId: leafId });
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toContain("later unrelated");
+  });
+
   it.each(["file", "identity"])("unverified fork %s cannot be acknowledged", fault => {
     const original = SessionManager.forkFrom;
     vi.spyOn(SessionManager, "forkFrom").mockImplementation((...a) => {
@@ -232,6 +284,11 @@ describe("topic SDK prefix-fork execution boundary", () => {
     expect(() => forkRoomSessionPrefix(args())).toThrow("reject acknowledged");
     assertInterrupted(); expect(artifacts()).toHaveLength(1);
     expect(association()?.sessionFile).toBe(artifacts()[0]);
+    f.reopen();
+    const reopened = SessionManager.open(association()!.sessionFile!);
+    expect(reopened.getLeafEntry()).toMatchObject({ type: "custom", customType: "bossmode:topic-fork", parentId: leafId, data: { attemptId: rows()[0].id } });
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toContain("later unrelated");
+    expect(rows()[0].status).toBe("interrupted"); // The SDK marker never implies SQL acknowledgement.
   });
 
   it("simultaneous SDK and recording failures stay visible and leave dispatched evidence, never success", () => {

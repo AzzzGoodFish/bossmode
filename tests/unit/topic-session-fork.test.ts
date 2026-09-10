@@ -146,7 +146,11 @@ describe("forkRoomSessionPrefix degrade + fork", () => {
     expect(r.sessionFile).toContain(join("topics", "topic_fork"));
     expect(r.prefixSummary).toMatch(/flaky test|User:/);
     expect(readFileSync(srcFile!)).toEqual(sourceBytes);
-    expect(r.sessionManager!.getLeafId()).toBe(src.getEntries()[0].id);
+    expect(r.sessionManager!.getLeafEntry()).toMatchObject({ type: "custom", customType: "bossmode:topic-fork", parentId: src.getEntries()[0].id });
+    const reopened = SessionManager.open(r.sessionFile!);
+    expect(reopened.getBranch()).toEqual(r.sessionManager!.getBranch());
+    expect(reopened.buildSessionContext().messages).toEqual(src.getBranch(src.getEntries()[0].id).filter(e => e.type === "message").map(e => e.message));
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toContain("after the fork point");
     expect(r.prefixSummary).not.toContain("after the fork point");
     expect(fixture.db.get("SELECT status,operation,member_id,scope_id FROM execution_attempts")).toEqual({
       status: "acknowledged", operation: "session-fork", member_id: "rm_dev", scope_id: "topic:topic_fork",

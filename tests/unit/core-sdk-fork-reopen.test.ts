@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -9,8 +10,8 @@ import { mainSessionDirectory, saveCurrentSession } from "../../src/workspace/se
 
 vi.mock("../../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-// SDK 0.82.1 public-API investigation, not a claim that the application defect is
-// fixed. No synthetic JSONL, private fields, provider calls or persistence hacks.
+// SDK 0.82.1 offline public-API diagnostics and application acceptance.
+// No synthetic JSONL, private fields, provider calls or persistence hacks.
 let f: ReturnType<typeof coreFixture>;
 const owner = "mem_reopen";
 const room = "reopen-room";
@@ -48,7 +49,21 @@ afterEach(() => {
   vi.unstubAllGlobals(); vi.restoreAllMocks(); f.close();
 });
 
-describe("installed SDK native prefix creation: capabilities and blockers", () => {
+describe("diagnostic: installed SDK branch API capabilities and limitations", () => {
+  it("diagnostic limitation: full fork plus branch alone does not persist the selected leaf", () => {
+    const src = source(false);
+    const destination = mainSessionDirectory(owner, scope);
+    const fork = SessionManager.forkFrom(src.file, f.root, destination, { id: randomUUID() });
+    fork.branch(src.anchor);
+    expect(fork.getLeafId()).toBe(src.anchor);
+    expect(JSON.stringify(fork.buildSessionContext())).not.toContain("must not leak");
+    const reopened = SessionManager.open(fork.getSessionFile()!, destination, f.root);
+    expect(reopened.getLeafId()).toBe(src.later);
+    expect(reopened.getEntries()).toEqual(src.manager.getEntries());
+    expect(JSON.stringify(reopened.buildSessionContext())).toContain("must not leak");
+    expect(readFileSync(src.file)).toEqual(src.bytes);
+  });
+
   it("materializes an assistant-containing prefix in the destination, survives immediate reopen and later append/reopen", () => {
     const src = source(true);
     const destination = mainSessionDirectory(owner, scope);
@@ -80,7 +95,7 @@ describe("installed SDK native prefix creation: capabilities and blockers", () =
     expect(readFileSync(src.file)).toEqual(src.bytes);
   });
 
-  it("BLOCKER: first-user prefix returns a new SDK path/id but creates no file, even after non-assistant appends", () => {
+  it("diagnostic limitation: first-user prefix returns a new SDK path/id but creates no file, even after non-assistant appends", () => {
     const src = source(false);
     const destination = mainSessionDirectory(owner, scope);
     const brancher = SessionManager.open(src.file, destination, f.root);
@@ -134,12 +149,63 @@ describe("installed SDK native prefix creation: capabilities and blockers", () =
   });
 });
 
-describe("application reopen defect characterization (not acceptance)", () => {
-  it.each([false, true])("BLOCKER: acknowledged association reopens the full room history (earlier assistant=%s)", withEarlierAssistant => {
+describe("public full fork plus non-message provenance persistence", () => {
+  it.each([false, true])("durably selects the exact prefix without model-visible provenance (earlier assistant=%s)", withEarlierAssistant => {
+    const src = source(withEarlierAssistant);
+    const destination = mainSessionDirectory(owner, scope);
+    const id = randomUUID();
+    const attemptId = randomUUID();
+    const fork = SessionManager.forkFrom(src.file, f.root, destination, { id });
+    const file = fork.getSessionFile()!;
+    expect(existsSync(file)).toBe(true);
+    expect(fork.getEntries()).toEqual(src.manager.getEntries());
+    fork.branch(src.anchor);
+    const prefix = fork.getBranch();
+    const context = fork.buildSessionContext();
+    expect(context.messages).toEqual(prefix.filter(e => e.type === "message").map(e => e.message));
+    // Unlike createBranchedSession, the full fork is already flushed and retains
+    // an assistant off-branch even when the selected prefix is first-user-only.
+    const markerId = fork.appendCustomEntry("bossmode:topic-fork", { attemptId });
+    const marker = fork.getLeafEntry()!;
+    expect(marker).toEqual({ type: "custom", customType: "bossmode:topic-fork", data: { attemptId },
+      id: markerId, parentId: src.anchor, timestamp: expect.any(String) });
+    // Immediate fresh open: no prompt, tool, user, assistant or custom-message
+    // append has happened on this fork. Read the marker from actual disk too.
+    expect(JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1)!)).toEqual(marker);
+    const reopened = SessionManager.open(file, destination, f.root);
+    expect(reopened.getSessionId()).toBe(id);
+    expect(reopened.getHeader()?.parentSession).toBe(src.file);
+    expect(reopened.getLeafId()).toBe(markerId);
+    expect(reopened.getBranch()).toEqual([...prefix, marker]);
+    expect(reopened.getEntries()).toEqual([...src.manager.getEntries(), marker]);
+    expect(reopened.buildSessionContext()).toEqual(context);
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toMatch(/must not leak|bossmode:topic-fork/);
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toContain(attemptId);
+    const next = reopened.appendMessage({ role: "user", content: "topic continuation", timestamp: 5 });
+    const again = SessionManager.open(file, destination, f.root);
+    expect(again.getSessionId()).toBe(id);
+    expect(again.getBranch().map(e => e.id)).toEqual([...prefix.map(e => e.id), markerId, next]);
+    expect(again.getEntry(markerId)).toEqual(marker);
+    expect(again.buildSessionContext()).toEqual({ ...context,
+      messages: [...context.messages, { role: "user", content: "topic continuation", timestamp: 5 }] });
+    expect(readFileSync(src.file)).toEqual(src.bytes);
+  });
+});
+
+describe("application durable prefix reopen acceptance", () => {
+  it.each([false, true])("acknowledged association immediately reopens only the selected context (earlier assistant=%s)", withEarlierAssistant => {
     const src = source(withEarlierAssistant);
     const result = forkRoomSessionPrefix({ memberId: owner, parentRoomId: room, topicId: topic,
       cwd: f.root, seedMode: "fork", anchorExcerpt: anchorText });
-    expect(result.sessionManager!.getLeafId()).toBe(src.anchor);
+    const marker = result.sessionManager!.getLeafEntry()!;
+    const attempt = f.db.get<{ id: string }>("SELECT id FROM execution_attempts")!;
+    expect(marker).toEqual({ type: "custom", customType: "bossmode:topic-fork", data: { attemptId: attempt.id },
+      id: expect.any(String), parentId: src.anchor, timestamp: expect.any(String) });
+    const prefix = src.manager.getBranch(src.anchor);
+    src.manager.branch(src.anchor); // Read-only context oracle; no source append.
+    const context = src.manager.buildSessionContext();
+    expect(context.messages).toEqual(prefix.filter(e => e.type === "message").map(e => e.message));
+    expect(JSON.parse(readFileSync(result.sessionFile!, "utf8").trim().split("\n").at(-1)!)).toEqual(marker);
     expect(result.prefixSummary).not.toContain("must not leak");
     expect(getTopicSession(room, topic, owner)).toMatchObject({ sessionId: result.sessionId, sessionFile: result.sessionFile });
     expect(f.db.get("SELECT status,operation,member_id,scope_id FROM execution_attempts")).toEqual({
@@ -150,13 +216,23 @@ describe("application reopen defect characterization (not acceptance)", () => {
     const saved = getTopicSession(room, topic, owner)!;
     const reopened = SessionManager.open(saved.sessionFile!, mainSessionDirectory(owner, scope), f.root);
     expect(reopened.getSessionId()).toBe(result.sessionId);
-    expect(reopened.getLeafId()).toBe(src.later); // Known defect, deliberately explicit.
-    expect(JSON.stringify(reopened.buildSessionContext())).toContain("must not leak");
+    expect(reopened.getHeader()?.parentSession).toBe(src.file);
+    expect(reopened.getLeafId()).toBe(marker.id);
+    expect(reopened.getBranch()).toEqual([...prefix, marker]);
+    expect(reopened.getEntries()).toEqual([...src.manager.getEntries(), marker]);
+    expect(reopened.buildSessionContext()).toEqual(context);
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toMatch(/must not leak|bossmode:topic-fork/);
+    expect(JSON.stringify(reopened.buildSessionContext())).not.toContain(attempt.id);
     const next = reopened.appendMessage({ role: "user", content: "topic after restart", timestamp: 5 });
     const again = SessionManager.open(saved.sessionFile!, mainSessionDirectory(owner, scope), f.root);
     expect(again.getLeafId()).toBe(next);
     expect(JSON.stringify(again.buildSessionContext())).toContain("topic after restart");
-    expect(JSON.stringify(again.buildSessionContext())).toContain("must not leak");
+    expect(again.getSessionId()).toBe(result.sessionId);
+    expect(again.getEntry(marker.id)).toEqual(marker);
+    expect(again.getBranch().map(e => e.id)).toEqual([...prefix.map(e => e.id), marker.id, next]);
+    expect(again.buildSessionContext()).toEqual({ ...context,
+      messages: [...context.messages, { role: "user", content: "topic after restart", timestamp: 5 }] });
+    expect(JSON.stringify(again.buildSessionContext())).not.toContain("must not leak");
     expect(readFileSync(src.file)).toEqual(src.bytes);
   });
 });
