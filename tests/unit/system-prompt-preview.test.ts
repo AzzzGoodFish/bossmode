@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
+import { closeTestServer, createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
 
 setupTestWorkspace();
 
@@ -34,22 +34,13 @@ describe("member system-prompt preview", () => {
 
     // Same-process compile with the exact room-activation arguments.
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const { loadAgentDefinition } = await import("../../src/workforce/agent-store.js");
     const { getRoom } = await import("../../src/workspace/room-store.js");
     const { getMember } = await import("../../src/workspace/member-registry.js");
-        const m = getMember(memberId)!;
-    const agentDef = loadAgentDefinition(m.agentTemplate) || {
-      name: m.agentTemplate,
-      description: m.agentTemplate,
-      systemPrompt: `You are ${m.name}.`,
-      tags: [],
-      skills: [],
-    };
+    const m = getMember(memberId)!;
     const compiled = compileMemberPromptForScope({
       scopeId,
       memberId: m.id,
       memberName: m.name,
-      agentDef,
       room: getRoom(roomId),
       docsRoot: join(getTestBossmodeDir(), "memory", "projects"),
     });
@@ -63,7 +54,7 @@ describe("member system-prompt preview", () => {
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
-    await new Promise<void>((r) => ts.server.close(() => r()));
+    await closeTestServer(ts);
   });
 
   it("rejects unknown member / bad scope / non-member scope", async () => {
@@ -86,11 +77,13 @@ describe("member system-prompt preview", () => {
 
     expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt`, { token })).status).toBe(400);
     expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=nonsense`, { token })).status).toBe(400);
+    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=topic:topic_missing`, { token })).status).toBe(404);
+    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=dm:${outsiderId}`, { token })).status).toBe(404);
     expect((await jsonRequest(ts.port, "GET", `/api/members/${outsiderId}/system-prompt?scope=${encodeURIComponent(`room:${roomId}`)}`, { token })).status).toBe(404);
     expect((await jsonRequest(ts.port, "GET", "/api/members/mem_does_not_exist/system-prompt?scope=dm:mem_does_not_exist", { token })).status).toBe(404);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await jsonRequest(ts.port, "DELETE", `/api/members/${outsiderId}`, { token, body: { confirm: true } });
-    await new Promise<void>((r) => ts.server.close(() => r()));
+    await closeTestServer(ts);
   });
 });

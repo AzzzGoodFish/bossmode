@@ -1,16 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
-
 const routes = new Map<string, any>();
 const sendJsonMock = vi.fn();
 const destroyInstanceMock = vi.fn();

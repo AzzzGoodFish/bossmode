@@ -15,7 +15,6 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 
 import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
-import { loadAgentDefinition } from "../workforce/agent-store.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
@@ -569,10 +568,9 @@ function refreshProfileSources(instance: AgentInstance): void {
   const ref = parseScopeId(instance.scopeId)!;
   const parentId = ref.kind === "topic" ? resolveTopicRoomId(ref.topicId) : ref.kind === "room" ? ref.roomId : undefined;
   const room = parentId ? roomStore.getRoom(parentId) : null;
-  const agentDef = loadAgentDefinition(member.agentTemplate) || { name: member.agentTemplate, description: "", systemPrompt: "", tags: [], skills: [] };
   const compiled = compileMemberPromptForScope({
     scopeId: instance.scopeId, memberId: member.id, memberName: member.name,
-    agentDef, room, docsRoot: join(getBossmodeDir(), "memory", "projects"),
+    room, docsRoot: join(getBossmodeDir(), "memory", "projects"),
     ...(ref.kind === "topic" && parentId ? { topicTitle: getTopic(parentId, ref.topicId)?.title } : {}),
   });
   instance.agentName = member.name;
@@ -941,9 +939,9 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
   );
 }
 
-// Resolve skills: member config > agent definition > empty
-export function resolveSkills(member: AgentMemberConfig, agentDef: { skills?: string[] }): string[] {
-  return member.skills ?? agentDef.skills ?? [];
+// Only current member configuration selects skills, including an explicit empty list.
+export function resolveSkills(member: AgentMemberConfig): string[] {
+  return member.skills ?? [];
 }
 
 // -- Instance creation --
@@ -1035,13 +1033,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         logger.error("agent", "dm member unconfigured", { member: member.name, memberId });
         return null;
       }
-      const agentDef = loadAgentDefinition(member.agent) || {
-        name: member.agent,
-        description: member.agent,
-        systemPrompt: `You are ${member.name}.`,
-        tags: [],
-        skills: [],
-      };
       const runtime0 = registry.get(member.runtime);
       if (!runtime0) {
         logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
@@ -1052,14 +1043,13 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         scopeId: dmScopeId,
         memberId,
         memberName: member.name,
-        agentDef,
         room: null,
         docsRoot: docsRootPath,
         activeScopes: buildDmScopeLabels(memberId, dmScopeId),
       });
       setContractFingerprint(dmScopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(dmScopeId, memberId);
-      skills = resolveSkills(member, agentDef);
+      skills = resolveSkills(member);
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
       keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
@@ -1119,20 +1109,15 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         return null;
       }
       logger.info("agent", "loadMember", { member: member.name, memberId, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
-      const agentDef = loadAgentDefinition(member.agent);
-      if (!agentDef) {
-        logger.error("agent", "agent definition not found", { member: member.name, agent: member.agent, roomId: ref.roomId });
-        return null;
-      }
       var runtime1 = registry.get(member.runtime);
       if (!runtime1) {
         logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
         return null;
       }
-      compiled = compileMemberPrompt({ room: r, member, agentDef, docsRoot: docsRootPath });
+      compiled = compileMemberPrompt({ room: r, member, docsRoot: docsRootPath });
       setContractFingerprint(`room:${ref.roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(`room:${ref.roomId}`, memberId);
-      skills = resolveSkills(member, agentDef);
+      skills = resolveSkills(member);
       skillPaths = [
         ...resolveGlobalSkillPaths(skills),
       ];
@@ -1206,13 +1191,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         logger.error("agent", "topic member unconfigured", { member: member.name, memberId, topicId });
         return null;
       }
-      const agentDef = loadAgentDefinition(member.agent) || {
-        name: member.agent,
-        description: member.agent,
-        systemPrompt: `You are ${member.name}.`,
-        tags: [],
-        skills: [],
-      };
       var runtime2 = registry.get(member.runtime);
       if (!runtime2) {
         logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
@@ -1224,14 +1202,13 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         scopeId,
         memberId,
         memberName: member.name,
-        agentDef,
         room: r,
         docsRoot: docsRootPath,
         topicTitle: topicRec?.title ?? null,
       });
       setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(scopeId, memberId);
-      skills = resolveSkills(member, agentDef);
+      skills = resolveSkills(member);
       cwd = activeWorkspaceRoot(memberId);
       sessionDir = mainSessionDirectory(memberId, scopeId);
       roomMembers = r.members;
@@ -2305,12 +2282,9 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     // fingerprint+version and clear stale markers so the UI doesn't show
     // a false "needs reload" badge for a member that will auto-pick-up.
     try {
-      const agentDef2 = loadAgentDefinition(member.agent);
-      if (agentDef2) {
-        const docsRoot2 = join(getBossmodeDir(), "memory", "projects");
-        const compiled2 = compileMemberPrompt({ room, member, agentDef: agentDef2, docsRoot: docsRoot2 });
-        setContractFingerprint(`room:${roomId}`, memberId, compiled2.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      }
+      const docsRoot = join(getBossmodeDir(), "memory", "projects");
+      const compiled = compileMemberPrompt({ room, member, docsRoot });
+      setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     } catch { /* compile failed — best effort */ }
     clearStaleMounts(`room:${roomId}`, memberId);
     return { ok: true, reloaded: false, message: "Member is not running — marked up to date; latest prompt, skills and tools apply on next activation." };
@@ -2320,11 +2294,9 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   }
   if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
 
-  const agentDef = loadAgentDefinition(member.agent);
-  if (!agentDef) throw new Error(`Agent definition not found: ${member.agent}`);
   const docsRootPath = join(getBossmodeDir(), "memory", "projects");
-  const compiled = compileMemberPrompt({ room, member, agentDef, docsRoot: docsRootPath });
-  const skills = resolveSkills(member, agentDef);
+  const compiled = compileMemberPrompt({ room, member, docsRoot: docsRootPath });
+  const skills = resolveSkills(member);
   const skillPaths = [
     ...resolveGlobalSkillPaths(skills),
   ];
@@ -2434,7 +2406,7 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
     id: rec.id,
     name: rec.name,
     type: "agent",
-    agent: rec.agentTemplate || "general",
+    agent: rec.agentTemplate,
     runtime: "pi-cli",
     model: eff.model || undefined,
     credentialId: eff.credentialId || undefined,

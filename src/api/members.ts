@@ -40,7 +40,6 @@ import * as messageStore from "../workspace/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
 import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../shared/types.js";
-import { memberTemplateWarning } from "../workforce/template-lifecycle.js";
 import { readMemberProfile } from "../workspace/member-profile.js";
 
 function publicMember(m: MemberRecord) {
@@ -51,7 +50,6 @@ function publicMember(m: MemberRecord) {
     /** Card field from database (identity batch-1; description retired batch-5). */
     title: m.title ?? null,
     agentTemplate: m.agentTemplate,
-    templateWarning: memberTemplateWarning(m.agentTemplate),
     global: m.global,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
@@ -419,7 +417,6 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     }
 
     const { compileMemberPromptForScope } = await import("../engine/prompt-compiler.js");
-    const { loadAgentDefinition } = await import("../workforce/agent-store.js");
     const { getRoom, resolveRoomMemberRef } = await import("../workspace/room-store.js");
     const { getBossmodeDir } = await import("../shared/config.js");
     const { join } = await import("node:path");
@@ -460,18 +457,10 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         sendJson(res, 404, { error: "not_found", message: "Member not found" });
         return;
       }
-      const agentDef = loadAgentDefinition(member.agent) || {
-        name: member.agent,
-        description: member.agent,
-        systemPrompt: `You are ${member.name}.`,
-        tags: [],
-        skills: [],
-      };
       const compiled = compileMemberPromptForScope({
         scopeId: scopeParam,
         memberId: m.id,
         memberName: member.name,
-        agentDef,
         room: null,
         docsRoot: join(getBossmodeDir(), "memory", "projects"),
         activeScopes: buildDmScopeLabels(m.id, scopeParam),
@@ -486,21 +475,17 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
 
     // room + topic: roster member config, room cwd (topic mirrors room with a
     // cwd fallback), global-skill + extension skill paths.
-    const room = getRoom(ref.roomId);
-    const rosterMember = resolveRoomMember(ref.roomId, m.name);
-    if (!room || !rosterMember || !resolveRoomMemberRef(ref.roomId, m.name)) {
+    const { getTopicById } = await import("../workspace/topic-store.js");
+    const topicRec = ref.kind === "topic" ? getTopicById(ref.topicId) : null;
+    const roomId = ref.kind === "topic" ? topicRec?.roomId : ref.roomId;
+    const room = roomId ? getRoom(roomId) : null;
+    const rosterMember = roomId ? resolveRoomMember(roomId, m.id) : null;
+    if (!room || !rosterMember || !resolveRoomMemberRef(room.id, m.id)) {
       sendJson(res, 404, { error: "not_found", message: "member not in this room" });
       return;
     }
     const member = rosterMember;
-    const agentDef = loadAgentDefinition(member.agent) || {
-      name: member.agent,
-      description: member.agent,
-      systemPrompt: `You are ${member.name}.`,
-      tags: [],
-      skills: [],
-    };
-    const skills = resolveSkills(member, agentDef);
+    const skills = resolveSkills(member);
     const skillPaths = [
       ...resolveGlobalSkillPaths(skills),
     ];
@@ -510,7 +495,6 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         scopeId: scopeParam,
         memberId: member.id,
         memberName: member.name,
-        agentDef,
         room,
         docsRoot: join(getBossmodeDir(), "memory", "projects"),
       });
@@ -519,13 +503,10 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     }
 
     // topic: parent-room roster + topic title, cwd mirrors topic activation.
-    const { getTopic } = await import("../workspace/topic-store.js");
-    const topicRec = getTopic(ref.roomId, ref.topicId);
     const compiled = compileMemberPromptForScope({
       scopeId: scopeParam,
       memberId: member.id,
       memberName: member.name,
-      agentDef,
       room,
       docsRoot: join(getBossmodeDir(), "memory", "projects"),
       topicTitle: topicRec?.title ?? null,

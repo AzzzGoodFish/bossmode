@@ -4,7 +4,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
+import type { AgentMemberConfig, Room } from "../../src/shared/types.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -52,7 +52,6 @@ function room(): Room {
   };
 }
 
-const agentDef: AgentDefinition = { name: "qa", description: "QA", systemPrompt: "QA ROLE", tags: [] };
 const member: AgentMemberConfig = { id: "mem_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
 
 describe("prompt compiler (three-segment)", () => {
@@ -66,7 +65,7 @@ describe("prompt compiler (three-segment)", () => {
     );
 
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     const prompt = compiled.fullPrompt;
 
     expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
@@ -81,12 +80,13 @@ describe("prompt compiler (three-segment)", () => {
     expect(prompt).not.toContain("## Scope Principles");
     expect(prompt).not.toContain("## Scope Mainline");
     expect(prompt).not.toContain("## Room Principles");
-    expect(prompt).not.toContain("QA ROLE"); // agent template not used as identity
+    // Historical-template independence is exercised with real catalog/body damage
+    // in core-no-template-runtime.test.ts rather than an unused compiler argument.
   });
 
   it("birth state: no persona.md → I am <name> only; platform guide present; no archive line", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     expect(compiled.fullPrompt).toContain("I am qa.");
     // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
     expect(compiled.fullPrompt).toMatch(/bossmode-guide/);
@@ -100,7 +100,6 @@ describe("prompt compiler (three-segment)", () => {
       scopeId: "dm:mem_qa",
       memberId: "mem_qa",
       memberName: "qa",
-      agentDef,
       docsRoot: "/docs",
     });
     expect(dm.fullPrompt).toContain("You are in a private chat with the user.");
@@ -110,7 +109,6 @@ describe("prompt compiler (three-segment)", () => {
       scopeId: "topic:topic_abc",
       memberId: "mem_qa",
       memberName: "qa",
-      agentDef,
       room: room(),
       docsRoot: "/docs",
       topicTitle: "Wire up cache",
@@ -129,7 +127,6 @@ describe("prompt compiler (three-segment)", () => {
       scopeId: "room:room-a",
       memberId: "mem_qa",
       memberName: "qa",
-      agentDef,
       room: room(),
       docsRoot: "/docs",
     });
@@ -137,7 +134,6 @@ describe("prompt compiler (three-segment)", () => {
       scopeId: "topic:topic_x",
       memberId: "mem_qa",
       memberName: "qa",
-      agentDef,
       room: room(),
       docsRoot: "/docs",
       topicTitle: "T",
@@ -156,7 +152,7 @@ describe("prompt compiler (three-segment)", () => {
     const raw = "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n";
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), raw, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     const section = compiled.sections.find((s) => s.id === "member")!.content;
     expect(section).toBe(`# Member\n\nI am qa.\n\n${raw.trim()}`);
     expect(compiled.fullPrompt).not.toContain("I am DisplayQA.");
@@ -176,7 +172,7 @@ describe("prompt compiler (three-segment)", () => {
     const expected = `# Member\n\nI am qa.${body ? `\n\n${body}` : ""}`;
     for (const scopeId of ["room:room-a", "dm:mem_qa", "topic:topic_x"] as const) {
       const compiled = compileMemberPromptForScope({
-        scopeId, memberId: "mem_qa", memberName: "qa", agentDef,
+        scopeId, memberId: "mem_qa", memberName: "qa",
         ...(scopeId.startsWith("dm:") ? {} : { room: room() }), docsRoot: "/docs",
       });
       expect(Buffer.from(compiled.sections.find((s) => s.id === "member")!.content)).toEqual(Buffer.from(expected));
@@ -191,7 +187,7 @@ describe("prompt compiler (three-segment)", () => {
     const body = "x".repeat(4500);
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     expect(compiled.profileOverBudget).toBe(true);
     expect(compiled.fullPrompt).toContain("x".repeat(4500));
   });
@@ -200,7 +196,7 @@ describe("prompt compiler (three-segment)", () => {
     mkdirSync(join(tmpDir, "members", "mem_qa", "archive"), { recursive: true });
     writeFileSync(join(tmpDir, "members", "mem_qa", "archive", "old.md"), "legacy", "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const withArch = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const withArch = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     expect(withArch.fullPrompt).toContain("Legacy notes from the old system");
     expect(withArch.fullPrompt).toContain(join(tmpDir, "members", "mem_qa", "archive"));
   });

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { logger } from "../foundation/logger.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import type { AgentDefinition, AgentMemberConfig, Room } from "../shared/types.js";
+import type { AgentMemberConfig, Room } from "../shared/types.js";
 import {
   formatMemberPromptSegment,
   memberArchiveDir,
@@ -252,7 +252,6 @@ export function compileMemberPromptForScope(args: {
   scopeId: ScopeId;
   memberId: string;
   memberName: string;
-  agentDef: AgentDefinition;
   room?: Room | null;
   docsRoot: string;
   activeScopes?: string[];
@@ -307,7 +306,6 @@ export function compileMemberPromptForScope(args: {
     member: args.memberName,
     memberId: args.memberId,
     scopeId: args.scopeId,
-    agent: args.agentDef.name,
     sections: Object.fromEntries(sections.map((s) => [s.id, { chars: s.charCount, included: s.included }])),
     totalChars: fullPrompt.length,
     totalBytes: Buffer.byteLength(fullPrompt, "utf8"),
@@ -333,7 +331,6 @@ export function compileMemberPromptForScope(args: {
 export function compileMemberPrompt(args: {
   room: Room;
   member: AgentMemberConfig;
-  agentDef: AgentDefinition;
   docsRoot: string;
   activeTools?: string[];
   contextWindowTokens?: number;
@@ -343,7 +340,6 @@ export function compileMemberPrompt(args: {
     scopeId,
     memberId: args.member.id,
     memberName: args.member.name,
-    agentDef: args.agentDef,
     room: args.room,
     docsRoot: args.docsRoot,
     contextWindowTokens: args.contextWindowTokens,
