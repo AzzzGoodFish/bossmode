@@ -144,12 +144,6 @@ describe("explicit member authority and birth", () => {
     expect(members.getRetained(archived.id)).toEqual(archived);
     expect(() => members.importArchived(archived,"backups/another",123)).toThrow(/UNIQUE/);
   });
-  it("refuses the retired synchronous fire path without moving assets", () => {
-    const m = registry.createMember({name:"No unsafe deletion"});
-    expect(() => registry.fireMember(m.id)).toThrow("confirm_required");
-    expect(() => registry.fireMember(m.id,{confirm:true})).toThrow("archive_quiescence_required");
-    expect(existsSync(registry.memberDir(m.id))).toBe(true);
-  });
   it("strict ID import and DM creation roll back together on conflicting scope owner", () => {
     db.run("INSERT INTO scopes VALUES('dm:mem_import','dm',NULL,'mem_other')");
     expect(() => registry.importMemberRecord(record())).toThrow("Scope ownership cannot change");

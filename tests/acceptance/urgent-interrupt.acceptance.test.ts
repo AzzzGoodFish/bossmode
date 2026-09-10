@@ -7,7 +7,7 @@
  * - idle target → straight-through activation, no abort, no banner
  * - "Hello!pm" plain text never fires
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import type { Room } from "../../src/shared/types.js";
 import {
   setupTestWorkspace,
@@ -23,6 +23,20 @@ import type { TestServer } from "../helpers/test-server.js";
 import { resetMocks, setMockPromptFn, mockAbortFn, mockSteerFn } from "../helpers/mock-runtime.js";
 
 setupTestWorkspace();
+const heldPrompts = new Set<() => void>();
+function holdPrompt(assign: (finish:()=>void)=>void): Promise<void> {
+  return new Promise<void>(resolve=>{
+    const finish=()=>{heldPrompts.delete(finish);resolve();};
+    heldPrompts.add(finish);assign(finish);
+  });
+}
+afterEach(()=>{
+  // A fake provider must actually finish its held calls before runtime teardown.
+  // Later queued turns use the already-completed fake, never another hidden gate.
+  setMockPromptFn(async()=>{});
+  for(const finish of [...heldPrompts])finish();
+});
+
 
 describe("Acceptance: urgent ! interrupt", () => {
   let ts: TestServer;
@@ -66,7 +80,7 @@ describe("Acceptance: urgent ! interrupt", () => {
     let promptResolveFn: (() => void) | undefined;
     setMockPromptFn(async (msg: string) => {
       promptCalls.push(msg);
-      await new Promise<void>((resolve) => { promptResolveFn = resolve; });
+      await holdPrompt(resolve=>{promptResolveFn=resolve;});
     });
 
     const wsClient = await createWsClient(ts.wsUrl, token);

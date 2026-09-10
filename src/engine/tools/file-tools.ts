@@ -1,3 +1,5 @@
+import {awaitResourceClose} from "../resource-close.js";
+import {memberRuntimeAllowed} from "../runtime-admission.js";
 /**
  * Batch 7 P1 (spec §3): workspace-aware file tools — read/write/edit override
  * pi's built-ins by name (the SDK tool registry lets custom tools shadow
@@ -37,6 +39,7 @@ interface PooledClient {
   sftp: any;
   ready: Promise<void>;
   failed: boolean;
+  closed: Promise<void>;
 }
 
 const sftpPool = new Map<string, PooledClient>();
@@ -46,59 +49,52 @@ function poolKey(memberId: string, w: SshWorkspace): string {
 }
 
 async function getSftp(memberId: string, w: SshWorkspace): Promise<any> {
-  const key = poolKey(memberId, w);
+  if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
+  const key = poolKey(memberId,w);
   const existing = sftpPool.get(key);
-  if (existing && !existing.failed) {
+  if (existing) {
+    if (existing.failed) {
+      existing.conn.destroy(); await awaitResourceClose(existing.closed,"SFTP connection");
+      return getSftp(memberId,w);
+    }
     await existing.ready;
+    if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
     return existing.sftp;
   }
   const { Client } = await import("ssh2");
+  if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
+  if (sftpPool.has(key)) return getSftp(memberId,w);
   const conn = new Client();
+  let resolveClosed!: () => void;
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
   const entry: PooledClient = {
-    conn,
-    sftp: null,
-    failed: false,
-    ready: new Promise<void>((resolvePromise, rejectPromise) => {
-      conn
-        .on("ready", () => {
-          conn.sftp((err: Error | undefined, sftp: any) => {
-            if (err) {
-              entry.failed = true;
-              rejectPromise(new Error(`sftp channel failed: ${err.message}`));
-              return;
-            }
-            entry.sftp = sftp;
-            resolvePromise();
-          });
-        })
-        .on("error", (err: Error) => {
-          entry.failed = true;
-          sftpPool.delete(key);
-          rejectPromise(new Error(`ssh connection failed: ${err.message}`));
-        })
-        .on("close", () => {
-          sftpPool.delete(key);
-        })
-        .connect({
-          host: w.host,
-          port: w.port,
-          username: w.user,
-          privateKey: existsSync(w.keyPath) ? readFileSync(w.keyPath) : undefined,
-        });
-    }),
+    conn, sftp: null, failed: false,
+    closed: new Promise<void>(resolve => { resolveClosed = resolve; }),
+    ready: new Promise<void>((resolve,reject) => { resolveReady = resolve; rejectReady = reject; }),
   };
-  sftpPool.set(key, entry);
+  sftpPool.set(key,entry);
+  const failed = (error: Error) => { entry.failed = true; rejectReady(error); conn.destroy(); };
+  conn.on("ready", () => conn.sftp((error: Error | undefined,sftp: any) => {
+    if (error) { failed(new Error(`sftp channel failed: ${error.message}`)); return; }
+    entry.sftp = sftp; resolveReady();
+  })).on("error", (error: Error) => failed(new Error(`ssh connection failed: ${error.message}`)))
+    .on("close", () => {
+      entry.failed = true; resolveClosed(); rejectReady(new Error("ssh connection closed"));
+      if (sftpPool.get(key) === entry) sftpPool.delete(key);
+    });
+  try {
+    conn.connect({host:w.host,port:w.port,username:w.user,privateKey:existsSync(w.keyPath)?readFileSync(w.keyPath):undefined});
+  } catch (error) { failed(error as Error); }
   await entry.ready;
+  if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
   return entry.sftp;
 }
 
-export function dropSftpConnectionsForMember(memberId: string): void {
-  for (const key of [...sftpPool.keys()]) {
-    if (key.startsWith(`${memberId}::`)) {
-      try { sftpPool.get(key)!.conn.end(); } catch { /* already closed */ }
-      sftpPool.delete(key);
-    }
-  }
+export async function dropSftpConnectionsForMember(memberId?: string): Promise<void> {
+  const entries = [...sftpPool].filter(([key]) => memberId === undefined || key.startsWith(`${memberId}::`));
+  for (const [,entry] of entries) entry.conn.destroy();
+  await Promise.all(entries.map(([,entry]) => awaitResourceClose(entry.closed,"SFTP connection")));
 }
 
 function sftpReadFile(sftp: any, path: string): Promise<Buffer> {
@@ -107,6 +103,7 @@ function sftpReadFile(sftp: any, path: string): Promise<Buffer> {
     const stream = sftp.createReadStream(path);
     stream.on("data", (c: Buffer) => chunks.push(c));
     stream.on("error", rejectPromise);
+    stream.on("close", () => rejectPromise(new Error("SFTP read closed before completion")));
     stream.on("end", () => resolvePromise(Buffer.concat(chunks)));
   });
 }
@@ -160,6 +157,7 @@ function toolError(message: string): FileToolResult {
 }
 
 export async function workspaceReadTool(memberId: string, args: { path?: string; offset?: number; limit?: number; workspace?: string }): Promise<FileToolResult> {
+  if (!memberRuntimeAllowed(memberId)) return toolError("member runtime admission is closed");
   const resolution = resolveWorkspacePath(memberId, String(args.path ?? ""), args.workspace);
   if ("error" in resolution) return toolError(resolution.error);
   const { workspace, path } = resolution;
@@ -198,6 +196,7 @@ export async function workspaceReadTool(memberId: string, args: { path?: string;
 }
 
 export async function workspaceWriteTool(memberId: string, args: { path?: string; content?: string; workspace?: string }): Promise<FileToolResult> {
+  if (!memberRuntimeAllowed(memberId)) return toolError("member runtime admission is closed");
   const resolution = resolveWorkspacePath(memberId, String(args.path ?? ""), args.workspace);
   if ("error" in resolution) return toolError(resolution.error);
   if (typeof args.content !== "string") return toolError("content is required");
@@ -223,6 +222,7 @@ export async function workspaceWriteTool(memberId: string, args: { path?: string
 }
 
 export async function workspaceEditTool(memberId: string, args: { path?: string; edits?: Array<{ oldText?: string; newText?: string }>; workspace?: string }): Promise<FileToolResult> {
+  if (!memberRuntimeAllowed(memberId)) return toolError("member runtime admission is closed");
   const resolution = resolveWorkspacePath(memberId, String(args.path ?? ""), args.workspace);
   if ("error" in resolution) return toolError(resolution.error);
   const edits = Array.isArray(args.edits) ? args.edits : [];

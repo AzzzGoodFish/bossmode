@@ -15,6 +15,8 @@ export interface AgentRuntime {
 
   detect(): Promise<RuntimeDetectResult>;
   createAgent(opts: CreateAgentOpts): Promise<AgentHandle>;
+  /** Await every owned handle, including detached instances and failed teardown attempts. */
+  shutdownMember(memberId: string): Promise<void>;
   shutdownAll(): Promise<void>;
 }
 

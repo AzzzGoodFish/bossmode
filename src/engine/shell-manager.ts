@@ -1,3 +1,5 @@
+import {awaitResourceClose} from "./resource-close.js";
+import { memberRuntimeAllowed } from "./runtime-admission.js";
 /**
  * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
  * shells. A shell is a real PTY (node-pty locally, an ssh2 channel for ssh
@@ -49,6 +51,9 @@ interface LiveShell {
   cwd?: string;
   proc: { write(data: string): void; kill(signal?: string): void; on(ev: string, fn: (arg: any) => void): void };
   alive: boolean;
+  closing?: boolean;
+  exited: Promise<void>;
+  markExited(): void;
   execCounter: number;
   lines: string[];
   firstLine: number; // absolute number of lines[0]
@@ -63,6 +68,8 @@ interface LiveShell {
   sshClient?: any; // kept so close() can tear the whole connection
 }
 
+const ownedSshConnections = new Map<any,{memberId:string;closed:Promise<void>}>();
+const pendingShells = new Map<Promise<ShellCreateResult>, string>();
 const shells = new Map<string, LiveShell>(); // key: memberId::shellId
 
 // Per-member blocking shell_exec waits — settled by interrupt so the tool
@@ -199,7 +206,7 @@ function archiveExec(shell: LiveShell, exec: ShellExec): void {
 }
 
 function drainQueue(shell: LiveShell): void {
-  if (shell.draining || shell.currentExec || !shell.alive) return;
+  if (shell.draining || shell.currentExec || !shell.alive || shell.closing) return;
   // Marker gating: never write the next line until the previous one's
   // completion marker arrived (serializes execs; the init sequence's own
   // marker must close before the first command runs).
@@ -225,6 +232,19 @@ function drainQueue(shell: LiveShell): void {
   }
 }
 
+function settleShellExit(shell: LiveShell): void {
+  shell.alive = false;
+  const pending = new Set([shell.currentExec,...shell.writeQueue.map(item=>item.exec)].filter((exec): exec is ShellExec=>!!exec));
+  shell.currentExec = null; shell.writeQueue = [];
+  for (const exec of pending) {
+    exec.status = "done"; exec.exitCode = null;
+    exec.lineEnd = Math.max(shell.lineCount-2,exec.lineStart);
+    exec.resolve?.(); exec.resolve = undefined; exec.doneResolve?.();
+    archiveExec(shell,exec);
+  }
+  shell.markExited();
+}
+
 async function spawnLocalShell(memberId: string, workspaceId: string, cwd: string | undefined, id: string, name: string | undefined): Promise<LiveShell> {
   const pty = await import("node-pty");
   // Always a real, bare bash (spec §4): PROMPT_COMMAND is the completion
@@ -245,7 +265,10 @@ async function spawnLocalShell(memberId: string, workspaceId: string, cwd: strin
       LANG: process.env.LANG || "en_US.UTF-8",
     } as Record<string, string>,
   });
+  let markExited!: () => void;
+  const exited = new Promise<void>(resolve => { markExited = resolve; });
   const shell: LiveShell = {
+    exited, markExited,
     id, name, memberId, workspaceId, cwd,
     proc: proc as unknown as LiveShell["proc"],
     alive: true, execCounter: 0,
@@ -254,21 +277,7 @@ async function spawnLocalShell(memberId: string, workspaceId: string, cwd: strin
     execHistory: [],
   };
   proc.onData((data: string) => pushData(shell, data));
-  proc.onExit(() => {
-    shell.alive = false;
-    if (shell.currentExec) {
-      const exec = shell.currentExec;
-      exec.status = "done";
-      exec.exitCode = null;
-      exec.lineEnd = Math.max(shell.lineCount - 2, exec.lineStart);
-      shell.currentExec = null;
-      exec.resolve?.();
-      exec.resolve = undefined;
-      exec.doneResolve?.();
-      archiveExec(shell, exec);
-    }
-    drainQueue(shell);
-  });
+  proc.onExit(() => settleShellExit(shell));
   // init sequence as the very first queued write
   shell.writeQueue.push({ command: initSequence().trimEnd() });
   drainQueue(shell);
@@ -278,29 +287,40 @@ async function spawnLocalShell(memberId: string, workspaceId: string, cwd: strin
 async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: string | undefined, id: string, name: string | undefined): Promise<LiveShell> {
   const { readFileSync, existsSync } = await import("node:fs");
   const { Client } = await import("ssh2");
+  if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
   const conn = new Client();
-  await new Promise<void>((resolve, reject) => {
-    conn
-      .on("ready", () => resolve())
-      .on("error", (err: Error) => reject(new Error(`ssh connection failed: ${err.message}`)))
-      .connect({
-        host: workspace.host,
-        port: workspace.port,
-        username: workspace.user,
-        privateKey: existsSync(workspace.keyPath) ? readFileSync(workspace.keyPath) : undefined,
-      });
-  });
-  const channel = await new Promise<any>((resolve, reject) => {
-    conn.shell({ term: "xterm-256color", cols: SHELL_COLS, rows: SHELL_ROWS }, (err: Error | undefined, stream: any) => {
-      if (err) reject(new Error(`ssh shell failed: ${err.message}`));
-      else resolve(stream);
+  let resolveClosed!:()=>void;
+  const closed = new Promise<void>(resolve=>resolveClosed=resolve);
+  ownedSshConnections.set(conn,{memberId,closed});
+  conn.once("close",()=>{resolveClosed();ownedSshConnections.delete(conn);});
+  let channel: any;
+  try {
+    await new Promise<void>((resolve,reject)=>{
+      conn.once("ready",resolve).on("error",(error:Error)=>reject(error))
+        .once("close",()=>reject(new Error("SSH connection closed during creation")));
+      conn.connect({host:workspace.host,port:workspace.port,username:workspace.user,
+        privateKey:existsSync(workspace.keyPath)?readFileSync(workspace.keyPath):undefined});
     });
-  });
+    if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
+    channel = await Promise.race([
+      new Promise<any>((resolve,reject)=>conn.shell({term:"xterm-256color",cols:SHELL_COLS,rows:SHELL_ROWS},(error:Error|undefined,stream:any)=>error?reject(error):resolve(stream))),
+      closed.then(()=>{throw new Error("SSH connection closed before shell creation");}),
+    ]);
+  } catch (error) {
+    conn.destroy();
+    try {await awaitResourceClose(closed,"SSH creation");}
+    catch (cleanupError) {throw new AggregateError([error,cleanupError],"SSH creation and cleanup failed");}
+    throw error;
+  }
+  let markExited!: () => void;
+  const channelClosed = new Promise<void>(resolve=>{markExited=resolve;});
+  const exited = Promise.all([channelClosed,closed]).then(()=>{});
   const shell: LiveShell = {
+    exited, markExited,
     id, name, memberId, workspaceId: workspace.id, cwd,
     proc: {
       write: (data: string) => channel.write(data),
-      kill: () => { try { channel.close(); } catch { /* already gone */ } try { conn.end(); } catch { /* already gone */ } },
+      kill: () => { channel.close(); conn.destroy(); },
       on: (ev: string, fn: (arg: any) => void) => {
         if (ev === "data") channel.on("data", (d: Buffer) => fn(d.toString("utf-8")));
         if (ev === "exit") channel.on("close", () => fn(undefined));
@@ -313,20 +333,7 @@ async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: str
     sshClient: conn,
   };
   channel.on("data", (d: Buffer) => pushData(shell, d.toString("utf-8")));
-  channel.on("close", () => {
-    shell.alive = false;
-    if (shell.currentExec) {
-      const exec = shell.currentExec;
-      exec.status = "done";
-      exec.exitCode = null;
-      exec.lineEnd = Math.max(shell.lineCount - 2, exec.lineStart);
-      shell.currentExec = null;
-      exec.resolve?.();
-      exec.resolve = undefined;
-      exec.doneResolve?.();
-    }
-    drainQueue(shell);
-  });
+  channel.on("close", () => settleShellExit(shell));
   shell.writeQueue.push({ command: initSequence().trimEnd() });
   drainQueue(shell);
   return shell;
@@ -335,6 +342,17 @@ async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: str
 export type ShellCreateResult = { ok: true; shell: string; workspace: string; cwd: string } | { ok: false; error: string };
 
 export async function createShell(args: {
+  memberId: string;
+  name?: string;
+  workspace?: string;
+  cwd?: string;
+}): Promise<ShellCreateResult> {
+  if (!memberRuntimeAllowed(args.memberId)) return {ok:false,error:"member runtime admission is closed"};
+  const pending = createShellInternal(args); pendingShells.set(pending,args.memberId);
+  try { return await pending; } finally { pendingShells.delete(pending); }
+}
+
+async function createShellInternal(args: {
   memberId: string;
   name?: string;
   workspace?: string;
@@ -356,6 +374,10 @@ export async function createShell(args: {
       shell = await spawnLocalShell(args.memberId, workspace.id, cwd, id, args.name);
     }
     shells.set(shellKey(args.memberId, id), shell);
+    if (!memberRuntimeAllowed(args.memberId)) {
+      await closeShell(args.memberId,id);
+      return {ok:false,error:"member runtime admission closed during shell creation"};
+    }
     logger.info("shell-manager", "shell created", { memberId: args.memberId, shell: id, workspace: workspace.id });
     return { ok: true, shell: id, workspace: workspace.id, cwd: args.cwd?.trim() || (workspace.kind === "ssh" ? workspace.root : workspace.root) };
   } catch (err: any) {
@@ -375,16 +397,20 @@ const KEY_SEQUENCES: Record<string, string> = {
 };
 
 export async function execInShell(args: {
+  signal?: AbortSignal;
   memberId: string;
   shell: string;
   command?: string;
   keys?: string;
   blockUntilMs?: number;
 }): Promise<ShellExecResult> {
+  if (args.signal?.aborted) return {ok:false,error:"Shell execution was cancelled before submission"};
+  if (!memberRuntimeAllowed(args.memberId)) return {ok:false,error:"member runtime admission is closed"};
   const shell = shells.get(shellKey(args.memberId, args.shell));
   if (!shell) {
     return { ok: false, error: `Shell not found: ${args.shell}. It may have been closed, or the daemon restarted (shells are memory-only — create a new one).` };
   }
+  if (shell.closing) return {ok:false,error:"Shell is closing"};
   if (!shell.alive) {
     return { ok: false, error: `Shell ${args.shell} is dead (process exited). Create a new one with shell_create.` };
   }
@@ -445,10 +471,11 @@ export async function execInShell(args: {
     blockMs > 0
       ? new Promise<boolean>((resolve) => {
           const t = setTimeout(() => resolve(false), blockMs);
-          waitReg.unregister = registerMemberShellWait(args.memberId, () => {
-            clearTimeout(t);
-            resolve(false);
-          });
+          const interrupt = () => {clearTimeout(t);resolve(false);};
+          const unregister = registerMemberShellWait(args.memberId,interrupt);
+          args.signal?.addEventListener("abort",interrupt,{once:true});
+          waitReg.unregister = () => {unregister();args.signal?.removeEventListener("abort",interrupt);clearTimeout(t);};
+          if(args.signal?.aborted)interrupt();
         })
       : Promise.resolve(false), // 0 = never block (qa rc.20 Major: a never-resolving promise here turned "background immediately" into a hang)
   ]);
@@ -543,6 +570,7 @@ function sliceLines(shell: LiveShell, from: number, to: number): Array<{ n: numb
  * Done returns exit code + line range + output; a timeout returns running with
  * the progress so far. shell_read stays an instant snapshot. */
 export async function waitShell(args: {
+  signal?: AbortSignal;
   memberId: string;
   shell: string;
   exec: string;
@@ -566,13 +594,20 @@ export async function waitShell(args: {
   const respond = () => exec.status === "done"
     ? { ok: true as const, exec: exec.id, status: "done" as const, exitCode: exec.exitCode, lineStart: exec.lineStart, lineEnd: exec.lineEnd ?? exec.lineStart, output: exec.output }
     : { ok: true as const, exec: exec.id, status: "running" as const, outputSoFar: exec.output, note: `Still running — wait again with shell_wait, or snapshot with shell_read.` };
-  if (exec.status === "done") return respond();
+  if (exec.status === "done" || args.signal?.aborted) return respond();
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : 30_000;
-  if (blockMs === 0) {
-    await exec.done;
-  } else {
-    await Promise.race([exec.done, new Promise<void>((resolve) => setTimeout(resolve, blockMs))]);
-  }
+  let unregister: (()=>void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const interrupted = new Promise<void>(resolve => {
+    const interrupt = () => resolve();
+    const unregisterWait = registerMemberShellWait(args.memberId,interrupt);
+    args.signal?.addEventListener("abort",interrupt,{once:true});
+    unregister = () => {unregisterWait();args.signal?.removeEventListener("abort",interrupt);};
+    if(args.signal?.aborted)resolve();
+    if (blockMs > 0) timer = setTimeout(resolve,blockMs);
+  });
+  try { await Promise.race([exec.done,interrupted]); }
+  finally { unregister?.(); if(timer) clearTimeout(timer); }
   return respond();
 }
 
@@ -592,30 +627,26 @@ export function listShells(memberId: string): Array<{ id: string; name?: string;
   return out;
 }
 
-export function closeShell(memberId: string, shellId: string): { ok: true } | { ok: false; error: string } {
+export async function closeShell(memberId: string, shellId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = shellKey(memberId, shellId);
   const shell = shells.get(key);
   if (!shell) return { ok: false, error: `Shell not found: ${shellId}` };
-  if (shell.currentExec) {
-    shell.currentExec.status = "done";
-    shell.currentExec.exitCode = null;
-    shell.currentExec.resolve?.();
-    shell.currentExec.resolve = undefined;
-    shell.currentExec = null;
-  }
-  try { shell.proc.kill(); } catch { /* already gone */ }
+  shell.closing = true;
+  try { shell.proc.kill(); } catch (error) { if (shell.alive) throw error; }
   if (shell.sshClient) { try { shell.sshClient.end(); } catch { /* already gone */ } }
+  await awaitResourceClose(shell.exited,"Shell");
   shells.delete(key);
   logger.info("shell-manager", "shell closed", { memberId, shell: shellId });
   return { ok: true };
 }
 
 /** P1 file-tools sftp pool teardown shares this on member destruction. */
-export function closeAllShellsForMember(memberId: string): void {
-  for (const [key, shell] of [...shells.entries()]) {
-    if (shell.memberId !== memberId) continue;
-    try { shell.proc.kill(); } catch { /* already gone */ }
-    if (shell.sshClient) { try { shell.sshClient.end(); } catch { /* already gone */ } }
-    shells.delete(key);
-  }
+export async function closeAllShellsForMember(memberId?: string): Promise<void> {
+  const connections = [...ownedSshConnections].filter(([,owner])=>memberId===undefined || owner.memberId===memberId);
+  for (const [conn] of connections) conn.destroy();
+  const connectionResults = await Promise.allSettled(connections.map(([,owner])=>awaitResourceClose(owner.closed,"SSH connection")));
+  await Promise.all([...pendingShells].filter(([,id])=>memberId===undefined || id===memberId).map(([promise])=>promise));
+  const results = await Promise.allSettled([...shells.values()].filter(shell=>memberId===undefined || shell.memberId===memberId).map(shell=>closeShell(shell.memberId,shell.id)));
+  const failures = [...connectionResults,...results].filter((result): result is PromiseRejectedResult => result.status === "rejected").map(result=>result.reason);
+  if (failures.length) throw new AggregateError(failures,"Shell shutdown incomplete");
 }

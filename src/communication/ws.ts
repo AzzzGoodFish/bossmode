@@ -1,3 +1,4 @@
+import {logger} from "../foundation/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
@@ -16,6 +17,8 @@ let wss: WebSocketServer | null = null;
 
 export function createWebSocketServer(server: import("node:http").Server): WebSocketServer {
   wss = new WebSocketServer({ server });
+  // ws forwards HTTP listen errors. The startup listener owns rejection/cleanup.
+  wss.on("error", error => logger.error("ws","server error",{error:String(error)}));
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url || "", "http://localhost");
@@ -112,13 +115,11 @@ export function getConnectedClientCount(): number {
   return clients.size;
 }
 
-export function shutdownWebSocket(): void {
-  if (wss) {
-    for (const [ws] of clients) {
-      ws.close(1001, "Server shutting down");
-    }
-    clients.clear();
-    wss.close();
-    wss = null;
-  }
+export async function shutdownWebSocket(): Promise<void> {
+  const server = wss;
+  if (!server) return;
+  wss = null;
+  clients.clear();
+  for (const ws of server.clients) ws.terminate();
+  await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
 }

@@ -8,19 +8,19 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { coreFixture } from "../helpers/core-fixture.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bm-b7p2-"));
-  process.env.BOSSMODE_DIR = dir;
-  mkdirSync(join(dir, "members", "mem_sh"), { recursive: true });
-  vi.resetModules();
+  fixture=coreFixture();dir=fixture.root;
+  for(const id of ["mem_sh","mem_other"]) {
+    fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,'general','{}',0,0)",id,id,id);
+    mkdirSync(join(dir,"members",id),{recursive:true});
+  }
 });
 afterEach(async () => {
-  const m = await import("../../src/engine/shell-manager.js");
-  m.closeAllShellsForMember("mem_sh");
-  m.closeAllShellsForMember("mem_other");
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+  const m=await import("../../src/engine/shell-manager.js");
+  await m.closeAllShellsForMember("mem_sh");await m.closeAllShellsForMember("mem_other");fixture.close();
 });
 
 async function fresh() {
@@ -312,10 +312,21 @@ false`;
     expect(sm.listShells("mem_sh")).toHaveLength(1);
     expect(sm.listShells("mem_other")).toHaveLength(0);
 
-    expect(sm.closeShell("mem_sh", s).ok).toBe(true);
+    expect((await sm.closeShell("mem_sh", s)).ok).toBe(true);
     const after = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo x", blockUntilMs: 1000 });
     expect(after.ok).toBe(false);
     expect(after.ok === false && after.error).toContain("not found");
     expect(sm.listShells("mem_sh")).toHaveLength(0);
   }, 10000);
+});
+
+it("unlimited shell_wait is interruptible and close settles outstanding exec completion",async()=>{
+  const sm=await fresh();const created=await sm.createShell({memberId:"mem_sh"});
+  if(!created.ok)throw new Error(created.error);
+  const exec=await sm.execInShell({memberId:"mem_sh",shell:created.shell,command:"sleep 30",blockUntilMs:0});
+  if(!exec.ok)throw new Error(exec.error);
+  const wait=sm.waitShell({memberId:"mem_sh",shell:created.shell,exec:exec.exec,blockUntilMs:0});
+  sm.settleMemberShellWaits("mem_sh");expect((await wait).status).toBe("running");
+  const ending=sm.waitShell({memberId:"mem_sh",shell:created.shell,exec:exec.exec,blockUntilMs:0});
+  await sm.closeShell("mem_sh",created.shell);expect((await ending).status).toBe("done");
 });

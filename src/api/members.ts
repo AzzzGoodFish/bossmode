@@ -1,3 +1,4 @@
+import { archiveMember } from "../services/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../engine/member-profile-update.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
@@ -11,7 +12,6 @@ import {
   getMember,
   createMember,
   updateMember,
-  fireMember,
   resolveMemberRef,
   getEffectiveConfig,
   MemberNameTakenError,
@@ -650,7 +650,7 @@ addRoute("DELETE", "/api/members/:id", async (req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const result = fireMember(m.id, { confirm: !!body.confirm });
+    const result = await archiveMember(m.id, { confirm: !!body.confirm });
     sendJson(res, 200, result);
   } catch (err) {
     const e = errCode(err);

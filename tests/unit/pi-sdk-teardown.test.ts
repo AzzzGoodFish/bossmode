@@ -141,8 +141,8 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
     const gate = new Promise<void>((r) => { release = r; });
     const good = handleWith(realRunner(async () => { await gate; })); // still tearing down
     const bad = handleWith(realRunner(async () => { throw new Error("shutdown boom"); }), () => { throw new Error("dispose boom"); });
-    (rt as any).handles.add(good);
-    (rt as any).handles.add(bad);
+    (rt as any).handles.set(good,"mem_good");
+    (rt as any).handles.set(bad,"mem_bad");
     let settled = false;
     const mark = (p: Promise<void>) => p.then(() => { settled = true; }, () => { settled = true; });
     const p1 = rt.shutdownAll();
@@ -158,7 +158,22 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
     await p1.catch((e: any) => { failed1 = /teardown|shutdownAll/.test(e.message); });
     await p2.catch((e: any) => { failed2 = /teardown|shutdownAll/.test(e.message); });
     expect(failed1 && failed2).toBe(true);
-    // after settlement the set is empty — a later call resolves fresh
-    await expect(rt.shutdownAll()).resolves.toBeUndefined();
+    // A past failure must not turn a repeated shutdown into false success.
+    await expect(rt.shutdownAll()).rejects.toThrow("incomplete");
+    await expect(rt.shutdownMember("mem_bad")).rejects.toThrow("incomplete");
+    await expect(rt.shutdownMember("mem_good")).resolves.toBeUndefined();
   });
+});
+
+it("teardown waits for manual compaction unwinding, not merely SDK agent idle", async()=>{
+  const disposed=vi.fn();const handle=handleWith(realRunner(async()=>{}),disposed);
+  let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
+  (handle as any).session.compact=vi.fn(async()=>{await gate;});
+  const compact=handle.compact!();let settled=false;
+  const teardown=handle.destroyAndWait!().then(()=>{settled=true;});
+  await new Promise(resolve=>setTimeout(resolve,10));
+  expect(settled).toBe(false);expect(disposed).not.toHaveBeenCalled();
+  release();expect(await compact).toEqual({aborted:true});await teardown;
+  expect(disposed).toHaveBeenCalledOnce();
+  await expect(handle.compact!()).rejects.toThrow("destroyed");
 });

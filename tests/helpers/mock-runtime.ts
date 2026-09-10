@@ -75,6 +75,8 @@ export class MockAgentHandle implements AgentHandle {
     return Promise.resolve();
   }
 
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
+
   destroy(): void {
     this.listeners.clear();
     const index = liveHandles.indexOf(this);
@@ -106,6 +108,7 @@ export class MockRuntime implements AgentRuntime {
   };
 
   private handles: MockAgentHandle[] = [];
+  private owners = new WeakMap<MockAgentHandle,string>();
 
   constructor(name = "mock") {
     this.name = name;
@@ -118,10 +121,16 @@ export class MockRuntime implements AgentRuntime {
   async createAgent(_opts: CreateAgentOpts): Promise<AgentHandle> {
     const handle = new MockAgentHandle();
     this.handles.push(handle);
+    this.owners.set(handle,_opts.member.id);
     return handle;
   }
 
+  async shutdownMember(memberId:string): Promise<void> {
+    await Promise.all(this.handles.filter(handle=>this.owners.get(handle)===memberId).map(handle=>handle.destroyAndWait()));
+  }
+
   async shutdownAll(): Promise<void> {
+    await Promise.all(this.handles.map(handle=>handle.destroyAndWait()));
     this.handles = [];
   }
 }

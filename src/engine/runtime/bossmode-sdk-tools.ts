@@ -63,12 +63,12 @@ export function createBossmodeSdkTools(opts: {
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
   const scopeKind = opts.scopeKind || "room";
-  const call = async (tool: string, params: Record<string, any>) => {
+  const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
     if (opts.execution === "background" && BACKGROUND_FORBIDDEN_TOOLS.has(tool)) {
       throw new Error(`tool "${tool}" is not available inside a background task; finish the task and return the result as your final text`);
     }
     const { handleToolCallback } = await import("../tools.js");
-    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, execution: opts.execution });
+    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, execution: opts.execution, ...(signal ? {signal} : {}) });
   };
 
   const tools: ToolDefinition[] = [
@@ -335,8 +335,8 @@ export function createBossmodeSdkTools(opts: {
         taskId: Type.String({ description: PARAM_DESCRIPTIONS.backgroundTaskId }),
         blockMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.backgroundBlockMs })),
       }),
-      execute: async (_id, params) => {
-        const data = await call("background_wait", params as any) as any;
+      execute: async (_id, params, signal) => {
+        const data = await call("background_wait", params as any, signal) as any;
         if (data?.ok === false) throw new Error(data.error || "Background wait failed");
         if (data.status === "running" || data.status === "starting" || data.status === "cancelling") {
           return textResult(`Task ${data.taskId} is still ${data.status}. ${data.note ?? ""}`.trim());
@@ -402,7 +402,7 @@ export function createBossmodeSdkTools(opts: {
         keys: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.shellKeys })),
         blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.shellBlockUntilMs })),
       }),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_exec", params as any), null, 2))),
+      execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("shell_exec", params as any, signal), null, 2))),
     }),
     defineTool({
       name: "shell_read",
@@ -425,7 +425,7 @@ export function createBossmodeSdkTools(opts: {
         exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
         blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.shellWaitBlockUntilMs })),
       }),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("shell_wait", params as any), null, 2))),
+      execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("shell_wait", params as any, signal), null, 2))),
     }),
     defineTool({
       name: "shell_list",
@@ -475,8 +475,8 @@ export function createBossmodeSdkTools(opts: {
         member: Type.String({ description: "Target member name to wait on" }),
         timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
       }),
-      execute: async (_id, params) => {
-        const data = await call("wait", params as any) as any;
+      execute: async (_id, params, signal) => {
+        const data = await call("wait", params as any, signal) as any;
         if (data?.ok === false) throw new Error(data.error || "Wait failed");
         if (data?.reason === "message") {
           const body = typeof data.message === "string" ? data.message : "";

@@ -555,6 +555,32 @@ describe("PiSdkRuntime", () => {
     expect(existsSync(sessionExtensionSetFlagValue.mock.calls.at(-1)![1])).toBe(false);
   });
 
+  it("retains failed creation cleanup for member and repeated global shutdown",async()=>{
+    exportedConfig={agentDir:join(dir,"profile-agent-dir"),extensionPaths:[],profile:{id:"test-profile",providerSlug:"anthropic"}};
+    const session=(await createAgentSession.getMockImplementation()!()).session;
+    session.dispose.mockImplementationOnce(()=>{throw new Error("dispose failed");});
+    sessionBindExtensions.mockRejectedValueOnce(new Error("bind failed"));
+    const {PiSdkRuntime}=await import("../../src/engine/runtime/pi-sdk.js");const runtime=new PiSdkRuntime();
+    await expect(runtime.createAgent(baseOpts())).rejects.toThrow("Runtime creation and cleanup failed");
+    await expect(runtime.shutdownMember(baseOpts().member.id)).rejects.toThrow("incomplete");
+    await expect(runtime.shutdownAll()).rejects.toThrow("incomplete");
+    await expect(runtime.shutdownAll()).rejects.toThrow("incomplete");
+    await expect(runtime.shutdownMember("mem_other")).resolves.toBeUndefined();
+  });
+
+  it("teardown waits for a blocked reload and prevents its late session start",async()=>{
+    exportedConfig={agentDir:join(dir,"profile-agent-dir"),extensionPaths:[],profile:{id:"test-profile",providerSlug:"anthropic"}};
+    const {PiSdkRuntime}=await import("../../src/engine/runtime/pi-sdk.js");
+    const handle=await new PiSdkRuntime().createAgent(baseOpts());const session=(handle as any).session;
+    let release!:()=>void;let entered=false;const gate=new Promise<void>(resolve=>release=resolve);
+    session.reload.mockImplementationOnce(async(options:any)=>{entered=true;await gate;await options.beforeSessionStart();});
+    const reload=handle.reloadResources!({roomId:"room-a",member:baseOpts().member,agentPrompt:"x",appendSystemPrompt:[],skillPaths:[]});
+    const rejected=expect(reload).rejects.toThrow("destroyed");
+    await vi.waitFor(()=>expect(entered).toBe(true));const teardown=handle.destroyAndWait!();
+    await Promise.resolve();expect(session.dispose).not.toHaveBeenCalled();
+    release();await rejected;await teardown;expect(session.dispose).toHaveBeenCalledOnce();
+  });
+
   it("does not create an apparently healthy session when the SDK suppresses a hosted factory error", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     hostedMcpLoaded = false;
@@ -828,6 +854,19 @@ describe("PiSdkRuntime", () => {
     expect(handle.runtimeParams?.model).toBe("anthropic/claude-opus-4-6");
   });
 
+  it("teardown awaits a pending model refresh and blocks late model/history mutation",async()=>{
+    exportedConfig={agentDir:join(dir,"profile-agent-dir"),extensionPaths:[],profile:{id:"test-profile",providerSlug:"anthropic"}};
+    const {PiSdkRuntime}=await import("../../src/engine/runtime/pi-sdk.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());const session=(handle as any).session;
+    let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
+    databaseRuntimeRefresh.mockImplementationOnce(async()=>{await gate;});
+    const changing=handle.setModel!("anthropic/claude-opus-4-6","cred-b");const rejected=expect(changing).rejects.toThrow("destroyed");
+    const teardown=handle.destroyAndWait!();await Promise.resolve();expect(session.dispose).not.toHaveBeenCalled();
+    release();await rejected;await teardown;
+    expect(session.setModel).not.toHaveBeenCalled();
+    await expect(handle.refreshModelRegistry!()).rejects.toThrow("destroyed");
+    expect(()=>handle.setThinkingLevel!("high")).toThrow("destroyed");
+  });
+
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
@@ -963,6 +1002,22 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     vi.clearAllMocks();
   });
 
+
+  it("teardown awaits watchdog compaction and never starts its continuation after destruction",async()=>{
+    const mock=makeWatchdogSession({contextWindow:50000,reserveTokens:1000,onPrompt:async m=>{
+      const assistant=assistantMsg(30000,[{type:"toolCall",id:"t",name:"read",arguments:{}}]);
+      m.emit({type:"message_end",message:assistant});m.emit({type:"agent_end",messages:[]});
+    }});
+    let release!:()=>void;let compacting=false;const gate=new Promise<void>(resolve=>release=resolve);
+    mock.session.compact=vi.fn(async()=>{compacting=true;await gate;});
+    createAgentSession.mockResolvedValueOnce({session:mock.session});
+    const {PiSdkRuntime}=await import("../../src/engine/runtime/pi-sdk.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());
+    const prompt=handle.prompt("original");await vi.waitFor(()=>expect(compacting).toBe(true));
+    let finished=false;const teardown=handle.destroyAndWait!().then(()=>finished=true);
+    await Promise.resolve();expect(finished).toBe(false);expect(mock.session.dispose).not.toHaveBeenCalled();
+    release();await prompt;await teardown;expect(mock.calls).toEqual(["original"]);
+    await expect(handle.prompt("late")).rejects.toThrow("destroyed");
+  });
 
   it("mid-run crossing: aborts and compacts without rewriting SDK history", async () => {
     const mock = makeWatchdogSession({

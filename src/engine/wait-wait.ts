@@ -55,6 +55,7 @@ interface ActiveWait {
   resolve: (outcome: WaitOutcome) => void;
   timer: ReturnType<typeof setTimeout>;
   unsubMessage: () => void;
+  unsubAbort?: () => void;
   settled: boolean;
 }
 
@@ -76,6 +77,7 @@ function settle(wait: ActiveWait, outcome: WaitOutcome): void {
   if (wait.settled) return;
   wait.settled = true;
   clearTimeout(wait.timer);
+  wait.unsubAbort?.();
   try { wait.unsubMessage(); } catch { /* ignore */ }
   detachIdleListener(wait);
   activeWaits.delete(waitKey(wait.roomId, wait.waiterMemberId));
@@ -100,6 +102,13 @@ export function settleWaitOnAbort(roomId: string, memberId: string): void {
     target: wait.targetName,
     detail: `Wait interrupted — stopped. Target was ${wait.targetName}.`,
   });
+}
+
+/** Ownership survives instance detachment; shutdown must not depend on the live map. */
+export function settleMemberWaits(memberId?: string): void {
+  for (const wait of [...activeWaits.values()]) {
+    if (memberId === undefined || wait.waiterMemberId === memberId) settleWaitOnAbort(wait.roomId,wait.waiterMemberId);
+  }
 }
 
 function detachIdleListener(wait: ActiveWait): void {
@@ -145,6 +154,7 @@ export function waitForMember(args: {
   /** Current status of the target ("idle" | "working" | "inactive"). */
   targetStatus: string;
   timeoutMinutes?: number;
+  signal?: AbortSignal;
 }): Promise<WaitOutcome> {
   const {
     roomId,
@@ -155,6 +165,7 @@ export function waitForMember(args: {
     targetStatus,
   } = args;
 
+  if (args.signal?.aborted) return Promise.resolve({ok:false,error:"Wait was cancelled before registration"});
   const currentTargetName = () => targetMemberId.startsWith("mem_") ? getMember(targetMemberId)?.name || targetName : targetName;
 
   if (waiterMemberId === targetMemberId) {
@@ -272,6 +283,12 @@ export function waitForMember(args: {
     }
 
     activeWaits.set(key, wait);
+    if (args.signal) {
+      const abort = () => settleWaitOnAbort(roomId,waiterMemberId);
+      args.signal.addEventListener("abort",abort,{once:true});
+      wait.unsubAbort = () => args.signal!.removeEventListener("abort",abort);
+      if (args.signal.aborted) { abort(); return; }
+    }
     logger.info("wait", "started", {
       roomId,
       waiter: waiterName,
@@ -287,6 +304,7 @@ export function clearAllWaitsForTests(): void {
   for (const wait of activeWaits.values()) {
     wait.settled = true;
     clearTimeout(wait.timer);
+    wait.unsubAbort?.();
     try { wait.unsubMessage(); } catch { /* ignore */ }
     detachIdleListener(wait);
   }

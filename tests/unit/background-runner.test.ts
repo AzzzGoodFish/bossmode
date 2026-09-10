@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 let dir: string;
+let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
+let expectedCleanupFailure = false;
 let runner: typeof import("../../src/engine/background-task-runner.js");
 let store: typeof import("../../src/engine/background-task-store.js");
 let agentManager: typeof import("../../src/engine/agent-manager.js");
@@ -50,10 +52,10 @@ const fakeHandle = {
 };
 
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), "bm-bgrun-"));
-  process.env.BOSSMODE_DIR = dir;
-  mkdirSync(join(dir, "members"), { recursive: true });
   vi.resetModules();
+  const {coreFixture}=await import("../helpers/core-fixture.js");
+  fixture=coreFixture();dir=fixture.root;expectedCleanupFailure=false;
+  const config=await import("../../src/shared/config.js");config.writeConfig(config.getDefaultConfig());
   promptDeferred = null;
   lastCreateOpts = null;
   FAKE_PROMPT.mockClear();
@@ -69,20 +71,11 @@ beforeEach(async () => {
   runner = await import("../../src/engine/background-task-runner.js");
   tools = await import("../../src/engine/tools.js");
 
-  // agent definition pool
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", "general.md"), "---\nname: general\ndescription: general\nsystemPrompt: you are general\n---\ngeneral\n", "utf-8");
-
-  const member = registryMod.createMember({
-    name: "bgrunner",
-    agentTemplate: "general",
-    runtime: "pi-cli",
-    model: "anthropic/model-x",
-    credentialId: "cred-a",
-    thinkingLevel: "off",
-  } as any);
+  const {saveAgentDefinition}=await import("../../src/workforce/agent-store.js");
+  saveAgentDefinition("general","---\nname: general\nskills: []\n---\ngeneral");
+  const member=registryMod.createMember({name:"bgrunner",agentTemplate:"general",model:"anthropic/model-x",credentialId:"cred-a",thinkingLevel:"off"});
   memberId = member.id;
-  const room = roomStore.createRoom("bg room", undefined, [{ agent: "general", name: "bgrunner" }]);
+  const room = roomStore.createRoom("bg room", undefined, []);
   roomStore.stampGlobalMemberIds(room.id, [member.id], member.id);
   roomId = room.id;
   scopeId = `room:${roomId}`;
@@ -98,6 +91,7 @@ beforeEach(async () => {
   });
 
   agentManager.initAgentManager({
+    getAll:()=>[],
     get: (name: string) => (name === "pi-cli" ? {
       name: "pi-cli",
       capabilities: {},
@@ -122,9 +116,12 @@ beforeEach(async () => {
   expect(instance).toBeTruthy();
 });
 
-afterEach(() => {
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  promptDeferred?.();
+  try {
+    if(expectedCleanupFailure) await expect(agentManager.shutdownAll()).rejects.toThrow("Runtime shutdown incomplete");
+    else await agentManager.shutdownAll();
+  } finally {fixture.close();}
 });
 
 async function runToCompletion() {
@@ -283,11 +280,14 @@ describe("background runner + tool dispatch", () => {
     expect(third.ok && (third as any).note).toContain("immutable");
   });
 
-  it("cancel landing during child creation skips the prompt entirely", async () => {
+  it.each([false,true])("cancel during child creation skips prompts and preserves cleanup failure=%s", async (cleanupFails) => {
+    expectedCleanupFailure=cleanupFails;
+    if(cleanupFails)fakeHandle.destroyAndWait.mockImplementationOnce(async()=>{throw new Error("creation cancellation cleanup failed");});
     // gate createAgent so the cancel lands while the child is being built
     let releaseCreate: (() => void) | null = null;
     const gatedCreate = new Promise<void>((resolve) => { releaseCreate = resolve; });
     const registry = {
+      getAll:()=>[],
       get: (name: string) => (name === "pi-cli" ? {
         name: "pi-cli", capabilities: {}, detect: async () => ({ available: true }),
         createAgent: async (opts: any) => { lastCreateOpts = opts; await gatedCreate; return fakeHandle as any; },
@@ -307,6 +307,10 @@ describe("background runner + tool dispatch", () => {
     expect(record?.status).toBe("cancelled");
     expect(FAKE_PROMPT).not.toHaveBeenCalled(); // no model work started
     expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
+    if(cleanupFails) {
+      expect(record?.error).toContain("creation cancellation cleanup failed");
+      await expect(runner.shutdownBackgroundTasks(memberId)).rejects.toThrow("Background task shutdown incomplete");
+    } else await runner.shutdownBackgroundTasks(memberId);
   });
 
   it("terminal is published only after the awaited cleanup completes", async () => {
@@ -331,6 +335,7 @@ describe("background runner + tool dispatch", () => {
   });
 
   it("a confirmed cleanup failure fails the task — no success claim, applied changes noted", async () => {
+    expectedCleanupFailure=true;
     (fakeHandle.destroyAndWait as any).mockImplementationOnce(async () => { throw new Error("teardown incomplete (1): dispose: ws pool refused to close"); });
     const started = runner.startBackgroundTask({ memberId, scopeId, kind: "generic", sessionMode: "new", prompt: "x" });
     if (!started.ok) return;
@@ -412,4 +417,14 @@ describe("background runner + tool dispatch", () => {
     expect(empty.ok).toBe(false);
     expect(empty.error).toContain("prompt");
   });
+});
+
+it("an exception after obtaining a child still awaits its teardown before publishing failure",async()=>{
+  fakeHandle.subscribe.mockImplementationOnce(()=>{throw new Error("subscription failed");});
+  const started=runner.startBackgroundTask({memberId,scopeId,kind:"generic",sessionMode:"new",prompt:"x"});
+  expect(started.ok).toBe(true);if(!started.ok)throw new Error(started.error);
+  await vi.waitFor(()=>expect(store.getBackgroundTask(memberId,started.taskId)?.status).toBe("failed"));
+  expect(fakeHandle.destroyAndWait).toHaveBeenCalled();
+  expect(store.getBackgroundTask(memberId,started.taskId)?.error).toContain("subscription failed");
+  await runner.shutdownBackgroundTasks(memberId);
 });

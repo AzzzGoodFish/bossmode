@@ -10,7 +10,7 @@
  * - SM-6: isWorking removed from AgentHandle interface
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import type { Room, RoomMessage } from "../../src/shared/types.js";
 import {
   setupTestWorkspace,
@@ -27,6 +27,20 @@ import { resetMocks, setMockPromptFn } from "../helpers/mock-runtime.js";
 
 // setupTestWorkspace must be called at module level (before server imports)
 setupTestWorkspace();
+const heldPrompts = new Set<() => void>();
+function holdPrompt(assign: (finish:()=>void)=>void): Promise<void> {
+  return new Promise<void>(resolve=>{
+    const finish=()=>{heldPrompts.delete(finish);resolve();};
+    heldPrompts.add(finish);assign(finish);
+  });
+}
+afterEach(()=>{
+  // A fake provider must actually finish its held calls before runtime teardown.
+  // Later queued turns use the already-completed fake, never another hidden gate.
+  setMockPromptFn(async()=>{});
+  for(const finish of [...heldPrompts])finish();
+});
+
 
 describe("Acceptance: Member State Machine (0.8.7)", () => {
   let ts: TestServer;
@@ -72,9 +86,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
 
     let promptResolveFn: (() => void) | undefined;
     setMockPromptFn(async () => {
-      await new Promise<void>((resolve) => {
-        promptResolveFn = resolve;
-      });
+      await holdPrompt(resolve=>{promptResolveFn=resolve;});
     });
 
     // Activate agent → WORKING
@@ -110,9 +122,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
 
     let promptResolveFn: (() => void) | undefined;
     setMockPromptFn(async () => {
-      await new Promise<void>((resolve) => {
-        promptResolveFn = resolve;
-      });
+      await holdPrompt(resolve=>{promptResolveFn=resolve;});
     });
 
     await sendMessage(room.id, "@pm hold");
@@ -163,9 +173,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
 
     setMockPromptFn(async (msg: string) => {
       promptCalls.push(msg);
-      await new Promise<void>((resolve) => {
-        promptResolveFn = resolve;
-      });
+      await holdPrompt(resolve=>{promptResolveFn=resolve;});
     });
 
     const wsClient = await createWsClient(ts.wsUrl, token);

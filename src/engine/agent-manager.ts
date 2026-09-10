@@ -1,3 +1,4 @@
+import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
 // Prompt assembly → engine/prompt-assembler.ts
 // Event handling → engine/event-handler.ts
@@ -42,7 +43,7 @@ import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "./model-credentials.js";
-import { notifyMemberIdle, settleWaitOnAbort } from "./wait-wait.js";
+import { notifyMemberIdle, settleWaitOnAbort, settleMemberWaits } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
 import { settleBackgroundWaits } from "./background-task-store.js";
 import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
@@ -51,8 +52,12 @@ import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/typ
 // -- Registry injection --
 
 let registry: RuntimeRegistry | null = null;
+let shutdownSettlement: Promise<void> | null = null;
+let shutdownRunning = false;
 
 export function initAgentManager(reg: RuntimeRegistry): void {
+  if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
+  shutdownSettlement = null; openRuntimeAdmission();
   registry = reg;
 }
 
@@ -222,7 +227,31 @@ interface AgentInstance {
   pendingReload: string | null;
 }
 
+// Application continuations outlive SDK idle; keep their ownership until all
+// post-prompt/config work has settled, including fire-and-forget control work.
+const memberOperations = new Map<Promise<unknown>,string>();
+function trackMemberOperation<T>(memberId: string, operation:()=>Promise<T>): Promise<T> {
+  let resolve!: (value:T|PromiseLike<T>)=>void;
+  let reject!: (error:unknown)=>void;
+  const pending=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});
+  const settlement=pending.finally(()=>memberOperations.delete(settlement));
+  memberOperations.set(settlement,memberId);
+  try {operation().then(resolve,reject);}catch(error){reject(error);}
+  return settlement;
+}
+async function settleMemberOperations(memberId?: string): Promise<void> {
+  for (;;) {
+    const pending=[...memberOperations].filter(([,owner])=>memberId===undefined || owner===memberId).map(([operation])=>operation);
+    if (!pending.length) return;
+    // Execution/control failures are reported by their caller. Here only
+    // completion matters; SDK/resource cleanup failures are collected separately.
+    await Promise.allSettled(pending);
+  }
+}
+
 const instances = new Map<string, AgentInstance>();
+const cancelledCreations = new Set<string>();
+const sessionPublishOwners = new Map<string, object>();
 const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
 
 /** §10 interlock, ONE map: presence = a member model switch is in progress.
@@ -400,6 +429,7 @@ function isLengthStopReason(stopReason: unknown): boolean {
 
 /** Drain queued mid-turn inputs into a fresh prompt. Returns true if a new prompt was started. */
 function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): boolean {
+  if (!memberRuntimeAllowed(instance.memberId)) return false;
   if (instance.queuedInputs.length === 0) return false;
   // After agent_end, turnActive is false while public status may still read "working"
   // until transition — gate on turn/dispatch, not public status (fish 2026-08-09).
@@ -438,6 +468,7 @@ async function maybeRunLengthContinuation(instance: AgentInstance, trigger: stri
 }
 
 async function finalizePromptSettlement(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return;
   updateDispatchState(instance, "idle", trigger);
   applyPendingAfterPromptSettlement(instance, trigger);
   if (instance.queuedInputs.length > 0) {
@@ -519,12 +550,23 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.roomMembers = room ? roomStore.getRoomMembers(room.id).map(m => m.name) : [member.name];
 }
 
-async function runPrompt(
+function runPrompt(
   instance: AgentInstance,
   message: string,
   trigger: string,
   onError: (err: unknown) => void,
 ): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
+  return trackMemberOperation(instance.memberId,()=>runPromptInternal(instance, message, trigger, onError));
+}
+
+async function runPromptInternal(
+  instance: AgentInstance,
+  message: string,
+  trigger: string,
+  onError: (err: unknown) => void,
+): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return;
   updateDispatchState(instance, "promptSubmitted", trigger);
   instance.promptInFlight = true;
   instance.hadErrorInTurn = false;
@@ -586,7 +628,16 @@ function modelProviderOf(ref: string): string {
  * instance's models.json so a newly created provider reaches the old
  * session's dir (runtime.refresh reads disk, and without this it would not
  * find the model). */
-async function applyModelSwitchToInstance(
+function applyModelSwitchToInstance(
+  instance: AgentInstance,
+  pending: { model: string; credentialId?: string },
+  trigger: string,
+): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
+  return trackMemberOperation(instance.memberId,()=>applyModelSwitchToInstanceInternal(instance, pending, trigger));
+}
+
+async function applyModelSwitchToInstanceInternal(
   instance: AgentInstance,
   pending: { model: string; credentialId?: string },
   trigger: string,
@@ -626,7 +677,12 @@ async function applyModelSwitchToInstance(
 }
 
 /** If the live instance drifted from the room binding, re-apply (or destroy so the next create is clean). */
-async function applyThinkingSwitchToInstance(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
+function applyThinkingSwitchToInstance(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
+  return trackMemberOperation(instance.memberId,()=>applyThinkingSwitchToInstanceInternal(instance, pending, trigger));
+}
+
+async function applyThinkingSwitchToInstanceInternal(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
   if (!instance.handle.setThinkingLevel) throw new Error("Runtime does not support dynamic thinking level switching");
   await instance.handle.setThinkingLevel(pending.thinkingLevel);
   if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
@@ -679,7 +735,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-async function applyCredentialRefreshToInstance(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
+function applyCredentialRefreshToInstance(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
+  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
+  return trackMemberOperation(instance.memberId,()=>applyCredentialRefreshToInstanceInternal(instance, pending, trigger));
+}
+
+async function applyCredentialRefreshToInstanceInternal(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
   try {
     const exported = exportPiConfigForMember({
       roomId: instance.roomId,
@@ -887,6 +948,7 @@ export interface BuildSessionOpts {
 }
 
 export async function buildMemberAgentSession(memberId: string, scopeId: string, _opts: BuildSessionOpts = {}): Promise<AgentInstance | null> {
+  if (!memberRuntimeAllowed(memberId)) return null;
   const creationProfileRevision = profileRevision;
   const ref = parseScopeId(scopeId);
   if (!ref) {
@@ -900,10 +962,16 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
   // gate is held — the switch awaits pending creations, so a registered
   // waiter would deadlock both sides. No timeout: the switch always settles.
   for (;;) {
+    if (!memberRuntimeAllowed(memberId)) return null;
     const existing = instances.get(key);
     if (existing) return existing;
     const pending = pendingCreations.get(key);
-    if (pending) return pending;
+    if (pending) {
+      const retryAfterCancellation = cancelledCreations.has(key);
+      const built = await pending;
+      if (retryAfterCancellation) continue;
+      return built;
+    }
     const gate = memberSwitchGates.get(memberId);
     if (gate) {
       await gate;
@@ -912,6 +980,10 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     break;
   }
 
+  const publicationOwner = {};
+  sessionPublishOwners.set(key,publicationOwner);
+  // Closing execution admission must not discard final session facts from an owned run.
+  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner;
   const creation = (async (): Promise<AgentInstance | null> => {
     if (!registry) {
       logger.error("agent", "runtime registry not initialized");
@@ -980,7 +1052,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       sessionDir = mainSessionDirectory(memberId, dmScopeId);
       const savedSession = sessionStore.getSessions(dmScopeId, memberId)[memberId];
       resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
-      onSessionChanged = (session) => sessionStore.saveSession(dmScopeId, memberId, { runtime: member.runtime, ...session });
+      onSessionChanged = (session) => { if (canPublishSession()) sessionStore.saveSession(dmScopeId, memberId, { runtime: member.runtime, ...session }); };
       logLabel = "dmAgentCreated";
       errLabel = "dm";
       const dmKey = key;
@@ -1079,6 +1151,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       const roomKey = key;
       const roomMemberName = () => currentRuntimeName(memberId, member.name);
       onSessionChanged = (session) => {
+        if (!canPublishSession()) return;
         sessionStore.saveSession(ref.roomId, memberId, {
           runtime: member.runtime,
           sessionId: session.sessionId,
@@ -1164,7 +1237,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       const topicScopeId = scopeId;
 
       // Batch 2: prefix-fork the room session when seedMode=fork (degrades to fresh).
-      const { forkRoomSessionPrefix, getTopicSession } = await import("./topic-session-fork.js");
+      const { forkRoomSessionPrefix, getTopicSession, saveTopicSession } = await import("./topic-session-fork.js");
       const existingTopicSession = getTopicSession(parentRoomId, topicId, memberId);
       resumeSession = existingTopicSession?.sessionFile
         ? { sessionId: existingTopicSession.sessionId, sessionFile: existingTopicSession.sessionFile }
@@ -1197,11 +1270,9 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         }
       }
       onSessionChanged = (session) => {
-        void import("./topic-session-fork.js").then(({ saveTopicSession }) => {
-          saveTopicSession(parentRoomId, topicId, memberId, {
-            sessionId: session.sessionId,
-            sessionFile: session.sessionFile,
-          });
+        if (!canPublishSession()) return;
+        saveTopicSession(parentRoomId, topicId, memberId, {
+          sessionId: session.sessionId, sessionFile: session.sessionFile,
         });
       };
       callbacks = {
@@ -1239,6 +1310,11 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         callbacks,
       });
 
+      if (!canPublishSession() || !memberRuntimeAllowed(memberId)) {
+        if (!handle.destroyAndWait) throw new Error("Runtime cannot confirm rejected builder cleanup");
+        await handle.destroyAndWait();
+        return null;
+      }
       logger.info("agent", logLabel, { member: member.name, agent: member.agent, runtime: member.runtime, scopeId });
 
       const instance: AgentInstance = {
@@ -1305,7 +1381,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
   try {
     return await creation;
   } finally {
-    if (pendingCreations.get(key) === creation) pendingCreations.delete(key);
+    if (pendingCreations.get(key) === creation) { pendingCreations.delete(key); cancelledCreations.delete(key); }
+    if (!instances.has(key) && sessionPublishOwners.get(key) === publicationOwner) sessionPublishOwners.delete(key);
   }
 }
 
@@ -1328,7 +1405,12 @@ export async function reloadMemberSession(scopeId: string, memberId: string, rea
   return { queued: false, rebuilt: true };
 }
 
-async function rebuildLiveInstance(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
+function rebuildLiveInstance(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
+  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve(null);
+  return trackMemberOperation(instance.memberId,()=>rebuildLiveInstanceInternal(instance, reason));
+}
+
+async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
   const scopeId = instance.scopeId;
   const memberId = instance.memberId;
   const carriedInputs = instance.queuedInputs.slice();
@@ -1336,6 +1418,7 @@ async function rebuildLiveInstance(instance: AgentInstance, reason: string): Pro
   try { instance.handle.destroy(); } catch { /* already stopped */ }
   try { instance.unsubscribe(); } catch { /* already stopped */ }
   instances.delete(instanceKey(scopeId, memberId));
+  sessionPublishOwners.delete(instanceKey(scopeId,memberId));
   // Session files are kept — reload means same conversation, fresh assets.
   const built = await buildMemberAgentSession(memberId, scopeId, { resume: true });
   if (built && carriedInputs.length > 0) built.queuedInputs.push(...carriedInputs);
@@ -1394,6 +1477,7 @@ function replyObligation(memberId: string, memberName: string, ctx?: ReplyContex
 }
 
 export async function activateAgent(roomId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
+  if (runtimeIsStopping()) return;
   const member = resolveRoomMember(roomId, memberRef);
   const obligation = replyObligation(member?.id || memberRef, member?.name || memberRef, ctx);
   return activateAgentInternal(roomId, member?.id || memberRef, { source: "room_mention", ...obligation, trigger: "activate" });
@@ -1419,6 +1503,7 @@ async function activateAgentInternal(
   }
 
   const instance = await getOrCreate(roomId, memberId);
+  if (!memberRuntimeAllowed(memberId)) return;
   if (!instance) {
     // getOrCreate posted its own failure detail on the create path.
     postMessage(roomId, "system", `Failed to activate member "${memberName}": not found or runtime unavailable.`);
@@ -2141,7 +2226,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
       await instance.handle.waitForIdle();
       // Stop landed in the gap (old prompt finished, compact not started):
       // abortAgent marked dispatchState "aborting" — honor it, do not compact.
-      if (instance.dispatchState === "aborting") {
+      if (instance.dispatchState === "aborting" || !memberRuntimeAllowed(memberId)) {
         logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, scopeId: instance.scopeId });
         return { ok: false, action: "stopped" };
       }
@@ -2372,9 +2457,11 @@ export function destroyInstance(roomId: string, memberRef: string): void {
   const memberId = resolved?.id || memberRef;
   const memberName = resolved?.name || memberRef;
   const key = instanceKey(roomId, memberId);
+  sessionPublishOwners.delete(key);
+  if (pendingCreations.has(key)) cancelledCreations.add(key);
   const instance = instances.get(key);
   if (instance) {
-    instance.handle.abort();
+    requestInstanceStop(instance);
     instance.handle.destroy();
     instance.unsubscribe();
     instances.delete(key);
@@ -2383,7 +2470,6 @@ export function destroyInstance(roomId: string, memberRef: string): void {
     clearActivationSource(roomId, memberId);
     logger.info("agent", "instance destroyed", { member: memberName, memberId, roomId });
   }
-  pendingCreations.delete(key);
 }
 
 export function getActiveInstanceCount(): number {
@@ -2393,10 +2479,12 @@ export function getActiveInstanceCount(): number {
 /** Tear down every live instance for a topic after End topic (plan §2.1). */
 export function destroyTopicInstances(topicId: string): number {
   const prefix = `topic:${topicId}:`;
+  for(const key of sessionPublishOwners.keys())if(key.startsWith(prefix))sessionPublishOwners.delete(key);
+  for (const key of pendingCreations.keys()) if (key.startsWith(prefix)) cancelledCreations.add(key);
   let n = 0;
   for (const [key, instance] of [...instances.entries()]) {
     if (!key.startsWith(prefix) && instance.scopeId !== `topic:${topicId}`) continue;
-    try { instance.handle.abort(); } catch { /* ignore */ }
+    try { requestInstanceStop(instance); } catch (error) { logger.error("agent","topic stop failed",{error:String(error)}); }
     try { instance.handle.destroy(); } catch { /* ignore */ }
     try { instance.unsubscribe(); } catch { /* ignore */ }
     instances.delete(key);
@@ -2605,6 +2693,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
  * Builds context from recent DM messages and prompts the runtime.
  */
 export async function activateDmMember(memberId: string): Promise<void> {
+  if (runtimeIsStopping()) return;
   const rec = getMember(memberId);
   if (!rec) {
     logger.error("agent", "activateDmMember: not found", { memberId });
@@ -2619,6 +2708,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
   }
 
   const instance = await getOrCreateDm(memberId);
+  if (!memberRuntimeAllowed(memberId)) return;
   // §10: no activate-heal — a live instance's binding can only change through
   // switchMemberModel (it applies to every instance atomically), so there is
   // no drift to heal here. Creation failure already posted a user-visible
@@ -2724,6 +2814,7 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
  * Does not touch the parent room instance.
  */
 export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
+  if (runtimeIsStopping()) return;
   const {
     getTopic,
     addTopicParticipant,
@@ -2743,6 +2834,7 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
   const memberName = roomMember?.name || memberRef;
 
   const instance = await getOrCreateTopic(parentRoomId, topicId, memberId);
+  if (!memberRuntimeAllowed(memberId)) return;
   if (!instance) return;
 
   addTopicParticipant(parentRoomId, topicId, memberId);
@@ -2900,20 +2992,77 @@ function resolveTopicParent(topicId: string): string | null {
   return parent;
 }
 
+function requestInstanceStop(instance: AgentInstance): void {
+  const failures: unknown[] = [];
+  instance.queuedInputs = [];
+  for (const stop of [
+    () => settleWaitOnAbort(instance.roomId,instance.memberId),
+    () => settleMemberShellWaits(instance.memberId),
+    () => settleBackgroundWaits(instance.memberId),
+    () => updateDispatchState(instance,"aborting","quiescence"),
+    () => instance.handle.abort(),
+  ]) { try { stop(); } catch (error) { failures.push(error); } }
+  if (failures.length) throw new AggregateError(failures,"Member stop request incomplete");
+}
+
+/** Called only after durable member admission has closed. */
+export async function quiesceMember(memberId: string): Promise<void> {
+  if (memberRuntimeAllowed(memberId)) throw new Error("member_admission_must_close_before_quiescence");
+  const errors: unknown[] = [];
+  settleMemberWaits(memberId); settleMemberShellWaits(memberId); settleBackgroundWaits(memberId);
+  const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+  try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}
+  for (const instance of instances.values()) if (instance.memberId===memberId) {
+    try {requestInstanceStop(instance);} catch(error){errors.push(error);}
+  }
+  await Promise.allSettled([...pendingCreationsFor(memberId), ...(memberSwitchGates.has(memberId) ? [memberSwitchGates.get(memberId)!] : [])]);
+  const {shutdownBackgroundTasks}=await import("./background-task-runner.js");
+  const {closeAllShellsForMember}=await import("./shell-manager.js");
+  const resources = await Promise.allSettled([shutdownBackgroundTasks(memberId),closeAllShellsForMember(memberId)]);
+  for (const result of resources) if (result.status === "rejected") errors.push(result.reason);
+  for (const [key,instance] of [...instances]) if(instance.memberId===memberId) {
+    try {
+      requestInstanceStop(instance);
+      if (!instance.handle.destroyAndWait) throw new Error("Runtime cannot confirm member teardown");
+      await instance.handle.destroyAndWait();instance.unsubscribe();instances.delete(key);sessionPublishOwners.delete(key);
+      contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);clearActivationSource(instance.roomId,memberId);
+    }catch(error){errors.push(error);}
+  }
+  if (registry) for (const runtime of registry.getAll()) {
+    try { await runtime.shutdownMember(memberId); } catch (error) { errors.push(error); }
+  }
+  await settleMemberOperations(memberId);
+  if(errors.length)throw new AggregateError(errors,"Member quiescence incomplete");
+}
+
 // -- Shutdown --
 
 export async function shutdownAll(): Promise<void> {
-  for (const [, instance] of instances) instance.unsubscribe();
-  instances.clear();
-  pendingCreations.clear();
-  contextUsageCache.clear();
-  contextCompactionWarningCache.clear();
-  clearAllActivationSources();
-  if (registry) {
-    for (const rt of registry.getAll()) {
-      await rt.shutdownAll().catch((err) => {
-        logger.error("agent", "runtime shutdown error", { runtime: rt.name, error: String(err) });
-      });
+  if (shutdownSettlement) return shutdownSettlement;
+  closeRuntimeAdmission(); shutdownRunning = true;
+  shutdownSettlement = (async () => {
+    const failures: unknown[] = [];
+    settleMemberWaits();
+    const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+    try {await dropSftpConnectionsForMember();}catch(error){failures.push(error);}
+    for (const instance of instances.values()) {
+      try { requestInstanceStop(instance); } catch (error) { failures.push(error); }
     }
-  }
+    for (const pending of await Promise.allSettled([...pendingCreations.values(), ...memberSwitchGates.values()])) {
+      if (pending.status === "rejected") failures.push(pending.reason);
+    }
+    const { shutdownBackgroundTasks } = await import("./background-task-runner.js");
+    const {closeAllShellsForMember}=await import("./shell-manager.js");
+    const resources = await Promise.allSettled([shutdownBackgroundTasks(),closeAllShellsForMember()]);
+    for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
+    if (registry) for (const rt of registry.getAll()) {
+      try { await rt.shutdownAll(); } catch (error) { failures.push(error); }
+    }
+    await settleMemberOperations();
+    for (const instance of instances.values()) {try {instance.unsubscribe();}catch(error){failures.push(error);}}
+    instances.clear(); pendingCreations.clear(); sessionPublishOwners.clear();
+    contextUsageCache.clear(); contextCompactionWarningCache.clear(); clearAllActivationSources();
+    if (failures.length) throw new AggregateError(failures, "Runtime shutdown incomplete");
+  })().finally(() => { shutdownRunning = false; });
+  return shutdownSettlement;
 }

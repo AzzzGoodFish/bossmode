@@ -340,7 +340,7 @@ function assistantHasToolCalls(message: any): boolean {
 }
 
 /** Complete every supported shutdown stage, even after an earlier failure. */
-async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => void): Promise<string[]> {
+async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => void, settleResources?: () => Promise<void>): Promise<string[]> {
   const errors: string[] = [];
   // The SDK's AgentSession.abort() awaits waitForIdle itself — awaiting ITS
   // promise here is the awaitable run-end, unlike the void handle.abort().
@@ -353,6 +353,7 @@ async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => v
     session.abortCompaction();
     session.abortBranchSummary();
   } catch {}
+  try { await settleResources?.(); } catch (error) { errors.push(`resource settlement: ${String(error)}`); }
   const runner: any = session.extensionRunner;
   if (typeof runner?.hasHandlers === "function" && runner.hasHandlers("session_shutdown")) {
     // Handler failures surface via onError ({extensionPath, event, error}),
@@ -606,11 +607,18 @@ export class PiSdkAgentHandle implements AgentHandle {
     return () => this.listeners.delete(fn);
   }
 
-  async prompt(message: string): Promise<void> {
+  private promptOperation: Promise<void> | null = null;
+  prompt(message: string): Promise<void> {
+    if (this.promptOperation) return Promise.reject(new Error("Runtime prompt is already in progress"));
+    const operation = this.trackResourceOperation(() => this.promptInternal(message));
+    this.promptOperation = operation;
+    return operation.finally(() => { if (this.promptOperation === operation) this.promptOperation = null; });
+  }
+  private async promptInternal(message: string): Promise<void> {
     this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
     try {
       let next: string | null = message;
-      while (next !== null) {
+      while (next !== null && !this.destroyed && this.watchdogTurn !== null) {
         this.startCompactionWatchdogRun();
         const run = this.session.prompt(next, { source: "external" as any }).catch((err) => {
           this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
@@ -637,6 +645,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
     if (options?.preserveCompaction) return;
+    this.watchdogTurn = null;
     if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
     try { this.session.abortCompaction(); } catch {}
     try { this.session.abortBranchSummary(); } catch {}
@@ -671,7 +680,10 @@ export class PiSdkAgentHandle implements AgentHandle {
 
   private async runTeardown(): Promise<void> {
     if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
-    const errors = await shutdownSdkSession(this.session, () => this.unsubscribeSession?.());
+    const errors = await shutdownSdkSession(this.session, () => this.unsubscribeSession?.(), async () => {
+      // SDK idle does not include manual compaction or reload continuations.
+      await Promise.allSettled([...this.resourceOperations]);
+    });
     for (const config of this.mcpConfigs) {
       try { config.dispose(); } catch (err) { errors.push(`MCP config cleanup: ${String(err)}`); }
     }
@@ -687,7 +699,8 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   async waitForIdle(): Promise<void> {
-    if (this.currentRun) await this.currentRun.catch(() => {});
+    if (this.promptOperation) await this.promptOperation.catch(() => {});
+    else if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
   forkSnapshot(): { sessionFile: string; branchEntries: unknown[] } | null {
@@ -702,19 +715,26 @@ export class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
-  async refreshModelRegistry(_opts?: { allowNetwork?: boolean }): Promise<void> {
+  refreshModelRegistry(_opts?: { allowNetwork?: boolean }): Promise<void> {
+    return this.trackResourceOperation(()=>this.refreshModelRegistryInternal());
+  }
+  private async refreshModelRegistryInternal(): Promise<void> {
     // Catalog network refresh belongs to the application service; the SDK consumes SQL snapshots.
     const profileId = this.runtimeParams.credentialId;
     await refreshDatabaseModelRuntime(this.session.modelRuntime, profileId);
   }
 
-  async setModel(modelRef: string, credentialId: string): Promise<void> {
+  setModel(modelRef: string, credentialId: string): Promise<void> {
+    return this.trackResourceOperation(()=>this.setModelInternal(modelRef,credentialId));
+  }
+  private async setModelInternal(modelRef: string, credentialId: string): Promise<void> {
     const { provider, modelId } = splitModelRef(modelRef);
     const profile = getModelCredentialProfile(credentialId);
     if (!profile || !profile.enabled || profile.providerSlug !== provider) {
       throw new Error(`Invalid credential binding for ${modelRef}`);
     }
     await this.credentials.runProfile(profile, () => refreshDatabaseModelRuntime(this.session.modelRuntime, profile.id));
+    if (this.destroyed) throw new Error("Runtime instance is destroyed");
     const found = this.modelRegistry.find(provider, modelId);
     if (!found) throw new Error(`Model not found: ${modelRef}`);
     const model = this.credentials.bind(found, profile);
@@ -725,6 +745,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   setThinkingLevel(level: string): void {
+    if (this.destroyed) throw new Error("Runtime instance is destroyed");
     try {
       this.session.setThinkingLevel(level as any);
       this.runtimeParams.thinkingLevel = (this.session as any).thinkingLevel || level;
@@ -789,9 +810,26 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.runtimeParams.systemPrompt = [sources.systemPrompt, ...sources.appendSystemPrompt].filter(Boolean).join("\n\n");
   }
 
-  async reloadResources(opts: ReloadAgentResourcesOpts): Promise<void> {
+  private resourceOperations = new Set<Promise<unknown>>();
+  private trackResourceOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.destroyed) return Promise.reject(new Error("Runtime instance is destroyed"));
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (error: unknown) => void;
+    const pending = new Promise<T>((yes,no) => { resolve=yes; reject=no; });
+    this.resourceOperations.add(pending);
+    // Register ownership first, then start synchronously so an immediate abort
+    // sees manual-compaction admission even before the SDK's first event.
+    try { operation().then(resolve,reject); } catch (error) { reject(error); }
+    return pending.finally(() => this.resourceOperations.delete(pending));
+  }
+
+  reloadResources(opts: ReloadAgentResourcesOpts): Promise<void> {
+    return this.trackResourceOperation(() => this.reloadResourcesInternal(opts));
+  }
+  private async reloadResourcesInternal(opts: ReloadAgentResourcesOpts): Promise<void> {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     await this.waitForIdle();
+    if (this.destroyed) throw new Error("Runtime instance is destroyed");
     const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
     // A failed reload can leave either generation active; retain both until teardown.
     this.mcpConfigs.add(mcpSettings);
@@ -816,6 +854,7 @@ export class PiSdkAgentHandle implements AgentHandle {
 
     await this.session.reload({
       beforeSessionStart: async () => {
+        if (this.destroyed) throw new Error("Runtime instance is destroyed");
         assertHostedMcpLoaded(this.resourceLoader);
         this.session.extensionRunner.setFlagValue("mcp-config", mcpSettings.configPath);
       },
@@ -878,7 +917,10 @@ export class PiSdkAgentHandle implements AgentHandle {
     logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
   }
 
-  async compact(): Promise<{ aborted: boolean }> {
+  compact(): Promise<{ aborted: boolean }> {
+    return this.trackResourceOperation(() => this.compactInternal());
+  }
+  private async compactInternal(): Promise<{ aborted: boolean }> {
     const outcome = { aborted: false };
     this.manualCompactionOutcome = outcome;
     this.emit({ type: "agent_start" });
@@ -910,7 +952,8 @@ export class PiSdkRuntime implements AgentRuntime {
     contextUsage: true,
   };
 
-  private handles = new Set<PiSdkAgentHandle>();
+  private handles = new Map<PiSdkAgentHandle, string>();
+  private creationCleanupFailures = new Map<string, Error[]>();
   /** Shared shutdown settlement: concurrent shutdownAll calls await the same teardown. */
   private shutdownSettlement: Promise<void> | null = null;
 
@@ -1111,7 +1154,7 @@ export class PiSdkRuntime implements AgentRuntime {
         opts.background ? undefined : opts.onSessionChanged,
         mcpSettings,
       );
-      this.handles.add(handle);
+      this.handles.set(handle, opts.member.id);
       logger.info("runtime:pi-sdk", "createAgent", {
         agent: opts.member.name,
         model: resolvedModel,
@@ -1128,21 +1171,33 @@ export class PiSdkRuntime implements AgentRuntime {
     } catch (err) {
       const cleanupErrors = sessionObtained ? await shutdownSdkSession(sessionObtained) : [];
       try { mcpSettings.dispose(); } catch (error) { cleanupErrors.push(`MCP config cleanup: ${String(error)}`); }
-      if (cleanupErrors.length) throw new AggregateError([err, ...cleanupErrors.map(message => new Error(message))], "Runtime creation and cleanup failed");
+      if (cleanupErrors.length) {
+        const failure = new AggregateError([err, ...cleanupErrors.map(message => new Error(message))], "Runtime creation and cleanup failed");
+        const failures = this.creationCleanupFailures.get(opts.member.id) ?? [];
+        failures.push(failure); this.creationCleanupFailures.set(opts.member.id, failures);
+        throw failure;
+      }
       throw err;
     }
+  }
+
+  async shutdownMember(memberId: string): Promise<void> {
+    const failures: unknown[] = [...(this.creationCleanupFailures.get(memberId) ?? [])];
+    await Promise.all([...this.handles].filter(([,owner]) => owner === memberId).map(async ([handle]) => {
+      try { await handle.destroyAndWait(); } catch (error) { failures.push(error); }
+    }));
+    if (failures.length) throw new AggregateError(failures, "Member runtime teardown incomplete");
   }
 
   async shutdownAll(): Promise<void> {
     // Concurrent callers share ONE settlement — a call landing mid-shutdown
     // awaits the same teardown instead of racing on an empty/cleared set.
     if (this.shutdownSettlement) return this.shutdownSettlement;
-    const failures: unknown[] = [];
+    const failures: unknown[] = [...this.creationCleanupFailures.values()].flat();
     const settlements: Promise<void>[] = [];
-    for (const handle of this.handles) {
+    for (const handle of this.handles.keys()) {
       settlements.push((handle as PiSdkAgentHandle).destroyAndWait().catch((err: unknown) => { failures.push(err); }));
     }
-    this.handles.clear();
     this.shutdownSettlement = (async () => {
       await Promise.all(settlements);
       if (failures.length > 0) {
@@ -1150,7 +1205,7 @@ export class PiSdkRuntime implements AgentRuntime {
       }
     })().finally(() => {
       // Sharing only matters while a shutdown is in flight; once settled, a
-      // later call starts fresh (the handle set is already cleared).
+      // later call rechecks retained failures; successful handles remove themselves.
       this.shutdownSettlement = null;
     });
     return this.shutdownSettlement;

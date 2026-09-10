@@ -24,6 +24,7 @@
  *   waiters get an explicitly unsaved failure snapshot (never forever-running,
  *   never fake success).
  */
+import { memberRuntimeAllowed } from "./runtime-admission.js";
 import { existsSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { logger } from "../foundation/logger.js";
@@ -102,6 +103,8 @@ export function forkCutLeafId(branchEntries: any[]): string | null {
 
 // -- Runner ----------------------------------------------------------------
 
+const activeRuns = new Map<string, Promise<void>>();
+const cleanupFailures = new Map<string, Error>();
 const cancelControllers = new Map<string, AbortController>(); // `${memberId}/${taskId}`
 
 function controllerKey(memberId: string, taskId: string): string {
@@ -129,6 +132,7 @@ export type StartBackgroundTaskResult =
   | { ok: false; error: string };
 
 export function startBackgroundTask(input: StartBackgroundTaskInput): StartBackgroundTaskResult {
+  if (!memberRuntimeAllowed(input.memberId)) return {ok:false,error:"member runtime admission is closed"};
   if (input.sessionMode !== "new" && input.sessionMode !== "fork") {
     return { ok: false, error: "sessionMode must be 'new' or 'fork'" };
   }
@@ -186,10 +190,12 @@ export function startBackgroundTask(input: StartBackgroundTaskInput): StartBackg
     parentSessionRef: input.sessionMode === "fork" ? (instance.handle.forkSnapshot?.()?.sessionFile ?? null) : null,
   });
   // Fire-and-forget: the tool returns the real current status immediately.
-  void executeBackgroundTask(record, ctx).catch((err) => {
+  const key = controllerKey(record.memberId, record.taskId);
+  const execution = executeBackgroundTask(record, ctx).catch((err) => {
     logger.error("background-tasks", "executor crashed", { taskId: record.taskId, error: String(err) });
     failTaskRecord(record, `executor crashed: ${String((err as Error)?.message || err)}`);
-  });
+  }).finally(() => activeRuns.delete(key));
+  activeRuns.set(key, execution);
   return { ok: true, taskId: record.taskId, status: record.status, startedAt: record.startedAt };
 }
 
@@ -214,7 +220,12 @@ function settleTerminal(record: BackgroundTaskRecord, update: Parameters<typeof 
 /** Awaitable child teardown. Returns a diagnostic string when the confirmed
  *  cleanup failed, null when cleanup completed (or no awaitable surface
  *  existed — reported, never sold as confirmed). */
-async function cleanupChild(handle: AgentHandle): Promise<string | null> {
+async function cleanupChild(handle: AgentHandle, memberId: string, taskId: string): Promise<string | null> {
+  const error = await releaseChild(handle);
+  if (error) cleanupFailures.set(controllerKey(memberId,taskId),new Error(error));
+  return error;
+}
+async function releaseChild(handle: AgentHandle): Promise<string | null> {
   if (typeof handle.destroyAndWait === "function") {
     try {
       await handle.destroyAndWait();
@@ -235,6 +246,12 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
   cancelControllers.set(controllerKey(memberId, taskId), controller);
 
   const settle = (update: Parameters<typeof updateBackgroundTask>[2]) => settleTerminal(record, update);
+  let handle: AgentHandle | undefined;
+  let releaseAttempted = false;
+  const release = async () => {
+    releaseAttempted = true;
+    return cleanupChild(handle!,memberId,taskId);
+  };
 
   try {
     // A cancel may have landed while the record was still "starting".
@@ -278,7 +295,6 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
       forkManager = forked as SessionManager;
     }
 
-    let handle: AgentHandle;
     try {
       handle = await ctx.runtime.createAgent({
         cwd: ctx.sources.cwd,
@@ -306,7 +322,7 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     // Cancel may have landed while the child was being created: do not start
     // model work; clean up (awaited) and settle cancelled.
     if (controller.signal.aborted || getBackgroundTask(memberId, taskId)?.status === "cancelling") {
-      const cleanupError = await cleanupChild(handle);
+      const cleanupError = await release();
       return settle({ status: "cancelled", error: cleanupError ? `cancelled by member request; ${cleanupError}` : "cancelled by member request" });
     }
 
@@ -321,8 +337,9 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     });
 
     const signal = controller.signal;
+    const activeHandle = handle;
     const onAbort = () => {
-      try { handle.abort(); } catch {}
+      try { activeHandle.abort(); } catch {}
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort);
@@ -342,7 +359,7 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     // confirmed cleanup failure — or an SDK surface that offers no
     // confirmation — is reported, never "request issued" sold as "done".
     try { unsubscribe(); } catch {}
-    const cleanupError = await cleanupChild(handle);
+    const cleanupError = await release();
     if (cleanupError) {
       // Observable at error level; non-done terminals also carry it in their
       // reason so waiters see the cleanup state.
@@ -376,6 +393,7 @@ async function executeBackgroundTask(record: BackgroundTaskRecord, ctx: ParentCo
     }
     return settle({ status: "done", result: text });
   } finally {
+    if (handle && !releaseAttempted) await release();
     cancelControllers.delete(controllerKey(memberId, taskId));
   }
 }
@@ -400,4 +418,25 @@ export function cancelBackgroundTask(memberId: string, taskId: string): CancelRe
   const next = updateBackgroundTask(memberId, taskId, { status: "cancelling" });
   cancelControllers.get(controllerKey(memberId, taskId))?.abort();
   return { ok: true, taskId, status: next.status };
+}
+
+/** Close admission first. Await actual child finally/disposal, not just a terminal database label. */
+export async function shutdownBackgroundTasks(memberId?: string): Promise<void> {
+  const selected = (key: string) => memberId === undefined || key.startsWith(`${memberId}/`);
+  const errors: unknown[] = [];
+  for (const [key, controller] of cancelControllers) {
+    if (!selected(key)) continue;
+    try {
+      const slash = key.indexOf("/");
+      const member = key.slice(0,slash), task = key.slice(slash+1);
+      const record = getBackgroundTask(member,task);
+      if (record && !isTerminalBackgroundTaskStatus(record.status) && record.status !== "cancelling") updateBackgroundTask(member,task,{status:"cancelling"});
+    } catch (error) { errors.push(error); }
+    finally { controller.abort(); }
+  }
+  for (const result of await Promise.allSettled([...activeRuns].filter(([key])=>selected(key)).map(([,promise])=>promise))) {
+    if (result.status === "rejected") errors.push(result.reason);
+  }
+  for (const [key,error] of cleanupFailures) if (selected(key)) errors.push(error);
+  if (errors.length) throw new AggregateError(errors,"Background task shutdown incomplete");
 }

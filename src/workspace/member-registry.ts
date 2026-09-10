@@ -363,12 +363,6 @@ export function getEffectiveConfig(id: string, _scopeId: ScopeId): EffectiveConf
   };
 }
 
-/** Unsafe synchronous firing is retired. API callers must await MemberArchiveService.archive(). */
-export function fireMember(_id: string, opts?: { confirm?: boolean }): { archived: string } {
-  if (!opts?.confirm) throw new Error("confirm_required");
-  throw new Error("archive_quiescence_required: use MemberArchiveService.archive");
-}
-
 /** Hard-delete unreferenced test identities only; FK-protected history is never cascaded. */
 export function deleteMemberForTests(id: string): void {
   getDatabase().assertOutsideTransaction();

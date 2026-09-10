@@ -48,7 +48,8 @@ export function httpRequest(
   options: http.RequestOptions & { body?: string },
 ): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
-    const req = http.request(options, (res) => {
+    const requestOptions = options.body === undefined ? options : { ...options, headers: { ...options.headers, "Content-Length": Buffer.byteLength(options.body) } };
+    const req = http.request(requestOptions, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -136,7 +137,7 @@ export async function createTestServer(): Promise<TestServer> {
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
   const { shutdownWebSocket } = await import("../../src/communication/ws.js");
-  shutdownWebSocket();
+  await shutdownWebSocket();
   const { shutdownAll } = await import("../../src/engine/agent-manager.js");
   await shutdownAll();
   ts.server.closeAllConnections();

@@ -316,6 +316,7 @@ function resolveCallerMemberId(roomId: string, agentName: string): string {
 }
 
 export interface ToolExecutionContext {
+  signal?: AbortSignal;
   /** Trusted runtime-owned caller identity, never taken from tool arguments. */
   memberId?: string;
   /** "background" = background task child session: same tool implementations,
@@ -800,6 +801,7 @@ export async function handleToolCallback(
       }
       if (tool === "shell_exec") {
         const result = await shell.execInShell({
+          signal:context?.signal,
           memberId: shellMemberId,
           shell: String(params?.shell || ""),
           command: params?.command !== undefined ? String(params.command) : undefined,
@@ -822,6 +824,7 @@ export async function handleToolCallback(
       }
       if (tool === "shell_wait") {
         const result = await shell.waitShell({
+          signal:context?.signal,
           memberId: shellMemberId,
           shell: String(params?.shell || ""),
           exec: String(params?.exec || ""),
@@ -873,6 +876,7 @@ export async function handleToolCallback(
       // wait only reports why it ended. Stop button is the sole abort path.
       const outcome = await waitForMember({
         roomId,
+        signal: context?.signal,
         waiterMemberId: actor.id,
         waiterName: actor.name,
         targetMemberId: target.id,
@@ -1093,7 +1097,11 @@ export async function handleToolCallback(
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       let unregisterSettle: (() => void) | undefined;
       const interrupted = new Promise<null>((resolveInterrupt) => {
-        unregisterSettle = registerBackgroundWaitSettle(actor.memberId, () => resolveInterrupt(null));
+        const interrupt = () => resolveInterrupt(null);
+        const unregister = registerBackgroundWaitSettle(actor.memberId,interrupt);
+        context?.signal?.addEventListener("abort",interrupt,{once:true});
+        unregisterSettle = () => {unregister();context?.signal?.removeEventListener("abort",interrupt);};
+        if(context?.signal?.aborted)interrupt();
       });
       const timeout = blockMs > 0 ? new Promise<null>((resolve) => { timeoutHandle = setTimeout(() => resolve(null), blockMs); }) : null;
       try {
