@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { latestMessage } from "../storage/message-repository.js";
 import type { CreateRoomMemberInput, Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
-import { loadAgentDefinition, getAgentTemplateMetadata } from "../workforce/agent-store.js";
+import { getAgentTemplateMetadata } from "../workforce/agent-store.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../storage/repositories/conversations.js";
 export { ensureDmScope } from "../storage/repositories/conversations.js";
 import { memberDir } from "./member-profile.js";
@@ -67,7 +67,7 @@ function buildRoomMemberRecord(roomId: string, memberName: string, override?: Ro
 }
 
 function buildDirectRoomMemberFromAgent(roomId: string, input: { agentName: string; memberName: string; config?: Partial<RoomMemberConfig> }): RoomMemberRecord {
-  const agent = loadAgentDefinition(input.agentName);
+  const agent = getAgentTemplateMetadata(input.agentName);
   const now = Date.now();
   const config = cleanMemberConfig(input.config || {});
   return {
@@ -208,7 +208,7 @@ export function createRoom(name: string, cwd: string | undefined, members: Creat
 
   // 0.20: agents always come from the global pool (no room-local team package).
   for (const draft of drafts) {
-    if (!loadAgentDefinition(draft.agent)) throw new Error(`Agent not found: ${draft.agent}`);
+    if (!getAgentTemplateMetadata(draft.agent)) throw new Error(`Agent not found: ${draft.agent}`);
   }
 
   const leaderName = opts?.promptLeaderMemberName ? normalizeMemberName(opts.promptLeaderMemberName) : undefined;
@@ -603,7 +603,7 @@ export function addRoomMemberFromAgent(
 
     const agentName = normalizeMemberName(String(input.agentName || ""));
     if (!agentName) return { ok: false, code: "invalid", error: "agent name is required" };
-    const agent = loadAgentDefinition(agentName);
+    const agent = getAgentTemplateMetadata(agentName);
     if (!agent) return { ok: false, code: "not_found", error: `Agent not found: ${agentName}` };
 
     const memberName = normalizeMemberName(String(input.memberName || ""));

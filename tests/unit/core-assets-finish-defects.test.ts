@@ -46,7 +46,7 @@ describe.each(["room", "dm", "topic"] as const)("hidden reply target in %s", kin
 
   // Verified red on base 097792b in /tmp/bm-core-assets-finish-defects-red.log.
   // Remove .fails with the parent tools.ts visibility fix; an unexpected pass fails this gate.
-  it.fails("does not expose a hidden target through inline or file reply excerpts", () => {
+  it("does not expose a hidden target through inline or file reply excerpts", () => {
     expect({ inline, file }).toEqual({
       inline: expect.not.stringContaining(hidden),
       file: expect.not.stringContaining(hidden),

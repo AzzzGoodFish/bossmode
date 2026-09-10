@@ -493,7 +493,7 @@ export async function handleToolCallback(
           base.replyTo = {
             seq: m.replyTo.seq,
             messageId: m.replyTo.messageId,
-            ...(target
+            ...(target && !isSystemNoticeHiddenFromMembers(target)
               ? { sender: target.sender, excerpt: excerptForReply(target.content) }
               : { unavailable: true }),
           };

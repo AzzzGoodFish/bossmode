@@ -46,7 +46,7 @@ describe("stable identity and body-free metadata", () => {
     expect(() => readMemberProfile(member.id)).toThrow();
   });
   // Verified ordinary failure: /tmp/bm-core-identity-extra-red.log.
-  it.fails("BLOCKED: adding a direct Agent member preserves the no-legacy-config contract", async () => {
+  it("adding a direct Agent member preserves the no-legacy-config contract", async () => {
     saveAgentDefinition("engineer","---\nname: Engineer\n---\nbody");
     const { createRoom, addRoomMemberFromAgent } = await import("../../src/workspace/room-store.js");
     const room=createRoom("Direct",undefined,[]);
