@@ -2,55 +2,26 @@
  * rc.8 read-chain presentation: shared member-view renderer for
  * query_room_messages — seq header, replyTo quote, attachments; inline + file.
  */
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-let dir = "";
-
-vi.mock("../../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-    readConfig: () => ({ auth: { username: "fish" }, runtime: {}, defaults: {} }),
-  };
+const dir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => {
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 vi.mock("../../src/communication/ws.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
   return { ...actual, broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn() };
-});
-
-const PROFILE = {
-  name: "Test provider",
-  providerSlug: "testprov",
-  protocol: "openai-responses" as const,
-  baseUrl: "https://example.invalid/v1",
-  authType: "api_key" as const,
-  apiKey: "sk-test",
-  requestProfile: "standard" as const,
-  enabled: true,
-  isDefault: true,
-  models: [{ id: "claude-a", contextWindow: 100000, maxTokens: 8000, input: ["text" as const] }],
-};
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bm-query-render-"));
-  mkdirSync(join(dir, "members"), { recursive: true });
-  mkdirSync(join(dir, "rooms"), { recursive: true });
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", "pm.md"), "---\nname: pm\n---\n\nYou are pm.\n", "utf-8");
-  vi.resetModules();
-});
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
 });
 
 describe("query renderer (member view)", () => {
@@ -109,11 +80,9 @@ describe("query renderer (member view)", () => {
 
   it("inline query result rendered by the SDK carries seq/replyTo/attachment (through tool rows)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const creds = await import("../../src/engine/model-credentials.js");
-    creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const m = reg.createMember({ name: "pm" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     const attachDir = join(dir, "rooms", room.id, "attachments");
@@ -122,12 +91,12 @@ describe("query renderer (member view)", () => {
 
     const messageStore = await import("../../src/workspace/message-store.js");
     const base = messageStore.addMessage(room.id, {
-      id: "m40",
+      mentions: [],
       sender: "pm",
       content: "please run checks",
     });
     messageStore.addMessage(room.id, {
-      id: "m41",
+      mentions: [],
       sender: "user",
       content: "report attached",
       attachments: [{ storedFilename: "rep1.md", originalFilename: "report.md", size: 3 }],
@@ -152,11 +121,9 @@ describe("query renderer (member view)", () => {
 
   it("file output matches inline shape (same renderer): seq + replyTo + attachment lines", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const creds = await import("../../src/engine/model-credentials.js");
-    creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const m = reg.createMember({ name: "pm" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R2", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R2", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     const attachDir = join(dir, "rooms", room.id, "attachments");
@@ -164,9 +131,9 @@ describe("query renderer (member view)", () => {
     writeFileSync(join(attachDir, "rep2.md"), "# r2", "utf-8");
 
     const messageStore = await import("../../src/workspace/message-store.js");
-    const base = messageStore.addMessage(room.id, { id: "b1", sender: "pm", content: "origin note" });
+    const base = messageStore.addMessage(room.id, { mentions: [], sender: "pm", content: "origin note" });
     messageStore.addMessage(room.id, {
-      id: "b2",
+      mentions: [],
       sender: "user",
       content: "reply with file",
       attachments: [{ storedFilename: "rep2.md", originalFilename: "notes.md", size: 4 }],
@@ -178,6 +145,7 @@ describe("query renderer (member view)", () => {
       output: "file",
     })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
+    rmSync(fileRes.path);
     expect(md).toContain(`[No.${base.seq + 1} · fish ·`);
     expect(md).toContain(`[In reply to msg:#${base.seq} from pm]: "origin note"`);
     expect(md).toContain("Attachment: [original filename: notes.md](" + join(attachDir, "rep2.md") + ")");
@@ -185,26 +153,24 @@ describe("query renderer (member view)", () => {
 
   it("cross-window reply target resolves from the full scope; lost target degrades", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const creds = await import("../../src/engine/model-credentials.js");
-    creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const m = reg.createMember({ name: "pm" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R3", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R3", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     const messageStore = await import("../../src/workspace/message-store.js");
     // Old message (outside the 1-message page window)
-    const old = messageStore.addMessage(room.id, { id: "old1", sender: "qa", content: "ancient origin" });
+    const old = messageStore.addMessage(room.id, { mentions: [], sender: "qa", content: "ancient origin" });
     // Reply (page window of 1 sees only this)
     messageStore.addMessage(room.id, {
-      id: "new1",
+      mentions: [],
       sender: "pm",
       content: "replying across the window",
       replyTo: { seq: old.seq, messageId: old.id },
     });
     // Reply to a target that does not exist anywhere in scope
     messageStore.addMessage(room.id, {
-      id: "new2",
+      mentions: [],
       sender: "pm",
       content: "replying into the void",
       replyTo: { seq: 9999, messageId: "missing" },
@@ -225,5 +191,48 @@ describe("query renderer (member view)", () => {
     expect(renderQueryRowForMember(lost)).toContain(
       "[In reply to msg:#9999 — original not visible in this context]",
     );
+  });
+
+  it.each(["dm", "topic"] as const)("%s output preserves attachment ownership and does not resolve foreign reply targets", async kind => {
+    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const { createRoom, inviteGlobalMember } = await import("../../src/workspace/room-store.js");
+    const { createTopic } = await import("../../src/workspace/topic-store.js");
+    const { addMessage } = await import("../../src/workspace/message-store.js");
+    const { getDmAttachmentPath, getAttachmentPath } = await import("../../src/workspace/attachment-store.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
+    const { dirname } = await import("node:path");
+    const member = createMember({ name: "reader" });
+    const room = createRoom("Read scopes", undefined, []);
+    inviteGlobalMember(room.id, { id: member.id, name: member.name });
+    const foreign = addMessage(room.id, { sender: "user", content: "room-only target", mentions: [] });
+    const topic = createTopic({ roomId: room.id, title: "Read scopes", anchorMessageId: foreign.id });
+    const scope = kind === "dm" ? `dm:${member.id}` : `topic:${topic.id}`;
+    const path = kind === "dm" ? getDmAttachmentPath(member.id, "report.md") : getAttachmentPath(room.id, "report.md");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "😀");
+    addMessage(scope, { sender: "user", content: "scoped reply", mentions: [],
+      replyTo: { messageId: foreign.id, seq: foreign.seq! },
+      attachments: [
+        { storedFilename: "report.md", originalFilename: "report.md", size: 4 },
+        { storedFilename: "missing.md", originalFilename: "missing.md", size: 0 },
+        { storedFilename: "../report.md", originalFilename: "invalid.md", size: 4 },
+      ],
+    });
+    fixture.reopen();
+    const rows = await handleToolCallback("query_room_messages", scope, member.id, {}) as import("../../src/engine/query-render.js").QueryRow[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].replyTo).toMatchObject({ messageId: foreign.id, unavailable: true });
+    expect(rows[0].attachments).toEqual([
+      { originalFilename: "report.md", path },
+      { originalFilename: "missing.md", path: "unavailable" },
+      { originalFilename: "invalid.md", path: "unavailable" },
+    ]);
+    const inline = renderQueryRowsForMember(rows);
+    expect(inline).not.toContain("room-only target");
+    expect(inline).toContain("original not visible in this context");
+    const result = await handleToolCallback("query_room_messages", scope, member.id, { output: "file" }) as { path: string };
+    try { expect(readFileSync(result.path, "utf8")).toContain(inline); }
+    finally { rmSync(result.path); }
   });
 });

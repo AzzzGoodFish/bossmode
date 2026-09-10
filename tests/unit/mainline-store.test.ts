@@ -1,23 +1,19 @@
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-let tmpDir = "";
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-}));
-
+const tmpDir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-mainline-"));
-  mkdirSync(join(tmpDir, "rooms", "room-a"), { recursive: true });
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
-
-afterEach(() => {
-  vi.resetModules();
-  rmSync(tmpDir, { recursive: true, force: true });
-});
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 const ACTOR = { type: "member" as const, memberId: "rm_1", name: "pm" };
 
@@ -48,10 +44,15 @@ describe("mainline-store", () => {
     expect(saved.revision).toBe(1);
     expect(readMainline("room-a", "rm_1").content).toBe(content);
     const { readFileSync } = await import("node:fs");
-    const history = readFileSync(join(tmpDir, "rooms", "room-a", "memory", "mainline-history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+    const { listDocumentHistory } = await import("../../src/storage/document-repository.js");
+    const history = listDocumentHistory(fixture.db, "rooms/room-a/memory/members/rm_1/mainline.md");
     expect(history).toHaveLength(1);
-    expect(history[0].content).toBe(content);
-    expect(history[0].reason).toBe("0.19 kickoff");
+    expect(readFileSync(join(tmpDir, history[0].snapshotPath), "utf8")).toBe(content);
+    expect(history[0]).toMatchObject({ reason: "0.19 kickoff", revision: 1, actorMemberId: "rm_1", actorName: "pm", operation: "write", snapshotBytes: Buffer.byteLength(content) });
+    expect(readFileSync(join(tmpDir, "rooms/room-a/memory/members/rm_1/mainline.md"))).toEqual(Buffer.from(content));
+    fixture.reopen();
+    expect(readMainline("room-a", "rm_1")).toEqual(saved);
+    expect(listDocumentHistory(fixture.db, "rooms/room-a/memory/members/rm_1/mainline.md")).toEqual(history);
   });
 
   it("requires reason and enforces the 4K budget with current content attached", async () => {
@@ -115,20 +116,20 @@ describe("mainline-store", () => {
     expect(out).not.toContain("[stale]");
   });
 
-  it("msg:#<seq> resolves once messages carry seq (stream 1 merged)", async () => {
-    const { writeMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+  it("msg:#<seq> resolves the SQL-allocated sequence without a JSONL rewrite", async () => {
+    const { resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
     const { addMessage } = await import("../../src/workspace/message-store.js");
     const message = addMessage("room-a", { sender: "user", content: "裁定", mentions: [] });
-    // Simulate the post-stream-1 shape: messages carry a seq field
-    const { readFileSync, writeFileSync: write } = await import("node:fs");
-    const path = join(tmpDir, "rooms", "room-a", "messages.jsonl");
-    const lines = readFileSync(path, "utf-8").trim().split("\n").map((l) => ({ ...JSON.parse(l), seq: 7 }));
-    write(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf-8");
     expect(message.id).toBeTruthy();
-    const content = `## Dynamic Index\n\n- msg:#7 — 有 seq 的消息\n`;
+    expect(message.seq).toBe(1);
+    // A retained obsolete stream cannot override SQL sequence/message authority.
+    mkdirSync(join(tmpDir, "rooms", "room-a"), { recursive: true });
+    writeFileSync(join(tmpDir, "rooms", "room-a", "messages.jsonl"), JSON.stringify({ ...message, seq: 7 }) + "\n");
+    const content = `## Dynamic Index\n\n- msg:#${message.seq} — 有 seq 的消息\n`;
     const resolved = resolveMainlineRefs("room-a", content);
-    expect(resolved).toContain("- msg:#7 — 有 seq 的消息");
+    expect(resolved).toContain(`- msg:#${message.seq} — 有 seq 的消息`);
     expect(resolved).not.toContain("[stale]");
+    expect(resolveMainlineRefs("room-a", "## Dynamic Index\n- msg:#7 — obsolete sequence")).toContain("[stale]");
   });
 
   it("re-resolution is idempotent and self-healing (stale mark dropped when target returns)", async () => {

@@ -2,29 +2,25 @@
  * Environment & Communication global asset (0.20 experience ③, fish 2026-08-05).
  * Discipline: product default lives in code; a user file is materialized ONLY
  * on edit; upgrades never overwrite an existing user file; restore default =
- * delete the user file. Compile splices the asset into both room and DM Core.
+ * delete the user file. Current compilation uses code-owned Communication instead.
  */
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
 
-let tmpDir = "";
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-}));
-
+const tmpDir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-ec-asset-"));
-  mkdirSync(join(tmpDir, "rooms", "room-a"), { recursive: true });
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
-
-afterEach(() => {
-  vi.resetModules();
-  rmSync(tmpDir, { recursive: true, force: true });
-});
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 function room(): Room {
   return {
@@ -95,7 +91,6 @@ describe("environment-communication asset", () => {
   it("identity batch-1: compile no longer injects the E&C asset (Communication is code-owned)", async () => {
     const asset = await import("../../src/workspace/environment-communication-asset.js");
     asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
-    vi.resetModules();
     const { compileMemberPrompt, compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const roomCompiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
     expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
@@ -113,5 +108,21 @@ describe("environment-communication asset", () => {
     });
     expect(dmCompiled.fullPrompt).toContain("private chat with the user");
     expect(dmCompiled.fullPrompt).not.toContain("Custom framing.");
+  });
+
+  it("preserves retained user bytes and falls back on unreadable assets without overwriting them", async () => {
+    const asset = await import("../../src/workspace/environment-communication-asset.js");
+    const path = join(tmpDir, "prompt-assets", "environment-communication.md");
+    mkdirSync(join(tmpDir, "prompt-assets"), { recursive: true });
+    const raw = "\uFEFF  Retained framing.\r\n\r\n";
+    writeFileSync(path, raw);
+    expect(asset.getEnvironmentCommunicationAsset()).toMatchObject({ source: "user", content: raw, updatedAt: expect.any(Number) });
+    fixture.reopen();
+    expect(readFileSync(path)).toEqual(Buffer.from(raw));
+    const { rmSync } = await import("node:fs");
+    rmSync(path);
+    mkdirSync(path);
+    expect(asset.getEnvironmentCommunicationAsset()).toEqual({ source: "default", content: asset.DEFAULT_ENVIRONMENT_COMMUNICATION });
+    expect(existsSync(path)).toBe(true);
   });
 });

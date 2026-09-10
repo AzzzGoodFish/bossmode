@@ -1,22 +1,18 @@
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-let tmpDir = "";
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-}));
-
+const tmpDir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-principles-"));
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
-
-afterEach(() => {
-  vi.resetModules();
-  rmSync(tmpDir, { recursive: true, force: true });
-});
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("principles-store", () => {
   it("returns empty revision 0 for missing principles", async () => {
@@ -107,13 +103,17 @@ describe("principles-store", () => {
     writePrinciples({ roomId: "room-a", scope: "room", content: "v1 content", actor: { type: "member", memberId: "rm_1" }, reason: "first" });
     writePrinciples({ roomId: "room-a", scope: "room", content: "v2 content", actor: { type: "user" }, reason: "user correction" });
     const { readFileSync } = await import("node:fs");
-    const history = readFileSync(join(tmpDir, "rooms", "room-a", "memory", "principles-history.jsonl"), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+    const { listDocumentHistory } = await import("../../src/storage/document-repository.js");
+    const history = listDocumentHistory(fixture.db, "rooms/room-a/memory/room-principles.md");
     expect(history).toHaveLength(2);
-    expect(history[0].content).toBe("v1 content");
+    expect(readFileSync(join(tmpDir, history[0].snapshotPath), "utf8")).toBe("v1 content");
     expect(history[0].reason).toBe("first");
-    expect(history[1].content).toBe("v2 content");
+    expect(readFileSync(join(tmpDir, history[1].snapshotPath), "utf8")).toBe("v2 content");
     expect(history[1].reason).toBe("user correction");
-    expect(history[1].revision).toBe(2);
+    expect(history[0]).toMatchObject({ revision: 1, actorType: "member", actorMemberId: "rm_1", snapshotBytes: Buffer.byteLength("v1 content") });
+    expect(history[1]).toMatchObject({ revision: 2, actorType: "user", operation: "write" });
+    fixture.reopen();
+    expect(listDocumentHistory(fixture.db, "rooms/room-a/memory/room-principles.md")).toEqual(history);
   });
 
   it("computes budget headers in the plan format", async () => {

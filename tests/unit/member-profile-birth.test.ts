@@ -1,27 +1,19 @@
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-let tmpDir = "";
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-  ensureBossmodeDir: () => { mkdirSync(tmpDir, { recursive: true }); },
-}));
-
-vi.mock("../../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
+const tmpDir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-member-birth-"));
-  mkdirSync(join(tmpDir, "members"), { recursive: true });
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
-afterEach(() => {
-  vi.resetModules();
-  rmSync(tmpDir, { recursive: true, force: true });
-});
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("member birth skeleton", () => {
   it("createMember writes an empty persona.md and skills dir", async () => {
@@ -67,5 +59,31 @@ describe("member birth skeleton", () => {
     updateMemberIdentity(m.id, { title: "" });
     expect(getMember(m.id)?.title).toBeUndefined();
     expect(readFileSync(memberProfilePath(m.id), "utf-8")).toBe(raw);
+    fixture.reopen();
+    expect(getMember(m.id)).toMatchObject({ name: "new-nova" });
+    expect(readMemberProfile(m.id).raw).toBe(raw);
+  });
+
+  it("reads persona literally at and above the UTF-16 limit without truncating bytes", async () => {
+    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const { memberProfilePath, readMemberProfile, MEMBER_PROFILE_BUDGET_CHARS } = await import("../../src/workspace/member-profile.js");
+    const m = createMember({ name: "literal" });
+    expect(MEMBER_PROFILE_BUDGET_CHARS).toBe(4000);
+    for (const length of [4000, 4001]) {
+      const prefix = "\uFEFF---\r\nname: not-identity\r\n---\r\n😀";
+      const raw = prefix + "x".repeat(length - prefix.length);
+      writeFileSync(memberProfilePath(m.id), raw);
+      expect(readMemberProfile(m.id)).toMatchObject({ raw, body: raw, exists: true, overBudget: length > 4000 });
+      expect(readFileSync(memberProfilePath(m.id))).toEqual(Buffer.from(raw));
+      expect(Buffer.byteLength(raw)).toBeGreaterThan(length);
+    }
+  });
+
+  it("missing persona is empty but non-ENOENT read failures are not hidden", async () => {
+    const { memberProfilePath, readMemberProfile } = await import("../../src/workspace/member-profile.js");
+    const { mkdirSync } = await import("node:fs");
+    expect(readMemberProfile("missing")).toMatchObject({ body: "", raw: "", exists: false, overBudget: false });
+    mkdirSync(memberProfilePath("missing"), { recursive: true });
+    expect(() => readMemberProfile("missing")).toThrow();
   });
 });

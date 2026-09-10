@@ -3,56 +3,30 @@
  * scope msg refs finally resolve (previously readAllMessages on the phantom
  * rooms/dm:<id> dir → every DM msg ref was stale).
  */
+import { coreFixture } from "../helpers/core-fixture.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-let dir: string;
-
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
+const dir = process.env.BOSSMODE_DIR!;
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => {
+  fixture = coreFixture();
+  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
-
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
-}
-
-const MAINLINE = `## Focus
-Ship the 0.20 flagship.
-
-## Dynamic Index
-- task:task-abc123 — flagship task
-- msg:#42 — the decision message
-- msg:msg_live_1 — direct id ref
-- msg:#999 — long gone
-- docs/bossmode/design/term.md — glossary
-`;
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("mainline msg ref enrichment (room + DM scope)", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-msgref-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
-    mkdirSync(join(dir, "rooms"), { recursive: true });
-    seedAgent("architect");
-    vi.resetModules();
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
   it("room scope: msg entries get msgId + summary; stale entries stay bare", async () => {
     const { addMessage } = await import("../../src/workspace/message-store.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const room = roomStore.createRoom("r", dir, [], undefined);
-    // message-bus append uses seq from the room store
-    const m42 = addMessage(room.id, { sender: "architect", content: "We decided to ship the unified panel", mentions: [] } as any);
-    const m43 = addMessage(room.id, { sender: "user", content: "go ahead", mentions: [] } as any);
-    const m44 = addMessage(room.id, { sender: "architect", content: "done", mentions: [] } as any);
+    // SQL appends allocate the next scope-local sequence.
+    const m42 = addMessage(room.id, { sender: "architect", content: "We decided to ship the unified panel", mentions: [] });
+    addMessage(room.id, { sender: "user", content: "go ahead", mentions: [] });
+    const m44 = addMessage(room.id, { sender: "architect", content: "done", mentions: [] });
 
     const ml = await import("../../src/workspace/mainline-store.js");
     // Rewrite the mainline so msg:#42 points at the actual seq of m42
@@ -77,8 +51,8 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
   it("DM scope: msg refs resolve against the member-owned DM stream", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const dm = await import("../../src/workspace/dm-message-store.js");
-    const arch = reg.createMember({ name: "architect", agentTemplate: "architect" });
-    const msg = dm.addDmMessage(arch.id, { sender: "user", content: "remember this DM decision", mentions: [] } as any);
+    const arch = reg.createMember({ name: "architect", agentTemplate: "general" });
+    const msg = dm.addDmMessage(arch.id, { sender: "user", content: "remember this DM decision", mentions: [] });
 
     const ml = await import("../../src/workspace/mainline-store.js");
     const scopeKey = `dm:${arch.id}`;
@@ -98,8 +72,8 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
     const { addMessage } = await import("../../src/workspace/message-store.js");
     const roomStore = await import("../../src/workspace/room-store.js");
     const room = roomStore.createRoom("r2", dir, [], undefined);
-    const m1 = addMessage(room.id, { sender: "architect", content: "loose ref message", mentions: [] } as any);
-    const m2 = addMessage(room.id, { sender: "user", content: "another one", mentions: [] } as any);
+    const m1 = addMessage(room.id, { sender: "architect", content: "loose ref message", mentions: [] });
+    const m2 = addMessage(room.id, { sender: "user", content: "another one", mentions: [] });
 
     const ml = await import("../../src/workspace/mainline-store.js");
     const content = `## Focus\nShip.\n\n## Dynamic Index\n- No.${m1.seq} 附近 — natural language, capital No.\n- #${m2.seq} — bare hash\n- msg:${m1.seq} 这里 — numeric msg:\n- 11:44 那份 — time, must NOT become a ref\n- #abc — not digits, must NOT become a ref\n- No.abc — not digits, must NOT become a ref\n`;
@@ -133,5 +107,31 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
     const content = `## Focus\nRemember No.14502 and #88 — prose, not refs.\n\n## Dynamic Index\n- task:task-x — t\n`;
     const parsed = ml.parseMainline(content);
     expect(parsed.index.some((e) => e.kind === "msg")).toBe(false);
+  });
+
+  it("isolates SQL message IDs and sequences across room, DM and topic references", async () => {
+    const { addMessage } = await import("../../src/workspace/message-store.js");
+    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const { createTopic } = await import("../../src/workspace/topic-store.js");
+    const { loadScopeMessages, buildMsgLookup, parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const member = createMember({ name: "scope-owner" });
+    const roomMessage = addMessage("room-a", { sender: "user", content: "room only", mentions: [] });
+    const topic = createTopic({ roomId: "room-a", title: "topic", anchorMessageId: roomMessage.id });
+    const scopes = ["room-a", `dm:${member.id}`, `topic:${topic.id}`];
+    const messages = [roomMessage, ...scopes.slice(1).map(scope => addMessage(scope, { sender: "user", content: `  ${scope} \n` + "😀".repeat(50), mentions: [] }))];
+    expect(messages.map(m => m.seq)).toEqual([1, 1, 1]);
+    fixture.reopen();
+    for (const [i, scope] of scopes.entries()) {
+      const loaded = loadScopeMessages(scope);
+      expect(loaded.map(m => m.id)).toEqual([messages[i].id]);
+      const content = "## Dynamic Index\n- msg:#1 — local\n" + messages.map(m => `- msg:${m.id} — id`).join("\n");
+      const parsed = parseMainline(resolveMainlineRefs(scope, content, loaded), buildMsgLookup(loaded));
+      expect(parsed.index[0]).toMatchObject({ msgId: messages[i].id, stale: false });
+      expect(parsed.index[0].summary).toBe(messages[i].content.replace(/\s+/g, " ").trim().slice(0, 80));
+      for (const [j, entry] of parsed.index.slice(1).entries()) {
+        expect(entry.stale).toBe(i !== j);
+        expect(entry.msgId).toBe(i === j ? messages[i].id : undefined);
+      }
+    }
   });
 });
