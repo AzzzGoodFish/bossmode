@@ -25,7 +25,7 @@ function seedTemplateProject(root: string, version = "9.9.9"): void {
 }
 
 describe("team-updates service (fresh-install seed only — update-check/apply removed)", () => {
-  let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
+  const originalDir = process.env.BOSSMODE_DIR;
   let cwdBefore = "";
   let bossmodeDir = "";
   let projectDir = "";
@@ -33,16 +33,17 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
   beforeEach(async () => {
     cwdBefore = process.cwd();
     projectDir = makeTmpRoot();
-    bossmodeDir = process.env.BOSSMODE_DIR!;
+    bossmodeDir = makeTmpRoot();
+    process.env.BOSSMODE_DIR = bossmodeDir;
     seedTemplateProject(projectDir, "1.2.3");
     process.chdir(projectDir);
     vi.resetModules();
-    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
   });
 
   afterEach(() => {
     process.chdir(cwdBefore);
-    fixture.close();
+    process.env.BOSSMODE_DIR = originalDir;
+    rmSync(bossmodeDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -61,10 +62,7 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
   it("seedBuiltinAssets seeds missing files without any meta file", async () => {
     const m = await mod();
     m.seedBuiltinAssets();
-    const { loadAgentDefinition, getAgentTemplateMetadata } = await import("../../src/workforce/agent-store.js");
-    expect(loadAgentDefinition("pm")).toMatchObject({ name: "pm", description: "PM", systemPrompt: "\n# prompt\n" });
-    expect(existsSync(join(bossmodeDir, getAgentTemplateMetadata("pm")!.personaPath))).toBe(true);
-    expect(existsSync(join(bossmodeDir, "agents", "pm.md"))).toBe(false);
+    expect(existsSync(join(bossmodeDir, "agents"))).toBe(false);
     expect(existsSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"))).toBe(true);
     expect(existsSync(join(bossmodeDir, "memory", "projects", "rules", "member-universal-principles.md"))).toBe(true);
     // No update-tracking file is written — seeding is meta-free.
@@ -85,10 +83,10 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
   it("seedBuiltinAssets is idempotent for existing files", async () => {
     const m = await mod();
     m.seedBuiltinAssets();
-    const { loadAgentDefinition, getAgentTemplateMetadata } = await import("../../src/workforce/agent-store.js");
-    const first = { definition: loadAgentDefinition("pm"), metadata: getAgentTemplateMetadata("pm") };
+    const paths = ["skills/skill-a/SKILL.md", "memory/projects/rules/member-universal-principles.md"];
+    const first = paths.map(path => readFileSync(join(bossmodeDir, path)));
     m.seedBuiltinAssets();
-    const second = { definition: loadAgentDefinition("pm"), metadata: getAgentTemplateMetadata("pm") };
+    const second = paths.map(path => readFileSync(join(bossmodeDir, path)));
     expect(second).toEqual(first);
   });
 

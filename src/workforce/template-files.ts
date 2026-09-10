@@ -1,9 +1,9 @@
-import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
-import { parse, stringify } from "yaml";
+// Historical template import and body inspection only; never a live member source.
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { createHash } from "node:crypto";
+import { parse } from "yaml";
 import { asString, asStringArray } from "../shared/frontmatter.js";
-import type { AgentDefinition } from "../shared/types.js";
 import type { Database } from "../storage/database.js";
 import { TemplateRepository, templateMetadataKeys, validateTemplatePath, validateTemplateSlug, type TemplateMetadata } from "../storage/repositories/templates.js";
 
@@ -34,23 +34,6 @@ export function parseAgentDefinitionMarkdown(slug: string, markdown: string): Pa
   };
 }
 
-export function templateDefinition(metadata: TemplateMetadata | ParsedTemplate["metadata"], body: string): AgentDefinition {
-  return { name: metadata.name, description: metadata.description, avatar: metadata.avatar,
-    model: metadata.model, tags: metadata.tags ?? [], skills: metadata.skills, systemPrompt: body };
-}
-
-/** Explicit editor/export reconstruction, not a live legacy-file fallback. */
-export function renderTemplateMarkdown(metadata: TemplateMetadata, body: string): string {
-  const meta = { ...metadata.extensions, name: metadata.name, description: metadata.description,
-    avatar: metadata.avatar, tags: metadata.tags, model: metadata.model, skills: metadata.skills };
-  return `---\n${stringify(meta).trimEnd()}\n---\n${body}`;
-}
-
-function sync(path: string): void {
-  const fd = openSync(path, "r");
-  try { fsyncSync(fd); } finally { closeSync(fd); }
-}
-
 function assetPath(root: string, slug: string, relativePath: string): string {
   if (!isAbsolute(root)) throw new Error("Agent asset root must be absolute");
   validateTemplatePath(slug, relativePath);
@@ -70,42 +53,8 @@ export function readTemplateBody(root: string, metadata: TemplateMetadata): stri
   return readFileSync(path, "utf8");
 }
 
-/** Complete, fsynced, unique body first; SQL reference publication is a separate operation.
- * Unique paths keep the previously committed body intact on SQL failure/outer rollback.
- * Unreferenced files are deliberate recoverable orphans, not an application history store.
- */
-export function writeTemplateBody(root: string, slug: string, body: string): string {
-  const relativePath = `agents/${slug}/${randomUUID()}/persona.md`;
-  const path = assetPath(root, slug, relativePath);
-  const directory = dirname(path);
-  const missing: string[] = [];
-  for (let cursor = directory; ; cursor = dirname(cursor)) {
-    try {
-      if (!lstatSync(cursor).isDirectory()) throw new Error("Agent asset parent is not a directory");
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      missing.push(cursor);
-    }
-  }
-  for (const dir of missing.reverse()) { mkdirSync(dir, { mode: 0o700 }); sync(dir); sync(dirname(dir)); }
-  const temporary = join(directory, ".persona.tmp");
-  try {
-    const fd = openSync(temporary, "wx", 0o600);
-    try { writeFileSync(fd, body, "utf8"); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temporary, path);
-    // A visible ancestor may be left by a mkdir whose parent fsync failed. Every
-    // save (also an identical-body retry) must re-sync the whole chain before SQL.
-    for (let cursor = directory; ; cursor = dirname(cursor)) {
-      sync(cursor);
-      if (cursor === join(root)) break;
-    }
-  } finally { rmSync(temporary, { force: true }); }
-  return relativePath;
-}
-
 export interface TemplateSource {
-  /** Legacy inventory path or immutable package source identifier; never opened here. */
+  /** Historical inventory path; never opened here. */
   path: string;
   slug: string;
   markdown: string;
@@ -136,17 +85,4 @@ export function importAgentTemplates(ctx: TemplateImportContext, sources: readon
     const repository = new TemplateRepository(tx);
     for (const item of prepared) repository.upsert({ ...item.metadata, personaPath: item.personaPath });
   });
-}
-
-/** Call after legacy import. Installed presence is SQL-only, including absent/retired mixed files. */
-export function seedAgentTemplates(ctx: TemplateImportContext, sources: readonly TemplateSource[], version: string): number {
-  const repository = new TemplateRepository(ctx.db);
-  const missing = sources.filter(source => !repository.has(source.slug));
-  const augmented = missing.map(source => {
-    const parsed = parseAgentDefinitionMarkdown(source.slug, source.markdown);
-    const metadata = { ...parsed.metadata, personaPath: "", extensions: { ...parsed.metadata.extensions, source: "builtin", version } };
-    return { ...source, markdown: renderTemplateMarkdown(metadata, parsed.body) };
-  });
-  importAgentTemplates(ctx, augmented);
-  return augmented.length;
 }

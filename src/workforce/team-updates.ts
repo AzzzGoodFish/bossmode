@@ -8,9 +8,7 @@ import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { logger } from "../foundation/logger.js";
 
-import { hasAgentDefinition, saveAgentDefinition } from "./agent-store.js";
-
-type AssetCategory = "agent" | "skill" | "rule";
+type AssetCategory = "skill" | "rule";
 
 interface TemplateFile {
   category: AssetCategory;
@@ -133,19 +131,6 @@ function enumerateTemplates(): TemplateFile[] {
   const templatesDir = findTemplatesDir();
   if (!templatesDir) return [];
   const out: TemplateFile[] = [];
-
-  const agentsDir = join(templatesDir, "agents");
-  if (existsSync(agentsDir)) {
-    for (const f of readdirSync(agentsDir).filter((x) => x.endsWith(".md"))) {
-      out.push({
-        category: "agent",
-        relativePath: `agents/${f}`,
-        name: f.replace(/\.md$/i, ""),
-        templateContent: readFileSync(join(agentsDir, f), "utf-8"),
-        localPath: join(bossmodeDir(), "agents", f),
-      });
-    }
-  }
 
   const skillsDir = join(templatesDir, "skills");
   if (existsSync(skillsDir)) {
@@ -318,23 +303,15 @@ function cleanupDeletedBuiltinSkills(templates: TemplateFile[]): string[] {
   return removed;
 }
 
-/** Fresh-install seed: write any packaged builtin agent/skill/rule template
+/** Fresh-install seed: write any packaged builtin skill/rule template
  * that doesn't already exist locally. Idempotent, no update-detection —
- * Agents use DB presence; skill/rule files present locally are left untouched. */
+ * Skill/rule files present locally are left untouched. */
 export function seedBuiltinAssets(): void {
   const currentVersion = getCurrentVersion();
   const templates = enumerateTemplates();
   let seeded = 0;
 
   for (const tpl of templates) {
-    // Installed agents are a SQL registry; retired mixed Markdown is never presence authority.
-    if (tpl.category === "agent") {
-      if (!hasAgentDefinition(tpl.name)) {
-        saveAgentDefinition(tpl.name, renderTemplate(tpl, currentVersion));
-        seeded += 1;
-      }
-      continue;
-    }
     if (getLocalContent(tpl) !== null) continue;
 
     try {
