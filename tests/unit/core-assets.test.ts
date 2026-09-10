@@ -10,7 +10,7 @@ vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof imp
 const root = process.env.BOSSMODE_DIR!;
 mkdirSync(join(root, "knowledge"), { recursive: true });
 mkdirSync(join(root, "memory", "projects"), { recursive: true });
-const { openDb } = await import("../../src/workspace/db/sqlite.js");
+const { createLegacyMemberStorageFixture } = await import("../helpers/legacy-member-storage.js");
 const { applyStorageMigrations, bindDatabase, getDatabase, openDatabase } = await import("../../src/storage/database.js");
 const { baseStorageMigration } = await import("../../src/storage/base-schema.js");
 const { settingsMigration } = await import("../../src/storage/schema/settings.js");
@@ -42,9 +42,8 @@ function stageAsset(path: string, bytes: Uint8Array): void {
   write(path, bytes);
 }
 function ready(bind = true): Database {
-  // Explicit legacy member schema setup, then close before opening the foundation context.
-  const legacy = openDb(join(root, "bossmode.db"));
-  legacy.close();
+  // Frozen historical schema fixture, closed before the explicit core context opens.
+  createLegacyMemberStorageFixture(join(root, "bossmode.db"));
   const database = openDatabase(join(root, "bossmode.db"));
   applyStorageMigrations(database, [baseStorageMigration, membersMigration, settingsMigration, assetsMigration]);
   new SettingsRepository(database).importConfig(getDefaultConfig());

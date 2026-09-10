@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { openDb } from "../../src/workspace/db/sqlite.js";
+import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/storage/database.js";
 import { baseStorageMigration } from "../../src/storage/base-schema.js";
 import { executionMigration } from "../../src/storage/schema/execution.js";
@@ -45,11 +45,10 @@ beforeEach(() => {
   forcedUUID = undefined;
   sandbox = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!, "execution-"));
   mkdirSync(join(sandbox, "knowledge"));
-  // Explicit accepted member schema bootstrap on an absolute isolated path, closed
-  // before core opens. No registry getter, default open, production data or SDK IO.
+  // Frozen historical schema on an absolute isolated path, closed before core
+  // opens. No registry getter, default open, production data or SDK IO.
   const path = join(sandbox, "bossmode.db");
-  const legacy = openDb(path);
-  legacy.close();
+  createLegacyMemberStorageFixture(path);
   db = openDatabase(path);
   applyStorageMigrations(db, [baseStorageMigration, executionMigration]);
   bindDatabase(db);

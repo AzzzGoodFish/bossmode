@@ -32,9 +32,9 @@ bossmode on
 
 ### Upgrading to 0.24 RC
 
-Existing installations require an **explicit offline member-storage migration**; startup does not migrate these files automatically. If `member.json` or `member.md` remains in an active member directory, startup refuses to continue.
+Normal startup automatically backs up supported legacy storage, imports and validates it, then switches authority to `bossmode.db` and retires the old metadata files. No manual migration command is required. Stop the previous Bossmode process before upgrading and retain a verified backup.
 
-Stop Bossmode, retain a verified backup, and review the packaged `node <package-directory>/scripts/migrate-member-storage-v1.mjs --dry-run --bossmode-dir <absolute-data-directory>` report before an explicitly approved `--apply`. An interrupted migration requires `--recover` while the service remains stopped. Do not delete `bossmode.db` as a cache: it now owns member identity and configuration.
+Invalid or conflicting inputs stop the upgrade rather than being silently repaired. After an interruption, retry normal startup; this does not repair corrupt data or replace missing authoritative data. Preserve the data directory and its backups for diagnosis or verified recovery if startup still fails. Retirement warnings mean old files were retained; they do not become live authority again. Do not delete `bossmode.db` as a cache: it owns application metadata, including member identity and configuration. Retained Markdown assets and SDK history remain files.
 
 Member persona is literal `persona.md` Markdown, without required sections or frontmatter. The self-only `update_profile` tool updates DB-owned name/title; names are globally unique, and `all`, `user`, and `system` are reserved. Renaming preserves member IDs, active sessions and historical messages. The member Assets panel lists extension sources, paths, entry points and discovery issues; discovery does not imply successful runtime loading.
 
