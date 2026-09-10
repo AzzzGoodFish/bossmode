@@ -4,26 +4,25 @@
  * loader paths, unified buildMemberAgentSession, reload tool semantics.
  */
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
+let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
 
-function seed() {
-  dir = mkdtempSync(join(tmpdir(), "bm-batch6-"));
-  process.env.BOSSMODE_DIR = dir;
+async function seed() {
+  dir = process.env.BOSSMODE_DIR!;
   mkdirSync(join(dir, "members"), { recursive: true });
   mkdirSync(join(dir, "mcp"), { recursive: true });
   vi.resetModules();
+  fixture = (await import("../helpers/core-fixture.js")).coreFixture();
 }
 
 import { vi, beforeEach, afterEach } from "vitest";
 
 beforeEach(seed);
 afterEach(() => {
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+  fixture.close();
 });
 
 const PLATFORM_MCP = {
@@ -33,32 +32,42 @@ const PLATFORM_MCP = {
   },
 };
 
-describe("member mcp.json as sole source", () => {
-  it("no member file → scoped config is empty (adapter stays bound)", async () => {
-    seed();
+async function seedMcpOwner(id: string) {
+  const { importMemberRecord } = await import("../../src/workspace/member-registry.js");
+  importMemberRecord({ id, name: id, agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
+    global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
+    scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+  const { ConversationsRepository } = await import("../../src/storage/repositories/conversations.js");
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "r1", name: "MCP", members: [id], globalMemberIds: [id], createdAt: 1 });
+  mkdirSync(join(dir, "members", id), { recursive: true });
+}
+
+describe("SQL member MCP configuration as sole live source", () => {
+  it("no member config → scoped config is empty (adapter stays bound)", async () => {
     const { writeMemberScopedMcpConfig } = await import("../../src/shared/mcp-settings.js");
-    mkdirSync(join(dir, "members", "mem_x"), { recursive: true });
+    await seedMcpOwner("mem_x");
     const scoped = writeMemberScopedMcpConfig({ roomId: "r1", memberId: "mem_x" });
     const text = readFileSync(scoped.configPath, "utf-8");
+    scoped.dispose();
     expect(JSON.parse(text)).toEqual({ mcpServers: {} });
     expect(scoped.serverNames).toEqual([]);
   });
 
-  it("member file servers all pass through (file present = enabled)", async () => {
-    seed();
-    const { writeMemberScopedMcpConfig } = await import("../../src/shared/mcp-settings.js");
-    mkdirSync(join(dir, "members", "mem_y"), { recursive: true });
-    writeFileSync(join(dir, "members", "mem_y", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
+  it("SQL member servers pass through; conflicting legacy file is ignored", async () => {
+    const { writeMemberScopedMcpConfig, writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    await seedMcpOwner("mem_y");
+    writeMemberMcpConfig("mem_y", PLATFORM_MCP);
+    writeFileSync(join(dir, "members", "mem_y", "mcp.json"), '{"mcpServers":{}}');
     const scoped = writeMemberScopedMcpConfig({ roomId: "r1", memberId: "mem_y" });
     expect(scoped.serverNames.sort()).toEqual(["srv-a", "srv-b"]);
     const text = readFileSync(scoped.configPath, "utf-8");
+    scoped.dispose();
     expect(Object.keys(JSON.parse(text).mcpServers).sort()).toEqual(["srv-a", "srv-b"]);
   });
 });
 
 describe("batch 6 migration (behavior invariants)", () => {
   it("dry-run default: nothing written", async () => {
-    seed();
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
     const { runMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
     const reg = await import("../../src/workspace/member-registry.js");
@@ -68,14 +77,13 @@ describe("batch 6 migration (behavior invariants)", () => {
     expect(report.members.find((m) => m.name === "listed")?.action).toBe("would-create");
     // Nothing written, platform file untouched
     expect(existsSync(join(dir, "mcp", "mcp.json"))).toBe(true);
-    const files = existsSync(join(dir, "members")) ? require_fs_readdir(join(dir, "members")) : [];
+    const files = existsSync(join(dir, "members")) ? readdirSync(join(dir, "members")) : [];
     for (const f of files) {
       expect(existsSync(join(dir, "members", f, "mcp.json"))).toBe(false);
     }
   });
 
   it("apply: only enable-listed servers copied; no-list member gets no file", async () => {
-    seed();
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
     const { runMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
     const reg = await import("../../src/workspace/member-registry.js");
@@ -97,28 +105,19 @@ describe("batch 6 migration (behavior invariants)", () => {
   });
 
   it("rerun after apply is a no-op", async () => {
-    seed();
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
     const { runMemberAssetsMigration, needsMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
     const reg = await import("../../src/workspace/member-registry.js");
     reg.createMember({ name: "solo", agentTemplate: "pm", mcpServers: ["srv-b"] } as any);
     runMemberAssetsMigration({ dryRun: false });
-    vi.resetModules();
     expect(needsMemberAssetsMigration()).toBe(false);
     const again = runMemberAssetsMigration({ dryRun: false });
     expect(again.members.length).toBe(0);
   });
 });
 
-function require_fs_readdir(p: string): string[] {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const fs = require("node:fs");
-  return fs.readdirSync(p);
-}
-
 describe("member dir asset paths (pi loader join)", () => {
   it("present dirs included, absent dirs empty", async () => {
-    seed();
     const { memberDirLoaderAssetPaths } = await import("../../src/engine/runtime/pi-sdk.js");
     const { memberSkillsDir, memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
     // absent → empty

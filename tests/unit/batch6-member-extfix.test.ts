@@ -4,21 +4,20 @@
  * migration logs its skip when the platform archive exists.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bm-extfix-"));
-  process.env.BOSSMODE_DIR = dir;
+let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
+beforeEach(async () => {
+  dir = process.env.BOSSMODE_DIR!;
   mkdirSync(join(dir, "members"), { recursive: true });
   mkdirSync(join(dir, "mcp"), { recursive: true });
   vi.resetModules();
+  fixture = (await import("../helpers/core-fixture.js")).coreFixture();
 });
 afterEach(() => {
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+  fixture.close();
 });
 
 describe("discoverMemberExtensionEntries (qa ①)", () => {

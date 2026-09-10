@@ -6,28 +6,26 @@
  * — the guide's self-install symlink recipe is mechanically valid
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
+let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
 
-function seed() {
-  dir = mkdtempSync(join(tmpdir(), "bm-plat-ext-off-"));
-  process.env.BOSSMODE_DIR = dir;
+async function seed() {
+  dir = process.env.BOSSMODE_DIR!;
   mkdirSync(join(dir, "members"), { recursive: true });
   vi.resetModules();
+  fixture = (await import("../helpers/core-fixture.js")).coreFixture();
 }
 
 beforeEach(seed);
 afterEach(() => {
-  delete process.env.BOSSMODE_DIR;
-  rmSync(dir, { recursive: true, force: true });
+  fixture.close();
 });
 
 describe("platform extensions.json retirement", () => {
   it("startup archives the manifest once, silently on later runs", async () => {
-    seed();
     writeFileSync(join(dir, "extensions.json"), JSON.stringify({ packages: ["npm:pi-web-access"] }), "utf-8");
     const { runMemberAssetsMigrationOnStartup } = await import("../../src/workspace/member-assets-migration.js");
     runMemberAssetsMigrationOnStartup();
@@ -43,7 +41,6 @@ describe("platform extensions.json retirement", () => {
   });
 
   it("member record write peels legacy global.extensions", async () => {
-    seed();
     // Hand-write a legacy record carrying the retired field (hermetic — no
     // module-cache coupling with the server test above).
     const mId = "mem_peel0000000000000000000000";
@@ -74,7 +71,6 @@ describe("platform extensions.json retirement", () => {
 
 describe("self-install recipe (guide): npm package via symlink", () => {
   it("symlinked package with package.json pi.extensions is discovered", async () => {
-    seed();
     const { discoverMemberExtensionEntries } = await import("../../src/engine/runtime/pi-sdk.js");
     const extDir = join(dir, "members", "mem_y", "extensions");
     const pkgDir = join(extDir, "node_modules", "fake-pkg");

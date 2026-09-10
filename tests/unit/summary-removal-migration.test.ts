@@ -4,24 +4,27 @@
  * Legacy fixture mirrors pre-0.19 rooms: summary rows interleaved with the
  * original messages they covered.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+import { coreFixture } from "../helpers/core-fixture.js";
+import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
 let dir: string;
+let sequence: number;
+let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+async function importHistoricalMessages() {
+  const entries = discoverLegacyInventory(dir).entries.filter(e => e.kind === "messages");
+  await importLegacyConversations({ db: fixture.db, root: dir, sourceRoot: dir,
+    previousDatabase: undefined, sourceFiles: entries.map(e => e.path), legacy: true,
+    progress() {}, stageAsset() { throw new Error("unexpected asset"); },
+  }, entries);
+}
 
 function line(sender: string, content: string, extra: Record<string, unknown> = {}) {
-  return JSON.stringify({ id: `msg-${Math.random().toString(36).slice(2, 8)}`, sender, content, mentions: [], ts: Date.now(), ...extra });
+  return JSON.stringify({ id: `msg-${++sequence}`, seq: sequence, sender, content, mentions: [], ts: Date.now(), ...extra });
 }
 
 function seedRoom(roomId: string, lines: string[]) {
@@ -37,13 +40,14 @@ function readRoomLines(roomId: string): any[] {
 
 describe("summary-removal-v1 migration", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-summary-removal-"));
+    fixture = coreFixture();
+    dir = fixture.root;
+    sequence = 0;
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("removes summary rows, originals reappear in place, snapshot written, idempotent rerun", async () => {
@@ -89,13 +93,20 @@ describe("summary-removal-v1 migration", () => {
     const rerun = runSummaryRemovalMigration();
     expect(rerun).toEqual({ rooms: 0, removed: 0, skipped: true });
     expect(readFileSync(join(dir, "rooms", "room-a", "messages.jsonl"), "utf-8")).toBe(before);
+    await importHistoricalMessages();
+    const { getMessages } = await import("../../src/workspace/message-store.js");
+    expect(getMessages("room-a").map(m => m.content)).toEqual(["ORIGINAL-1", "ORIGINAL-2", "ORIGINAL-3"]);
+    expect(getMessages("room-a")[2].type).toBe("task_event");
+    expect(getMessages("room-b").map(m => m.content)).toEqual(["NO-SUMMARY-HERE"]);
+    expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
   });
 
-  it("readers no longer merge: getMessages returns originals without summary rows", async () => {
+  it("after explicit historical import, SQL readers return originals without summary merging", async () => {
     seedRoom("room-c", [
       line("user", "PLAIN-1"),
       line("pm", "PLAIN-2"),
     ]);
+    await importHistoricalMessages();
     const store = await import("../../src/workspace/message-store.js");
     const messages = store.getMessages("room-c", { limit: 50 });
     expect(messages.map((m) => m.content)).toEqual(["PLAIN-1", "PLAIN-2"]);

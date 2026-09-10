@@ -1,16 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const state = vi.hoisted(() => ({ tmpDir: "" }));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { importMemberRecord } from "../../src/workspace/member-registry.js";
+let fixture: ReturnType<typeof coreFixture>;
 
 vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => state.tmpDir,
 }));
 
 import {
@@ -24,23 +20,29 @@ import {
 import { postMessage } from "../../src/communication/message-bus.js";
 
 beforeEach(() => {
-  state.tmpDir = mkdtempSync(join(tmpdir(), "bossmode-wait-"));
-  mkdirSync(join(state.tmpDir, "rooms", "room-a"), { recursive: true });
+  fixture = coreFixture();
+  for (const name of ["pm", "qa", "dev"]) importMemberRecord({
+    id: `mem_${name}`, name, agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
+    global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
+    scopeOverrides: {}, createdAt: 1, updatedAt: 1,
+  });
+  new ConversationsRepository().upsertRoom({ id: "room-a", name: "Wait", members: ["pm", "qa", "dev"],
+    globalMemberIds: ["mem_pm", "mem_qa", "mem_dev"], createdAt: 1 });
   clearAllWaitsForTests();
 });
 
 afterEach(() => {
   clearAllWaitsForTests();
-  rmSync(state.tmpDir, { recursive: true, force: true });
+  fixture.close();
 });
 
 describe("waitForMember", () => {
   it("returns immediately when target is already idle", async () => {
     const outcome = await waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "idle",
     });
@@ -54,9 +56,9 @@ describe("waitForMember", () => {
   it("rejects self-wait and concurrent second wait", async () => {
     const self = await waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_pm",
+      targetMemberId: "mem_pm",
       targetName: "pm",
       targetStatus: "working",
     });
@@ -64,44 +66,44 @@ describe("waitForMember", () => {
 
     const first = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 5));
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(true);
 
     const second = await waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_dev",
+      targetMemberId: "mem_dev",
       targetName: "developer",
       targetStatus: "working",
     });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.error).toMatch(/one wait/i);
 
-    settleWaitOnAbort("room-a", "rm_pm");
+    settleWaitOnAbort("room-a", "mem_pm");
     await first;
   });
 
   it("resolves when target posts an agent-authored message", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
 
-    postMessage("room-a", "qa", "QA report ready", [], { senderMemberId: "rm_qa" });
+    postMessage("room-a", "qa", "QA report ready", [], { senderMemberId: "mem_qa" });
 
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
@@ -114,9 +116,9 @@ describe("waitForMember", () => {
   it("ignores user/system messages without senderMemberId; settles on idle", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
@@ -125,9 +127,9 @@ describe("waitForMember", () => {
 
     postMessage("room-a", "user", "hello");
     postMessage("room-a", "system", "noise");
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(true);
 
-    notifyMemberIdle("room-a", "rm_qa");
+    notifyMemberIdle("room-a", "mem_qa");
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.reason).toBe("idle");
@@ -136,15 +138,15 @@ describe("waitForMember", () => {
   it("resolves on target idle notification", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
-    notifyMemberIdle("room-a", "rm_qa");
+    notifyMemberIdle("room-a", "mem_qa");
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.reason).toBe("idle");
@@ -153,15 +155,15 @@ describe("waitForMember", () => {
   it("resolves with reason error when target idles after turn failure", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
-    notifyMemberIdle("room-a", "rm_qa", { error: "request failed. Error: terminated" });
+    notifyMemberIdle("room-a", "mem_qa", { error: "request failed. Error: terminated" });
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
@@ -175,18 +177,18 @@ describe("waitForMember", () => {
   it("does not wake on idle notify for a different member (transient retry stays working)", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
     // Other member idling / error must not settle this wait — target still working (retry).
-    notifyMemberIdle("room-a", "rm_dev", { error: "terminated" });
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
-    notifyMemberIdle("room-a", "rm_qa");
+    notifyMemberIdle("room-a", "mem_dev", { error: "terminated" });
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(true);
+    notifyMemberIdle("room-a", "mem_qa");
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.reason).toBe("idle");
@@ -195,22 +197,22 @@ describe("waitForMember", () => {
   it("resolves on @mention of the waiter (mention_interrupt) after one tick — no abort", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(true);
 
     postMessage("room-a", "user", "@pm please look", ["pm"], {
-      mentionMemberIds: ["rm_pm"],
+      mentionMemberIds: ["mem_pm"],
     });
 
     // Steer-first: still waiting on the same tick as the message (deferred settle).
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(true);
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(true);
 
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
@@ -219,7 +221,7 @@ describe("waitForMember", () => {
       expect(outcome.message).toBeUndefined(); // body is NOT on wait result
       expect(outcome.detail).toMatch(/mentioned by user/i);
     }
-    expect(isMemberWaiting("room-a", "rm_pm")).toBe(false);
+    expect(isMemberWaiting("room-a", "mem_pm")).toBe(false);
   });
 
   it("mention path never calls abortAgent (steer owns delivery)", async () => {
@@ -237,15 +239,15 @@ describe("waitForMember", () => {
   it("resolves on abort settle", async () => {
     const pending = waitForMember({
       roomId: "room-a",
-      waiterMemberId: "rm_pm",
+      waiterMemberId: "mem_pm",
       waiterName: "pm",
-      targetMemberId: "rm_qa",
+      targetMemberId: "mem_qa",
       targetName: "qa",
       targetStatus: "working",
       timeoutMinutes: 5,
     });
     await new Promise((r) => setTimeout(r, 10));
-    settleWaitOnAbort("room-a", "rm_pm");
+    settleWaitOnAbort("room-a", "mem_pm");
     const outcome = await pending;
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.reason).toBe("mention_interrupt");
@@ -256,9 +258,9 @@ describe("waitForMember", () => {
     try {
       const pending = waitForMember({
         roomId: "room-a",
-        waiterMemberId: "rm_pm",
+        waiterMemberId: "mem_pm",
         waiterName: "pm",
-        targetMemberId: "rm_qa",
+        targetMemberId: "mem_qa",
         targetName: "qa",
         targetStatus: "working",
         timeoutMinutes: 1,

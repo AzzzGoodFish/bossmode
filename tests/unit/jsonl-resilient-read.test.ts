@@ -1,108 +1,159 @@
-/**
- * JSONL read-path line-level resilience (0.19.5).
- * A single corrupt/truncated line must not take down room message reads.
- */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+/** Historical JSONL imports are strict and recoverable. Live reads use SQL only;
+ * tolerant parsing remains available for retained, non-authoritative archives. */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { bindDatabase, openDatabase } from "../../src/storage/database.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { importMessage, readMessages } from "../../src/storage/message-repository.js";
+import { coreStorageMigrations } from "../../src/storage/migrations.js";
+import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/storage/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
+import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
+import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/workspace/message-store.js";
+import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+import { parseJsonlLines } from "../../src/shared/jsonl.js";
 
-let dir: string;
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-}));
-
-function goodMsg(id: string, content: string, seq: number) {
-  return JSON.stringify({
-    id,
-    seq,
-    ts: 1_700_000_000_000 + seq,
-    sender: "user",
-    content,
-    type: "message",
+let fixture: ReturnType<typeof coreFixture>;
+let upgraded: Awaited<ReturnType<typeof prepareStorageUpgrade>> | undefined;
+const messagePath = "rooms/room-a/messages.jsonl";
+const eventPath = "rooms/room-a/agent-events/pm.jsonl";
+const retainedMessage = { id: "prior", seq: 1, ts: 1, sender: "user", content: "Existing SQL fact", mentions: [] };
+const goodMsg = (id: string, content: string, seq: number) => JSON.stringify({
+  id, seq, ts: 1_700_000_000_000 + seq, sender: "user", content, mentions: [], type: "message",
+});
+function write(path: string, body: string) {
+  const file = join(fixture.root, path);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, body);
+  return file;
+}
+function upgrade() {
+  fixture.db.close();
+  let entries: LegacySourceEntry[] = [];
+  return prepareStorageUpgrade({
+    root: fixture.root, formatVersion: 1, migrations: coreStorageMigrations,
+    collectLegacySources: async () => (entries = discoverLegacyInventory(fixture.root).entries),
+    importData: async (ctx: UpgradeImportContext) => { await importLegacyConversations(ctx, entries); },
+    validate: async () => {},
   });
 }
+async function importAndBind() {
+  upgraded = await upgrade();
+  bindDatabase(upgraded.db);
+  expect(upgraded.db.all("SELECT * FROM outbox")).toEqual([]);
+  expect(readMessages("existing-room", upgraded.db)).toEqual([retainedMessage]);
+}
+function assertOriginalUntouched(path: string, body: string) {
+  expect(readFileSync(join(fixture.root, path), "utf8")).toBe(body);
+  const original = openDatabase(fixture.path);
+  try {
+    expect(readMessages("room-a", original)).toEqual([]);
+    expect(readMessages("existing-room", original)).toEqual([retainedMessage]);
+    expect(original.all("SELECT * FROM agent_events")).toEqual([]);
+    expect(original.get("SELECT value FROM storage_meta WHERE key='core-authority'")).toBeUndefined();
+  } finally { original.close(); }
+}
 
-describe("jsonl resilient read", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-jsonl-"));
-    mkdirSync(join(dir, "rooms", "room-a"), { recursive: true });
-    vi.resetModules();
-  });
+beforeEach(() => {
+  fixture = coreFixture();
+  new ConversationsRepository(fixture.db).upsertRoom({ id: "existing-room", name: "Existing", members: [], createdAt: 1 });
+  importMessage(fixture.db, "existing-room", retainedMessage);
+});
+afterEach(() => { upgraded?.db.close(); upgraded = undefined; fixture.close(); });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  function writeMessages(...lines: string[]) {
-    writeFileSync(join(dir, "rooms", "room-a", "messages.jsonl"), lines.join("\n") + (lines.length ? "\n" : ""), "utf-8");
-  }
-
-  it("empty file returns []", async () => {
-    writeMessages();
-    const { getMessages, readAllMessages } = await import("../../src/workspace/message-store.js");
+describe("historical JSONL import and SQL queries", () => {
+  it("empty historical file imports an empty SQL scope", async () => {
+    write(messagePath, "");
+    await importAndBind();
     expect(getMessages("room-a")).toEqual([]);
     expect(readAllMessages("room-a")).toEqual([]);
+    expect(existsSync(join(fixture.root, messagePath))).toBe(false);
   });
 
-  it("all-good file returns every message", async () => {
-    writeMessages(goodMsg("m1", "hello", 1), goodMsg("m2", "world", 2), goodMsg("m3", "!", 3));
-    const { getMessages, readAllMessages, getLatestMessageId } = await import("../../src/workspace/message-store.js");
-    const all = readAllMessages("room-a");
-    expect(all.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
-    expect(getMessages("room-a").map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  it("all-good history preserves every message, order, search and latest; live reads ignore stale JSONL", async () => {
+    const body = [goodMsg("m1", "hello", 1), goodMsg("m2", "world", 2), goodMsg("m3", "!", 3)].join("\n") + "\n";
+    write(messagePath, body);
+    await importAndBind();
+    expect(readAllMessages("room-a").map(m => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(getMessages("room-a").map(m => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(getMessagesSince("room-a", "m1").map(m => m.id)).toEqual(["m2", "m3"]);
+    expect(searchMessages("room-a", { query: "world" }).messages.map(m => m.id)).toEqual(["m2"]);
     expect(getLatestMessageId("room-a")).toBe("m3");
+    const backup = upgraded!.db.get<{ backup_path: string }>("SELECT backup_path FROM storage_upgrade_files WHERE path=?", messagePath)!;
+    expect(readFileSync(join(fixture.root, backup.backup_path), "utf8")).toBe(body);
+    write(messagePath, goodMsg("stale", "not authoritative", 4) + "\n");
+    expect(getLatestMessageId("room-a")).toBe("m3");
+    expect(searchMessages("room-a", { query: "not authoritative" }).messages).toEqual([]);
   });
 
-  it("trailing truncated line is skipped; earlier messages still load (lhy disk-full case)", async () => {
-    // 51-byte-ish unterminated string fragment, same class of failure as production
-    const truncated = '{"id":"m-bad","sender":"jarvy","content":"redis is';
-    writeMessages(goodMsg("m1", "first", 1), goodMsg("m2", "second", 2), truncated);
-    const { getMessages, readAllMessages, getMessagesSince, getLatestMessageId } = await import("../../src/workspace/message-store.js");
-
-    const all = readAllMessages("room-a");
-    expect(all.map((m) => m.id)).toEqual(["m1", "m2"]);
-    expect(getMessages("room-a").map((m) => m.id)).toEqual(["m1", "m2"]);
-    expect(getMessagesSince("room-a", null).map((m) => m.id)).toEqual(["m1", "m2"]);
-    // Latest-id walks past the corrupt tail
-    expect(getLatestMessageId("room-a")).toBe("m2");
+  it.each([
+    ["truncated trailing JSON", goodMsg("m1", "first", 1) + '\n{"id":"m-bad","content":"redis is\n', "invalid-json"],
+    ["middle corruption", goodMsg("m1", "a", 1) + '\n{not-json\n\n' + goodMsg("m2", "b", 2) + "\n", "invalid-json"],
+    ["valid but unterminated final record", goodMsg("m1", "first", 1), "unterminated-jsonl-line"],
+  ])("%s rejects cutover, retaining source bytes and prior SQL", async (_name, body, error) => {
+    write(messagePath, body);
+    await expect(upgrade()).rejects.toThrow(error);
+    assertOriginalUntouched(messagePath, body);
   });
 
-  it("middle corrupt line is skipped; neighbors remain in order", async () => {
-    writeMessages(
-      goodMsg("m1", "a", 1),
-      "{not-json",
-      goodMsg("m2", "b", 2),
-      "",
-      goodMsg("m3", "c", 3),
-    );
-    const { readAllMessages, getMessages, searchMessages } = await import("../../src/workspace/message-store.js");
-    expect(readAllMessages("room-a").map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
-    expect(getMessages("room-a").map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
-    expect(searchMessages("room-a", { query: "b" }).messages.map((m) => m.id)).toEqual(["m2"]);
+  it("blank lines and CRLF preserve neighboring message order and query results", async () => {
+    write(messagePath, "\r\n" + goodMsg("m1", "a", 1) + "\r\n \t\r\n" + goodMsg("m2", "b", 2) + "\r\n");
+    await importAndBind();
+    expect(readAllMessages("room-a").map(m => m.id)).toEqual(["m1", "m2"]);
+    expect(searchMessages("room-a", { query: "b" }).messages.map(m => m.id)).toEqual(["m2"]);
   });
 
-  it("agent-events loadEventsFromDisk also skips corrupt lines", async () => {
-    const eventsDir = join(dir, "rooms", "room-a", "agent-events");
-    mkdirSync(eventsDir, { recursive: true });
-    writeFileSync(
-      join(eventsDir, "pm.jsonl"),
-      [
-        JSON.stringify({ type: "agent_start", ts: 1 }),
-        '{"type":"tool_start","ts":2,"partial',
-        JSON.stringify({ type: "agent_end", ts: 3 }),
-      ].join("\n") + "\n",
-      "utf-8",
-    );
-    const { loadEventsFromDisk } = await import("../../src/engine/event-handler.js");
-    const events = loadEventsFromDisk("room-a", "pm");
-    expect(events.map((e: any) => e.type)).toEqual(["agent_start", "agent_end"]);
+  it("late corruption never publishes already committed staging batches; corrected retry imports once", async () => {
+    const good = Array.from({ length: 130 }, (_, i) => goodMsg(`m${i + 1}`, `body${i + 1}`, i + 1)).join("\n") + "\n";
+    write(messagePath, good + "{bad}\n");
+    await expect(upgrade()).rejects.toThrow("invalid-json");
+    assertOriginalUntouched(messagePath, good + "{bad}\n");
+    const staged = openDatabase(join(fixture.root, "upgrades/staging.sqlite"));
+    try {
+      expect(staged.get("SELECT COUNT(*) n FROM messages WHERE scope_id='room-a'")).toEqual({ n: 128 });
+      expect(readMessages("existing-room", staged)).toEqual([retainedMessage]);
+    }
+    finally { staged.close(); }
+    write(messagePath, good);
+    await importAndBind();
+    expect(readAllMessages("room-a")).toHaveLength(130);
+    expect(getLatestMessageId("room-a")).toBe("m130");
+    upgraded!.db.close();
+    await importAndBind();
+    expect(upgraded!.migrated).toBe(false);
+    expect(readAllMessages("room-a")).toHaveLength(130);
   });
 
-  it("parseJsonlLines helper: middle/trailing/all-good/empty", async () => {
-    const { parseJsonlLines } = await import("../../src/shared/jsonl.js");
+  it("corrupt historical agent events reject import instead of silently dropping an execution", async () => {
+    const body = '{"type":"agent_start","ts":1}\n{"type":"tool_start","partial\n{"type":"agent_end","ts":3}\n';
+    write(eventPath, body);
+    await expect(upgrade()).rejects.toThrow("invalid-json");
+    assertOriginalUntouched(eventPath, body);
+  });
+
+  it("valid event history retains order under an unresolved owner, never the current same-name member", async () => {
+    const { importMemberRecord } = await import("../../src/workspace/member-registry.js");
+    importMemberRecord({ id: "mem_pm", name: "pm", agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
+      global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
+      scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    write(eventPath, '\n{"type":"agent_start","ts":1}\n\n{"type":"agent_end","ts":3}\n');
+    await importAndBind();
+    expect(loadEventsFromDisk("room-a", "legacy-unresolved:pm").map(e => e.type)).toEqual(["agent_start", "agent_end"]);
+    expect(loadEventsFromDisk("room-a", "mem_pm")).toEqual([]);
+    expect(upgraded!.db.all("SELECT DISTINCT owner_key,member_id FROM agent_events")).toEqual([{ owner_key: "legacy-unresolved:pm", member_id: null }]);
+  });
+
+  it("room source ownership mismatch rejects cutover and preserves its bytes", async () => {
+    const path = "rooms/room-a/room.json";
+    const body = JSON.stringify({ id: "wrong-room", name: "Wrong", members: [], createdAt: 1 });
+    write(path, body);
+    await expect(upgrade()).rejects.toThrow("ownership mismatch");
+    assertOriginalUntouched(path, body);
+  });
+
+  it("parseJsonlLines retains tolerant archive-only middle/trailing/all-good/empty behavior", () => {
     expect(parseJsonlLines("", { category: "test" })).toEqual([]);
     expect(parseJsonlLines('{"a":1}\n{"a":2}\n', { category: "test" })).toEqual([{ a: 1 }, { a: 2 }]);
     expect(parseJsonlLines('{"a":1}\nNOPE\n{"a":3}\n', { category: "test" })).toEqual([{ a: 1 }, { a: 3 }]);
