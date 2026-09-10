@@ -1,54 +1,77 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { prepareCoreStorage } from "../../src/storage/core-startup.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import type { Database } from "../../src/storage/database.js";
+
 let root: string;
-let restore: string | undefined;
-beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "bm-member-startup-"));
-  restore = process.env.BOSSMODE_DIR; process.env.BOSSMODE_DIR = root;
-  vi.resetModules();
-});
-afterEach(async () => {
-  const { openDb } = await import("../../src/workspace/db/sqlite.js");
-  openDb().close();
-  if (restore === undefined) delete process.env.BOSSMODE_DIR; else process.env.BOSSMODE_DIR = restore;
-  rmSync(root, { recursive: true, force: true });
-});
-describe("mandatory member storage startup", () => {
-  it("initializes fresh DB and validates new member directories", async () => {
-    const { ensureMemberStorageReady } = await import("../../src/workspace/member-storage-startup.js");
-    ensureMemberStorageReady();
-    const { createMember } = await import("../../src/workspace/member-registry.js");
-    createMember({ name: "fresh" });
-    expect(() => ensureMemberStorageReady()).not.toThrow();
+let db: Database | undefined;
+const member = {id:"mem_old",name:"old",agentTemplate:"general",global:{model:"p/m"},createdAt:1,updatedAt:2};
+beforeEach(() => { root = process.env.BOSSMODE_DIR!; mkdirSync(join(root,"knowledge"),{recursive:true}); });
+afterEach(() => { db?.close(); db = undefined; rmSync(root,{recursive:true,force:true}); });
+function file(path: string, value: string) { const full = join(root,path); mkdirSync(dirname(full),{recursive:true}); writeFileSync(full,value); }
+async function start() { const result = await prepareCoreStorage({root,initialConfig:getDefaultConfig(),bundledCatalog:[]}); db = result.db; return result; }
+function oldDatabase(marked = true, withTable = true) {
+  const old = new DatabaseSync(join(root,"bossmode.db"));
+  old.exec("CREATE TABLE schema_migrations(id TEXT PRIMARY KEY)");
+  if (marked) old.exec("INSERT INTO schema_migrations VALUES('member-storage-v1')");
+  if (withTable) old.exec("CREATE TABLE members(id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE,title TEXT,agent_template TEXT NOT NULL,global_json TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)");
+  return old;
+}
+
+describe("ordinary startup member authority", () => {
+  it("initializes and reopens fresh SQL authority without a manual command", async () => {
+    const first = await start(); expect(first.migrated).toBe(true);
+    expect(new MembersRepository(db!).list()).toEqual([]); db!.close();
+    expect((await start()).migrated).toBe(false);
   });
-  it("refuses legacy records before opening an empty registry", async () => {
-    const dir = join(root, "members", "mem_old"); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "member.json"), "{}");
-    const { ensureMemberStorageReady } = await import("../../src/workspace/member-storage-startup.js");
-    expect(() => ensureMemberStorageReady()).toThrow(/offline migration/);
+  it("imports legacy IDs, metadata and body at normal startup, then ignores poisoned leftovers", async () => {
+    file("members/mem_old/member.json",JSON.stringify(member));
+    file("members/mem_old/member.md","---\nname: wrong-label\ntitle: Engineer\n---\n\n literal body \n");
+    const first = await start();
+    expect(new MembersRepository(db!).get(member.id)).toMatchObject({...member,title:"Engineer"});
+    expect(readFileSync(join(root,"members/mem_old/persona.md"),"utf8")).toBe("\n literal body \n");
+    expect(db!.get("SELECT member_id FROM memory_documents WHERE path='members/mem_old/persona.md'")).toEqual({member_id:member.id});
+    expect(readFileSync(join(first.backupDirectory!,"files/members/mem_old/member.json"),"utf8")).toBe(JSON.stringify(member));
+    expect(existsSync(join(root,"members/mem_old/member.json"))).toBe(false);
+    db!.close(); file("members/mem_old/member.json","poison");
+    expect((await start()).migrated).toBe(false);
+    expect(new MembersRepository(db!).get(member.id)?.name).toBe("old");
   });
-  it("refuses missing authoritative DB and incomplete conversion", async () => {
-    mkdirSync(join(root, "migrations"));
-    const journal = join(root, "migrations", "member-storage-v1.json");
-    writeFileSync(journal, JSON.stringify({ status: "prepared" }));
-    const { ensureMemberStorageReady } = await import("../../src/workspace/member-storage-startup.js");
-    expect(() => ensureMemberStorageReady()).toThrow(/incomplete/);
-    writeFileSync(journal, JSON.stringify({ status: "done" }));
-    expect(() => ensureMemberStorageReady()).toThrow(/database is missing/);
+  it("retains an empty prior SQL registry as authority, ignoring invalid retired identities", async () => {
+    oldDatabase().close();
+    file("members/mem_old/member.json","invalid retired JSON"); file("members/mem_old/member.md","---\nbroken");
+    await start(); expect(new MembersRepository(db!).list()).toEqual([]);
+    expect(db!.all("SELECT * FROM memory_documents")).toEqual([]);
   });
-  it("refuses a database member whose assets disappeared during an interrupted fire", async () => {
-    const { createMember } = await import("../../src/workspace/member-registry.js");
-    const member = createMember({ name: "interrupted" });
-    rmSync(join(root, "members", member.id), { recursive: true });
-    const { ensureMemberStorageReady } = await import("../../src/workspace/member-storage-startup.js");
-    expect(() => ensureMemberStorageReady()).toThrow(/no asset directory/);
+  it.each([[false,true],[true,false]])("rejects inconsistent old authority marker=%s table=%s", async (marked, table) => {
+    oldDatabase(marked,table).close();
+    await expect(start()).rejects.toThrow("Unrecognized previous member authority");
+    const prior = new DatabaseSync(join(root,"bossmode.db"),{readOnly:true});
+    try { expect(prior.prepare("SELECT 1 FROM sqlite_master WHERE name='storage_meta'").get()).toBeUndefined(); } finally { prior.close(); }
   });
-  it("refuses orphaned asset directories rather than hiding a lost identity", async () => {
-    const { openDb } = await import("../../src/workspace/db/sqlite.js"); openDb();
-    mkdirSync(join(root, "members", "mem_orphan"), { recursive: true });
-    const { ensureMemberStorageReady } = await import("../../src/workspace/member-storage-startup.js");
-    expect(() => ensureMemberStorageReady()).toThrow(/no database identity/);
+  it("refuses missing current persona instead of restoring it from retired profile text", async () => {
+    const old = oldDatabase();
+    old.prepare("INSERT INTO members VALUES (?,?,?,?,?,?,?,?)").run(member.id,member.name,member.name,null,"general","{}",1,2); old.close();
+    file("members/mem_old/member.md","stale replacement");
+    await expect(start()).rejects.toThrow("Missing snapshotted member source");
+    expect(readFileSync(join(root,"members/mem_old/member.md"),"utf8")).toBe("stale replacement");
+  });
+  it("rejects orphan mixed profiles and permits corrected ordinary retry", async () => {
+    file("members/mem_old/member.md","body");
+    await expect(start()).rejects.toThrow("no identity metadata");
+    expect(existsSync(join(root,"bossmode.db"))).toBe(false);
+    file("members/mem_old/member.json",JSON.stringify(member));
+    await start(); expect(new MembersRepository(db!).get(member.id)?.name).toBe(member.name);
+  });
+  it.each(["not sqlite", ""]) ("propagates unreadable or unrecognized existing authority %j", async bytes => {
+    file("bossmode.db",bytes);
+    if (bytes) await expect(start()).rejects.toThrow();
+    else { // An empty file has no member authority; ordinary startup may initialize it.
+      await start(); expect(new MembersRepository(db!).list()).toEqual([]);
+    }
   });
 });

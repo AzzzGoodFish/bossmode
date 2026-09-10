@@ -1,30 +1,28 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { MemberArchivesRepository } from "../../src/storage/repositories/member-archives.js";
+import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
+import { commitDocumentRevision } from "../../src/storage/document-repository.js";
+let fixture: ReturnType<typeof coreFixture>;
 let root: string;
-let old: string | undefined;
-beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "bm-member-db-archive-")); old = process.env.BOSSMODE_DIR;
-  process.env.BOSSMODE_DIR = root; vi.resetModules();
-});
-afterEach(async () => {
-  (await import("../../src/workspace/db/sqlite.js")).openDb().close();
-  if (old === undefined) delete process.env.BOSSMODE_DIR; else process.env.BOSSMODE_DIR = old;
-  rmSync(root, { recursive: true, force: true });
-});
-it("fire exports DB metadata, import preserves title/configuration and literal persona", async () => {
-  const { createMember, fireMember, getMember, memberDir } = await import("../../src/workspace/member-registry.js");
+beforeEach(() => { fixture = coreFixture(); root = fixture.root; });
+afterEach(() => fixture.close());
+it("archive retains SQL metadata, import preserves title/configuration and literal persona", async () => {
+  const { createMember, getMember, memberDir } = await import("../../src/workspace/member-registry.js");
   const { listArchives, importMemberFromArchive } = await import("../../src/workspace/member-archive.js");
   const m = createMember({ name: "before", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: ["skill-a"], mcpServers: ["server-a"] });
   const markdown = "---\nname: this is Markdown, not identity\n---\n\n自由正文\n\n";
   writeFileSync(join(memberDir(m.id), "persona.md"), markdown);
   expect(existsSync(join(memberDir(m.id), "member.json"))).toBe(false);
-  const { archived } = fireMember(m.id, { confirm: true });
+  const { archived } = await new MemberArchiveService(fixture.db, root, { quiesce: async () => {} }).archive(m.id, { confirm: true });
   expect(getMember(m.id)).toBeNull();
-  expect(JSON.parse(readFileSync(join(root, archived, "member.json"), "utf8"))).toMatchObject({ id: m.id, title: "Engineer", global: m.global });
+  expect(fixture.db.get("SELECT archive_path FROM members WHERE id=?", m.id)).toEqual({ archive_path: archived });
+  expect(new MemberArchivesRepository(fixture.db).get(archived, m.name)).toMatchObject({ title: "Engineer", global: m.global });
+  expect(existsSync(join(root, archived, "member.json"))).toBe(false);
   expect(listArchives().find((a) => a.archivePath === archived)?.hasPersona).toBe(true);
-  const imported = importMemberFromArchive({ archivePath: archived, name: "after" });
+  const imported = importMemberFromArchive({ archivePath: archived, name: "after" }, { commitPersona: (db, p) => commitDocumentRevision(db, p.identity, p.meta, p.event, 0) });
   expect(imported.id).not.toBe(m.id);
   expect(imported.title).toBe("Engineer");
   expect(imported.global).toEqual(m.global);

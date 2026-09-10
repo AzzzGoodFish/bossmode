@@ -7,27 +7,19 @@
  * Fixtures mirror production shapes: entries keyed by mem_* (today's model
  * switches) and by legacy member name (codex era), in stamped rooms.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+import { coreFixture } from "../helpers/core-fixture.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
-
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
-
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
+function historicalRoom(name: string, ids?: string[]) {
+  const room = { id: name, name, members: ["pm"], createdAt: 1, ...(ids ? {globalMemberIds: ids} : {}) };
+  mkdirSync(join(dir, "rooms", room.id), {recursive:true});
+  writeFileSync(join(dir, "rooms", room.id, "room.json"), JSON.stringify(room));
+  return room;
 }
-
 const PROFILE = {
   name: "Test provider",
   providerSlug: "testprov",
@@ -50,10 +42,7 @@ async function seedCredential() {
 }
 
 async function makeStampedRoom(memberId: string, memberName = "pm", roomName = "R") {
-  const roomStore = await import("../../src/workspace/room-store.js");
-  const room = roomStore.createRoom(roomName, dir, [{ agent: memberName, name: memberName }], undefined);
-  roomStore.stampGlobalMemberIds(room.id, [memberId], memberId);
-  return room;
+  return historicalRoom(roomName, [memberId]);
 }
 
 function writeOverrides(roomId: string, overrides: Record<string, unknown>) {
@@ -69,19 +58,8 @@ function readOverrides(roomId: string): Record<string, unknown> | undefined {
 }
 
 describe("cleanup-member-overrides-v1", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-oc-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
-    mkdirSync(join(dir, "rooms"), { recursive: true });
-    mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("pm");
-    seedAgent("qa");
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  beforeEach(() => { fixture = coreFixture(); dir = fixture.root; });
+  afterEach(() => fixture.close());
 
   it("clears dead residue (mem_* duplicates, codex-era name keys, ghosts); registry config untouched; snapshot + idempotent", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
@@ -173,9 +151,7 @@ describe("cleanup-member-overrides-v1", () => {
     const cred = await seedCredential();
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const qa = reg.createMember({ name: "qa", agentTemplate: "qa", model: "testprov/claude-a", credentialId: cred.id });
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }, { agent: "qa", name: "qa" }], undefined);
-    roomStore.stampGlobalMemberIds(room.id, [pm.id, qa.id], pm.id);
+    const room = historicalRoom("R", [pm.id, qa.id]);
 
     writeOverrides(room.id, {
       // Architect rehearsal finding: mem_* entry whose credentialId differs
@@ -201,8 +177,7 @@ describe("cleanup-member-overrides-v1", () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const cred = await seedCredential();
     reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("Legacy", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const room = historicalRoom("Legacy");
     // No stampGlobalMemberIds — legacy read side consults memberOverrides.
     writeOverrides(room.id, { pm: { thinkingLevel: "high" } });
 

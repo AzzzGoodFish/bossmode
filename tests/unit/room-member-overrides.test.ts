@@ -1,28 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
+import { coreFixture } from "../helpers/core-fixture.js";
+import { saveAgentDefinition } from "../../src/workforce/agent-store.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bossmode-room-member-overrides-"));
-  vi.resetModules();
-  vi.stubEnv("BOSSMODE_DIR", dir);
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-  rmSync(dir, { recursive: true, force: true });
-});
-
+beforeEach(() => { fixture = coreFixture(); dir = fixture.root; });
+afterEach(() => fixture.close());
 function writeAgent(name: string): void {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\nmodel: anthropic/${name}\n---\n${name} prompt\n`, "utf-8");
+  saveAgentDefinition(name, `---\nname: ${name}\nmodel: anthropic/${name}\n---\n${name} prompt\n`);
 }
-
 describe("room member overrides", () => {
   it("keeps model and thinking overrides scoped to one room", async () => {
     writeAgent("pm");
@@ -54,9 +44,7 @@ describe("room member overrides", () => {
     writeFileSync(join(dir, "members.json"), JSON.stringify([
       { id: "legacy-dev", name: "dev-a", agent: "qa", runtime: "pi-cli", model: "anthropic/legacy", thinkingLevel: "high" },
     ]));
-    const room = roomStore.createRoom("A", dir, drafts([]));
-    const added = roomStore.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" });
-    expect(added.ok).toBe(true);
+    const room = roomStore.createRoom("A", dir, [{ agent: "developer", name: "dev-a" }]);
 
     expect(resolveRoomMember(room.id, "dev-a")).toMatchObject({
       id: expect.stringMatching(/^rm_/),

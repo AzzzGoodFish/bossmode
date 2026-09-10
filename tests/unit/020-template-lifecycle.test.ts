@@ -1,32 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const state = vi.hoisted(() => ({ dir: "" }));
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => state.dir,
-  readConfig: () => ({ username: "fish" }),
-}));
-
-vi.mock("../../src/foundation/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
+import { coreFixture } from "../helpers/core-fixture.js";
+import { saveAgentDefinition } from "../../src/workforce/agent-store.js";
+import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { getDefaultConfig } from "../../src/shared/config.js";
+let fixture: ReturnType<typeof coreFixture>;
 describe("template lifecycle S5", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bm-tpl-"));
-    mkdirSync(join(state.dir, "agents"), { recursive: true });
-    writeFileSync(join(state.dir, "agents", "general.md"), "---\nname: general\ntags: [builtin]\n---\nG\n", "utf8");
-    writeFileSync(join(state.dir, "agents", "custom_x.md"), "---\nname: custom_x\n---\nC\n", "utf8");
+    fixture = coreFixture();
+    new SettingsRepository(fixture.db).importConfig(getDefaultConfig());
+    saveAgentDefinition("general", "---\nname: general\ntags: [builtin]\n---\nG\n");
+    saveAgentDefinition("custom_x", "---\nname: custom_x\n---\nC\n");
   });
-  afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
-  });
+  afterEach(() => fixture.close());
 
   it("falls back referencing members to general and posts dm warning", async () => {
-    // agent-store freezes AGENTS_DIR at import — write via save path after import with mock
+    // Exercise the retained explicit lifecycle helper, not a retired template API.
     const reg = await import("../../src/workspace/member-registry.js");
     const life = await import("../../src/workforce/template-lifecycle.js");
     const dm = await import("../../src/workspace/dm-message-store.js");
@@ -34,7 +23,7 @@ describe("template lifecycle S5", () => {
     const m = reg.createMember({ name: "dave", agentTemplate: "custom_x" });
     expect(m.agentTemplate).toBe("custom_x");
 
-    // Simulate file gone + fallback (deleteAgent may not see our agents dir due to frozen path)
+    // Explicit fallback does not require implicit filesystem template discovery.
     const result = life.fallbackMembersToGeneral("custom_x");
     expect(result.updatedMemberIds).toContain(m.id);
     expect(reg.getMember(m.id)!.agentTemplate).toBe("general");

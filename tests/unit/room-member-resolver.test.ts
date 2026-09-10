@@ -1,32 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { saveAgentDefinition } from "../../src/workforce/agent-store.js";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
-let closeDb: (() => void) | undefined;
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bossmode-room-member-resolver-"));
-  vi.resetModules();
-  vi.stubEnv("BOSSMODE_DIR", dir);
-});
-
-afterEach(() => {
-  closeDb?.();
-  closeDb = undefined;
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-  rmSync(dir, { recursive: true, force: true });
-});
-
+beforeEach(() => { fixture = coreFixture(); dir = fixture.root; });
+afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 function writeAgent(name: string, extraFrontmatter = ""): void {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n${extraFrontmatter}---\n${name} prompt\n`, "utf-8");
+  saveAgentDefinition(name, `---\nname: ${name}\n${extraFrontmatter}---\n${name} prompt\n`);
 }
-
 describe("room-member-resolver — no implicit model default", () => {
   it("leaves a freshly created direct Agent member Unconfigured (no model, no credentialId)", async () => {
     writeAgent("architect");
@@ -55,21 +42,18 @@ describe("room-member-resolver — no implicit model default", () => {
     writeAgent("developer");
     const roomStore = await import("../../src/workspace/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
+    // Retained historical converter runs on files; resolution sees only the explicitly imported SQL DTO.
     const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
-
-    writeFileSync(join(dir, "members.json"), JSON.stringify([
-      { id: "legacy-developer", name: "developer", agent: "developer", runtime: "pi-cli", model: "claude-sonnet-4-6", thinkingLevel: "off" },
-    ]));
-    const room = roomStore.createRoom("A", dir, drafts(["developer"]));
-    // Simulate a pre-v0.14 legacy room with no roomMembers array yet, so migration
-    // materializes the legacy member configuration in the room record.
-    const roomJsonPath = join(roomStore.roomDir(room.id), "room.json");
-    const rawRoom = JSON.parse(readFileSync(roomJsonPath, "utf-8"));
-    delete rawRoom.roomMembers;
-    writeFileSync(roomJsonPath, JSON.stringify(rawRoom, null, 2), "utf-8");
+    const path = join(dir,"rooms/legacy-room/room.json");
+    mkdirSync(join(dir,"rooms/legacy-room"),{recursive:true});
+    writeFileSync(path,JSON.stringify({id:"legacy-room",name:"Legacy",members:["developer"],createdAt:1}));
+    writeFileSync(join(dir,"members.json"),JSON.stringify([{id:"legacy-developer",name:"developer",agent:"developer",runtime:"pi-cli",model:"claude-sonnet-4-6",thinkingLevel:"off"}]));
     runRoomMemberMigration();
-    // Live resolution must not consult the migration input again.
-    writeFileSync(join(dir, "members.json"), "invalid retired data");
+    const room = JSON.parse(readFileSync(path,"utf8"));
+    expect(room.roomMembers[0].config.model).toBe("claude-sonnet-4-6");
+    new ConversationsRepository(fixture.db).upsertRoom(room);
+    writeFileSync(join(dir,"members.json"),"invalid retired data");
+    writeFileSync(path,"invalid retired room");
 
     const resolved = resolveRoomMember(room.id, "developer");
     expect(resolved?.model).toBe("claude-sonnet-4-6");
@@ -92,9 +76,7 @@ describe("room-member-resolver — no implicit model default", () => {
 
 async function currentMemberFixture() {
   const registry = await import("../../src/workspace/member-registry.js");
-  const { openDb } = await import("../../src/workspace/db/sqlite.js");
-  const db = openDb();
-  closeDb = () => db.close();
+  const db = fixture.db;
   const member = registry.importMemberRecord({
     id: "mem_current", name: "current-name", title: "Engineer", agentTemplate: "developer",
     unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
@@ -110,7 +92,8 @@ async function currentMemberFixture() {
     config: { model: "shadow-model", credentialId: "shadow-credential", thinkingLevel: "high", skills: ["shadow-skill"], mcpServers: ["shadow-mcp"], contextLimit: 99 },
   };
   const path = join(roomStore.roomDir(room.id), "room.json");
-  writeFileSync(path, JSON.stringify({ ...room, roomMembers: [shadow] }));
+  new ConversationsRepository(db).upsertRoom({ ...room, roomMembers: [shadow] });
+  writeFileSync(path, "poison retired room");
   return { registry, member, roomStore, room, path, shadow, db };
 }
 
@@ -137,7 +120,7 @@ describe("room-member-resolver — database authority", () => {
   it("uses DB records for global membership and ignores old files and room shadows", async () => {
     const { member, room, path, shadow } = await currentMemberFixture();
     writeFileSync(join(dir, "members.json"), "invalid retired data");
-    writeFileSync(path, JSON.stringify({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] }));
+    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] });
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/workforce/room-member-resolver.js");
     expect(resolveRoomMember(room.id, member.id)).toMatchObject({ id: member.id, name: "current-name", model: "db-model" });
     expect(resolveRoomMembers(room.id)).toHaveLength(1);
@@ -161,7 +144,7 @@ describe("room-member-resolver — database authority", () => {
   it("does not resolve a missing global member through a same-named agent or stale overrides", async () => {
     const { registry, member, room, path } = await currentMemberFixture();
     writeAgent(member.name);
-    writeFileSync(path, JSON.stringify({ ...room, globalMemberIds: [member.id], memberOverrides: { [member.name]: { model: "stale-model" } } }));
+    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], memberOverrides: { [member.name]: { model: "stale-model" } } });
     registry.deleteMemberForTests(member.id);
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/workforce/room-member-resolver.js");
     expect(resolveRoomMember(room.id, member.name)).toBeNull();
@@ -170,8 +153,15 @@ describe("room-member-resolver — database authority", () => {
 
   it("propagates corrupt DB configuration for global membership", async () => {
     const { member, room, path, shadow, db } = await currentMemberFixture();
-    writeFileSync(path, JSON.stringify({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] }));
-    db.run("UPDATE members SET global_json = ? WHERE id = ?", "invalid JSON", member.id);
+    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] });
+    expect(() => db.run("UPDATE members SET global_json = ? WHERE id = ?", "invalid JSON", member.id)).toThrow();
+    // Corruption cannot pass current SQL constraints. Inject a corrupt returned row
+    // to independently exercise the registry decoder and final resolver error path.
+    const get = db.get.bind(db);
+    vi.spyOn(db, "get").mockImplementation((sql: string, ...params: unknown[]) => {
+      const row = get(sql, ...params);
+      return row && sql.includes("SELECT * FROM members") ? {...row, global_json:"invalid JSON"} : row;
+    });
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/workforce/room-member-resolver.js");
     expect(() => resolveRoomMember(room.id, member.id)).toThrow();
     expect(() => resolveRoomMembers(room.id)).toThrow();
