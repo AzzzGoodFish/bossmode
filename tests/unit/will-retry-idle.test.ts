@@ -1,23 +1,30 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
+import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+let compactionRefreshPending = false;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "../../src/engine/runtime/types.js";
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
-
 const state = vi.hoisted(() => ({
-  sourceAgent: "developer",
   promptImpl: vi.fn(async (_message: string) => {}),
-  postMessage: vi.fn(),
-  setCursor: vi.fn(),
-  processEvent: vi.fn(() => undefined as string | undefined),
-  appendEventToDisk: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
   broadcastToRoom: vi.fn(),
   notifyMemberIdle: vi.fn(),
@@ -25,16 +32,18 @@ const state = vi.hoisted(() => ({
 
 class TestHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
-  prompt = vi.fn(async (message: string) => state.promptImpl(message));
+  prompt = vi.fn(async (message: string, options?: PromptOptions) => { dispatch(message, options); return state.promptImpl(message); });
   steer = vi.fn();
   abort = vi.fn();
   destroy = vi.fn();
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
   waitForIdle = vi.fn(async () => {});
   subscribe = vi.fn((fn: (event: AgentStreamEvent) => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   });
   emit(event: AgentStreamEvent) {
+    if (event.type === "compaction_end") compactionRefreshPending = true;
     for (const fn of this.listeners) fn(event);
   }
 }
@@ -45,50 +54,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test-will-retry",
-  readConfig: () => ({ runtime: { sessionResume: false }, defaults: {}, apiKeys: {} }),
-}));
-
-
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({
-    id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: 1,
-    roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }],
-  })),
-  getCursors: vi.fn(() => ({ rm_dev: null })),
-  setCursor: state.setCursor,
-  resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) =>
-    ref === "developer" || ref === "rm_dev"
-      ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }
-      : null),
-  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, config: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }]),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({})),
-  saveSession: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/attachment-store.js", () => ({
-  getAttachmentPath: vi.fn(),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: state.postMessage,
-  getMessagesSince: vi.fn(() => [{ id: "msg-1", sender: "user", content: "@developer hi", mentions: ["developer"], ts: Date.now() }]),
-  getLatestMessageId: vi.fn(() => "msg-1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: state.broadcastToRoom,
   broadcastToAgentSubscribers: state.broadcastToAgentSubscribers,
-}));
-
-vi.mock("../../src/engine/prompt-compiler.js", () => ({
-  compileMemberPrompt: vi.fn(() => ({ agentPrompt: "agent", envPrompt: "env", appendSystemPrompt: [], fullPrompt: "agent\n\nenv", contractFingerprint: "fp" })),
-  compileMemberPromptForScope: vi.fn(() => ({ agentPrompt: "agent", envPrompt: "env", appendSystemPrompt: [], fullPrompt: "agent\n\nenv", contractFingerprint: "fp" })),
 }));
 
 vi.mock("../../src/engine/wait-wait.js", async () => {
@@ -96,16 +64,6 @@ vi.mock("../../src/engine/wait-wait.js", async () => {
   return {
     ...actual,
     notifyMemberIdle: (...args: unknown[]) => state.notifyMemberIdle(...args),
-  };
-});
-
-vi.mock("../../src/engine/event-handler.js", async () => {
-  const actual = await vi.importActual<typeof import("../../src/engine/event-handler.js")>("../../src/engine/event-handler.js");
-  return {
-    ...actual,
-    // Use real processEvent for willRetry status decisions
-    loadEventsFromDisk: vi.fn(() => []),
-    appendEventToDisk: state.appendEventToDisk,
   };
 });
 
@@ -129,6 +87,36 @@ async function setup() {
   initAgentManager(registry);
 }
 
+beforeEach(async () => {
+  compactionRefreshPending = false;
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["developer", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room1", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+  }
+  bus.postMessage("room1", "user", "@developer hi", ["developer"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  // The real event consumer schedules post-compaction refreshes up to 1500ms.
+  if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
+  fixture.close();
+});
+
 describe("mapPiAgentEvent willRetry passthrough", () => {
   it("maps agent_end.willRetry from raw pi event", () => {
     expect(mapPiAgentEvent({ type: "agent_end", willRetry: true })).toEqual({ type: "agent_end", willRetry: true });
@@ -139,26 +127,23 @@ describe("mapPiAgentEvent willRetry passthrough", () => {
 describe("processEvent willRetry does not idle", () => {
   it("returns undefined for agent_end willRetry (no public idle)", () => {
     const buf: any[] = [];
-    const status = processEvent("room1", "developer", "k", { type: "agent_end", willRetry: true }, buf, "rm_dev");
+    const status = processEvent("room1", "developer", "k", { type: "agent_end", willRetry: true }, buf, "mem_developer");
     expect(status).toBeUndefined();
   });
 
   it("returns idle for final agent_end", () => {
     const buf: any[] = [];
-    const status = processEvent("room1", "developer", "k", { type: "agent_end", willRetry: false }, buf, "rm_dev");
+    const status = processEvent("room1", "developer", "k", { type: "agent_end", willRetry: false }, buf, "mem_developer");
     expect(status).toBe("idle");
   });
 });
 
 describe("willRetry idle + deferred error notice + user_steer", () => {
   beforeEach(async () => {
-    state.sourceAgent = "developer";
     state.promptImpl = vi.fn(async () => {
       // hang until test emits events
     });
-    state.postMessage.mockReset();
-    state.setCursor.mockReset();
-    state.appendEventToDisk.mockReset();
+    vi.mocked(bus.postMessage).mockClear();
     state.broadcastToAgentSubscribers.mockReset();
     state.broadcastToRoom.mockReset();
     state.notifyMemberIdle.mockReset();
@@ -171,9 +156,9 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
         handle.emit({ type: "agent_start" });
         handle.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "Request timed out" });
         handle.emit({ type: "agent_end", willRetry: true });
-        expect(getAgentStatus("room1", "rm_dev")).toBe("working");
+        expect(getAgentStatus("room1", "mem_developer")).toBe("working");
         expect(state.notifyMemberIdle).not.toHaveBeenCalled();
-        expect(state.postMessage).not.toHaveBeenCalledWith(
+        expect(bus.postMessage).not.toHaveBeenCalledWith(
           "room1",
           "system",
           expect.stringContaining("request failed"),
@@ -190,9 +175,9 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     await promptDone;
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(getAgentStatus("room1", "rm_dev")).toBe("idle");
+    expect(getAgentStatus("room1", "mem_developer")).toBe("idle");
     expect(state.notifyMemberIdle).toHaveBeenCalled();
-    const systemFails = state.postMessage.mock.calls.filter(
+    const systemFails = vi.mocked(bus.postMessage).mock.calls.filter(
       (c) => c[1] === "system" && String(c[2]).includes("request failed"),
     );
     expect(systemFails).toHaveLength(1);
@@ -210,8 +195,9 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
 
     const first = activateAgent("room1", "developer");
     await new Promise((r) => setTimeout(r, 20));
-    expect(getAgentStatus("room1", "rm_dev")).toBe("working");
+    expect(getAgentStatus("room1", "mem_developer")).toBe("working");
 
+    bus.postMessage("room1", "user", "@developer hi again", ["developer"]);
     // Second @ while working → interrupt path: abort (never steer), the
     // message is queued at the front banner-wrapped. fish 2026-09-05: NO
     // user_steer event here — the drained queue emits exactly one user_prompt
@@ -219,8 +205,7 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     await activateAgent("room1", "developer");
     expect(handle.steer).not.toHaveBeenCalled();
     expect(handle.abort).toHaveBeenCalled();
-    const steers = state.appendEventToDisk.mock.calls
-      .map((c: any[]) => c[2])
+    const steers = loadEventsFromDisk("room1", "mem_developer")
       .filter((e: any) => e?.type === "user_steer");
     expect(steers).toHaveLength(0);
 
@@ -230,8 +215,7 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
 
     // The drained interrupt produced exactly one user_prompt (banner +
     // message), and the model received the interrupted message exactly once.
-    const prompts = state.appendEventToDisk.mock.calls
-      .map((c: any[]) => c[2])
+    const prompts = loadEventsFromDisk("room1", "mem_developer")
       .filter((e: any) => e?.type === "user_prompt");
     const interruptCards = prompts.filter((e: any) => typeof e.text === "string" && e.text.includes("interrupted by this message"));
     expect(interruptCards).toHaveLength(1);

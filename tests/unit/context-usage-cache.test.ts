@@ -1,18 +1,24 @@
-vi.mock("../../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn(() => ({
-    id: "developer",
-    name: "developer",
-    type: "agent",
-    agent: "developer",
-    model: "sonnet",
-    credentialId: "cred-a",
-    runtime: "pi-cli",
-    thinkingLevel: "off",
-    skills: [],
-  })),
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   broadcastToRoom: vi.fn(),
@@ -21,10 +27,11 @@ const mocks = vi.hoisted(() => ({
 let contextUsageCallCount = 0;
 
 const mockHandle = {
-  prompt: vi.fn(async () => {}),
+  prompt: vi.fn(async (message: string, options?: PromptOptions) => { dispatch(message, options); }),
   steer: vi.fn(),
   abort: vi.fn(),
   destroy: vi.fn(),
+  async destroyAndWait() { this.abort(); await this.waitForIdle(); this.destroy(); },
   waitForIdle: vi.fn(async () => {}),
   subscribe: vi.fn(() => () => {}),
   getContextUsage: vi.fn(async () => {
@@ -39,75 +46,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
-  readConfig: () => ({
-    auth: { username: "u", passwordHash: "h" },
-    apiKeys: {},
-    defaults: { host: "127.0.0.1", port: 8080 },
-    runtime: { sessionResume: true },
-  }),
-}));
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn(() => ({
-    name: "developer",
-    description: "dev",
-    systemPrompt: "You are dev",
-    skills: [],
-    tags: [],
-  })),
-}));
-
-
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: Date.now() })),
-  getCursors: vi.fn(() => ({ developer: null })),
-  setCursor: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({})),
-  saveSession: vi.fn(),
-}));
-
-vi.mock("../../src/knowledge/store.js", () => ({
-  listEntries: vi.fn(() => []),
-  getEntry: vi.fn(),
-  getDocumentTree: vi.fn(() => ({ path: "", name: "docs", kind: "folder", children: [] })),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: vi.fn(),
-  getMessagesSince: vi.fn(() => [{ id: "msg-1", sender: "user", content: "@developer hi", mentions: ["developer"], ts: Date.now() }]),
-  getLatestMessageId: vi.fn(() => "msg-1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: mocks.broadcastToRoom,
   broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../../src/engine/prompt-assembler.js", () => ({
-  buildAgentPrompt: vi.fn(() => ({ agentPrompt: "", envPrompt: "" })),
-}));
-
-vi.mock("../../src/engine/event-handler.js", () => ({
-  handleAgentEvent: vi.fn(() => undefined),
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
-}));
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
 }));
 
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
@@ -119,6 +60,33 @@ import {
   refreshContextUsage,
   shutdownAll,
 } from "../../src/engine/agent-manager.js";
+
+beforeEach(async () => {
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["developer", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room1", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+  }
+  bus.postMessage("room1", "user", "@developer hi", ["developer"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  fixture.close();
+});
 
 describe("agent-manager context usage cache", () => {
   beforeEach(async () => {
@@ -148,8 +116,8 @@ describe("agent-manager context usage cache", () => {
 
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
-    initAgentManager(reg);
     await shutdownAll();
+    initAgentManager(reg);
     await activateAgent("room1", "developer");
   });
 
@@ -162,6 +130,7 @@ describe("agent-manager context usage cache", () => {
       type: "agent:context_usage",
       roomId: "room1",
       agent: "developer",
+      memberId: "mem_developer",
       usage: { totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet" },
     });
   });

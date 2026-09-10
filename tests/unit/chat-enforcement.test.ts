@@ -1,38 +1,45 @@
-vi.mock("../../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn((_roomId: string, name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off" })),
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+let compactionRefreshPending = false;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
 
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
 import type { AgentStreamEvent } from "../../src/engine/runtime/types.js";
 
 const state = vi.hoisted(() => ({
-  sourceAgent: "developer",
   promptImpl: vi.fn(async (_message: string) => {}),
-  postMessage: vi.fn(),
-  setCursor: vi.fn(),
-  processEvent: vi.fn(() => undefined),
 }));
 
 class TestHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
-  prompt = vi.fn(async (message: string) => state.promptImpl(message));
+  prompt = vi.fn(async (message: string, options?: PromptOptions) => { dispatch(message, options); return state.promptImpl(message); });
   steer = vi.fn();
   abort = vi.fn();
   destroy = vi.fn();
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
   waitForIdle = vi.fn(async () => {});
   subscribe = vi.fn((fn: (event: AgentStreamEvent) => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); });
-  emit(event: AgentStreamEvent) { for (const fn of this.listeners) fn(event); }
+  emit(event: AgentStreamEvent) {
+    if (event.type === "compaction_end") compactionRefreshPending = true;
+    for (const fn of this.listeners) fn(event);
+  }
 }
 
 let handle: TestHandle;
@@ -41,53 +48,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
-  readConfig: () => ({ runtime: { sessionResume: false }, defaults: {}, apiKeys: {} }),
-}));
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn((name: string) => ({ name, description: name, systemPrompt: `${name} prompt`, tags: [] })),
-}));
-
-
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer"], createdAt: 1, roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }] })),
-  getCursors: vi.fn(() => ({ rm_dev: null })),
-  setCursor: state.setCursor,
-  resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) => ref === "developer" || ref === "rm_dev" ? { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } } : null),
-  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }]),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({})),
-  saveSession: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/attachment-store.js", () => ({
-  getAttachmentPath: vi.fn(),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: state.postMessage,
-  getMessagesSince: vi.fn(() => [{ id: "msg-1", sender: "user", content: "@developer hi", mentions: ["developer"], ts: Date.now() }]),
-  getLatestMessageId: vi.fn(() => "msg-1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../../src/engine/prompt-compiler.js", () => ({
-  compileMemberPrompt: vi.fn(() => ({ agentPrompt: "agent", envPrompt: "env", appendSystemPrompt: [], fullPrompt: "agent\n\nenv" })),
-}));
-
-vi.mock("../../src/engine/event-handler.js", () => ({
-  handleAgentEvent: state.processEvent,
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
 }));
 
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
@@ -97,7 +60,7 @@ async function setup() {
   await shutdownAll();
   handle = new TestHandle();
   const runtime = {
-    name: "test",
+    name: "pi-cli",
     capabilities: { streaming: true, toolEvents: true, thinking: false, usage: false, dynamicModel: false, dynamicThinking: false, permissionControl: false, sessionResume: false },
     detect: vi.fn(async () => ({ available: true })),
     createAgent: vi.fn(async () => handle as any),
@@ -108,13 +71,40 @@ async function setup() {
   initAgentManager(registry);
 }
 
+beforeEach(async () => {
+  compactionRefreshPending = false;
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["developer", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room1", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+  }
+  bus.postMessage("room1", "user", "@developer hi", ["developer"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  // The real event consumer schedules post-compaction refreshes up to 1500ms.
+  if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
+  fixture.close();
+});
+
 describe("chat enforcement pending reply", () => {
   beforeEach(async () => {
-    state.sourceAgent = "developer";
     state.promptImpl = vi.fn(async () => {});
-    state.postMessage.mockReset();
-    state.setCursor.mockReset();
-    state.processEvent.mockReset();
+    vi.mocked(bus.postMessage).mockClear();
     await setup();
   });
 
@@ -124,7 +114,7 @@ describe("chat enforcement pending reply", () => {
     // No hidden chat_warning follow-up prompt — only the original turn ran.
     expect(handle.prompt).toHaveBeenCalledTimes(1);
     // No text at all → the silence is made visible to the room as a system message.
-    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("[room]-marked text is plain text now: a debt turn's final text is fallback-posted verbatim (marker mechanism removed)", async () => {
@@ -136,11 +126,11 @@ describe("chat enforcement pending reply", () => {
     await activateAgent("room1", "developer");
 
     // The marker is dead text — the completed segment is delivered as-is by the fallback.
-    const delivered = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
+    const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(1);
     expect(delivered[0][2]).toBe("Let me check...\n[room]\nFound it — the failure is in the token refresh.");
     expect(delivered[0][4]).toMatchObject({ autoDelivered: true });
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
     expect(handle.prompt).toHaveBeenCalledTimes(1);
   });
 
@@ -153,11 +143,11 @@ describe("chat enforcement pending reply", () => {
     await activateAgent("room1", "developer");
 
     expect(handle.prompt).toHaveBeenCalledTimes(1);
-    const delivered = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
+    const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(1);
     expect(delivered[0][2]).toBe("Done — the fix is in place.");
     // Fallback delivery clears the reply debt → no silence note.
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("an FYI turn (no debt) never fallback-posts bare text and never warns", async () => {
@@ -170,8 +160,8 @@ describe("chat enforcement pending reply", () => {
 
     // No debt → the text stays invisible (work note), and no silence note fires.
     expect(handle.prompt).toHaveBeenCalledTimes(1);
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "developer", expect.stringContaining("Let me check"), expect.anything());
-    expect(state.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "developer", expect.stringContaining("Let me check"), expect.anything());
+    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("continues once after length truncation even when SDK emits no compaction event", async () => {
@@ -194,7 +184,7 @@ describe("chat enforcement pending reply", () => {
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
     expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
     // Only the continuation's completed text was fallback-posted.
-    const delivered = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
+    const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(1);
     expect(delivered[0][2]).toBe("Full result after continuation.");
   });
@@ -218,7 +208,7 @@ describe("chat enforcement pending reply", () => {
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
     expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
-    const delivered = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
+    const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(1);
     expect(delivered[0][2]).toBe("Result after threshold compaction.");
   });
@@ -262,6 +252,6 @@ describe("chat enforcement pending reply", () => {
     await activateAgent("room1", "developer");
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
-    expect(state.postMessage).toHaveBeenCalledWith("room1", "system", expect.stringContaining("Automatic continuation stopped to avoid a loop"));
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", expect.stringContaining("Automatic continuation stopped to avoid a loop"));
   });
 });

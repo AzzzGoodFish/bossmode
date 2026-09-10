@@ -3,28 +3,26 @@
  * authority (member registry), not room.json memberOverrides — otherwise
  * display shows the old model and activate-heal silently rolls the session
  * back. Permanent assertions:
- *   switch → registry updated (global for unifiedModel=true, scope override
- *   for false) → memberOverrides untouched → re-activation does NOT roll the
- *   live session back.
- * F3 same batch: DM activation heals a drifted live instance (room parity).
+ *   switch → SQL global binding updated → memberOverrides untouched →
+ *   re-activation does NOT roll the live session back. Retired scoped flags
+ *   do not change ownership; raw config writes do not heal a live instance.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { randomUUID } from "node:crypto";
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
 
-const broadcastToRoom = vi.fn();
-
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+const { broadcastToRoom } = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
 
 vi.mock("../../src/communication/ws.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
@@ -36,8 +34,10 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
 });
 
 function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
+  const personaPath = `agents/${name}/persona.md`;
+  mkdirSync(join(dir, "agents", name), { recursive: true });
+  writeFileSync(join(dir, personaPath), `You are ${name}.`);
+  new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath, extensions: {} });
 }
 
 const PROFILE = {
@@ -69,8 +69,10 @@ async function makeStampedRoom(memberId: string, memberName = "pm") {
 }
 
 describe("F4 model binding persists to the registry", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-f4-"));
+  beforeEach(async () => {
+    fixture = coreFixture();
+    dir = fixture.root;
+    (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
@@ -78,11 +80,12 @@ describe("F4 model binding persists to the registry", () => {
     seedAgent("dev");
     seedAgent("qa");
     broadcastToRoom.mockClear();
-    vi.resetModules();
+
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+    fixture.close();
   });
 
   it("unifiedModel=true: switch writes the global binding; memberOverrides untouched; read side agrees", async () => {
@@ -184,7 +187,8 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     createAgent: vi.fn(async () => {
       createAgentCalls += 1;
       return {
-        prompt: vi.fn(async () => {
+        prompt: vi.fn(async (message: string, options?: PromptOptions) => {
+          dispatch(message, options);
           subscribeCb?.({ type: "agent_start" });
           subscribeCb?.({ type: "message_end", text: "done", stopReason: "stop" });
           subscribeCb?.({ type: "agent_end" });
@@ -192,6 +196,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
         steer: vi.fn(),
         abort: vi.fn(),
         destroy: vi.fn(),
+        async destroyAndWait() { this.abort(); await this.waitForIdle(); this.destroy(); },
         waitForIdle: vi.fn(async () => {}),
         subscribe: (fn: (event: any) => void) => {
           subscribeCb = fn;
@@ -205,8 +210,10 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     }),
   });
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-f4heal-"));
+  beforeEach(async () => {
+    fixture = coreFixture();
+    dir = fixture.root;
+    (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
@@ -215,11 +222,12 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     subscribeCb = undefined;
     createAgentCalls = 0;
     setModelCalls = [];
-    vi.resetModules();
+
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+    fixture.close();
   });
 
   it("room: switch with live instance → persisted → re-activation does NOT roll the session back", async () => {
@@ -231,6 +239,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const manager = await import("../../src/engine/agent-manager.js");
     manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
 
+    (await import("../../src/communication/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
     expect(createAgentCalls).toBe(1);
 
@@ -242,6 +251,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     // Pre-fix the registry still said claude-a → heal "rolled the drift back".
     // Post-fix they agree — no setModel, no destroy/recreate.
     setModelCalls = [];
+    (await import("../../src/communication/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
     expect(setModelCalls).toEqual([]);
     expect(createAgentCalls).toBe(1);

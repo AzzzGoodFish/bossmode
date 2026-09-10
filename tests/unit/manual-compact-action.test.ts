@@ -1,6 +1,23 @@
-vi.mock("../../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn(() => member),
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
+
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+let compactionRefreshPending = false;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
 
 /**
  * Manual compaction as ONE conversation action (steer-removal §2/§3):
@@ -10,15 +27,11 @@ vi.mock("../../src/workforce/room-member-resolver.js", () => ({
  * - Stop after start aborts the operation; lifecycle resets; queue resumes
  * - room / DM / topic instances all key by their real scopeId
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentHandle, AgentStreamEvent } from "../../src/engine/runtime/types.js";
 
-let member: any;
-let messages: any[];
 const handles: TestHandle[] = [];
-const loggerError = vi.fn();
-const loggerWarn = vi.fn();
-const loggerInfo = vi.fn();
+const { loggerError, loggerWarn, loggerInfo } = vi.hoisted(() => ({ loggerError: vi.fn(), loggerWarn: vi.fn(), loggerInfo: vi.fn() }));
 
 class TestHandle implements AgentHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
@@ -41,7 +54,8 @@ class TestHandle implements AgentHandle {
     this.runtimeParams = { model };
   }
 
-  async prompt(message = ""): Promise<void> {
+  async prompt(message = "", options?: PromptOptions): Promise<void> {
+    dispatch(message, options);
     this.promptCalls.push(message);
     this.emit({ type: "agent_start" });
     this.emit({ type: "agent_end" });
@@ -58,6 +72,7 @@ class TestHandle implements AgentHandle {
   steer(): void { throw new Error("steer must never be called after steer-removal"); }
   abort(): void { this.abortCalls += 1; }
   destroy(): void { this.destroyed = true; }
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
   waitForIdle(): Promise<void> {
     if (this.idleResolver) return new Promise<void>((resolve) => { this.idleResolver = resolve; });
     return Promise.resolve();
@@ -67,6 +82,7 @@ class TestHandle implements AgentHandle {
     return () => this.listeners.delete(fn);
   }
   emit(event: AgentStreamEvent): void {
+    if (event.type === "compaction_end") compactionRefreshPending = true;
     for (const fn of this.listeners) fn(event);
   }
   async compact(): Promise<{ aborted: boolean }> {
@@ -90,74 +106,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn((name: string) => ({ name, model: "anthropic/claude-a", description: name, systemPrompt: "test", skills: [], tags: [] })),
-}));
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room", name: "Room", cwd: "/tmp", members: ["pm"], ruleDocs: [] })),
-  getRoomByScope: vi.fn(() => ({ id: "room", name: "Room", cwd: "/tmp", members: ["pm"], ruleDocs: [] })),
-  listRooms: vi.fn(() => [{ id: "room", name: "Room", cwd: "/tmp", members: ["pm"] }]),
-  roomDir: vi.fn(() => "/tmp/bm-room"),
-  getRoomMemberOverride: vi.fn(() => undefined),
-  updateRoomMemberOverride: vi.fn(),
-  hasRoomMemberModelOverride: vi.fn(() => false),
-  getCursors: vi.fn(() => ({})),
-  setCursor: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/member-registry.js", () => ({
-  getMember: vi.fn(() => ({ id: "pm", name: "pm", agentTemplate: "pm", global: { model: "anthropic/claude-a", credentialId: "cred-a" } })),
-  updateMember: vi.fn(),
-  getEffectiveConfig: vi.fn(() => ({ model: "anthropic/claude-a", credentialId: "cred-a", thinkingLevel: "off", skills: [], mcpServers: [] })),
-}));
-
-vi.mock("../../src/workspace/topic-store.js", () => ({
-  getTopic: vi.fn(() => null),
-  saveTopic: vi.fn(),
-  buildTopicGuideText: vi.fn(() => ""),
-  resolveOwningRoomId: vi.fn(() => "room"),
-}));
-
-vi.mock("../../src/engine/topic-session-fork.js", () => ({
-  forkRoomSessionPrefix: vi.fn(() => ({ mode: "fresh" })),
-  getTopicSession: vi.fn(() => null),
-  saveTopicSession: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({ pm: { runtime: "test", sessionId: "s1", sessionFile: "/tmp/session.jsonl" } })),
-  saveSession: vi.fn(),
-  clearSession: vi.fn(),
-}));
-
-vi.mock("../../src/knowledge/store.js", () => ({
-  listEntries: vi.fn(() => []),
-  getDocumentTree: vi.fn(() => ""),
-  getEntry: vi.fn(() => null),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: vi.fn(),
-  getMessagesSince: vi.fn(() => messages),
-  getLatestMessageId: vi.fn(() => "m1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../../src/engine/event-handler.js", () => ({
-  handleAgentEvent: vi.fn((_roomId: string, _memberName: string, _key: string, event: AgentStreamEvent) => {
-    if (event.type === "agent_start") return "working";
-    if (event.type === "agent_end") return "idle";
-    return undefined;
-  }),
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
 }));
 
 vi.mock("../../src/engine/model-credentials.js", () => ({
@@ -165,21 +116,11 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
   listAvailableModels: vi.fn(() => [{ ref: "anthropic/claude-a" }]),
   assertModelAvailable: vi.fn(),
   exportPiConfigForMember: vi.fn(() => ({ agentDir: "/tmp/agent", extensionPaths: [], profile: { id: "cred-a", name: "test" } })),
-  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "test", enabled: true, providerSlug: "anthropic" })),
-}));
-
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: vi.fn(() => "/tmp/bossmode-test"),
-  ensureBossmodeDir: vi.fn(),
-  readConfig: vi.fn(() => ({ runtime: { sessionResume: true } })),
-}));
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
+  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "pi-cli", enabled: true, providerSlug: "anthropic" })),
 }));
 
 const runtime = {
-  name: "test",
+  name: "pi-cli",
   async createAgent(opts: any) {
     const handle = new TestHandle(opts.member.model);
     handles.push(handle);
@@ -196,10 +137,40 @@ const registry = {
 /** settleMemberShellWaits comes from the real shell-manager — no shells here,
  * so it is a no-op through the real module (no live PTYs in this suite). */
 
+beforeEach(async () => {
+  compactionRefreshPending = false;
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["pm", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });
+  }
+  conversations.upsertTopic({ id: "mem-topic", roomId: "room", title: "Topic", anchorMessageId: "anchor", createdBy: "user", createdAt: 1, status: "active", seedMode: "fresh", participants: ["mem_pm"] });
+  bus.postMessage("room", "user", "@pm hi", ["pm"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  for (const handle of handles) { handle.holdPrompt = false; handle.resolvePendingPrompt(); handle.resolvePendingCompact(); }
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  // The real event consumer schedules post-compaction refreshes up to 1500ms.
+  if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
+  fixture.close();
+});
+
 describe("manual compaction conversation action", () => {
   beforeEach(async () => {
-    member = { id: "pm", name: "pm", type: "agent", agent: "pm", runtime: "test", model: "anthropic/claude-a", credentialId: "cred-a", skills: [], thinkingLevel: "off" };
-    messages = [{ id: "m1", type: "chat", sender: "user", content: "@pm hi", mentions: ["pm"], createdAt: Date.now() }];
     handles.splice(0);
     vi.clearAllMocks();
     const manager = await import("../../src/engine/agent-manager.js");
@@ -212,7 +183,7 @@ describe("manual compaction conversation action", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    const result = await manager.compactMember("room:room", "pm");
+    const result = await manager.compactMember("room:room", "mem_pm");
 
     expect(result).toEqual({ ok: true, action: "compacted" });
     expect(first.compactCalls).toBe(1);
@@ -224,14 +195,12 @@ describe("manual compaction conversation action", () => {
 
     // The room /compact command can precede activation — the session is built
     // (never prompted), then compacted.
-    const result = await manager.compactMember("room:room2", "pm");
+    const result = await manager.compactMember("room:room2", "mem_pm");
     expect(result).toEqual({ ok: true, action: "compacted" });
     expect(handles).toHaveLength(1);
     expect(handles[0].promptCalls).toEqual([]); // build only, no prompt
 
-    // No resolvable member → honest error (the name-based member store is the
-    // only resolver in this harness).
-    member = null;
+    // No resolvable SQL member → honest error, not a fabricated session.
     await expect(manager.compactMember("room:room", "ghost")).rejects.toThrow(/No active session/);
   });
 
@@ -241,14 +210,14 @@ describe("manual compaction conversation action", () => {
     const first = handles[0];
     first.holdCompact = true;
 
-    const inFlight = manager.compactMember("room:room", "pm");
+    const inFlight = manager.compactMember("room:room", "mem_pm");
     await new Promise((r) => setTimeout(r, 20)); // compaction_start has fired
     expect(first.compactCalls).toBe(1);
     expect(manager.getAgentStatus("room", "pm")).toBe("working");
 
     // An ordinary message while compacting: queued by the real activation
     // path, does not cancel the operation, does not prompt mid-compaction.
-    messages.push({ id: "m2", type: "chat", sender: "user", content: "@pm held message during compact", mentions: ["pm"], createdAt: Date.now() });
+    bus.postMessage("room", "user", "@pm held message during compact", ["pm"]);
     await manager.activateAgent("room", "pm");
     const firstPromptBaseline = first.promptCalls.length;
 
@@ -267,6 +236,7 @@ describe("manual compaction conversation action", () => {
     const first = handles[0];
     first.holdPrompt = true;
 
+    bus.postMessage("room", "user", "@pm next turn", ["pm"]);
     const pending = manager.activateAgent("room", "pm");
     await new Promise((r) => setTimeout(r, 20));
     expect(manager.getMemberBusyState("room", "pm")).toMatchObject({ busy: true });
@@ -284,7 +254,7 @@ describe("manual compaction conversation action", () => {
       await origCompact();
     };
 
-    const result = await manager.compactMember("room:room", "pm");
+    const result = await manager.compactMember("room:room", "mem_pm");
     await pending;
 
     expect(result).toEqual({ ok: true, action: "compacted" });
@@ -297,6 +267,7 @@ describe("manual compaction conversation action", () => {
     const first = handles[0];
     first.holdPrompt = true;
 
+    bus.postMessage("room", "user", "@pm next turn", ["pm"]);
     const pending = manager.activateAgent("room", "pm");
     await new Promise((r) => setTimeout(r, 20));
 
@@ -304,7 +275,7 @@ describe("manual compaction conversation action", () => {
     let releaseIdle!: () => void;
     first.waitForIdle = () => new Promise<void>((resolve) => { releaseIdle = resolve; });
 
-    const inFlight = manager.compactMember("room:room", "pm");
+    const inFlight = manager.compactMember("room:room", "mem_pm");
     await new Promise((r) => setTimeout(r, 20));
 
     // Stop lands in the gap: abortAgent marks dispatchState "aborting".
@@ -325,13 +296,13 @@ describe("manual compaction conversation action", () => {
     await manager.activateAgent("room", "pm");
     const roomHandle = handles[0];
 
-    const dmBuilt = await manager.buildMemberAgentSession("pm", "dm:pm");
-    const topicBuilt = await manager.buildMemberAgentSession("pm", "topic:mem-topic");
-    expect(dmBuilt?.scopeId).toBe("dm:pm");
+    const dmBuilt = await manager.buildMemberAgentSession("mem_pm", "dm:mem_pm");
+    const topicBuilt = await manager.buildMemberAgentSession("mem_pm", "topic:mem-topic");
+    expect(dmBuilt?.scopeId).toBe("dm:mem_pm");
     expect(topicBuilt?.scopeId).toBe("topic:mem-topic");
 
-    const dmResult = await manager.compactMember("dm:pm", "pm");
-    const topicResult = await manager.compactMember("topic:mem-topic", "pm");
+    const dmResult = await manager.compactMember("dm:mem_pm", "mem_pm");
+    const topicResult = await manager.compactMember("topic:mem-topic", "mem_pm");
     expect(dmResult).toEqual({ ok: true, action: "compacted" });
     expect(topicResult).toEqual({ ok: true, action: "compacted" });
     expect(roomHandle.compactCalls).toBe(0); // scope-exact, no room-path spillover

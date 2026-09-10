@@ -1,13 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-let dir: string;
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ModelCredentialsRepository } from "../../src/storage/repositories/model-settings.js";
+let fixture: ReturnType<typeof coreFixture>;
 
 function gate() {
   let release!: () => void;
@@ -20,12 +15,12 @@ async function setup() {
   const { ModelCredentialBinding } = await import("../../src/engine/runtime/model-credential-binding.js");
   const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
   const profiles = ["A", "B"].map((id) => ({
-    id, name: id, enabled: true, providerSlug: "test-auth", profileKind: "custom_endpoint",
+    id, name: id, enabled: true, isDefault: false, providerSlug: "test-auth", profileKind: "custom_endpoint",
     protocol: "openai-responses", baseUrl: "http://127.0.0.1:1", authType: "oauth", requestProfile: "standard",
     oauthCredentials: { access: `${id}-old`, refresh: `${id}-refresh`, expires: Date.now() - 60_000 },
     models: [], createdAt: Date.now(), updatedAt: Date.now(),
   }));
-  writeFileSync(join(dir, "model-credentials.json"), JSON.stringify({ profiles, migrations: [] }));
+  for (const profile of profiles) new ModelCredentialsRepository(fixture.db).importProfile(profile as any);
   const binding = new ModelCredentialBinding(profiles[0]);
   const runtime = await ModelRuntime.create({ credentials: binding, modelsPath: null, allowModelNetwork: false });
   binding.attach(runtime);
@@ -46,10 +41,9 @@ async function setup() {
 
 describe("model snapshot credentials through real SDK getAuth", () => {
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bossmode-model-auth-"));
-    vi.resetModules();
+    fixture = coreFixture();
   });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  afterEach(() => { fixture.close(); });
 
   it("keeps A across read/modify while B authenticates, and writes each rotation to its own profile", async () => {
     const { binding, runtime, refresh, credentials, a, b, switchToB } = await setup();

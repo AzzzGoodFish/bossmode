@@ -1,19 +1,34 @@
-vi.mock("../../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn(() => member),
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
+import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+import { getMember, updateMember } from "../../src/workspace/member-registry.js";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+let compactionRefreshPending = false;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentHandle, AgentStreamEvent } from "../../src/engine/runtime/types.js";
 
-let member: any;
-let messages: any[];
 let availableModels: Array<{ ref: string }>;
 let exportedCalls: any[];
 let exportReturnsNull: boolean;
 const handles: TestHandle[] = [];
-const loggerError = vi.fn();
-const loggerWarn = vi.fn();
-const loggerInfo = vi.fn();
+const { loggerError, loggerWarn, loggerInfo } = vi.hoisted(() => ({ loggerError: vi.fn(), loggerWarn: vi.fn(), loggerInfo: vi.fn() }));
 
 class TestHandle implements AgentHandle {
   listeners = new Set<(event: AgentStreamEvent) => void>();
@@ -35,7 +50,8 @@ class TestHandle implements AgentHandle {
     this.runtimeParams = { model };
   }
 
-  async prompt(message = ""): Promise<void> {
+  async prompt(message = "", options?: PromptOptions): Promise<void> {
+    dispatch(message, options);
     this.promptCalls.push(message);
     this.emit({ type: "agent_start" });
     this.emit({ type: "agent_end" });
@@ -60,12 +76,14 @@ class TestHandle implements AgentHandle {
   }
   abort(): void {}
   destroy(): void { this.destroyed = true; }
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
   waitForIdle(): Promise<void> { return Promise.resolve(); }
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
   emit(event: AgentStreamEvent): void {
+    if (event.type === "compaction_end") compactionRefreshPending = true;
     for (const fn of this.listeners) fn(event);
   }
   async setModel(model: string): Promise<void> {
@@ -102,52 +120,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn((name: string) => ({ name, model: "anthropic/claude-a", description: name, systemPrompt: "test", skills: [], tags: [] })),
-}));
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room", name: "Room", cwd: "/tmp", members: ["pm"], ruleDocs: [] })),
-  getRoomMemberOverride: vi.fn(() => undefined),
-  updateRoomMemberOverride: vi.fn((_roomId: string, _memberName: string, patch: any) => { member = { ...member, ...patch }; return { id: "room", name: "Room", cwd: "/tmp", members: ["pm"] }; }),
-  hasRoomMemberModelOverride: vi.fn(() => false),
-  getCursors: vi.fn(() => ({})),
-  setCursor: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({ pm: { runtime: "test", sessionId: "s1", sessionFile: "/tmp/session.jsonl" } })),
-  saveSession: vi.fn(),
-  clearSession: vi.fn(),
-}));
-
-vi.mock("../../src/knowledge/store.js", () => ({
-  listEntries: vi.fn(() => []),
-  getDocumentTree: vi.fn(() => ""),
-  getEntry: vi.fn(() => null),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: vi.fn(),
-  getMessagesSince: vi.fn(() => messages),
-  getLatestMessageId: vi.fn(() => "m1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../../src/engine/event-handler.js", () => ({
-  handleAgentEvent: vi.fn((_roomId: string, _memberName: string, _key: string, event: AgentStreamEvent) => {
-    if (event.type === "agent_start") return "working";
-    if (event.type === "agent_end") return "idle";
-    return undefined;
-  }),
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
 }));
 
 vi.mock("../../src/engine/model-credentials.js", () => ({
@@ -174,28 +149,14 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
 
 // Member registry (single-path commit target): switchMemberModel commits the
 // global binding here, once, after every live instance accepted.
-let registryRecord: any;
-vi.mock("../../src/workspace/member-registry.js", () => ({
-  getMember: vi.fn(() => registryRecord),
-  updateMember: vi.fn((id: string, patch: any) => {
-    registryRecord = { ...registryRecord, id, global: { ...(registryRecord?.global || {}), ...patch.global } };
-    return registryRecord;
-  }),
-}));
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: vi.fn(() => "/tmp/bossmode-test"),
-  ensureBossmodeDir: vi.fn(),
-  readConfig: vi.fn(() => ({ runtime: { sessionResume: true } })),
-}));
-
-
-vi.mock("../../src/workforce/skill-store.js", () => ({
+vi.mock("../../src/workforce/skill-store.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/workforce/skill-store.js")>(),
   resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
 }));
 
 const runtime = {
-  name: "test",
+  name: "pi-cli",
   async createAgent(opts: any) {
     const handle = new TestHandle(opts.member.model);
     handles.push(handle);
@@ -209,11 +170,39 @@ const registry = {
   getAll: vi.fn(() => [runtime]),
 };
 
+beforeEach(async () => {
+  compactionRefreshPending = false;
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["pm", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });
+  }
+  bus.postMessage("room", "user", "@pm hi", ["pm"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  for (const handle of handles) { handle.holdPrompt = false; handle.resolvePendingPrompt(); }
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  // The real event consumer schedules post-compaction refreshes up to 1500ms.
+  if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
+  fixture.close();
+});
+
 describe("agent-manager model hot switch", () => {
   beforeEach(async () => {
-    member = { id: "pm", name: "pm", type: "agent", agent: "pm", runtime: "test", model: "anthropic/claude-a", credentialId: "cred-a", skills: [], thinkingLevel: "off" };
-    registryRecord = { id: "pm", name: "pm", agentTemplate: "pm", global: { model: "anthropic/claude-a", credentialId: "cred-a" } };
-    messages = [{ id: "m1", type: "chat", sender: "user", content: "@pm hi", mentions: ["pm"], createdAt: Date.now() }];
     availableModels = [{ ref: "anthropic/claude-b" }, { ref: "anthropic-proxy/claude-fable-5" }];
     exportedCalls = [];
     exportReturnsNull = false;
@@ -229,14 +218,14 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     expect(handles).toHaveLength(1);
 
-    const result = await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    const result = await manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
     expect(result.model).toBe("anthropic/claude-b");
     expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(handles[0].destroyed).toBe(false);
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
-    expect(registryRecord.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
+    expect(getMember("mem_pm")!.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
   });
 
   it("applies cross-credential/provider switches via setModel without recreating the handle", async () => {
@@ -244,7 +233,7 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    const result = await manager.switchMemberModel("mem_pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
 
     expect(result.model).toBe("anthropic-proxy/claude-fable-5");
     expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
@@ -252,7 +241,7 @@ describe("agent-manager model hot switch", () => {
     expect(first.destroyed).toBe(false);
     expect(first.setModelCalls).toEqual(["anthropic-proxy/claude-fable-5"]);
     expect(first.runtimeParams.model).toBe("anthropic-proxy/claude-fable-5");
-    expect(registryRecord.global).toEqual({ model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    expect(getMember("mem_pm")!.global).toEqual({ model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
   });
 
   it("applies same-provider credential changes via setModel without recreating (live credential store)", async () => {
@@ -260,7 +249,7 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-b" });
+    await manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-b" });
 
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
@@ -269,12 +258,12 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("applies proxy→builtin switches via setModel without recreating", async () => {
-    member = { ...member, model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" };
+    updateMember("mem_pm", { global: { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" } });
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
-    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
@@ -302,7 +291,7 @@ describe("agent-manager model hot switch", () => {
     handles[0].emit({ type: "compaction_start", reason: "threshold" });
     expect(manager.getAgentStatus("room", "pm")).toBe("working");
     expect(manager.getMemberBusyState("room", "pm")).toMatchObject({ busy: true, reason: "working" });
-    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "working" });
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", memberId: "mem_pm", status: "working" });
 
     handles[0].emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
@@ -322,6 +311,7 @@ describe("agent-manager model hot switch", () => {
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
 
     first.holdPrompt = true;
+    bus.postMessage("room", "user", "@pm next turn", ["pm"]);
     const pending = manager.activateAgent("room", "pm");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -351,6 +341,7 @@ describe("agent-manager model hot switch", () => {
     const baseline = first.promptCalls.length;
 
     first.holdPrompt = true;
+    bus.postMessage("room", "user", "@pm next turn", ["pm"]);
     const pending = manager.activateAgent("room", "pm");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -358,7 +349,7 @@ describe("agent-manager model hot switch", () => {
     first.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
 
-    messages.push({ id: "m2", type: "chat", sender: "user", content: "@pm are you there", mentions: ["pm"], createdAt: Date.now() });
+    bus.postMessage("room", "user", "@pm are you there", ["pm"]);
     await manager.activateAgent("room", "pm");
     // Not delivered yet — the in-flight prompt() has not settled (dispatchState still busy).
     expect(first.promptCalls).toHaveLength(baseline + 1);
@@ -379,7 +370,7 @@ describe("agent-manager model hot switch", () => {
     const baseline = first.promptCalls.length;
 
     first.emit({ type: "compaction_start", reason: "threshold" });
-    messages.push({ id: "m2", type: "chat", sender: "user", content: "@pm are you there", mentions: ["pm"], createdAt: Date.now() });
+    bus.postMessage("room", "user", "@pm are you there", ["pm"]);
     await manager.activateAgent("room", "pm");
 
     expect(first.promptCalls).toHaveLength(baseline);
@@ -412,7 +403,7 @@ describe("agent-manager model hot switch", () => {
     const first = handles[0];
     first.emit({ type: "agent_start" });
 
-    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    const result = await manager.switchMemberModel("mem_pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
     expect(result.instances).toEqual([{ scopeId: "room:room", applied: true }]);
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
@@ -432,7 +423,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(1);
     expect(handles[0].refreshCalls).toBe(1);
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-a"]);
-    expect(exportedCalls.at(-1)).toMatchObject({ roomId: "room", memberName: "pm", modelRef: "anthropic/claude-a", credentialId: "cred-a" });
+    expect(exportedCalls.at(-1)).toMatchObject({ roomId: "room", memberName: "mem_pm", modelRef: "anthropic/claude-a", credentialId: "cred-a" });
   });
 
   it("queues credential refresh while working and applies it after agent_end", async () => {
@@ -475,7 +466,7 @@ describe("agent-manager model hot switch", () => {
     expect(result).toEqual([{ roomId: "room", memberName: "pm", applied: true, pending: false }]);
     expect(first.destroyed).toBe(true);
     expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
-    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", memberId: "mem_pm", status: "inactive" });
   });
 
   it("drops an idle active agent when refresh/rebind fails with a non-transient error", async () => {
@@ -490,7 +481,7 @@ describe("agent-manager model hot switch", () => {
 
     expect(first.destroyed).toBe(true);
     expect(manager.getAgentStatus("room", "pm")).toBe("inactive");
-    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+    expect(ws.broadcastToRoom).toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", memberId: "mem_pm", status: "inactive" });
   });
 
   it("does not drop the instance when credential refresh hits a transient network error", async () => {
@@ -517,18 +508,19 @@ describe("agent-manager model hot switch", () => {
   it("does not commit the global config when setModel fails — instance is restored", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
+    vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     // §10 shape: the SDK assigned state.model and THEN setModel threw — the
     // rollback must put the original binding back on this same handle.
     first.failSetModelOnce = true;
 
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
       .rejects.toThrow(/restored to its previous model/);
 
     // Commit happens only after a successful apply — the registry was never written.
     expect(registry.updateMember).not.toHaveBeenCalled();
-    expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
+    expect(getMember("mem_pm")!.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
     expect(first.setModelCalls).toEqual(["anthropic/claude-b", "anthropic/claude-a"]); // applied then rolled back
     expect(first.runtimeParams.model).toBe("anthropic/claude-a");
     expect(first.destroyed).toBe(false);
@@ -537,24 +529,26 @@ describe("agent-manager model hot switch", () => {
   it("commits the global config exactly once, only after a successful live apply", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
+    vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
 
-    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
 
     expect(handles[0].setModelCalls).toEqual(["anthropic/claude-b"]);
     expect(registry.updateMember).toHaveBeenCalledTimes(1);
-    expect(registry.updateMember).toHaveBeenCalledWith("pm", { global: { model: "anthropic/claude-b", credentialId: "cred-a" } });
-    expect(registryRecord.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
+    expect(registry.updateMember).toHaveBeenCalledWith("mem_pm", { global: { model: "anthropic/claude-b", credentialId: "cred-a" } });
+    expect(getMember("mem_pm")!.global).toEqual({ model: "anthropic/claude-b", credentialId: "cred-a" });
   });
 
   it("applies the switch to EVERY live instance of the member across scopes", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
+    vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
     expect(handles).toHaveLength(2);
 
-    const result = await manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
+    const result = await manager.switchMemberModel("mem_pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" });
 
     // Instances keyed by scope, both applied, one commit.
     const scopes = result.instances.map((r: any) => r.scopeId).sort();
@@ -569,18 +563,19 @@ describe("agent-manager model hot switch", () => {
   it("multi-instance partial failure rolls back EVERY attempted instance (incl. the thrower) and commits nothing", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
+    vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
     // §10: room2's setModel fails AFTER assigning SDK state (once), so its
     // rollback must put the original model back rather than skip it.
     handles[1].failSetModelOnce = true;
 
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
       .rejects.toThrow(/failed at room:room2.*restored to its previous model/s);
 
     // No commit, both handles back on the original binding, both alive.
     expect(registry.updateMember).not.toHaveBeenCalled();
-    expect(registryRecord.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
+    expect(getMember("mem_pm")!.global).toEqual({ model: "anthropic/claude-a", credentialId: "cred-a" });
     for (const h of handles) {
       expect(h.setModelCalls[h.setModelCalls.length - 1]).toBe("anthropic/claude-a");
       expect(h.runtimeParams.model).toBe("anthropic/claude-a");
@@ -593,11 +588,12 @@ describe("agent-manager model hot switch", () => {
   it("rollback that fails again stops that exact scope's instance and names it in the error", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const registry = await import("../../src/workspace/member-registry.js");
+    vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
     handles[1].failSetModel = true; // fails the switch AND its rollback
 
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" }))
       .rejects.toThrow(/failed at room:room2.*could not restore room:room2.*stopped/s);
 
     expect(registry.updateMember).not.toHaveBeenCalled();
@@ -618,8 +614,8 @@ describe("agent-manager model hot switch", () => {
 
     // §10: the lock is acquired synchronously at entry — the second call gets
     // the conflict error immediately, even while the first is still validating.
-    const inFlight = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
-    await expect(manager.switchMemberModel("pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" }))
+    const inFlight = manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" }))
       .rejects.toMatchObject({ name: "MemberModelSwitchConflictError" });
     await inFlight;
     expect(first.setModelCalls).toEqual(["anthropic/claude-b"]);
@@ -631,7 +627,7 @@ describe("agent-manager model hot switch", () => {
     await manager.activateAgent("room2", "pm");
     handles[1].emit({ type: "agent_start" }); // second instance busy
 
-    const result = await manager.switchMemberThinkingLevel("pm", "high");
+    const result = await manager.switchMemberThinkingLevel("mem_pm", "high");
 
     expect(result.applied.sort()).toEqual(["room:room"]);
     expect(result.pending.sort()).toEqual(["room:room2"]);
@@ -651,10 +647,10 @@ describe("agent-manager model hot switch", () => {
       first.setModelCalls.push(model);
       first.runtimeParams.model = model;
     };
-    const inFlight = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    const inFlight = manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
     await new Promise((resolve) => setTimeout(resolve, 20)); // switch is now held in setModel
 
-    const creating = manager.buildMemberAgentSession("pm", "room:room3");
+    const creating = manager.buildMemberAgentSession("mem_pm", "room:room3");
     await new Promise((resolve) => setTimeout(resolve, 50));
     // Gated: nothing built while the switch is in flight, and the switch did
     // not wait on it either (it never registered as a pending creation).
@@ -667,7 +663,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(2);
     // The new instance is NOT part of the switch result (it built after, from
     // the committed binding) — no latecomer sweep exists to include it.
-    expect(built!.handle.runtimeParams.model).toBe("anthropic/claude-a"); // member mock still points at claude-a
+    expect(built!.handle.runtimeParams.model).toBe("anthropic/claude-b"); // SQL binding committed before creation resumes
   }, 15000);
 
   it("§10: the switch WAITS for an in-flight creation — its snapshot includes it (no timeout path)", async () => {
@@ -678,7 +674,7 @@ describe("agent-manager model hot switch", () => {
     // createAgent behind a latch.
     let releaseCreate!: () => void;
     const slowRuntime = {
-      name: "test",
+      name: "pi-cli",
       async createAgent(opts: any) {
         await new Promise<void>((resolve) => { releaseCreate = resolve; });
         const handle = new TestHandle(opts.member.model);
@@ -689,10 +685,10 @@ describe("agent-manager model hot switch", () => {
     };
     registry.get.mockReturnValue(slowRuntime as any);
 
-    const creating = manager.buildMemberAgentSession("pm", "room:room3");
+    const creating = manager.buildMemberAgentSession("mem_pm", "room:room3");
     await new Promise((resolve) => setTimeout(resolve, 20)); // creation now pending, latched
 
-    const switching = manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    const switching = manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
     await new Promise((resolve) => setTimeout(resolve, 50));
     // The switch must NOT have snapshotted yet — it is waiting for the pending
     // creation (no setModel on the live instance in the meantime).
@@ -717,13 +713,13 @@ describe("agent-manager model hot switch", () => {
 
     // Entry validation is read-only — a rejected switch never writes models.json.
     const before = exportedCalls.length;
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-proxy" }))
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-proxy" }))
       .rejects.toThrow(/does not serve model/);
     expect(exportedCalls.length).toBe(before);
 
     // A valid switch DOES export at apply time — a newly created provider
     // must reach the old session's dir so runtime.refresh can find it.
-    await manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
+    await manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-a" });
     expect(exportedCalls.length).toBeGreaterThan(before);
     expect(exportedCalls.at(-1)).toMatchObject({ modelRef: "anthropic/claude-b", credentialId: "cred-a" });
   });
@@ -735,18 +731,18 @@ describe("agent-manager model hot switch", () => {
 
     // Unknown profile → fail upfront, no setModel, no commit.
     (creds.getModelCredentialProfile as any).mockReturnValueOnce(undefined);
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-b", credentialId: "cred-missing" })).rejects.toThrow(/Credential profile not found/);
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-b", credentialId: "cred-missing" })).rejects.toThrow(/Credential profile not found/);
     expect(handles[0].setModelCalls).toEqual([]);
 
     // Model not in the catalog → fail upfront.
-    await expect(manager.switchMemberModel("pm", { model: "anthropic/claude-z", credentialId: "cred-a" })).rejects.toThrow(/not available/);
+    await expect(manager.switchMemberModel("mem_pm", { model: "anthropic/claude-z", credentialId: "cred-a" })).rejects.toThrow(/not available/);
     expect(handles[0].setModelCalls).toEqual([]);
   });
 
   it("filters all member runtime failure system messages from activation prompts", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const now = Date.now();
-    messages = [
+    const messages = [
       { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: now, seq: 1 },
       { id: "cred", type: "chat", sender: "system", content: 'Member "pm" model credential is no longer available. Update Settings.', mentions: [], ts: now, seq: 2 },
       { id: "switch", type: "chat", sender: "system", content: 'Failed to switch model for "pm": setModel failed', mentions: [], ts: now, seq: 3 },
@@ -755,6 +751,8 @@ describe("agent-manager model hot switch", () => {
       { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: now, seq: 6 },
       { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: now, seq: 7 },
     ];
+    (await import("../../src/workspace/room-store.js")).setCursor("room", "mem_pm", bus.getLatestMessageId("room"));
+    for (const message of messages) bus.postMessage("room", message.sender, message.content, message.mentions, message.type === "chat" ? undefined : { type: message.type as any });
 
     await manager.activateAgent("room", "pm");
 
@@ -762,7 +760,7 @@ describe("agent-manager model hot switch", () => {
     // backlog hint (counted, not re-injected verbatim); failure notices are
     // filtered from BOTH the hint and the trigger.
     expect(handles[0].promptCalls[0]).toContain("@pm continue");
-    expect(handles[0].promptCalls[0]).toContain("you have 2 unread messages (No.5–No.6): system×2");
+    expect(handles[0].promptCalls[0]).toContain("you have 2 unread messages (No.6–No.7): system×2");
     expect(handles[0].promptCalls[0]).toContain("incl. 1 task events, 1 knowledge updates");
     expect(handles[0].promptCalls[0]).not.toContain("[Task] qa moved task to review");
     expect(handles[0].promptCalls[0]).not.toContain("[Knowledge] qa updated document");
@@ -774,7 +772,7 @@ describe("agent-manager model hot switch", () => {
 
   it("reloads active member resources in place without destroying the instance", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    member = { ...member, skills: ["review"] };
+    updateMember("mem_pm", { global: { skills: ["review"] } });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -783,14 +781,13 @@ describe("agent-manager model hot switch", () => {
     expect(result).toEqual({ ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." });
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
-    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "pm" }), skillNames: ["review"] });
+    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "mem_pm" }), skillNames: ["review"] });
     expect(first.reloadCalls[0].agentPrompt).toContain("I am pm.");
     expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
   });
 
   it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const eventHandler = await import("../../src/engine/event-handler.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failReload = true;
@@ -798,14 +795,14 @@ describe("agent-manager model hot switch", () => {
     await expect(manager.reloadMemberResources("room", "pm")).rejects.toThrow("Reload could not apply MCP access.");
 
     expect(first.runtimeParams.systemPrompt).toBeUndefined();
-    expect(eventHandler.appendEventToDisk).not.toHaveBeenCalledWith("room", "pm", expect.objectContaining({ text: "Reloaded member resources in place." }));
+    expect(loadEventsFromDisk("room", "mem_pm")).not.toContainEqual(expect.objectContaining({ text: "Reloaded member resources in place." }));
     expect(first.destroyed).toBe(false);
   });
 
   it("blocks activation for an Unconfigured member without creating a runtime or guessing a credential", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");
-    member = { ...member, model: undefined, credentialId: undefined };
+    updateMember("mem_pm", { global: { model: null, credentialId: null } });
 
     await manager.activateAgent("room", "pm");
 
@@ -816,18 +813,17 @@ describe("agent-manager model hot switch", () => {
   it("compact with no live instance builds for a configured member; an unresolvable one fails honestly", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
 
-    const result = await manager.compactMember("room:room2", "pm");
+    const result = await manager.compactMember("room:room2", "mem_pm");
     expect(result).toEqual({ ok: true, action: "compacted" }); // built, never prompted
     expect(handles[0].promptCalls).toEqual([]);
 
-    member = null;
     await expect(manager.compactMember("room:room", "ghost")).rejects.toThrow(/No active session/);
   });
 
   it("blocks activation when a member has a model but no bound credential", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");
-    member = { ...member, credentialId: undefined };
+    updateMember("mem_pm", { global: { credentialId: null } });
 
     await manager.activateAgent("room", "pm");
 
@@ -848,11 +844,11 @@ describe("agent-manager model hot switch", () => {
     // so retry storms post one notice, not one per attempt (fish 2026-08-09).
     first.emit({ type: "agent_end" });
 
-    expect(loggerError).toHaveBeenCalledWith("agent", "member request failed", expect.objectContaining({ roomId: "room", member: "pm", memberId: "pm", error: "502 upstream_error" }));
+    expect(loggerError).toHaveBeenCalledWith("agent", "member request failed", expect.objectContaining({ roomId: "room", member: "pm", memberId: "mem_pm", error: "502 upstream_error" }));
     expect(messageBus.postMessage).toHaveBeenCalledWith("room", "system", 'Member "pm" request failed. Error: 502 upstream_error');
     expect(first.destroyed).toBe(false);
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
-    expect(ws.broadcastToRoom).not.toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", status: "inactive" });
+    expect(ws.broadcastToRoom).not.toHaveBeenCalledWith("room", { type: "agent:status", roomId: "room", agent: "pm", memberId: "mem_pm", status: "inactive" });
 
     await manager.activateAgent("room", "pm");
     expect(handles).toHaveLength(1);

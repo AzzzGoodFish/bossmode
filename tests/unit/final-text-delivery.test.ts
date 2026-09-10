@@ -1,37 +1,46 @@
-vi.mock("../../src/workforce/room-member-resolver.js", () => ({
-  resolveRoomMember: vi.fn((_roomId: string, name: string) => ({ id: name, name, type: "agent", agent: state.sourceAgent, model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a", runtime: "test", thinkingLevel: "off" })),
-}));
+import { coreFixture } from "../helpers/core-fixture.js";
+import { getDatabase } from "../../src/storage/database.js";
+import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as bus from "../../src/communication/message-bus.js";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
+function dispatch(message: string, options?: PromptOptions) {
+  getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
+}
+let fixture: ReturnType<typeof coreFixture>;
+let compactionRefreshPending = false;
+vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+  return { ...actual, postMessage: vi.fn(actual.postMessage) };
+});
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: (agent: string) => ({
-    name: agent, description: agent, systemPrompt: "test", tags: [], skills: [],
-  }),
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/workforce/skill-store.js", () => ({
-  resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
-}));
-import type { AgentStreamEvent } from "../../src/engine/runtime/types.js";
+import type { AgentStreamEvent, CreateAgentOpts } from "../../src/engine/runtime/types.js";
 
 const state = vi.hoisted(() => ({
-  sourceAgent: "developer",
   promptImpl: vi.fn(async (_message: string) => {}),
-  postMessage: vi.fn(),
-  setCursor: vi.fn(),
-  processEvent: vi.fn(() => undefined),
 }));
 
 class TestHandle {
+  onChat!: (message: string) => Promise<void>;
   listeners = new Set<(event: AgentStreamEvent) => void>();
-  prompt = vi.fn(async (message: string) => state.promptImpl(message));
+  prompt = vi.fn(async (message: string, options?: PromptOptions) => { dispatch(message, options); return state.promptImpl(message); });
   steer = vi.fn();
   abort = vi.fn();
   destroy = vi.fn();
+  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
   waitForIdle = vi.fn(async () => {});
   subscribe = vi.fn((fn: (event: AgentStreamEvent) => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); });
-  emit(event: AgentStreamEvent) { for (const fn of this.listeners) fn(event); }
+  emit(event: AgentStreamEvent) {
+    if (event.type === "compaction_end") compactionRefreshPending = true;
+    for (const fn of this.listeners) fn(event);
+  }
 }
 
 let handle: TestHandle;
@@ -40,57 +49,9 @@ vi.mock("../../src/foundation/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
-  getBossmodeDir: () => "/tmp/bossmode-test",
-  readConfig: () => ({ runtime: { sessionResume: false }, defaults: {}, apiKeys: {} }),
-}));
-
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinition: vi.fn((name: string) => ({ name, description: name, systemPrompt: `${name} prompt`, tags: [] })),
-}));
-
-
-
-vi.mock("../../src/workspace/room-store.js", () => ({
-  getRoom: vi.fn(() => ({ id: "room1", name: "Room", cwd: "/tmp", members: ["developer", "qa"], createdAt: 1, roomMembers: [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }, { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "qa" } }] })),
-  getCursors: vi.fn(() => ({ rm_dev: null, rm_qa: null })),
-  setCursor: state.setCursor,
-  resolveRoomMemberRef: vi.fn((_roomId: string, ref: string) => {
-    if (ref === "developer" || ref === "rm_dev") return { id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } };
-    if (ref === "qa" || ref === "rm_qa") return { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "qa" } };
-    return null;
-  }),
-  getRoomMembers: vi.fn(() => [{ id: "rm_dev", name: "developer", sourceAgent: state.sourceAgent, createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "developer" } }, { id: "rm_qa", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1, migratedFrom: { memberName: "qa" } }]),
-}));
-
-vi.mock("../../src/workspace/session-store.js", () => ({
-  getSessions: vi.fn(() => ({})),
-  saveSession: vi.fn(),
-}));
-
-vi.mock("../../src/workspace/attachment-store.js", () => ({
-  getAttachmentPath: vi.fn(),
-}));
-
-vi.mock("../../src/communication/message-bus.js", () => ({
-  postMessage: state.postMessage,
-  getMessagesSince: vi.fn(() => [{ id: "msg-1", sender: "user", content: "@developer hi", mentions: ["developer"], ts: Date.now() }]),
-  getLatestMessageId: vi.fn(() => "msg-1"),
-}));
-
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
-}));
-
-vi.mock("../../src/engine/prompt-compiler.js", () => ({
-  compileMemberPrompt: vi.fn(() => ({ agentPrompt: "agent", envPrompt: "env", appendSystemPrompt: [], fullPrompt: "agent\n\nenv" })),
-}));
-
-vi.mock("../../src/engine/event-handler.js", () => ({
-  handleAgentEvent: state.processEvent,
-  loadEventsFromDisk: vi.fn(() => []),
-  appendEventToDisk: vi.fn(),
 }));
 
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
@@ -100,10 +61,10 @@ async function setup() {
   await shutdownAll();
   handle = new TestHandle();
   const runtime = {
-    name: "test",
+    name: "pi-cli",
     capabilities: { streaming: true, toolEvents: true, thinking: false, usage: false, dynamicModel: false, dynamicThinking: false, permissionControl: false, sessionResume: false },
     detect: vi.fn(async () => ({ available: true })),
-    createAgent: vi.fn(async () => handle as any),
+    createAgent: vi.fn(async (options: CreateAgentOpts) => { handle.onChat = options.callbacks!.onChat!; return handle; }),
     shutdownAll: vi.fn(async () => {}),
   };
   const registry = new RuntimeRegistry();
@@ -112,22 +73,49 @@ async function setup() {
 }
 
 function deliveredMessages(): Array<{ text: string; extra?: Record<string, unknown> }> {
-  return state.postMessage.mock.calls
-    .filter((c: any[]) => c[0] === "room1" && c[1] === "developer")
-    .map((c: any[]) => ({ text: c[2], extra: c[4] }));
+  return bus.getMessagesSince("room1", null)
+    .filter((message) => message.senderMemberId === "mem_developer")
+    .map((message) => ({ text: message.content, extra: { autoDelivered: message.autoDelivered } }));
 }
 
 function silenceNoteCalls() {
-  return state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "system" && String(c[2]).includes("finished without replying"));
+  return bus.getMessagesSince("room1", null).filter((message) => message.sender === "system" && message.content.includes("finished without replying"));
 }
+
+beforeEach(async () => {
+  compactionRefreshPending = false;
+  fixture = coreFixture();
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  const members = new MembersRepository(fixture.db);
+  const conversations = new ConversationsRepository(fixture.db);
+  for (const name of ["developer", "qa"]) {
+    const id = `mem_${name}`;
+    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
+    conversations.ensureDmScope(id);
+    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
+    for (const path of [`agents/${name}`, `members/${id}`]) {
+      mkdirSync(join(fixture.root, path), { recursive: true });
+      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
+    }
+  }
+  for (const id of ["room1", "room2", "room3"]) {
+    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+  }
+  bus.postMessage("room1", "user", "@developer hi", ["developer"]);
+  vi.mocked(bus.postMessage).mockClear();
+});
+afterEach(async () => {
+  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  // The real event consumer schedules post-compaction refreshes up to 1500ms.
+  if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
+  fixture.close();
+});
 
 describe("final-text fallback (chat need_response debt turn)", () => {
   beforeEach(async () => {
-    state.sourceAgent = "developer";
     state.promptImpl = vi.fn(async () => {});
-    state.postMessage.mockReset();
-    state.setCursor.mockReset();
-    state.processEvent.mockReset();
+    vi.mocked(bus.postMessage).mockClear();
     await setup();
   });
 
@@ -148,19 +136,24 @@ describe("final-text fallback (chat need_response debt turn)", () => {
 
   it("a successful chat call clears the debt: bare final text is NOT fallback-posted, no silence note", async () => {
     state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "c1", result: {}, isError: false });
+      // Exercise the runtime callback: real publication, no successful-tool-event shortcut.
+      await handle.onChat("Sent via chat");
       handle.emit({ type: "message_end", text: "done — sent via chat", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(deliveredMessages()).toEqual([{ text: "Sent via chat", extra: { autoDelivered: undefined } }]);
     expect(silenceNoteCalls()).toHaveLength(0);
   });
 
   it("a failed chat call does NOT clear the debt: the fallback still posts the final text", async () => {
     state.promptImpl = vi.fn(async () => {
+      expect(() => getDatabase().transaction(() => {
+        bus.postMessage("room1", "developer", "Uncommitted chat", [], { senderMemberId: "mem_developer" });
+        throw new Error("boom");
+      })).toThrow("boom");
       handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "c1", result: { ok: false, error: "boom" }, isError: true });
       handle.emit({ type: "message_end", text: "chat failed but here is the result anyway", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -265,7 +258,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
 
     await activateAgent("room1", "developer");
 
-    const calls = state.postMessage.mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
+    const calls = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(calls).toHaveLength(1);
     expect(calls[0][2]).toBe("@qa please verify the fallback");
     // mentions list carries the target for the router listener.
@@ -308,4 +301,41 @@ describe("final-text fallback (chat need_response debt turn)", () => {
     expect(delivered[0].text).toBe("Full result after continuation.");
     expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
   });
+
+  it("delivers for the captured member ID after a rename, never for a reused display name", async () => {
+    state.promptImpl = vi.fn(async () => {
+      (await import("../../src/workspace/member-registry.js")).updateMemberIdentity("mem_developer", { name: "renamed" });
+      new MembersRepository(fixture.db).insert({ id: "mem_replacement", name: "developer", agentTemplate: "developer", global: {},
+        unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 2, updatedAt: 2 });
+      handle.emit({ type: "message_end", text: "Reply from original owner", stopReason: "stop" });
+      handle.emit({ type: "agent_end" });
+    });
+    await activateAgent("room1", "mem_developer");
+    const replies = bus.getMessagesSince("room1", null).filter((message) => message.autoDelivered);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ sender: "renamed", senderMemberId: "mem_developer", content: "Reply from original owner" });
+    expect(bus.getMessagesSince("room1", null).some((message) => message.senderMemberId === "mem_replacement")).toBe(false);
+  });
+
+
+  it.each(["dm", "topic"])("commits final-text fallback in the owning %s scope without leaking into the room", async (kind) => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    const scope = kind === "dm" ? "dm:mem_developer" : "topic:fixture-topic";
+    if (kind === "topic") {
+      new ConversationsRepository(fixture.db).upsertTopic({ id: "fixture-topic", roomId: "room1", title: "Scoped reply",
+        anchorMessageId: bus.getLatestMessageId("room1")!, createdBy: "user", createdAt: 1, status: "active", seedMode: "fresh", participants: ["mem_developer"] });
+    }
+    bus.postMessage(scope, "user", "@developer scoped question", ["developer"]);
+    state.promptImpl = vi.fn(async () => {
+      handle.emit({ type: "message_end", text: "Scoped answer", stopReason: "stop" });
+      handle.emit({ type: "agent_end" });
+    });
+    if (kind === "dm") await manager.activateDmMember("mem_developer");
+    else await manager.activateTopicMember("room1", "fixture-topic", "mem_developer");
+    const replies = bus.getMessagesSince(scope, null).filter((message) => message.senderMemberId === "mem_developer");
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ content: "Scoped answer", autoDelivered: true });
+    expect(deliveredMessages()).toHaveLength(0);
+  });
+
 });
