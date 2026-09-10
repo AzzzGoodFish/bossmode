@@ -1,3 +1,4 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20.0 flagship ① (fish 2026-08-05: "DM 里的 architect 对 bossmode dev 完全
  * 不了解"): the prompt promises "read any scope you belong to (optional scope
@@ -8,10 +9,10 @@
  * route writes through the same unified-flag authority rule as F4.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -27,11 +28,6 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
   return { ...actual, broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn() };
 });
-
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
-}
 
 const PROFILE = {
   name: "Test provider",
@@ -54,57 +50,57 @@ async function seedWorld() {
   const dev = reg.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
   const outsider = reg.createMember({ name: "outsider", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
   const roomStore = await import("../../src/workspace/room-store.js");
-  const roomA = roomStore.createRoom("alpha", dir, [{ agent: "dev", name: "dev" }], undefined);
+  const roomA = roomStore.createRoom("alpha", undefined, []);
   roomStore.stampGlobalMemberIds(roomA.id, [dev.id], dev.id);
-  const roomB = roomStore.createRoom("beta", dir, [{ agent: "dev", name: "dev" }], undefined);
+  const roomB = roomStore.createRoom("beta", undefined, []);
   roomStore.stampGlobalMemberIds(roomB.id, [dev.id], dev.id);
-  const roomC = roomStore.createRoom("gamma", dir, [{ agent: "dev", name: "outsider" }], undefined);
+  const roomC = roomStore.createRoom("gamma", undefined, []);
   roomStore.stampGlobalMemberIds(roomC.id, [outsider.id], outsider.id);
   return { dev, outsider, roomA, roomB, roomC };
 }
 
 describe("cross-scope reads (flagship ①)", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-xs-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("dev");
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("query_room_messages: scope param reads another member-room; violations are explicit errors", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const messageStore = await import("../../src/workspace/message-store.js");
-    messageStore.addMessage(roomA.id, { sender: "dev", content: "alpha-only discussion", seq: 1 });
-    messageStore.addMessage(roomB.id, { sender: "pm", content: "beta decision: ship it", seq: 1 });
-    messageStore.addMessage(roomB.id, { sender: "system", content: "[Member failure notice] hidden", seq: 2 });
+    messageStore.addMessage(roomA.id, { sender: "dev", mentions: [], content: "alpha-only discussion" });
+    messageStore.addMessage(roomB.id, { sender: "pm", mentions: [], content: "beta decision: ship it" });
+    messageStore.addMessage(roomB.id, { sender: "system", mentions: [], content: "[Member failure notice] hidden" });
 
     const tools = await import("../../src/engine/tools.js");
     // Cross-scope read from roomA into roomB.
-    const res = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomB.id}` })) as any[];
+    const res = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
     expect(Array.isArray(res)).toBe(true);
     expect(res.map((m) => m.content)).toEqual(["beta decision: ship it"]); // system notice filtered
 
     // Default (no scope) = current scope, unchanged.
-    const cur = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", {})) as any[];
+    const cur = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", {}, { memberId: dev.id })) as any[];
     expect(cur.map((m) => m.content)).toEqual(["alpha-only discussion"]);
 
     // Not a member of roomC → explicit error, no silent fallback.
-    const denied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomC.id}` })) as any;
+    const denied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomC.id}` }, { memberId: dev.id })) as any;
     expect(denied.ok).toBe(false);
     expect(denied.error).toMatch(/not a member/);
 
     // Nonexistent room → explicit error.
-    const missing = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "room:nope" })) as any;
+    const missing = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "room:nope" }, { memberId: dev.id })) as any;
     expect(missing.ok).toBe(false);
 
     // Another member's DM → explicit error.
-    const dmDenied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "dm:mem_other" })) as any;
+    const dmDenied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "dm:mem_other" }, { memberId: dev.id })) as any;
     expect(dmDenied.ok).toBe(false);
     expect(dmDenied.error).toMatch(/own DM/);
   });
@@ -112,15 +108,15 @@ describe("cross-scope reads (flagship ①)", () => {
   it("query_room_messages: own DM scope is readable from room and from DM (member-owned store)", async () => {
     const { dev, roomA } = await seedWorld();
     const dmStore = await import("../../src/workspace/dm-message-store.js");
-    dmStore.addDmMessage(dev.id, { sender: "user", content: "private beta question" });
-    dmStore.addDmMessage(dev.id, { sender: "dev", content: "private answer" });
+    dmStore.addDmMessage(dev.id, { sender: "user", mentions: [], content: "private beta question" });
+    dmStore.addDmMessage(dev.id, { sender: "dev", mentions: [], content: "private answer" });
 
     const tools = await import("../../src/engine/tools.js");
-    const fromRoom = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `dm:${dev.id}` })) as any[];
+    const fromRoom = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `dm:${dev.id}` }, { memberId: dev.id })) as any[];
     expect(fromRoom.map((m) => m.content)).toEqual(["private beta question", "private answer"]);
 
     // From inside the DM scope itself: default reads the DM; query filter works.
-    const fromDm = (await tools.handleToolCallback("query_room_messages", `dm:${dev.id}`, "dev", { query: "question" })) as any[];
+    const fromDm = (await tools.handleToolCallback("query_room_messages", `dm:${dev.id}`, "dev", { query: "question" }, { memberId: dev.id })) as any[];
     expect(fromDm.map((m) => m.content)).toEqual(["private beta question"]);
   });
 
@@ -130,74 +126,30 @@ describe("cross-scope reads (flagship ①)", () => {
     taskStore.createTask(roomB.id, { title: "beta task", createdBy: "pm" });
 
     const tools = await import("../../src/engine/tools.js");
-    const tasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `room:${roomB.id}` })) as any[];
+    const tasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
     expect(tasks.map((t) => t.title)).toEqual(["beta task"]);
 
-    const detail = (await tools.handleToolCallback("get_task", roomA.id, "dev", { scope: `room:${roomB.id}`, taskId: tasks[0].id })) as string;
+    const detail = (await tools.handleToolCallback("get_task", roomA.id, "dev", { scope: `room:${roomB.id}`, taskId: tasks[0].id }, { memberId: dev.id })) as string;
     expect(detail).toContain("beta task");
 
-    const dmTasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `dm:${dev.id}` })) as any;
+    const dmTasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `dm:${dev.id}` }, { memberId: dev.id })) as any;
     expect(dmTasks.ok).toBe(false);
     expect(dmTasks.error).toMatch(/room-scoped/);
   });
 
-  it.skip("read_memory retired: scope param reads own member memory...", async () => {
-    const { dev, roomA, roomB, roomC } = await seedWorld();
-    const memStore = await import("../../src/workspace/member-memory-store.js");
-    memStore.writeMemoryLayer(dev.id, "principles", "beta-scope rules", { type: "member", memberId: dev.id, name: "dev" }, { scopeId: `room:${roomB.id}`, reason: "test", operation: "write" });
-    const principlesStore = await import("../../src/workspace/principles-store.js");
-    principlesStore.writePrinciples({ roomId: roomB.id, scope: "room", content: "beta room principles", actor: { type: "member", memberId: dev.id, name: "dev" }, reason: "test" });
-
-    const tools = await import("../../src/engine/tools.js");
-    // Member principles at room:B scope, read from roomA via scope=room:<B>.
-    const res = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: `room:${roomB.id}` })) as any;
-    expect(res.ok).toBe(true);
-    expect(res.content).toBe("beta-scope rules");
-
-    // Room principles of roomB from roomA: not reachable through read_memory's
-    // single scope param (asset-level 'room' reads only the CURRENT room; a
-    // room:<id> target reads the member's own assets at that scope). This is a
-    // deliberate scope trim from flagship ① (room principles of another room
-    // are niche — a member of B already has them injected) — flagged to
-    // architect; resurrect via a composed param if he rules it back in.
-    const rp = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "room", target_scope: `room:${roomB.id}` })) as any;
-    expect(rp.ok).toBe(false); // target_scope is retired → explicit error (no silent room-principles read)
-    const rp2 = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "room" })) as any;
-    expect(rp2.ok).toBe(true);
-    expect(rp2.content).not.toBe("beta room principles"); // current roomA, not roomB
-
-    // Unauthorized target scope → explicit error.
-    const denied = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: `room:${roomC.id}` })) as any;
-    expect(denied.ok).toBe(false);
-    expect(denied.error).toMatch(/not a member/);
-
-    // Default remains current scope.
-    const cur = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles" })) as any;
-    expect(cur.ok).toBe(true);
-    expect(cur.content).not.toBe("beta-scope rules");
-  });
-
-  it.skip("scope param validation retired with read_memory", async () => {
+  it("supported query tools reject retired target_scope without silent fallback", async () => {
     const { dev, roomA } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
-    // Invalid scope value on read_memory.
-    const bad = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", scope: "roomx" })) as any;
-    expect(bad.ok).toBe(false);
-    expect(bad.error).toMatch(/must be 'room', 'member', 'room:<id>', or 'dm:<memberId>'/);
-    // Retired target_scope on read_memory.
-    const retired = (await tools.handleToolCallback("read_memory", roomA.id, "dev", { asset: "principles", target_scope: `room:${roomA.id}` })) as any;
-    expect(retired.ok).toBe(false);
-    expect(retired.error).toMatch(/target_scope is retired/);
     // Retired target_scope on query_room_messages (QA's silent-fallback trap).
-    const q = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { target_scope: `room:${roomA.id}` })) as any;
+    const q = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
     expect(Array.isArray(q)).toBe(false);
     expect(q.ok).toBe(false);
     expect(q.error).toMatch(/unknown parameter 'target_scope'/);
     // Retired target_scope on list_tasks / get_task.
-    const lt = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { target_scope: `room:${roomA.id}` })) as any;
+    const lt = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
     expect(lt.ok).toBe(false);
     expect(lt.error).toMatch(/unknown parameter 'target_scope'/);
-    const gt = (await tools.handleToolCallback("get_task", roomA.id, "dev", { taskId: "x", target_scope: `room:${roomA.id}` })) as any;
+    const gt = (await tools.handleToolCallback("get_task", roomA.id, "dev", { taskId: "x", target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
     expect(gt.ok).toBe(false);
     expect(gt.error).toMatch(/unknown parameter 'target_scope'/);
   });
@@ -205,7 +157,7 @@ describe("cross-scope reads (flagship ①)", () => {
   it("list_scopes: rooms (id+name) + own DM; excludes non-member rooms", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
-    const res = (await tools.handleToolCallback("list_scopes", roomA.id, "dev", {})) as any;
+    const res = (await tools.handleToolCallback("list_scopes", roomA.id, "dev", {}, { memberId: dev.id })) as any;
     expect(res.ok).toBe(true);
     const scopes = res.scopes.map((s: any) => s.scope);
     expect(scopes).toContain(`room:${roomA.id}`);
@@ -250,7 +202,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
     // Room scope same story: global write, no memberOverrides residue.
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room2 = roomStore.createRoom("delta", dir, [{ agent: "dev", name: "scoped" }], undefined);
+    const room2 = roomStore.createRoom("delta", undefined, []);
     roomStore.stampGlobalMemberIds(room2.id, [scoped.id], scoped.id);
     reg.applyMemberConfigPatch(scoped.id, `room:${room2.id}`, { thinkingLevel: "max" });
     rec = reg.getMember(scoped.id)!;

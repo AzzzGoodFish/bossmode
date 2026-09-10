@@ -1,14 +1,15 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * DM attachments (fish 2026-08-04: DM chat essentials align with room).
  * DM upload stores member-owned under members/<id>/dm-attachments/; the DM
- * message POST persists structured attachments on the RoomMessage shape.
+ * message store persists structured attachments on the RoomMessage shape.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -20,23 +21,17 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
   };
 });
 
-function seedAgent(name: string) {
-  const agentsDir = join(dir, "agents");
-  mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(join(agentsDir, `${name}.md`), `---\nname: ${name}\ndescription: \"${name}\"\n---\n\nYou are ${name}.\n`, "utf-8");
-}
-
 describe("DM attachments", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-dm-att-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    seedAgent("archie");
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("streamToDmAttachment stores member-owned with hash naming + traversal protection", async () => {
@@ -55,7 +50,7 @@ describe("DM attachments", () => {
     expect(() => store.getDmAttachmentPath(member.id, "../escape.txt")).toThrow(/Invalid filename/);
   });
 
-  it("DM message POST persists structured attachments on the RoomMessage shape", async () => {
+  it("DM message store persists structured attachments on the RoomMessage shape", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const member = reg.createMember({ name: "archie", agentTemplate: "archie" });
     const dm = await import("../../src/workspace/dm-message-store.js");
@@ -65,6 +60,7 @@ describe("DM attachments", () => {
     expect(msg.attachments).toHaveLength(1);
     expect((msg.attachments as any[])[0].originalFilename).toBe("notes.txt");
 
+    fixture.reopen();
     const back = dm.readAllDmMessages(member.id);
     expect(back).toHaveLength(1);
     expect((back[0].attachments as any[])[0].storedFilename).toBe("abc123.txt");

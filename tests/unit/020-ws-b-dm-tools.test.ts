@@ -1,11 +1,12 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 WS-B: DM tool surface — list_members / create_room / edit_room.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -17,30 +18,18 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
   };
 });
 
-function seedAgent(name: string) {
-  const agentsDir = join(dir, "agents");
-  mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(
-    join(agentsDir, `${name}.md`),
-    `---\nname: ${name}\ndescription: \"${name}\"\n---\n\nYou are ${name}.\n`,
-    "utf-8",
-  );
-}
-
 describe("020 WS-B DM tools", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-wsb-dm-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("pm");
-    seedAgent("developer");
-    seedAgent("general");
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("list_members returns global registry", async () => {
@@ -48,7 +37,7 @@ describe("020 WS-B DM tools", () => {
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const result = await handleToolCallback("list_members", "", "pm", {}) as any;
+    const result = await handleToolCallback("list_members", `dm:${pm.id}`, "pm", {}, { memberId: pm.id }) as any;
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);

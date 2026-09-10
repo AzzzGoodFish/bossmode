@@ -1,3 +1,4 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 read-cursor + system-notice eligibility (fish 2026-08-04 ruling):
  * - chats-list unread/mention counts exclude system notices and typed
@@ -6,10 +7,10 @@
  *   system notices, same as the activation-context injection path.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -26,15 +27,16 @@ function msg(sender: string, content: string, extra: Record<string, unknown> = {
 }
 
 describe("unread eligibility (chats list)", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-unread-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("counts only real conversation; system notices and typed events never badge", async () => {
@@ -65,25 +67,28 @@ describe("unread eligibility (chats list)", () => {
 });
 
 describe("query_room_messages member-visible filter", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-qrm-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "agents"), { recursive: true });
-    writeFileSync(join(dir, "agents", "pm.md"), `---\nname: pm\n---\npm`, "utf-8");
-    vi.resetModules();
-  });
+    });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("hides ALL system notices (failures + non-error prompts) but keeps conversation and typed events", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const messageStore = await import("../../src/workspace/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const room = roomStore.createRoom("r", dir, [{ agent: "pm", name: "pm" }], undefined);
+    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const member = createMember({ name: "pm" });
+    const room = roomStore.createRoom("r", undefined, []);
 
+    roomStore.stampGlobalMemberIds(room.id, [member.id]);
     messageStore.addMessage(room.id, msg("user", "REAL-USER-MSG"));
     messageStore.addMessage(room.id, msg("pm", "REAL-MEMBER-MSG"));
     messageStore.addMessage(room.id, msg("system", "Member \"pm\" request failed. runtime blew up with a long stack trace"));
@@ -92,7 +97,7 @@ describe("query_room_messages member-visible filter", () => {
     messageStore.addMessage(room.id, msg("system", "TASKEVENT-KEPT", { type: "task_event" }));
     messageStore.addMessage(room.id, msg("system", "KNOWLEDGEEVENT-KEPT", { type: "knowledge_event" }));
 
-    const result = (await handleToolCallback("query_room_messages", room.id, "pm", {})) as any[];
+    const result = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: member.id })) as any[];
     const texts = result.map((m: any) => m.content).join("\n");
     expect(texts).toContain("REAL-USER-MSG");
     expect(texts).toContain("REAL-MEMBER-MSG");

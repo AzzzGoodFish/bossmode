@@ -1,8 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { createMember } from "../../src/workspace/member-registry.js";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+let fixture: ReturnType<typeof coreFixture>;
 const state = vi.hoisted(() => ({ dir: "" }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -16,52 +19,43 @@ vi.mock("../../src/shared/config.js", () => ({
   writeConfig: vi.fn(),
 }));
 
-import { createTopic, addTopicMessage, readAllTopicMessages, resolveChatScopeRoomId } from "../../src/workspace/topic-store.js";
+import { createTopic, readAllTopicMessages, resolveChatScopeRoomId } from "../../src/workspace/topic-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { processAgentAttachments } from "../../src/engine/agent-attachments.js";
 import type { Room } from "../../src/shared/types.js";
 
 function writeRoom(roomId: string): Room {
-  const roomDir = join(state.dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
-  const room = {
-    id: roomId,
-    name: "R",
-    cwd: tmpdir(),
-    members: ["alice", "bob"],
-    roomMembers: [
-      { id: "rm_alice", name: "alice", sourceAgent: "pm", roomId, createdAt: 1, updatedAt: 1 },
-      { id: "rm_bob", name: "bob", sourceAgent: "developer", roomId, createdAt: 1, updatedAt: 1 },
-    ],
-    createdAt: 1,
-  } as Room;
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+  const members = ["alice", "bob"].map(name => createMember({ name }));
+  const room: Room = { id: roomId, name: "R", members: members.map(m => m.name),
+    globalMemberIds: members.map(m => m.id), createdAt: 1 };
+  new ConversationsRepository().upsertRoom(room);
   return room;
 }
 
 describe("topic chat scope: mentions / need_response / attachments", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-chat-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("resolveChatScopeRoomId maps topic: to parent", () => {
-    writeRoom("roomA");
+    const room = writeRoom("roomA");
     const topic = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1", seedMode: "fresh" });
     expect(resolveChatScopeRoomId(`topic:${topic.id}`)).toBe("roomA");
     expect(resolveChatScopeRoomId("dm:mem_x")).toBeNull();
   });
 
   it("chat in topic: persists @ mentions and need_response from parent roster", async () => {
-    writeRoom("roomA");
+    const room = writeRoom("roomA");
     const topic = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1", seedMode: "fresh" });
     const scope = `topic:${topic.id}`;
     const result = await handleToolCallback("chat", scope, "alice", {
       message: "@bob please ack NR",
       need_response: ["bob"],
-    });
+    }, { memberId: room.globalMemberIds![0] });
     expect(result).toMatchObject({ ok: true });
     const msgs = readAllTopicMessages("roomA", topic.id);
     expect(msgs).toHaveLength(1);
@@ -70,9 +64,9 @@ describe("topic chat scope: mentions / need_response / attachments", () => {
   });
 
   it("attachments on topic: land in the parent room store", async () => {
-    writeRoom("roomA");
+    const room = writeRoom("roomA");
     const topic = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1", seedMode: "fresh" });
-    const src = join(tmpdir(), `topic-attach-${Date.now()}.txt`);
+    const src = join(state.dir, "members", room.globalMemberIds![0], "topic-attach.txt");
     writeFileSync(src, "hello-attach");
     const outcomes = await processAgentAttachments(`topic:${topic.id}`, [src]);
     expect(outcomes).toHaveLength(1);

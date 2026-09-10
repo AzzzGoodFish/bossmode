@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 rc.5 流B: DM failure notices user-visible (G1) + scope-routed egress +
  * phantom-dir hygiene + system notices fully hidden from members (fish 2026-08-04).
@@ -6,14 +8,14 @@
  *   store (never a phantom rooms/dm:<id>/messages.jsonl).
  * - DM instances share the single wireInstanceEvents subscription: a failed
  *   turn posts a system notice into the DM store + broadcasts to dm:<id>.
- * - Phantom messages.jsonl sweep migrates legacy phantom content into the DM
- *   store (snapshot + idempotent-by-absence).
+ * - Ordinary SQL startup imports phantom history, backs up and retires sources,
+ *   and reopens without replaying historical activation.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 const broadcastToRoom = vi.fn();
@@ -36,27 +38,18 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
   };
 });
 
-function seedAgent(name: string) {
-  const agentsDir = join(dir, "agents");
-  mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(
-    join(agentsDir, `${name}.md`),
-    `---\nname: ${name}\ndescription: "${name}"\n---\n\nYou are ${name}.\n`,
-    "utf-8",
-  );
-}
-
 describe("scope-routed postMessage", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-dm-egress-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     broadcastToRoom.mockClear();
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("dm:<id> address writes the DM store, broadcasts to dm:<id>, leaves no phantom", async () => {
@@ -95,7 +88,10 @@ describe("DM instance unified event wiring (G1)", () => {
     createAgent: vi.fn(async () => {
       createAgentCalls += 1;
       return {
-        prompt: vi.fn(() => promptImpl()),
+        prompt: vi.fn(async (message: string, options?: { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void }) => {
+          fixture.db.transaction(() => options?.beforeDispatch?.({ attemptId: `mock:${randomUUID()}`, dispatchIndex: 0, message }));
+          await promptImpl();
+        }),
         steer: vi.fn(),
         abort: vi.fn(),
         destroy: vi.fn(),
@@ -108,21 +104,23 @@ describe("DM instance unified event wiring (G1)", () => {
     }),
   });
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-dm-g1-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("architect");
     broadcastToRoom.mockClear();
     subscribeCb = undefined;
     createAgentCalls = 0;
     promptImpl = async () => {};
-    vi.resetModules();
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    const manager = await import("../../src/engine/agent-manager.js");
+    await manager.shutdownAll();
+    fixture.close();
   });
 
   async function setup() {
@@ -207,6 +205,7 @@ describe("DM instance unified event wiring (G1)", () => {
         throw new Error("provider config missing");
       }),
     };
+    await manager.shutdownAll();
     (manager as any).initAgentManager({ get: () => failing, getAll: () => [] } as any);
 
     await manager.activateDmMember(member.id);
@@ -225,7 +224,10 @@ describe("DM instance unified event wiring (G1)", () => {
         createAgentCalls += 1;
         capturedCallbacks = opts.callbacks;
         return {
-          prompt: vi.fn(() => promptImpl()),
+          prompt: vi.fn(async (message: string, options?: { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void }) => {
+            fixture.db.transaction(() => options?.beforeDispatch?.({ attemptId: `mock:${randomUUID()}`, dispatchIndex: 0, message }));
+            await promptImpl();
+          }),
           steer: vi.fn(),
           abort: vi.fn(),
           destroy: vi.fn(),
@@ -238,6 +240,7 @@ describe("DM instance unified event wiring (G1)", () => {
       }),
     };
     const managerAny = manager as any;
+    await manager.shutdownAll();
     managerAny.initAgentManager({ get: () => runtime, getAll: () => [] } as any);
 
     await manager.activateDmMember(member.id);
@@ -250,57 +253,69 @@ describe("DM instance unified event wiring (G1)", () => {
   });
 });
 
-describe("dm phantom messages migration", () => {
+describe("DM historical messages through ordinary storage startup", () => {
+  let database: import("../../src/storage/database.js").Database | undefined;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-dm-phantom-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
-    mkdirSync(join(dir, "rooms"), { recursive: true });
     vi.resetModules();
+    dir = process.env.BOSSMODE_DIR!;
+    mkdirSync(dir, { recursive: true });
   });
-
   afterEach(() => {
+    database?.close();
+    database = undefined;
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("merges phantom messages.jsonl into the DM store, snapshots, removes; re-run is a no-op", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm" });
+  async function startup() {
+    const { prepareCoreStorage } = await import("../../src/storage/core-startup.js");
+    const result = await prepareCoreStorage({ root: dir, bundledCatalog: [], initialConfig: {
+      auth: { username: "test", passwordHash: "fixture" }, apiKeys: {},
+      defaults: { host: "127.0.0.1", port: 8080 }, runtime: {},
+    } });
+    database = result.db;
+    (await import("../../src/storage/database.js")).bindDatabase(database);
+    return result;
+  }
 
-    const phantomDir = join(dir, "rooms", `dm:${member.id}`);
+  it("imports phantom messages into the owned DM scope, backs up and retires sources; restart is a no-op", async () => {
+    const memberId = "mem_historical";
+    const phantomDir = join(dir, "rooms", `dm:${memberId}`);
     mkdirSync(phantomDir, { recursive: true });
     const phantom = [
-      { id: "p1", seq: 1, ts: 1000, sender: "system", content: `Member "pm" request failed. Error: old`, mentions: [] },
-      { id: "p2", seq: 2, ts: 2000, sender: "system", content: `Member "pm" runtime ended unexpectedly (exit 1).`, mentions: [] },
+      { id: "p1", seq: 1, ts: 1000, sender: "system", content: 'Member "pm" request failed. Error: old', mentions: [] },
+      { id: "p2", seq: 2, ts: 2000, sender: "system", content: 'Member "pm" runtime ended unexpectedly (exit 1).', mentions: [] },
     ];
-    writeFileSync(join(phantomDir, "messages.jsonl"), phantom.map((m) => JSON.stringify(m)).join("\n") + "\n", "utf-8");
-    writeFileSync(join(phantomDir, ".seq"), "3", "utf-8");
+    const source = phantom.map(m => JSON.stringify(m)).join("\n") + "\n";
+    writeFileSync(join(phantomDir, "messages.jsonl"), source);
+    writeFileSync(join(phantomDir, ".seq"), "3");
 
-    const { runDmPhantomMessagesMigration } = await import("../../src/workspace/dm-phantom-messages-migration.js");
-    runDmPhantomMessagesMigration();
-
+    const result = await startup();
+    expect(result.migrated).toBe(true);
     const store = await import("../../src/workspace/dm-message-store.js");
-    const all = store.readAllDmMessages(member.id);
-    expect(all).toHaveLength(2);
-    expect(all[0].content).toContain("request failed");
-    expect(all[1].content).toContain("runtime ended unexpectedly");
-    // Re-sequenced fresh, order preserved by ts.
-    expect(all[0].seq).toBeLessThan(all[1].seq!);
-
-    // Phantom gone, snapshot kept.
-    expect(existsSync(join(phantomDir, "messages.jsonl"))).toBe(false);
-    expect(existsSync(join(phantomDir, ".seq"))).toBe(false);
-    const snapshot = join(dir, "pi-agent", "runtime", ".migration-snapshots", "dm-phantom-messages-v1", `dm:${member.id}`, "messages.jsonl");
-    expect(existsSync(snapshot)).toBe(true);
-    expect(readFileSync(snapshot, "utf-8")).toContain("request failed");
-
-    // Idempotent: second run does not duplicate.
-    runDmPhantomMessagesMigration();
-    expect(store.readAllDmMessages(member.id)).toHaveLength(2);
+    // Current importer preserves historical IDs, timestamps and sequence values.
+    expect(store.readAllDmMessages(memberId)).toEqual(phantom);
+    expect(database!.get("SELECT kind, member_id FROM scopes WHERE id=?", `dm:${memberId}`))
+      .toEqual({ kind: "dm", member_id: memberId });
+    expect(database!.all("SELECT * FROM rooms")).toEqual([]);
+    expect(database!.all("SELECT * FROM outbox")).toEqual([]);
+    for (const filename of ["messages.jsonl", ".seq"]) {
+      expect(existsSync(join(phantomDir, filename))).toBe(false);
+      const record = database!.get<{ backup_path: string; retired_at: number }>(
+        "SELECT backup_path,retired_at FROM storage_upgrade_files WHERE path=?", `rooms/dm:${memberId}/${filename}`)!;
+      expect(record.retired_at).toBeTypeOf("number");
+      expect(readFileSync(join(dir, record.backup_path), "utf8")).toBe(filename === ".seq" ? "3" : source);
+    }
+    database!.close();
+    database = undefined;
+    const again = await startup();
+    expect(again.migrated).toBe(false);
+    expect(store.readAllDmMessages(memberId)).toEqual(phantom);
   });
 
-  it("skips cleanly when no phantom exists", async () => {
-    const { runDmPhantomMessagesMigration } = await import("../../src/workspace/dm-phantom-messages-migration.js");
-    expect(() => runDmPhantomMessagesMigration()).not.toThrow();
+  it("starts cleanly without phantom history and does not invent a DM or room", async () => {
+    await startup();
+    expect(database!.all("SELECT * FROM scopes")).toEqual([]);
+    expect(database!.all("SELECT * FROM messages")).toEqual([]);
   });
 });
 
@@ -315,33 +330,5 @@ describe("system notices hidden from members (fish 2026-08-04)", () => {
     expect(isSystemNoticeHiddenFromMembers({ sender: "system", type: "knowledge_event", content: "[Knowledge] pm updated" })).toBe(false);
     expect(isSystemNoticeHiddenFromMembers({ sender: "pm", content: "hi" })).toBe(false);
     expect(isSystemNoticeHiddenFromMembers({ sender: "user", content: "hi" })).toBe(false);
-  });
-});
-
-describe("write_memory receipt wording", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-mem-receipt-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
-    mkdirSync(join(dir, "rooms"), { recursive: true });
-    seedAgent("pm");
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it.skip("write_memory receipt retired", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("r", dir, [{ agent: "pm", name: "pm" }], undefined);
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const result = (await handleToolCallback("write_memory", room.id, "pm", {
-      asset: "principles",
-      content: "## Rules\n- test\n",
-      reason: "test",
-    })) as any;
-    expect(result.ok).toBe(true);
-    expect(result.message).toContain("Reload or a fresh session");
-    expect(result.message).not.toContain("next member activation");
   });
 });

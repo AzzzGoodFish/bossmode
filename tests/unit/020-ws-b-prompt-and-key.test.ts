@@ -1,11 +1,12 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 WS-B foundation: scope-aware prompt assembly + instanceKey rekey.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -18,15 +19,16 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
 });
 
 describe("020 WS-B prompt + instanceKey", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-wsb-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("instanceKey for room uses room:<id>:<memberId>", async () => {
@@ -41,32 +43,21 @@ describe("020 WS-B prompt + instanceKey", () => {
   it("compileMemberPromptForScope (room) is three-segment Member → Communication → Environment", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
 
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     // Grow persona body beyond birth skeleton.
-    const { writeFileSync: wfs } = await import("node:fs");
-    wfs(
+    writeFileSync(
       join(dir, "members", member.id, "persona.md"),
       "---\nname: architect\n---\n\nI am careful.\n",
       "utf-8",
     );
 
-    const roomDir = join(dir, "rooms", "room1");
-    mkdirSync(join(roomDir, "memory"), { recursive: true });
-    writeFileSync(join(roomDir, "room.json"), JSON.stringify({
-      id: "room1",
-      name: "Test Room",
-      cwd: dir,
-      members: ["architect"],
-      roomMembers: [{ id: member.id, name: "architect", agent: "architect" }],
-      promptLeaderMemberId: member.id,
-    }), "utf-8");
-
-    const { readFileSync } = await import("node:fs");
-    const room = JSON.parse(readFileSync(join(roomDir, "room.json"), "utf-8"));
+    const roomStore = await import("../../src/workspace/room-store.js");
+    const created = roomStore.createRoom("Test Room", undefined, []);
+    roomStore.stampGlobalMemberIds(created.id, [member.id], member.id);
+    const room = roomStore.getRoom(created.id)!;
     const compiled = compileMemberPromptForScope({
-      scopeId: "room:room1",
+      scopeId: `room:${room.id}`,
       memberId: member.id,
       memberName: "architect",
       agentDef: { name: "architect", description: "", systemPrompt: "You are the architect.", tags: [], skills: [] },

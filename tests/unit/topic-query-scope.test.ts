@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { coreFixture } from "../helpers/core-fixture.js";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir = "";
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -23,11 +24,6 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
   return { ...actual, broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn() };
 });
 
-function seedAgent(name: string) {
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", `${name}.md`), `---\nname: ${name}\n---\n\nYou are ${name}.\n`, "utf-8");
-}
-
 const PROFILE = {
   name: "Test provider",
   providerSlug: "testprov",
@@ -42,16 +38,15 @@ const PROFILE = {
 };
 
 describe("query_room_messages topic scope", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-topic-query-"));
+  beforeEach(async () => {
+    vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
-    seedAgent("dev");
-    seedAgent("outsider");
-    vi.resetModules();
   });
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   async function seed() {
@@ -61,9 +56,9 @@ describe("query_room_messages topic scope", () => {
     const dev = reg.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
     const outsider = reg.createMember({ name: "outsider", agentTemplate: "outsider", model: "testprov/claude-a", credentialId: cred.id });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("alpha", dir, [{ agent: "dev", name: "dev" }], undefined);
+    const room = roomStore.createRoom("alpha", undefined, []);
     roomStore.stampGlobalMemberIds(room.id, [dev.id], dev.id);
-    const other = roomStore.createRoom("gamma", dir, [{ agent: "outsider", name: "outsider" }], undefined);
+    const other = roomStore.createRoom("gamma", undefined, []);
     roomStore.stampGlobalMemberIds(other.id, [outsider.id], outsider.id);
     const topicStore = await import("../../src/workspace/topic-store.js");
     const topic = topicStore.createTopic({ roomId: room.id, title: "T", anchorMessageId: "m1", seedMode: "fresh" });
@@ -75,37 +70,37 @@ describe("query_room_messages topic scope", () => {
   }
 
   it("topic instance reads its own history (no filter / from_seq / query)", async () => {
-    const { topic } = await seed();
+    const { dev, topic } = await seed();
     const tools = await import("../../src/engine/tools.js");
     const scope = `topic:${topic.id}`;
 
-    const all = (await tools.handleToolCallback("query_room_messages", scope, "dev", {})) as any[];
+    const all = (await tools.handleToolCallback("query_room_messages", scope, "dev", {}, { memberId: dev.id })) as any[];
     expect(all.map((m) => m.content)).toEqual(["topic hello", "topic ack"]);
     expect(all.every((m) => m.content !== "room only history")).toBe(true);
 
-    const after = (await tools.handleToolCallback("query_room_messages", scope, "dev", { from_seq: 1 })) as any[];
+    const after = (await tools.handleToolCallback("query_room_messages", scope, "dev", { from_seq: 1 }, { memberId: dev.id })) as any[];
     expect(after.map((m) => m.content)).toEqual(["topic ack"]);
 
-    const q = (await tools.handleToolCallback("query_room_messages", scope, "dev", { query: "hello" })) as any[];
+    const q = (await tools.handleToolCallback("query_room_messages", scope, "dev", { query: "hello" }, { memberId: dev.id })) as any[];
     expect(q.map((m) => m.content)).toEqual(["topic hello"]);
   });
 
   it("room instance explicit scope reads the topic, not the parent room", async () => {
-    const { room, topic } = await seed();
+    const { dev, room, topic } = await seed();
     const tools = await import("../../src/engine/tools.js");
     const res = (await tools.handleToolCallback("query_room_messages", room.id, "dev", {
       scope: `topic:${topic.id}`,
-    })) as any[];
+    }, { memberId: dev.id })) as any[];
     expect(res.map((m) => m.content)).toEqual(["topic hello", "topic ack"]);
     expect(res.some((m) => m.content === "room only history")).toBe(false);
   });
 
   it("outsider cannot read a topic in a room they are not in", async () => {
-    const { other, topic } = await seed();
+    const { outsider, other, topic } = await seed();
     const tools = await import("../../src/engine/tools.js");
     const denied = (await tools.handleToolCallback("query_room_messages", other.id, "outsider", {
       scope: `topic:${topic.id}`,
-    })) as any;
+    }, { memberId: outsider.id })) as any;
     expect(denied.ok).toBe(false);
     expect(String(denied.error)).toMatch(/Access denied|not a member/i);
   });

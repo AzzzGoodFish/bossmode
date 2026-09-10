@@ -1,11 +1,12 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 conversations / scope surface unit checks (no full HTTP stack).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
 vi.mock("../../src/shared/config.js", async (importOriginal) => {
@@ -18,14 +19,15 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
 });
 
 describe("020 conversations / scope surface", () => {
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "bm-conv-"));
-    mkdirSync(join(dir, "members"), { recursive: true });
+  beforeEach(async () => {
     vi.resetModules();
+    fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+    dir = fixture.root;
+    mkdirSync(join(dir, "members"), { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    fixture.close();
   });
 
   it("conversations module loads and registers routes", async () => {

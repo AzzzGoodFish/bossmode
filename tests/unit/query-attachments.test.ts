@@ -1,13 +1,14 @@
+import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * fish No.16834: query_room_messages returns attachments per message
  * ({originalFilename, path}); markdown export appends Attachment lines;
  * missing file → "unavailable". Room / DM / topic scopes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
+let fixture: ReturnType<typeof coreFixture>;
 let dir = "";
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -41,18 +42,15 @@ const PROFILE = {
   models: [{ id: "claude-a", contextWindow: 100000, maxTokens: 8000, input: ["text" as const] }],
 };
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "bm-query-attach-"));
+beforeEach(async () => {
+  vi.resetModules();
+  fixture = (await import("../helpers/core-fixture.js")).coreFixture();
+  dir = fixture.root;
   mkdirSync(join(dir, "members"), { recursive: true });
   mkdirSync(join(dir, "rooms"), { recursive: true });
-  // createRoom validates agent definitions — seed a template (data files inert;
-  // batch 2.5 kept definition loading for this purpose).
-  mkdirSync(join(dir, "agents"), { recursive: true });
-  writeFileSync(join(dir, "agents", "pm.md"), "---\nname: pm\n---\n\nYou are pm.\n", "utf-8");
-  vi.resetModules();
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  fixture.close();
 });
 
 describe("query_room_messages attachments", () => {
@@ -62,7 +60,7 @@ describe("query_room_messages attachments", () => {
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     // Stored attachment in room attach dir (batch 7 P3: room data dir)
@@ -72,15 +70,14 @@ describe("query_room_messages attachments", () => {
 
     const messageStore = await import("../../src/workspace/message-store.js");
     messageStore.addMessage(room.id, {
-      id: "msg-1",
       sender: "user",
       content: "report attached",
-      ts: Date.now(),
+      mentions: [],
       attachments: [{ storedFilename: "abc123.md", originalFilename: "report.md", size: 8 }],
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {})) as any[];
+    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("report attached"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "report.md", path: join(attachDir, "abc123.md") },
@@ -89,7 +86,7 @@ describe("query_room_messages attachments", () => {
     // Markdown export mode
     const fileRes = (await handleToolCallback("query_room_messages", room.id, "pm", {
       output: "file",
-    })) as any;
+    }, { memberId: m.id })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
     expect(md).toContain("Attachment: [original filename: report.md](" + join(attachDir, "abc123.md") + ")");
   });
@@ -100,20 +97,19 @@ describe("query_room_messages attachments", () => {
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R2", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R2", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     const messageStore = await import("../../src/workspace/message-store.js");
     messageStore.addMessage(room.id, {
-      id: "msg-2",
       sender: "user",
       content: "gone file",
-      ts: Date.now(),
+      mentions: [],
       attachments: [{ storedFilename: "nope.md", originalFilename: "ghost.md", size: 4 }],
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {})) as any[];
+    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("gone file"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "ghost.md", path: "unavailable" },
@@ -121,7 +117,7 @@ describe("query_room_messages attachments", () => {
 
     const fileRes = (await handleToolCallback("query_room_messages", room.id, "pm", {
       output: "file",
-    })) as any;
+    }, { memberId: m.id })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
     expect(md).toContain("Attachment: [original filename: ghost.md](unavailable)");
   });
@@ -140,11 +136,12 @@ describe("query_room_messages attachments", () => {
     dmStore.addDmMessage(m.id, {
       sender: "user",
       content: "dm attach",
+      mentions: [],
       attachments: [{ storedFilename: "dmf1.png", originalFilename: "shot.png", size: 3 }],
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", `dm:${m.id}`, "pm", {})) as any[];
+    const rows = (await handleToolCallback("query_room_messages", `dm:${m.id}`, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("dm attach"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "shot.png", path: join(dmAttachDir, "dmf1.png") },
@@ -157,7 +154,7 @@ describe("query_room_messages attachments", () => {
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R3", dir, [{ agent: "pm", name: "pm" }]);
+    const room = roomStore.createRoom("R3", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
     const attachDir = join(dir, "rooms", room.id, "attachments");
@@ -175,6 +172,7 @@ describe("query_room_messages attachments", () => {
     topicStore.addTopicMessage(room.id, topic.id, {
       sender: "user",
       content: "topic attach",
+      mentions: [],
       attachments: [{ storedFilename: "topicfile.md", originalFilename: "tnote.md", size: 1 }],
     } as any);
 
@@ -184,6 +182,7 @@ describe("query_room_messages attachments", () => {
       `topic:${topic.id}`,
       "pm",
       {},
+      { memberId: m.id },
     )) as any[];
     const hit = rows.find((r) => r.content.includes("topic attach"));
     expect(hit?.attachments).toEqual([

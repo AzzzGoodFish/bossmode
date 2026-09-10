@@ -1,8 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { coreFixture } from "../helpers/core-fixture.js";
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { createMember } from "../../src/workspace/member-registry.js";
+import { mkdirSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+let fixture: ReturnType<typeof coreFixture>;
 const state = vi.hoisted(() => ({ dir: "" }));
 
 vi.mock("../../src/foundation/logger.js", () => ({
@@ -22,29 +24,23 @@ import { wrapRoomContextMessage } from "../../src/engine/message-envelope.js";
 import type { Room } from "../../src/shared/types.js";
 
 function writeRoom(roomId: string): Room {
-  const roomDir = join(state.dir, "rooms", roomId);
-  mkdirSync(roomDir, { recursive: true });
-  const room = {
-    id: roomId,
-    name: "R",
-    cwd: "/tmp",
-    members: ["pm"],
-    roomMembers: [{ id: "rm_pm", name: "pm", sourceAgent: "pm", createdAt: 1, updatedAt: 1 }],
-    createdAt: 1,
-  } as Room;
-  writeFileSync(join(roomDir, "room.json"), JSON.stringify(room), "utf-8");
+  const members = ["pm"].map(name => createMember({ name }));
+  const room: Room = { id: roomId, name: "R", members: members.map(m => m.name),
+    globalMemberIds: members.map(m => m.id), createdAt: 1 };
+  new ConversationsRepository().upsertRoom(room);
   return room;
 }
 
 describe("topic scope reply_to + envelope lookup", () => {
   beforeEach(() => {
-    state.dir = mkdtempSync(join(tmpdir(), "bossmode-topic-reply-"));
+    fixture = coreFixture();
+    state.dir = fixture.root;
   });
   afterEach(() => {
-    rmSync(state.dir, { recursive: true, force: true });
+    fixture.close();
   });
 
-  it("loadScopeMessages(topic:) returns topic jsonl, not the parent room", () => {
+  it("loadScopeMessages(topic:) returns topic SQL history, not the parent room", () => {
     writeRoom("roomA");
     const topic = createTopic({
       roomId: "roomA",
