@@ -55,29 +55,20 @@ it.each(["room", "dm:mem_one", "topic:one"])("leaves prior DB facts and original
   again.db.close();
 });
 
-// Known importer defect, outside this PR's production allowlist. Keep the desired
-// duplicate-superset contract executable, not silently replaced by current-name inference.
-// Remove .fails only when the parent implements verified cross-source provenance.
-it.fails("BLOCKED: imports a proven name/ID duplicate superset once without losing model/token dimensions", async () => {
+// Actor evidence alone cannot prove that equal payloads are the same executions.
+it("retains independent equal events from two proven same-owner sources", async () => {
   const root = join(fixture.root, "snapshot");
   write(root, "rooms/room/agent-events/old-label.jsonl", jsonl([event(1), event(2)]));
   write(root, "rooms/room/agent-events/mem_one.jsonl", jsonl([event(1), event(2), event(3)]));
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_one','new-label','new-label','general','{}',1,1)");
   const entries = discoverLegacyInventory(root).entries;
   const ctx: UpgradeImportContext = { db: fixture.db, root: fixture.root, sourceRoot: root, previousDatabase: undefined, sourceFiles: entries.map(e => e.path), legacy: true, progress() {}, stageAsset() { throw Error("unexpected asset"); } };
-  // Explicit external evidence for these exact sources. Neither the filename nor
-  // a current name is used to infer the historical owner.
+  // External actor evidence for these exact sources, NOT duplicate-event evidence.
   const verifiedSources = new Set(entries.map(e => e.path));
-  let error: unknown;
-  try {
-    await importLegacyConversations(ctx, entries, { eventOwner: entry => {
-      if (!verifiedSources.has(entry.path)) throw Error("unproven source");
-      return { ownerKey: "mem_one", memberId: "mem_one" };
-    } });
-  } catch (caught) { error = caught; }
-  // Preserve the concrete collision diagnostic in the standalone failing repro log.
-  if (error && !String(error).includes("UNIQUE constraint failed: agent_events.scope_id, agent_events.owner_key, agent_events.seq")) throw error;
-  expect(error, "verified duplicate source import must succeed, not collide on owner sequence").toBeUndefined();
-  expect(fixture.db.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 3 });
-  expect(fixture.db.get("SELECT input_tokens,output_tokens,cache_read,cache_write,cost,turns,model FROM token_usage_daily")).toEqual({ input_tokens: 6, output_tokens: 12, cache_read: 18, cache_write: 24, cost: 1.5, turns: 3, model: "p/m" });
+  await importLegacyConversations(ctx, entries, { eventOwner: entry => {
+    if (!verifiedSources.has(entry.path)) throw Error("unproven source");
+    return { ownerKey: "mem_one", memberId: "mem_one" };
+  } });
+  expect(fixture.db.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 5 });
+  expect(fixture.db.get("SELECT input_tokens,output_tokens,cache_read,cache_write,cost,turns,model FROM token_usage_daily")).toEqual({ input_tokens: 9, output_tokens: 18, cache_read: 27, cache_write: 36, cost: 2.25, turns: 5, model: "p/m" });
 });
