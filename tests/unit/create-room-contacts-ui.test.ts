@@ -99,7 +99,7 @@ beforeAll(async () => {
 beforeEach(() => {
   container = new HostNode();
   root = createRoot(container as any);
-  fetchMock = vi.fn().mockResolvedValue(ok(contacts));
+  fetchMock = vi.fn().mockResolvedValue(ok({ members: contacts }));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(async () => { await act(async () => root.unmount()); });
@@ -151,7 +151,7 @@ describe("contacts room creation through React state and the HTTP client", () =>
     expect(container.textContent).not.toContain("historical-label");
     expect(container.textContent).not.toContain("Edit");
     await act(async () => nodes().find((node) => node.tagName === "SELECT")!.props.onChange({ target: { value: "mem-b" } }));
-    fetchMock.mockImplementation(async (url: string) => ok(url === "/api/members" ? contacts : { id: "room-1" }));
+    fetchMock.mockImplementation(async (url: string) => ok(url === "/api/members" ? { members: contacts } : { id: "room-1" }));
     await submit();
     const posts = fetchMock.mock.calls.filter(([, options]) => options.method === "POST");
     expect(posts).toHaveLength(1);
@@ -181,14 +181,14 @@ describe("contacts room creation through React state and the HTTP client", () =>
     await pick("mem-a");
     await pick("mem-b");
     await act(async () => nodes().find((node) => node.tagName === "SELECT")!.props.onChange({ target: { value: "mem-b" } }));
-    fetchMock.mockImplementation(async (url: string) => url === "/api/members" ? ok(contacts) : { ok: false, status: 409, json: async () => ({ error: "Contact was removed" }) });
+    fetchMock.mockImplementation(async (url: string) => url === "/api/members" ? ok({ members: contacts }) : { ok: false, status: 409, json: async () => ({ error: "Contact was removed" }) });
     await submit();
     expect(container.textContent).toContain("Contact was removed");
     expect(selectedIds()).toEqual(["mem-a", "mem-b"]);
     expect(nodes().find((node) => node.tagName === "SELECT")!.props.value).toBe("mem-b");
     expect(nodes().find((node) => node.tagName === "INPUT")!.props.value).toBe(" Product launch ");
     expect(onClose).not.toHaveBeenCalled();
-    fetchMock.mockImplementation(async (url: string) => ok(url === "/api/members" ? contacts : { id: "room-1" }));
+    fetchMock.mockImplementation(async (url: string) => ok(url === "/api/members" ? { members: contacts } : { id: "room-1" }));
     await submit();
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -198,7 +198,7 @@ describe("contacts room creation through React state and the HTTP client", () =>
     await render(createElement(CreateRoomDialog, { onClose: vi.fn(), onSubmit }));
     await nameRoom();
     await pick("mem-a");
-    fetchMock.mockResolvedValue(ok(contacts.slice(1)));
+    fetchMock.mockResolvedValue(ok({ members: contacts.slice(1) }));
     await submit();
     expect(container.textContent).toContain("A selected contact is no longer available.");
     expect(selectedIds()).toEqual(["mem-a"]);
@@ -257,7 +257,7 @@ describe("current contact picker loading and recovery", () => {
     await act(async () => pending.reject(new Error("offline")));
     expect(container.textContent).toContain("Couldn’t load contacts.");
     expect(container.textContent).not.toContain("No contacts yet.");
-    fetchMock.mockResolvedValue(ok([]));
+    fetchMock.mockResolvedValue(ok({ members: [] }));
     await click(button("Retry"));
     expect(container.textContent).toContain("No contacts yet. Create a member in Contacts, then return here.");
     expect(container.textContent).not.toContain("Couldn’t load contacts.");
@@ -278,9 +278,9 @@ describe("current contact picker loading and recovery", () => {
     const props = { onClose: vi.fn(), onPickMember: vi.fn(), selectedMemberIds: [] };
     await render(createElement(MemberPickerDialog, { ...props, open: true }));
     await render(createElement(MemberPickerDialog, { ...props, open: false }));
-    fetchMock.mockResolvedValue(ok([contacts[1]]));
+    fetchMock.mockResolvedValue(ok({ members: [contacts[1]] }));
     await render(createElement(MemberPickerDialog, { ...props, open: true }));
-    await act(async () => old.resolve(ok([contacts[0]])));
+    await act(async () => old.resolve(ok({ members: [contacts[0]] })));
     expect(nodes().filter((node) => node.attributes["data-contact-id"]).map((node) => node.attributes["data-contact-id"])).toEqual(["mem-b"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

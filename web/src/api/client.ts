@@ -141,8 +141,18 @@ export interface MemberInfo {
   createdAt?: number;
 }
 
-export async function getMembers(): Promise<MemberInfo[]> {
-  return apiFetch("/api/members");
+/** Current contact identity returned by the member directory. */
+export interface RoomContact {
+  id: string;
+  name: string;
+  title?: string | null;
+  avatar?: string;
+}
+
+export async function getMembers(): Promise<RoomContact[]> {
+  const result = await apiFetch<{ members: RoomContact[] }>("/api/members");
+  if (!Array.isArray(result.members)) throw new Error("Invalid member list response");
+  return result.members;
 }
 
 export async function getMember(id: string): Promise<MemberInfo> {

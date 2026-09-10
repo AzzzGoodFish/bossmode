@@ -1,4 +1,4 @@
-import { it, expect } from "vitest";
+import { it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, jsonRequest, getTestBossmodeDir } from "../helpers/test-server.js";
@@ -12,6 +12,15 @@ it("creates a deduplicated stable-ID roster and leader without cloning or renami
   try {
     const token = await loginAndGetToken(server.port);
     const a = createMemberWithPersona({name: "架构 同学"}, "\uFEFF---\r\nLiteral `persona`\r\n"), b = createMemberWithPersona({name: "mem_literal-name"}, "  Second persona  ");
+    const actualFetch = globalThis.fetch;
+    vi.stubGlobal("localStorage", {getItem: () => null, setItem() {}, removeItem() {}});
+    vi.stubGlobal("fetch", (path: string, options: RequestInit) => actualFetch(`http://127.0.0.1:${server.port}${path}`, options));
+    try {
+      const client = await import("../../web/src/api/client");
+      client.setToken(token);
+      const contacts = await client.getMembers();
+      expect(contacts.map(contact => [contact.id, contact.name])).toEqual(expect.arrayContaining([[a.id,a.name],[b.id,b.name]]));
+    } finally { vi.unstubAllGlobals(); }
     const before = getDatabase().all("SELECT * FROM members ORDER BY id");
     const response = await jsonRequest(server.port, "POST", "/api/rooms", {token, body:{name:"Contacts room",memberIds:[a.id,b.id,a.id],leaderMemberId:b.id}});
     expect(response.status).toBe(200);

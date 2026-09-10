@@ -1,17 +1,17 @@
 import { useReducer, useRef, useState, type FormEvent } from "react";
 import { Crown, Plus, Trash2, Users, X } from "lucide-react";
-import type { MemberInfo } from "../api/client";
+import type { RoomContact } from "../api/client";
 import { getMembers } from "../api/client";
 import { MemberPickerDialog } from "./MemberPickerDialog";
 import { Sheet } from "./Sheet";
 
 export interface RoomContactSelection {
-  members: MemberInfo[];
+  members: RoomContact[];
   leaderMemberId: string;
 }
 
 type SelectionAction =
-  | { type: "add"; member: MemberInfo }
+  | { type: "add"; member: RoomContact }
   | { type: "remove"; memberId: string }
   | { type: "leader"; memberId: string };
 

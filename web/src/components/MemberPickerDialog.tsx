@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import type { MemberInfo } from "../api/client";
+import type { RoomContact } from "../api/client";
 import { getMembers } from "../api/client";
 import { Sheet } from "./Sheet";
 import { StaffBadge } from "./StaffBadge";
@@ -10,13 +10,13 @@ interface MemberPickerDialogProps {
   open: boolean;
   onClose: () => void;
   selectedMemberIds: string[];
-  onPickMember: (member: MemberInfo) => void;
+  onPickMember: (member: RoomContact) => void;
 }
 
 export type ContactLoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; contacts: MemberInfo[] };
+  | { status: "ready"; contacts: RoomContact[] };
 
 export function contactDisplayState(state: ContactLoadState): "loading" | "error" | "empty" | "items" {
   if (state.status !== "ready") return state.status;
