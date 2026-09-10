@@ -208,15 +208,13 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
     const pub = readMemberSshPublicKey(legacy.id);
     expect(pub).toMatch(/^ssh-ed25519 /);
 
-    // Credential material is stable on a repeat, irrespective of the report defect below.
+    // Credential material remains stable on a repeat.
     backfillMemberSshKeys();
     expect(credentials.read(legacy.id)).toEqual(key);
   });
 
-  // Source defect: member-assets-migration.ts checks retired key paths instead of
-  // ssh_credentials; ensureMemberSshKeyPair returns existing SQL keys, but the
-  // backfill incorrectly reports them as generated again. Keep this assertion.
-  it.fails("SOURCE DEFECT: backfill reports existing SQL credentials as skipped on rerun", async () => {
+  // SQL credentials are authoritative even when legacy key files do not exist.
+  it("backfill reports existing SQL credentials as skipped on rerun", async () => {
     const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
     backfillMemberSshKeys();
     expect(backfillMemberSshKeys()).toEqual({ generated: [], skipped: 1 });

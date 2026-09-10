@@ -24,7 +24,7 @@ import {
   disableDeferredMcpCapabilities,
 } from "../shared/mcp-settings.js";
 import { listMembers } from "./member-registry.js";
-import { ensureMemberSshKeyPair, memberSshKeyPath, memberSshPublicKeyPath } from "./ssh-keygen.js";
+import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "./ssh-keygen.js";
 import { memberDir } from "./member-profile.js";
 
 export interface MemberAssetsMigrationReport {
@@ -122,7 +122,7 @@ export function backfillMemberSshKeys(): { generated: string[]; skipped: number 
   const generated: string[] = [];
   let skipped = 0;
   for (const m of listMembers()) {
-    if (existsSync(memberSshKeyPath(m.id)) && existsSync(memberSshPublicKeyPath(m.id))) {
+    if (readMemberSshPublicKey(m.id) !== null) {
       skipped++;
       continue;
     }
