@@ -857,17 +857,10 @@ export async function handleToolCallback(
       try {
         // DB members already have validated identities. Do not materialize
         // room-local drafts with the retired ASCII-only name validation.
-        room = roomStore.createRoom(name, cwd, []);
+        room = roomStore.createRoom(name, cwd, allIds, undefined, { promptLeaderMemberId: creator.id });
       } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };
       }
-
-      // Bind room membership and leadership directly to the existing DB IDs.
-      roomStore.stampGlobalMemberIds(
-        room.id,
-        invitees.map((m) => m.id),
-        creator.id,
-      );
 
       const principles = typeof params?.principles === "string" ? params.principles.trim() : "";
       if (principles) {

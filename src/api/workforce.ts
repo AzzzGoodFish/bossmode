@@ -1,17 +1,11 @@
 // Skills and member operational API routes. Member CRUD lives in members.ts.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
-import {
-  loadAgentDefinitions, saveAgentDefinition, getAgentsDir,
-} from "../workforce/agent-store.js";
 import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
 import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
-import { parseFrontmatter } from "../shared/frontmatter.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
@@ -20,26 +14,6 @@ import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-
-// ── Agent / Templates API retired (identity batch 2.5) ──
-// Routes answer 410 so old clients fail loud; runtime still loads agents/*.md
-// lazily via agent-store for residual agentTemplate labels (data files not deleted).
-
-function templatesGone(res: import("node:http").ServerResponse): void {
-  sendJson(res, 410, {
-    error: "gone",
-    message: "Agent templates API retired — members own their identity via persona.md",
-  });
-}
-
-addRoute("GET", "/api/agents", async (_req, res) => { templatesGone(res); });
-addRoute("GET", "/api/agents/templates", async (_req, res) => { templatesGone(res); });
-addRoute("GET", "/api/agents/:name", async (_req, res) => { templatesGone(res); });
-addRoute("POST", "/api/agents", async (_req, res) => { templatesGone(res); });
-addRoute("PUT", "/api/agents/:name", async (_req, res) => { templatesGone(res); });
-addRoute("DELETE", "/api/agents/:name", async (_req, res) => { templatesGone(res); });
-addRoute("GET", "/api/templates", async (_req, res) => { templatesGone(res); });
-addRoute("DELETE", "/api/templates/:name", async (_req, res) => { templatesGone(res); });
 
 // ── Skill CRUD ──
 
@@ -98,25 +72,6 @@ addRoute("DELETE", "/api/skills/:name", async (_req, res, params) => {
   if (!deleted) {
     sendJson(res, 404, { error: "Skill not found" });
     return;
-  }
-
-  // Auto-unbind: remove this skill from all agents that reference it
-  try {
-    const agents = loadAgentDefinitions();
-    for (const agent of agents) {
-      if (agent.skills?.includes(params.name)) {
-        const agentPath = join(getAgentsDir(), `${agent.name}.md`);
-        const raw = readFileSync(agentPath, "utf-8");
-        const { meta, body } = parseFrontmatter(raw);
-        const skills = Array.isArray(meta.skills) ? (meta.skills as string[]).filter((s) => s !== params.name) : [];
-        meta.skills = skills;
-        const { stringify } = await import("yaml");
-        const newContent = `---\n${stringify(meta).trim()}\n---\n\n${body}`;
-        saveAgentDefinition(agent.name, newContent);
-      }
-    }
-  } catch (err) {
-    logger.error("api", "failed to auto-unbind skill", { error: String(err) });
   }
 
   sendJson(res, 200, { ok: true });

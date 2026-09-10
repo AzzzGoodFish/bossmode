@@ -6,12 +6,10 @@ const location = vi.hoisted(() => ({ root: "" }));
 vi.mock("../src/shared/config.js", async original => ({ ...await original<typeof import("../src/shared/config.js")>(), getBossmodeDir: () => location.root }));
 import * as rooms from "../src/workspace/room-store.js";
 import * as messages from "../src/workspace/message-store.js";
-import { saveAgentDefinition } from "../src/workforce/agent-store.js";
 
 let f: ReturnType<typeof conversationsFixture>;
 beforeEach(() => { f = conversationsFixture(); location.root = f.root; });
 afterEach(() => f.close());
-const template = (slug: string) => saveAgentDefinition(slug, `---\nname: ${slug}\n---\nLiteral template body\n`);
 
 it("creates and reopens room metadata and document bindings without file authority", () => {
   expect(rooms.listRooms()).toEqual([]);
@@ -31,35 +29,35 @@ it("creates and reopens room metadata and document bindings without file authori
   expect(rooms.listRooms()).toHaveLength(2);
 });
 
-it("rejects invalid local drafts and missing templates before creating a room", () => {
-  template("pm");
-  for (const { drafts, error } of [
-    { drafts: [{ agent: "pm", name: "pm" }, { agent: "pm", name: "pm" }], error: /Duplicate member name/ },
-    { drafts: [{ agent: "pm", name: "bad/name" }], error: /member name may contain/ },
-    { drafts: [{ agent: "missing", name: "valid" }], error: /Agent not found/ },
-  ]) expect(() => rooms.createRoom("Rejected", undefined, drafts)).toThrow(error);
+it("rejects draft objects, unknown IDs and an unselected leader before creating a room", () => {
+  f.member("mem_pm", "PM");
+  expect(() => rooms.createRoom("Rejected", undefined, [{ agent: "pm", name: "PM" }] as any)).toThrow(/stable member IDs/);
+  expect(() => rooms.createRoom("Rejected", undefined, ["PM"])).toThrow(/Member not found/);
+  expect(() => rooms.createRoom("Rejected", undefined, ["mem_missing"])).toThrow(/Member not found/);
+  expect(() => rooms.createRoom("Rejected", undefined, ["mem_pm"], undefined, {promptLeaderMemberId: "mem_missing"})).toThrow(/one of memberIds/);
   expect(rooms.listRooms()).toEqual([]);
 });
 
-it("creates distinct local identities from one SQL template without inheriting retired name-based config", () => {
-  template("pm"); template("developer");
-  writeFileSync(join(f.root, "members.json"), JSON.stringify([{ name: "dev-a", model: "retired", thinkingLevel: "high" }]));
-  const room = rooms.createRoom("Local", undefined, [{ agent: "pm", name: "pm" }]);
-  const pm = rooms.getRoomMembers(room.id)[0];
-  expect(rooms.getCursors(room.id)[pm.id]).toBeNull();
-  for (const memberName of ["dev-a", "dev-b"]) expect(rooms.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName }).ok).toBe(true);
-  const members = rooms.getRoomMembers(room.id).filter(member => member.sourceAgent === "developer");
-  expect(members.map(member => member.name)).toEqual(["dev-a", "dev-b"]);
-  expect(new Set(members.map(member => member.id)).size).toBe(2);
-  expect(members[0].config?.model).toBeUndefined();
-  expect(members[0].config?.thinkingLevel).toBeUndefined();
-  expect(members[0].sourceMemberId).toBeUndefined();
-  expect(members[0].migratedFrom).toBeUndefined();
-  expect(rooms.addRoomMemberFromAgent(room.id, { agentName: "developer", memberName: "dev-a" })).toMatchObject({ ok: false, code: "duplicate" });
+it("creates only existing contacts and never inherits retired template or name-based config", () => {
+  f.member("mem_pm", "PM"); f.member("mem_a", "开发 A"); f.member("mem_b", "dev `B`");
+  writeFileSync(join(f.root, "members.json"), JSON.stringify([{ name: "开发 A", model: "retired", thinkingLevel: "high" }]));
+  const room = rooms.createRoom("Contacts", undefined, ["mem_pm", "mem_a", "mem_a"], undefined, {promptLeaderMemberId: "mem_a"});
+  expect(room.globalMemberIds).toEqual(["mem_pm", "mem_a"]);
+  expect(room.promptLeaderMemberId).toBe("mem_a");
+  expect(rooms.getCursors(room.id).mem_pm).toBeNull();
+  const members = rooms.getRoomMembers(room.id);
+  expect(members.map(m => [m.id, m.name])).toEqual([["mem_pm", "PM"], ["mem_a", "开发 A"]]);
+  expect(members[1].config).toBeUndefined();
+  expect(members[1].sourceMemberId).toBe("mem_a");
+  expect(members[1].migratedFrom).toBeUndefined();
   const latest = messages.addMessage(room.id, { sender: "user", content: "Before invite", mentions: [] });
-  expect(rooms.addMember(room.id, "developer")).toBe(true);
-  expect(rooms.addMember(room.id, "developer")).toBe(false);
-  expect(rooms.getCursors(room.id)[rooms.findRoomMemberByName(room.id, "developer")!.id]).toBe(latest.id);
+  expect(rooms.inviteGlobalMember(room.id, {id: "mem_b", name: "ignored stale name", agentTemplate: "ignored"}).ok).toBe(true);
+  expect(rooms.getCursors(room.id).mem_b).toBe(latest.id);
+  expect(rooms.inviteGlobalMember(room.id, {id: "mem_b", name: "dev `B`", agentTemplate: "general"})).toMatchObject({ok: false, code: "duplicate"});
+  expect(rooms.getRoomMembers(room.id).at(-1)).toMatchObject({id: "mem_b", name: "dev `B`"});
+  f.reopen();
+  expect(rooms.getRoom(room.id)?.globalMemberIds).toEqual(["mem_pm", "mem_a", "mem_b"]);
+  expect(f.db.get<{n:number}>("SELECT COUNT(*) n FROM members")!.n).toBe(3);
 });
 
 it("keeps global membership and cursors on stable IDs across rename, restart and roster clearing", () => {

@@ -391,13 +391,6 @@ export interface RoomMemberConfig {
   extensions?: string[];
 }
 
-export interface CreateRoomMemberInput {
-  /** Exact Agent template name. */
-  agent: string;
-  /** Room-local member identity / @mention name. */
-  name: string;
-}
-
 export interface RoomMemberRecord {
   /** Hidden stable globally unique room-member identity. */
   id: string;

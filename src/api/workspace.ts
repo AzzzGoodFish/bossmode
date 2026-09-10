@@ -22,13 +22,12 @@ import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../sh
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
 import { compileMemberPrompt } from "../engine/prompt-compiler.js";
-import { loadAgentDefinition } from "../workforce/agent-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo } from "../workspace/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
-import type { CreateRoomMemberInput, RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../shared/types.js";
+import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../shared/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
 
 type AttachmentInput = { storedFilename?: string; filename?: string; originalFilename?: string; size?: number };
@@ -90,135 +89,38 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
 
 addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
-    name?: string;
-    cwd?: string;
-    /** 0.20 contract: global member ids */
-    memberIds?: unknown;
-    leaderMemberId?: string | null;
-    principles?: string;
-    /** Legacy until cutover */
-    members?: unknown;
-    ruleDocs?: string[];
-    promptLeaderMemberName?: string;
-    docsPath?: string | null;
+    name?: string; cwd?: string; memberIds?: unknown; leaderMemberId?: string | null;
+    principles?: string; ruleDocs?: string[]; docsPath?: string | null;
   };
-
-  if (!body.name) {
-    sendJson(res, 400, { error: "name is required" });
-    return;
+  if (typeof body.name !== "string" || !body.name.trim()) {
+    sendJson(res, 400, { error: "name is required" }); return;
   }
-
-  // Batch 7 P3: cwd optional and ignored for new rooms (member workspaces own
-  // the working directories now). Tolerated for older clients.
+  if (!Array.isArray(body.memberIds) || body.memberIds.some(id => typeof id !== "string" || !id || id.trim() !== id)) {
+    sendJson(res, 400, { error: "memberIds must contain stable member IDs" }); return;
+  }
+  if ("members" in body || "promptLeaderMemberName" in body) {
+    sendJson(res, 400, { error: "Template member drafts are not supported; select existing memberIds" }); return;
+  }
+  if (body.leaderMemberId != null && (typeof body.leaderMemberId !== "string" || !body.leaderMemberId.trim())) {
+    sendJson(res, 400, { error: "leaderMemberId must be a selected member ID" }); return;
+  }
   if (body.cwd && !existsSync(body.cwd)) {
-    sendJson(res, 400, { error: `Directory does not exist: ${body.cwd}` });
-    return;
-  }
-
-  // ── 0.20 contract shape: memberIds[] ──
-  if (Array.isArray(body.memberIds)) {
-    try {
-      const { resolveMemberRef, getMember } = await import("../workspace/member-registry.js");
-      const ids = body.memberIds.map((v) => String(v || "").trim()).filter(Boolean);
-      const globals = [];
-      for (const id of ids) {
-        const m = resolveMemberRef(id) || getMember(id);
-        if (!m) {
-          sendJson(res, 400, { error: "member_not_found", message: `Member not found: ${id}` });
-          return;
-        }
-        globals.push(m);
-      }
-      // Deduplicate by id
-      const seen = new Set<string>();
-      const unique = globals.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
-
-      let leaderGlobalId =
-        typeof body.leaderMemberId === "string" && body.leaderMemberId.trim()
-          ? body.leaderMemberId.trim()
-          : undefined;
-      if (leaderGlobalId && !unique.some((m) => m.id === leaderGlobalId)) {
-        sendJson(res, 400, { error: "leader_not_in_members", message: "leaderMemberId must be one of memberIds" });
-        return;
-      }
-      // Existing DB identities bind directly by ID, with no room-local name validation.
-      const room = roomStore.createRoom(body.name, body.cwd, [], body.ruleDocs, {
-        docsPath: body.docsPath,
-      });
-
-      // Persist stable membership and leader IDs
-      const globalIds = unique.map((m) => m.id);
-      if (!leaderGlobalId && unique[0]) leaderGlobalId = unique[0].id;
-      roomStore.stampGlobalMemberIds(room.id, globalIds, leaderGlobalId || null);
-
-      if (typeof body.principles === "string" && body.principles.trim()) {
-        principlesStore.writePrinciples({
-          roomId: room.id,
-          scope: "room",
-          content: body.principles,
-          actor: { type: "user" },
-          reason: "create room",
-          operation: "write",
-        });
-      }
-
-      sendJson(res, 200, roomStore.getRoom(room.id));
-      return;
-    } catch (err: any) {
-      const message = String(err?.message || err);
-      sendJson(res, message.startsWith("Agent not found:") ? 404 : 400, { error: message });
-      return;
-    }
-  }
-
-  // ── Legacy shape: members:[{agent,name}] ──
-  if (!Array.isArray(body.members)) {
-    sendJson(res, 400, { error: "memberIds or members array is required" });
-    return;
-  }
-  if (!body.members.every((member) => member && typeof member === "object" && !Array.isArray(member))) {
-    sendJson(res, 400, { error: "members must contain { agent, name } objects" });
-    return;
-  }
-  const members = body.members as CreateRoomMemberInput[];
-  if (!members.every((member) => typeof member.agent === "string" && typeof member.name === "string" && member.agent.trim() && member.name.trim())) {
-    sendJson(res, 400, { error: "agent and member name are required" });
-    return;
-  }
-  const validation = roomStore.validateRoomMemberNameList(members.map((member) => member.name));
-  if (validation) {
-    sendJson(res, validation.startsWith("Duplicate") ? 409 : 400, { error: validation });
-    return;
-  }
-  const promptLeaderMemberName = typeof body.promptLeaderMemberName === "string"
-    ? roomStore.normalizeMemberName(body.promptLeaderMemberName)
-    : "";
-  if (!promptLeaderMemberName) {
-    sendJson(res, 400, { error: "promptLeaderMemberName is required" });
-    return;
-  }
-  if (!members.some((member) => roomStore.normalizeMemberName(member.name) === promptLeaderMemberName)) {
-    sendJson(res, 400, { error: "promptLeaderMemberName must be one of the room members" });
-    return;
+    sendJson(res, 400, { error: `Directory does not exist: ${body.cwd}` }); return;
   }
   try {
-    const room = roomStore.createRoom(body.name, body.cwd, members, body.ruleDocs, {
-      promptLeaderMemberName,
-      docsPath: body.docsPath,
+    const room = roomStore.createRoom(body.name.trim(), body.cwd, body.memberIds as string[], body.ruleDocs, {
+      promptLeaderMemberId: body.leaderMemberId ?? undefined, docsPath: body.docsPath,
     });
-    // Dual-write: stamp global ids when registry has matching names
-    try {
-      const { findMemberByName } = await import("../workspace/member-registry.js");
-      const gids = members
-        .map((m) => findMemberByName(m.name)?.id)
-        .filter((id): id is string => !!id);
-      const leaderG = findMemberByName(promptLeaderMemberName)?.id;
-      if (gids.length) roomStore.stampGlobalMemberIds(room.id, gids, leaderG || null);
-    } catch { /* ignore */ }
-    sendJson(res, 200, roomStore.getRoom(room.id) || room);
-  } catch (err: any) {
-    const message = String(err?.message || err);
-    sendJson(res, message.startsWith("Agent not found:") ? 404 : 400, { error: message });
+    if (typeof body.principles === "string" && body.principles.trim()) {
+      principlesStore.writePrinciples({roomId: room.id, scope: "room", content: body.principles,
+        actor: {type: "user"}, reason: "create room", operation: "write"});
+    }
+    sendJson(res, 200, room);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const error = message.startsWith("Member not found:") ? "member_not_found"
+      : message === "leaderMemberId must be one of memberIds" ? "leader_not_in_members" : message;
+    sendJson(res, 400, { error, message });
   }
 });
 
@@ -650,74 +552,27 @@ addRoute("PATCH", "/api/rooms/:id/members/:memberName", async (req, res, params)
 });
 
 addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
+  if (!roomStore.getRoom(params.id)) { sendJson(res, 404, { error: "Room not found" }); return; }
+  const body = (await parseBody(req)) as { memberId?: string; config?: Partial<RoomMemberConfig> };
+  if (typeof body.memberId !== "string" || !body.memberId || body.memberId.trim() !== body.memberId) {
+    sendJson(res, 400, { error: "memberId is required" }); return;
   }
-
-  const body = (await parseBody(req)) as {
-    memberId?: string;
-    agent?: string;
-    name?: string;
-    config?: Partial<RoomMemberConfig>;
-  };
-
-  // 0.20: invite by global memberId (preferred)
-  if (typeof body.memberId === "string" && body.memberId.trim()) {
-    try {
-      const { resolveMemberRef } = await import("../workspace/member-registry.js");
-      const global = resolveMemberRef(body.memberId.trim());
-      if (!global) {
-        sendJson(res, 404, { error: "Member not found" });
-        return;
-      }
-      const added = roomStore.inviteGlobalMember(params.id, {
-        id: global.id,
-        name: global.name,
-        agentTemplate: global.agentTemplate,
-        config: body.config,
-      });
-      if (!added.ok) {
-        sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, { error: added.error });
-        return;
-      }
-      sendJson(res, 200, roomStore.getRoom(params.id));
-      return;
-    } catch (err: any) {
-      sendJson(res, 400, { error: err?.message || String(err) });
-      return;
-    }
+  if ("agent" in body || "name" in body) {
+    sendJson(res, 400, { error: "Template member drafts are not supported; select an existing memberId" }); return;
   }
-
-  // Legacy: invite by agent template + local member name
-  if (!body.agent) {
-    sendJson(res, 400, { error: "memberId or agent name is required" });
-    return;
-  }
-  if (typeof body.name !== "string" || !body.name.trim()) {
-    sendJson(res, 400, { error: "member name is required" });
-    return;
-  }
-
-  const added = roomStore.addRoomMemberFromAgent(params.id, { agentName: body.agent, memberName: body.name, config: body.config });
-  if (!added.ok) {
-    sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, { error: added.error });
-    return;
-  }
-
-  // Dual-write: if a global member with this name exists, stamp id
   try {
-    const { findMemberByName } = await import("../workspace/member-registry.js");
-    const g = findMemberByName(body.name);
-    if (g) roomStore.addGlobalMemberId(params.id, g.id);
-  } catch { /* ignore */ }
-
-  const updatedRoom = roomStore.getRoom(params.id);
-  sendJson(res, 200, updatedRoom);
+    const { getMember } = await import("../workspace/member-registry.js");
+    const global = getMember(body.memberId);
+    if (!global) { sendJson(res, 404, { error: "Member not found" }); return; }
+    const added = roomStore.inviteGlobalMember(params.id, {id: global.id, name: global.name,
+      agentTemplate: global.agentTemplate, config: body.config});
+    if (!added.ok) {
+      sendJson(res, added.code === "duplicate" ? 409 : added.code === "not_found" ? 404 : 400, {error: added.error}); return;
+    }
+    sendJson(res, 200, roomStore.getRoom(params.id));
+  } catch (err) { sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
 });
 
-// 0.20: remove member from room (keeps their scope memory assets)
 addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params) => {
   const room = roomStore.getRoom(params.id);
   if (!room) {
