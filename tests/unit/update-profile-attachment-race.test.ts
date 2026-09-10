@@ -7,9 +7,7 @@ vi.mock("../../src/engine/agent-attachments.js", () => ({ processAgentAttachment
 it("captures mention/reply target IDs before attachment IO while refreshing the sender label after IO", async () => {
   const reg = await import("../../src/workspace/member-registry.js");
   const rooms = await import("../../src/workspace/room-store.js");
-  const { waitForProjectionInitialization } = await import("../../src/workspace/db/projection.js");
   const own = reg.createMember({ name: "Sender" });
-  await waitForProjectionInitialization();
   const target = reg.createMember({ name: "Target" });
   const reuse = reg.createMember({ name: "Other" });
   const room = rooms.createRoom("Attachment race", undefined, []);
@@ -21,7 +19,7 @@ it("captures mention/reply target IDs before attachment IO while refreshing the 
   const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
   const router = await import("../../src/communication/router.js");
   const activate = vi.fn();
-  const stop = router.initRouter(activate, () => {});
+  const stop = router.initRouter({mention:activate});
   try {
     const pending = handleToolCallback("chat", room.id, own.name, { message: "@Target answer", need_response: ["Target"], attachments: ["simulated-IO"] }, { memberId: own.id });
     expect(processAttachments).toHaveBeenCalledOnce();

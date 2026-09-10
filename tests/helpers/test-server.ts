@@ -92,6 +92,7 @@ export interface TestServer {
   port: number;
   url: string;
   wsUrl: string;
+  stopRouter: () => void;
 }
 
 export async function createTestServer(): Promise<TestServer> {
@@ -110,7 +111,7 @@ export async function createTestServer(): Promise<TestServer> {
   initAgentManager(registry);
 
   // Same mention-router as production — topic: must not hit room getOrCreate.
-  wireMentionRouter();
+  const stopRouter = wireMentionRouter();
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -130,12 +131,13 @@ export async function createTestServer(): Promise<TestServer> {
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
-  const result = { server, port, url: `http://127.0.0.1:${port}`, wsUrl: `ws://127.0.0.1:${port}` };
+  const result = { server, stopRouter, port, url: `http://127.0.0.1:${port}`, wsUrl: `ws://127.0.0.1:${port}` };
   servers.add(result);
   return result;
 }
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
+  ts.stopRouter();
   const { shutdownWebSocket } = await import("../../src/communication/ws.js");
   await shutdownWebSocket();
   const { shutdownAll } = await import("../../src/engine/agent-manager.js");

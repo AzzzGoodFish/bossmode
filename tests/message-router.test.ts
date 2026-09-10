@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { parseMentionMemberIds, parseMentions } from "../src/communication/router.js";
 
 describe("parseMentions", () => {
@@ -45,25 +45,5 @@ describe("parseMentions", () => {
       { id: "member-dev", name: "dev", agent: "developer" },
       { id: "member-dev-a", name: "dev-a", agent: "developer" },
     ])).toEqual(["member-dev-a"]);
-  });
-});
-
-describe("initRouter", () => {
-  it("should call onMention for each mentioned member", async () => {
-    // Import message-bus to post messages that router will receive
-    const { onMessage, postMessage } = await import("../src/communication/message-bus.js");
-    const { initRouter } = await import("../src/communication/router.js");
-
-    const onMention = vi.fn();
-    const onMentionAll = vi.fn();
-    const unsubscribe = initRouter(onMention, onMentionAll);
-
-    // We need to mock message-store since postMessage writes to disk
-    // Instead, test through the onMessage callback directly
-    // The router subscribes via onMessage, so let's verify the callback pattern
-    unsubscribe();
-
-    expect(onMention).not.toHaveBeenCalled();
-    expect(onMentionAll).not.toHaveBeenCalled();
   });
 });

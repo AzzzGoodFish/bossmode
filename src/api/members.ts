@@ -1,3 +1,4 @@
+import { postMessage } from "../communication/message-bus.js";
 import { archiveMember } from "../services/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../engine/member-profile-update.js";
 /**
@@ -24,7 +25,6 @@ import * as principlesStore from "../workspace/principles-store.js";
 import { listArchives, importMemberFromArchive } from "../workspace/member-archive.js";
 import {
   readAllDmMessages,
-  addDmMessage,
   getLatestDmSeq,
 } from "../workspace/dm-message-store.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
@@ -896,22 +896,10 @@ addRoute("POST", "/api/dm/:memberId/messages", async (req, res, params) => {
       if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
       replyTo = { seq, messageId: target.id };
     }
-    const message = addDmMessage(m.id, {
-      sender: "user",
-      content: text,
-      mentions: [],
+    const message = postMessage(`dm:${m.id}`,"user",text,[],{
       ...(replyTo ? { replyTo } : {}),
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments as any } : {}),
     });
-    // 0.20: DM messages activate the member directly (no @).
-    try {
-      const { activateDmMember } = await import("../engine/agent-manager.js");
-      void activateDmMember(m.id).catch((err) => {
-        console.error("[dm] activate failed", err);
-      });
-    } catch (err) {
-      console.error("[dm] activate import failed", err);
-    }
     sendJson(res, 200, { message });
   } catch (err) {
     sendJson(res, 500, { error: "internal", message: String(err) });

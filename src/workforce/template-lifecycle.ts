@@ -6,7 +6,6 @@
 import { listMembers, updateMember } from "../workspace/member-registry.js";
 import * as roomStore from "../workspace/room-store.js";
 import { postMessage } from "../communication/message-bus.js";
-import { addDmMessage } from "../workspace/dm-message-store.js";
 import { loadAgentDefinition, listFactoryTemplateNames } from "../workforce/agent-store.js";
 import { logger } from "../foundation/logger.js";
 
@@ -51,12 +50,7 @@ export function fallbackMembersToGeneral(templateName: string): {
 
     // DM scope warning
     try {
-      addDmMessage(m.id, {
-        sender: "system",
-        content: warning,
-        mentions: [],
-        type: undefined,
-      });
+      postMessage(`dm:${m.id}`,"system",warning);
       warningsPosted += 1;
     } catch (err) {
       logger.warn("templates", "dm warning failed", { memberId: m.id, error: String(err) });

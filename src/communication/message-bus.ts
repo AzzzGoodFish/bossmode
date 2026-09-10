@@ -3,7 +3,7 @@ import {pendingScopeNotifications} from "../storage/notification-repository.js";
 // All messages (user, agent, system) go through here.
 
 import * as messageStore from "../workspace/message-store.js";
-import { appendMessage } from "../storage/message-repository.js";
+import { appendCapturedMessage } from "../services/message-service.js";
 import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../storage/message-dispatch-repository.js";
 import { broadcastToRoom } from "./ws.js";
 import { logger } from "../foundation/logger.js";
@@ -34,7 +34,7 @@ export function postMessage(
   mentions: string[] = [],
   extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "autoDelivered" | "replyTo">>,
 ): RoomMessage {
-  const message = appendMessage(roomId, { sender, content, mentions, ...extra });
+  const message = appendCapturedMessage(roomId, { sender, content, mentions, ...extra });
   // A microtask runs after any enclosing synchronous business transaction has
   // committed/rolled back. Never notify from inside a nested savepoint.
   scheduleMessageDispatch();

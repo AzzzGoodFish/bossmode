@@ -1,4 +1,6 @@
-// Message Router — listens for messages, parses @mentions, notifies engine
+import {getDatabase} from "../storage/database.js";
+import {DeliveryRepository,type CapturedMessage,type DeliveryKind} from "../storage/repositories/delivery-repository.js";
+// Mention parsers and commit-time captured-target router.
 // Does NOT directly call activateAgent — uses injected callbacks for decoupling.
 
 import { onMessage } from "./message-bus.js";
@@ -59,53 +61,35 @@ export function parseUrgentMentionMemberIds(content: string, roomMembers: RoomMe
     .filter((id): id is string => Boolean(id));
 }
 
-/** Activation context passed to mention callbacks (from the routed message). */
+/** Immutable message context handed to runtime admission; no late name/@all lookup. */
 export interface MentionActivationCtx {
-  /**
-   * Member names who owe a reply (chat need_response string[]).
-   * Undefined/empty = FYI. User sender still always debts (activateAgent).
-   */
+  capture: CapturedMessage;
+  deliveryKind: DeliveryKind;
   needResponse?: string[];
   needResponseMemberIds?: string[];
-  /** Message sender name ("user" for user posts). */
   senderName: string;
+  senderOrigin: CapturedMessage["snapshot"]["origin"];
+}
+export interface RouterHandlers {
+  mention(scopeId:string,actorKey:string,context:MentionActivationCtx):void;
+  urgent?(scopeId:string,actorKey:string,context:MentionActivationCtx):void;
 }
 
-/** Initialize router: subscribe to message-bus, invoke callbacks on @mention / !urgent */
-export function initRouter(
-  onMention: (roomId: string, memberRef: string, ctx: MentionActivationCtx) => void,
-  onMentionAll: (roomId: string, ctx: MentionActivationCtx) => void,
-  onUrgentMention?: (roomId: string, memberRef: string, urgentByName: string) => void,
-): () => void {
-  return onMessage((roomId, message) => {
-    if (message.mentions.length === 0 && (!message.mentionMemberIds || message.mentionMemberIds.length === 0)) return;
-
-    logger.info("router", "routeMessage", { roomId, mentions: message.mentions, mentionMemberIds: message.mentionMemberIds, urgentMentionMemberIds: message.urgentMentionMemberIds, needResponse: message.needResponse });
-
-    const needList = Array.isArray(message.needResponse) ? message.needResponse.filter((n) => typeof n === "string" && n.trim()) : undefined;
-    const explicitFyi = Array.isArray(message.needResponse) && message.needResponse.length === 0;
-    const ctx: MentionActivationCtx = {
-      ...(needList && needList.length ? { needResponse: needList } : {}),
-      ...(explicitFyi ? { needResponse: [] as string[] } : {}),
-      ...(Array.isArray(message.needResponseMemberIds) ? { needResponseMemberIds: message.needResponseMemberIds } : {}),
-      senderName: message.sender,
-    };
-
-    if (message.mentions.includes("all")) {
-      onMentionAll(roomId, ctx);
-    } else if (message.mentionMemberIds?.length) {
-      for (const memberId of message.mentionMemberIds) {
-        if (memberId === message.senderMemberId) continue;
-        if (message.urgentMentionMemberIds?.includes(memberId) && onUrgentMention) {
-          onUrgentMention(roomId, memberId, message.sender);
-        } else {
-          onMention(roomId, memberId, ctx);
-        }
-      }
-    } else {
-      for (const name of message.mentions) {
-        if (name === message.sender) continue;
-        onMention(roomId, name, ctx);
+export function initRouter(handlers:RouterHandlers):()=>void {
+  return onMessage((scopeId,message)=>{
+    const capture=new DeliveryRepository(getDatabase()).getCapture(scopeId,message.id);
+    if(!capture)throw new Error(`Missing durable routing capture: ${scopeId}/${message.id}`);
+    const snapshot=capture.snapshot;
+    if(snapshot.messageType!=="chat")return;
+    for(const kind of ["ordinary","urgent","dm"] as const){
+      for(const target of snapshot.targets[kind]){
+        const context:MentionActivationCtx={
+          capture:structuredClone(capture),deliveryKind:kind,senderName:String(snapshot.message.sender),senderOrigin:snapshot.origin,
+          ...(snapshot.needResponse===null?{}:{needResponse:snapshot.needResponse.length?undefined:[],needResponseMemberIds:snapshot.needResponse.map(actor=>actor.actorKey)}),
+        };
+        logger.info("router","routeCapturedMessage",{scopeId,messageId:message.id,target:target.actorKey,kind});
+        if(kind==="urgent"&&handlers.urgent)handlers.urgent(scopeId,target.actorKey,context);
+        else handlers.mention(scopeId,target.actorKey,context);
       }
     }
   });

@@ -103,32 +103,21 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
 
 /**
  * Deliver a member's text into the conversation (room or DM, same rule).
- * Room scope: mention scan + senderMemberId resolution + messageMeta, then
+ * Requires a trusted stable sender ID. Room scope: mention scan + messageMeta, then
  * postMessage (mention activation handled by router listener). DM scope:
  * direct postMessage, no mention routing.
  * `opts.autoDelivered` marks a fallback-posted message (no chat call was made
  * on a debt turn) — persisted and queryable, not rendered in the UI.
  */
-export function deliverMemberMessage(roomId: string, memberName: string, text: string, opts?: { autoDelivered?: boolean }): void {
-  // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
-  if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-    postMessage(roomId, memberName, text, [], { senderMemberId: roomId.slice(3), ...(opts?.autoDelivered ? { autoDelivered: true } : {}) });
-    logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, autoDelivered: opts?.autoDelivered === true });
-    return;
-  }
-
-  const rosterId = resolveChatScopeRoomId(roomId) || roomId;
-  const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
-  const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-  const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, memberName) : undefined;
-  const info = room ? mentionInfoFromText(text, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
-
-  // Room message via message-bus (writes + broadcasts + notifies listeners)
-  // Mention activation is handled by router listener via message-bus.
-  const meta = messageMeta({ senderMemberId: senderMember?.id, senderName: memberName, mentionMemberIds: info.mentionMemberIds, urgentMentions: info.urgentMentions, urgentMentionMemberIds: info.urgentMentionMemberIds, mentions: info.mentions, autoDelivered: opts?.autoDelivered });
-  if (meta) postMessage(roomId, memberName, text, info.mentions, meta);
-  else postMessage(roomId, memberName, text, info.mentions);
-  logger.info("agent", "finalTextDelivered", { member: memberName, chars: text.length, autoDelivered: opts?.autoDelivered === true });
+export function deliverMemberMessage(roomId: string, memberId: string, text: string, opts?: { autoDelivered?: boolean }): void {
+  const sender=getMember(memberId);
+  if(!sender)throw new Error(`Member not found: ${memberId}`);
+  if(roomId.startsWith("dm:") && roomId!==`dm:${memberId}`)throw new Error("DM sender does not own the scope");
+  const info=roomId.startsWith("dm:")
+    ? {mentions:[],mentionMemberIds:[],urgentMentions:[],urgentMentionMemberIds:[]}
+    : mentionInfoFromText(text,roomStore.getRoomMembers(resolveOwningRoomId(roomId)));
+  postMessage(roomId,sender.name,text,info.mentions,messageMeta({senderMemberId:memberId,...info,autoDelivered:opts?.autoDelivered}));
+  logger.info("agent","finalTextDelivered",{memberId,chars:text.length,autoDelivered:opts?.autoDelivered===true});
 }
 
 function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): boolean {
@@ -163,12 +152,12 @@ function messageMeta(meta: {
   } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
-  if (meta.senderMemberId && meta.senderMemberId !== meta.senderName) out.senderMemberId = meta.senderMemberId;
-  if (meta.mentionMemberIds?.length && meta.mentionMemberIds.join("\0") !== (meta.mentions || []).join("\0")) out.mentionMemberIds = meta.mentionMemberIds;
+  if (meta.senderMemberId) out.senderMemberId = meta.senderMemberId;
+  if (meta.mentionMemberIds !== undefined) out.mentionMemberIds = meta.mentionMemberIds;
   if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
-  if (meta.urgentMentionMemberIds?.length) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
-  if (meta.needResponse?.length) out.needResponse = meta.needResponse;
-  if (meta.needResponseMemberIds?.length) out.needResponseMemberIds = meta.needResponseMemberIds;
+  if (meta.urgentMentionMemberIds !== undefined) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
+  if (meta.needResponse !== undefined) out.needResponse = meta.needResponse;
+  if (meta.needResponseMemberIds !== undefined) out.needResponseMemberIds = meta.needResponseMemberIds;
   if (meta.autoDelivered) out.autoDelivered = true;
   if (meta.replyTo) out.replyTo = meta.replyTo;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -349,8 +338,8 @@ export async function handleToolCallback(
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
       const rosterId = resolveChatScopeRoomId(roomId) || roomId;
       const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
-      const roomMembers = ("getRoomMembers" in roomStore ? (roomStore as any).getRoomMembers(rosterId) : undefined) || (room?.members || []).map((name: string) => ({ id: name, name, sourceAgent: name }));
-      const senderMember = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(rosterId, actorRef) : undefined;
+      const roomMembers = roomId.startsWith("dm:") ? [] : roomStore.getRoomMembers(rosterId);
+      const senderMember = context?.memberId ? boundActor() : roomStore.resolveRoomMemberRef(rosterId, actorRef);
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
       const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
 

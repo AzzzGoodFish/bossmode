@@ -8,7 +8,7 @@ import {readMessages} from "../../src/storage/message-repository.js";
 import {mockPromptFn,resetMocks} from "../helpers/mock-runtime.js";
 import {handleToolCallback} from "../../src/engine/tools.js";
 setupTestWorkspace();
-const tables=["tasks","task_comments","task_subscribers","task_references","messages","message_mentions","message_replies","scope_sequences","outbox"];
+const tables=["tasks","task_comments","task_subscribers","task_references","messages","message_mentions","message_replies","scope_sequences","outbox","delivery_captures","reply_obligations","reply_settlements"];
 const snapshot=()=>Object.fromEntries(tables.map(table=>[table,getDatabase().all(`SELECT * FROM ${table}`)]));
 
 it("task changes produce passive timeline and durable UI events without activating assignees or watchers",async()=>{

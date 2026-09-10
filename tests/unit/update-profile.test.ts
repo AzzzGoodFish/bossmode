@@ -107,7 +107,7 @@ describe("self-only update_profile", () => {
     const router = await import("../../src/communication/router.js");
     const next = `言实 同事 ${randomUUID().slice(0, 6)}`;
     let captured: any;
-    const stop = router.initRouter((_scope, id, ctx) => { captured = { id, ctx }; }, () => {});
+    const stop = router.initRouter({mention:(_scope,id,ctx)=>{captured={id,ctx};}});
     try {
       await f.call("chat", { message: `@${f.peer.name} please reply`, need_response: [f.peer.name] });
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });

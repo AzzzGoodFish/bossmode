@@ -8,7 +8,7 @@ export interface CapturedDeliverySnapshot {
    * Never use this snapshot as the current message/card/history read model. */
   message: { [key: string]: DeliveryJson };
   context: DeliveryJson;
-  origin: "user" | "member" | "system";
+  origin: "user" | "member" | "system" | "unresolved";
   messageType: "chat" | "task_event" | "knowledge_event" | "notification";
   senderActorKey: string | null;
   senderMemberId: string | null;
@@ -67,7 +67,7 @@ function validateCapture(c: CapturedMessage): string {
   deliveryText(c.messageId, "message ID");
   const s = c.snapshot;
   if (!s || !s.message || Array.isArray(s.message) || typeof s.message !== "object" || s.message.id !== c.messageId) throw new Error("Captured message ID mismatch");
-  if (!["user", "member", "system"].includes(s.origin) || !["chat", "task_event", "knowledge_event", "notification"].includes(s.messageType)) throw new Error("Invalid delivery classification");
+  if (!["user", "member", "system", "unresolved"].includes(s.origin) || !["chat", "task_event", "knowledge_event", "notification"].includes(s.messageType)) throw new Error("Invalid delivery classification");
   if (s.senderActorKey !== null) deliveryText(s.senderActorKey, "sender actor key");
   if (s.senderMemberId !== null) {
     deliveryText(s.senderMemberId, "sender member ID");

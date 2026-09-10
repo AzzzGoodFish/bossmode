@@ -493,7 +493,7 @@ async function finalizePromptSettlement(instance: AgentInstance, trigger: string
   if (!opts.skipChatWarning && !instance.hadErrorInTurn && instance.pendingChatReply) {
     const seg = instance.lastCompletedFinalText;
     if (seg) {
-      deliverMemberMessage(instance.roomId, instance.agentName, seg, { autoDelivered: true });
+      deliverMemberMessage(instance.roomId, instance.memberId, seg, { autoDelivered: true });
       clearPendingChatReply(instance, "final_text_fallback");
     }
   }
@@ -1462,10 +1462,10 @@ async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInst
 
 // -- Activation --
 
-type ReplyContext = { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string };
+type ReplyContext = { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string; senderOrigin?: "user"|"member"|"system"|"unresolved" };
 
 function replyObligation(memberId: string, memberName: string, ctx?: ReplyContext) {
-  const isUser = ctx?.senderName === "user";
+  const isUser = ctx?.senderOrigin !== undefined ? ctx.senderOrigin === "user" : ctx?.senderName === "user";
   const listed = ctx?.needResponseMemberIds !== undefined
     ? ctx.needResponseMemberIds.includes(memberId)
     : (ctx?.needResponse || []).some(name => name === memberName || name === memberId);
@@ -1622,20 +1622,6 @@ async function activateAgentInternalContinue(
     logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
     postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
   });
-}
-
-// -- @all broadcast --
-
-export async function activateAll(roomId: string, ctx?: { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string }): Promise<void> {
-  const room = roomStore.getRoom(roomId);
-  if (!room) return;
-  const activations = roomStore.getRoomMembers(roomId).map((member) => {
-    const key = instanceKey(roomId, member.id);
-    const instance = instances.get(key);
-    if (instance && (instance.status === "working" || instance.dispatchState !== "idle")) return Promise.resolve();
-    return activateAgent(roomId, member.id, ctx);
-  });
-  await Promise.allSettled(activations);
 }
 
 // -- Model switching --
@@ -2294,21 +2280,22 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
  * A sender=system room notice records every interrupt (user-visible; members
  * never see system notices per the rc.5 filter).
  */
-export async function interruptAgent(roomId: string, memberRef: string, urgentByName: string): Promise<{ ok: boolean; action: string }> {
+export async function interruptAgent(roomId: string, memberRef: string, urgentByName: string, ctx?:ReplyContext): Promise<{ ok: boolean; action: string }> {
   if (typeof roomId === "string" && roomId.startsWith("topic:")) {
     const topicId = roomId.slice("topic:".length);
     const parent = resolveTopicRoomId(topicId);
     if (!parent) return { ok: false, action: "not_in_topic" };
-    return interruptTopicMember(parent, topicId, memberRef, urgentByName);
+    return interruptTopicMember(parent, topicId, memberRef, urgentByName, ctx);
   }
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const memberName = member?.name || memberRef;
+  const {replyDebt}=replyObligation(memberId,memberName,ctx);
   const key = instanceKey(roomId, memberId);
   const instance = instances.get(key);
 
   if (!instance || (instance.status !== "working" && instance.dispatchState === "idle")) {
-    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt" });
+    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt" });
     return { ok: true, action: "activated" };
   }
 
@@ -2321,12 +2308,12 @@ export async function interruptAgent(roomId: string, memberRef: string, urgentBy
     updateDispatchState(instance, "aborting", "urgent_interrupt");
     postMessage(roomId, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
     logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId, urgentBy: urgentByName });
-    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt", banner, urgent: true });
+    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt", banner, urgent: true });
     return { ok: true, action: "interrupted" };
   }
 
   // Compacting or dispatch-busy (e.g. prompt settling): queue front, no abort.
-  await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt: true, trigger: "urgent_interrupt", urgent: true });
+  await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt", urgent: true });
   return { ok: true, action: "queued_front" };
 }
 
@@ -2684,7 +2671,7 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
  * Activate a member in their DM scope (user message path — no @ required).
  * Builds context from recent DM messages and prompts the runtime.
  */
-export async function activateDmMember(memberId: string): Promise<void> {
+export async function activateDmMember(memberId: string, ctx?:ReplyContext): Promise<void> {
   if (runtimeIsStopping()) return;
   const rec = getMember(memberId);
   if (!rec) {
@@ -2751,7 +2738,7 @@ export async function activateDmMember(memberId: string): Promise<void> {
       return;
     }
 
-    markPendingChatReply(instance, "dm-activate");
+    if(replyObligation(memberId,rec.name,ctx).replyDebt)markPendingChatReply(instance,"dm-activate");
     await runPrompt(instance, prompt, "dm-activate", (err) => {
       logger.error("agent", "dm prompt failed", {
         memberId,
@@ -2896,7 +2883,7 @@ export async function activateTopicMember(parentRoomId: string, topicId: string,
 }
 
 /** Abort a live topic instance only. No topic instance → error, never touch the room instance. */
-async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string): Promise<{ ok: boolean; action: string }> {
+async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string, ctx?:ReplyContext): Promise<{ ok: boolean; action: string }> {
   const roomMember = resolveRoomMember(parentRoomId, memberRef);
   const memberId = roomMember?.id || memberRef;
   const memberName = roomMember?.name || memberRef;
@@ -2908,7 +2895,7 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
     return { ok: false, action: "not_in_topic" };
   }
   if (instance.compacting) {
-    await activateTopicMember(parentRoomId, topicId, memberRef);
+    await activateTopicMember(parentRoomId, topicId, memberRef, ctx);
     return { ok: true, action: "queued" };
   }
   if (instance.status === "working") {
@@ -2920,62 +2907,33 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
     postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
     logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId: `topic:${topicId}`, urgentBy: urgentByName });
   }
-  await activateTopicMember(parentRoomId, topicId, memberRef);
+  await activateTopicMember(parentRoomId, topicId, memberRef, ctx);
   return { ok: true, action: instance.status === "working" ? "interrupted" : "activated" };
-}
-
-async function activateAllTopicMembers(parentRoomId: string, topicId: string, ctx?: ReplyContext): Promise<void> {
-  for (const m of roomStore.getRoomMembers(parentRoomId)) {
-    await activateTopicMember(parentRoomId, topicId, m.id, ctx);
-  }
 }
 
 /** Single mention-router wiring for production server + acceptance tests (no topic: leak into room getOrCreate). */
 export function wireMentionRouter(): () => void {
-  return initRouter(
-    (scopeId, memberRef, ctx) => {
-      if (scopeId.startsWith("topic:")) {
-        const topicId = scopeId.slice("topic:".length);
-        const parent = resolveTopicParent(topicId);
-        if (!parent) return;
-        activateTopicMember(parent, topicId, memberRef, ctx).catch((err) => {
-          logger.error("router", "topic activate failed", { topicId, member: memberRef, error: String(err) });
-        });
-        return;
+  return initRouter({
+    mention: (scopeId,memberRef,ctx) => {
+      if(scopeId.startsWith("dm:")){
+        void activateDmMember(memberRef,ctx).catch(error=>logger.error("router","DM activate failed",{scopeId,memberRef,error:String(error)}));
+      }else if(scopeId.startsWith("topic:")){
+        const topicId=scopeId.slice("topic:".length);const parent=resolveTopicParent(topicId);if(!parent)return;
+        void activateTopicMember(parent,topicId,memberRef,ctx).catch(error=>logger.error("router","topic activate failed",{scopeId,memberRef,error:String(error)}));
+      }else{
+        // Preserve room-broadcast admission without expanding the current roster.
+        const mentions=ctx.capture.snapshot.message.mentions;
+        if(Array.isArray(mentions)&&mentions.includes("all")){
+          const active=instances.get(instanceKey(scopeId,memberRef));
+          if(active&&(active.status==="working"||active.dispatchState!=="idle"))return;
+        }
+        void activateAgent(scopeId,memberRef,ctx).catch(error=>logger.error("router","activate failed",{scopeId,memberRef,error:String(error)}));
       }
-      activateAgent(scopeId, memberRef, ctx).catch((err) => {
-        logger.error("router", "activate failed", { roomId: scopeId, member: memberRef, error: String(err) });
-      });
     },
-    (scopeId, ctx) => {
-      if (scopeId.startsWith("topic:")) {
-        const topicId = scopeId.slice("topic:".length);
-        const parent = resolveTopicParent(topicId);
-        if (!parent) return;
-        activateAllTopicMembers(parent, topicId, ctx).catch((err) => {
-          logger.error("router", "topic activateAll failed", { topicId, error: String(err) });
-        });
-        return;
-      }
-      activateAll(scopeId, ctx).catch((err) => {
-        logger.error("router", "activateAll failed", { roomId: scopeId, error: String(err) });
-      });
+    urgent:(scopeId,memberRef,ctx)=>{
+      void interruptAgent(scopeId,memberRef,ctx.senderName,ctx).catch(error=>logger.error("router","urgent interrupt failed",{scopeId,memberRef,error:String(error)}));
     },
-    (scopeId, memberRef, urgentByName) => {
-      if (scopeId.startsWith("topic:")) {
-        const topicId = scopeId.slice("topic:".length);
-        const parent = resolveTopicParent(topicId);
-        if (!parent) return;
-        interruptTopicMember(parent, topicId, memberRef, urgentByName).catch((err) => {
-          logger.error("router", "topic urgent interrupt failed", { topicId, member: memberRef, error: String(err) });
-        });
-        return;
-      }
-      interruptAgent(scopeId, memberRef, urgentByName).catch((err) => {
-        logger.error("router", "urgent interrupt failed", { roomId: scopeId, member: memberRef, error: String(err) });
-      });
-    },
-  );
+  });
 }
 
 function resolveTopicParent(topicId: string): string | null {
