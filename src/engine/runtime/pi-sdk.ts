@@ -13,6 +13,7 @@ import {
   type AgentSession,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
+import { SdkExecutionService, type SdkExecutionAttempt } from "../../services/sdk-execution-service.js";
 import { logger } from "../../foundation/logger.js";
 import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
@@ -24,7 +25,7 @@ import { loadDatabaseMcpFactory } from "./mcp-factory.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo } from "./types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo, RuntimePromptOptions } from "./types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
@@ -396,6 +397,8 @@ export class PiSdkAgentHandle implements AgentHandle {
   private mcpConfigs = new Set<McpRuntimeSettings>();
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
+  private promptAttempt: SdkExecutionAttempt | null = null;
+  private compactAttempts = new Set<SdkExecutionAttempt>();
   private compactionWatchdogRun: CompactionWatchdogRun | null = null;
   private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionOutcome: { aborted: boolean } | null = null;
@@ -430,6 +433,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.toolAssembly = toolAssembly;
     this.unsubscribeSession = session.subscribe((raw) => {
+      this.observeExecutionEvidence(raw);
       this.publishSessionReferenceIfMaterialized();
       this.observeCompactionWatchdog(raw);
       if (this.manualCompactionOutcome && (raw.type === "compaction_start" || raw.type === "compaction_end") && raw.reason === "manual") {
@@ -443,6 +447,52 @@ export class PiSdkAgentHandle implements AgentHandle {
       if (mapped) this.emit(mapped);
     });
     this.publishSessionReferenceIfMaterialized();
+  }
+
+  private executionService(): SdkExecutionService {
+    return new SdkExecutionService(this.toolAssembly.memberId ?? "", this.toolAssembly.roomId);
+  }
+
+  private observeExecutionEvidence(raw: any): void {
+    if (raw?.type === "message_end" && raw.message?.role === "assistant") {
+      const stopReason = raw.message.stopReason ?? raw.message.stop_reason;
+      const error = raw.message.errorMessage ?? raw.message.error_message;
+      if (stopReason === "error" || stopReason === "aborted" || error) {
+        this.promptAttempt?.noteUncertain(`SDK assistant ${stopReason ?? "error"}: ${error || "no detail"}`);
+      }
+    }
+    if (raw?.type === "compaction_end" && (raw.aborted || raw.errorMessage)) {
+      const reason = `SDK compaction ${raw.aborted ? "aborted" : "failed"}: ${raw.errorMessage || "no detail"}`;
+      this.promptAttempt?.noteUncertain(reason);
+      for (const attempt of this.compactAttempts) attempt.noteUncertain(reason);
+    }
+  }
+
+  private interruptAttempts(reason: string, includeCompaction: boolean): void {
+    const attempts = [this.promptAttempt, ...(includeCompaction ? this.compactAttempts : [])];
+    for (const attempt of attempts) {
+      if (!attempt) continue;
+      // A void cancellation must still reach the SDK if recording fails. The
+      // local evidence prevents acknowledgement and settlement retries the write.
+      try { attempt.interrupt(reason); }
+      catch (error) { logger.error("runtime:pi-sdk", "execution cancellation recording failed", { attemptId: attempt.id, error: String(error) }); }
+    }
+  }
+
+  private async dispatchCompact(isCancelled?: () => boolean): Promise<void> {
+    const attempt = this.executionService().dispatch("external", "pi-sdk:session.compact");
+    this.compactAttempts.add(attempt);
+    try {
+      await attempt.run(async () => {
+        try { await this.session.compact(); }
+        catch (error) {
+          // Only a rejected SDK call may use the public aborted outcome. SQL
+          // admission/settlement failures must propagate even during teardown.
+          if (!isCancelled?.()) throw error;
+          attempt.noteUncertain(`SDK compaction cancelled: ${String(error)}`);
+        }
+      });
+    } finally { this.compactAttempts.delete(attempt); }
   }
 
   private publishSessionReferenceIfMaterialized(): void {
@@ -519,6 +569,7 @@ export class PiSdkAgentHandle implements AgentHandle {
         actionThreshold: run.actionThreshold,
         contextWindow: run.contextWindow,
       });
+      this.interruptAttempts("Compaction watchdog requested abort", false);
       void this.session.abort().catch((err) => {
         logger.error("runtime:pi-sdk", "compaction watchdog: abort failed", { error: String(err) });
       });
@@ -592,7 +643,7 @@ export class PiSdkAgentHandle implements AgentHandle {
         maxTokens: run.maxTokens,
         actionThreshold: run.actionThreshold,
       });
-      await this.session.compact();
+      await this.dispatchCompact();
     } catch (err: any) {
       const message = err?.message || String(err);
       // Raced with an SDK compaction (or nothing worth compacting) — fine.
@@ -608,29 +659,40 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   private promptOperation: Promise<void> | null = null;
-  prompt(message: string): Promise<void> {
+  prompt(message: string, options?: RuntimePromptOptions): Promise<void> {
     if (this.promptOperation) return Promise.reject(new Error("Runtime prompt is already in progress"));
-    const operation = this.trackResourceOperation(() => this.promptInternal(message));
+    const operation = this.trackResourceOperation(() => this.promptInternal(message, options));
     this.promptOperation = operation;
     return operation.finally(() => { if (this.promptOperation === operation) this.promptOperation = null; });
   }
-  private async promptInternal(message: string): Promise<void> {
+  private async promptInternal(message: string, options?: RuntimePromptOptions): Promise<void> {
     this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
     try {
       let next: string | null = message;
+      let dispatchIndex = 0;
       while (next !== null && !this.destroyed && this.watchdogTurn !== null) {
         this.startCompactionWatchdogRun();
-        const run = this.session.prompt(next, { source: "external" as any }).catch((err) => {
-          this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
-          throw err;
-        }).finally(() => {
-          if (this.currentRun === run) this.currentRun = null;
-        });
-        this.currentRun = run;
         let settled: CompactionWatchdogRun | null = null;
         try {
+          const dispatchMessage: string = next;
+          if (options?.beforeDispatch?.constructor.name === "AsyncFunction") {
+            throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
+          }
+          const attempt = this.executionService().dispatch("input", "pi-sdk:session.prompt", options?.beforeDispatch
+            ? attemptId => options.beforeDispatch!({ attemptId, dispatchIndex, message: dispatchMessage })
+            : undefined);
+          dispatchIndex++;
+          this.promptAttempt = attempt;
+          const run = attempt.run(() => this.session.prompt(dispatchMessage, { source: "external" as any })).catch((err) => {
+            this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
+            throw err;
+          }).finally(() => {
+            if (this.currentRun === run) this.currentRun = null;
+          });
+          this.currentRun = run;
           await run;
         } finally {
+          this.promptAttempt = null;
           settled = this.finishCompactionWatchdogRun();
         }
         next = await this.afterWatchdogRun(settled);
@@ -642,6 +704,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   abort(options?: { preserveCompaction?: boolean }): void {
+    this.interruptAttempts("Runtime abort requested", !options?.preserveCompaction);
     // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
     if (options?.preserveCompaction) return;
@@ -673,6 +736,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   async destroyAndWait(): Promise<void> {
     if (!this.destroyPromise) {
       this.destroyed = true;
+      this.interruptAttempts("Runtime teardown requested", true);
       this.destroyPromise = this.runTeardown();
     }
     return this.destroyPromise;
@@ -927,9 +991,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     try {
       // The supported SDK emits compaction_start/end itself, then rejects on
       // cancellation or failure. Never manufacture replacement events.
-      await this.session.compact();
-    } catch (err) {
-      if (!outcome.aborted) throw err;
+      await this.dispatchCompact(() => outcome.aborted);
     } finally {
       this.manualCompactionOutcome = null;
       this.emit({ type: "agent_end" });
@@ -962,6 +1024,26 @@ export class PiSdkRuntime implements AgentRuntime {
   }
 
   async createAgent(opts: CreateAgentOpts): Promise<AgentHandle> {
+    const attempt = new SdkExecutionService(opts.member.id, opts.roomId).dispatch("session-create", "pi-sdk:createAgent");
+    let handle: PiSdkAgentHandle | undefined;
+    try {
+      handle = await this.createAgentInternal(opts);
+      attempt.settle();
+      return handle;
+    } catch (error) {
+      // Internal creation already cleans partial sessions. A fully created
+      // handle still needs teardown if durable acknowledgement itself fails.
+      if (handle) {
+        try { await handle.destroyAndWait(); }
+        catch (cleanupError) {
+          return attempt.fail(new AggregateError([error, cleanupError], "Runtime creation and cleanup failed"));
+        }
+      }
+      return attempt.fail(error);
+    }
+  }
+
+  private async createAgentInternal(opts: CreateAgentOpts): Promise<PiSdkAgentHandle> {
     if (!opts.member.model || !opts.member.credentialId) {
       throw new Error(`Member "${opts.member.name}" hasn't selected a model yet. Open the member card to choose a model and credential.`);
     }

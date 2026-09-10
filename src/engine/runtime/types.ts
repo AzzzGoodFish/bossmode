@@ -109,8 +109,19 @@ export interface AgentRuntimeParams {
   credentialName?: string;
 }
 
+export interface RuntimePromptDispatch {
+  attemptId: string;
+  dispatchIndex: number;
+  message: string;
+}
+
+export interface RuntimePromptOptions {
+  /** Runs synchronously in the SDK dispatch transaction, before external IO, for every iteration. */
+  beforeDispatch?: (event: RuntimePromptDispatch) => void;
+}
+
 export interface AgentHandle {
-  prompt(message: string): Promise<void>;
+  prompt(message: string, options?: RuntimePromptOptions): Promise<void>;
   /** Manual compaction (conversation action). Emits the full event bridge
    * (agent_start / compaction_start / compaction_end / agent_end) and reports
    * whether the operation was aborted (e.g. by an explicit Stop). */
