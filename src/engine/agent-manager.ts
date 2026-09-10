@@ -1,3 +1,11 @@
+import {randomUUID} from "node:crypto";
+import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../services/runtime-input-service.js";
+import {InputQueueRepository,type QueuedInput} from "../storage/repositories/input-queue-repository.js";
+import {ReplyObligationRepository,type ReplyDisposition} from "../storage/repositories/reply-obligation-repository.js";
+import type {CapturedMessage} from "../storage/repositories/delivery-repository.js";
+import {readMemberProfile,isBlankPersona} from "../workspace/member-profile.js";
+import {getTopicCursors,getTopicMessagesSince,setTopicCursor,addTopicParticipant,buildTopicGuideText} from "../workspace/topic-store.js";
+import type {MentionActivationCtx} from "../communication/router.js";
 import { getDatabase } from "../storage/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
@@ -58,8 +66,18 @@ let shutdownRunning = false;
 
 export function initAgentManager(reg: RuntimeRegistry): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
+  if(registry&&(instances.size||pendingCreations.size||inputPumps.size))throw new Error("Runtime initialization requires completed teardown");
+  recoverRuntimeInputState();
   shutdownSettlement = null; openRuntimeAdmission();
   registry = reg;
+}
+
+/** Called only after HTTP/PID publication, never during historical import. */
+export function resumePendingRuntimeInputs():void{
+  const pending=new InputQueueRepository(getDatabase());let afterId=0;
+  for(;;){const page=pending.listPending({afterId,limit:1000});if(!page.length)break;
+    for(const input of page){afterId=input.id;void pumpRuntimeInputs(input.scopeId,input.targetActorKey).catch(error=>logger.error("agent","pending input recovery failed",{inputId:input.id,error:String(error)}));}
+  }
 }
 
 export function getRegistry(): RuntimeRegistry | null {
@@ -189,10 +207,8 @@ interface AgentInstance {
   dispatchState: DispatchState;
   promptInFlight: boolean;
   profilePromptDirty?: boolean;
-  queuedInputs: string[];
   pendingThinkingSwitch?: PendingThinkingSwitch;
   pendingCredentialRefresh?: PendingCredentialRefresh;
-  pendingChatReply: boolean;
   hadErrorInTurn: boolean;
   /** Last turn failure text for wait() error-idle wake. Cleared at next runPrompt start. */
   lastTurnError: string | null;
@@ -396,114 +412,102 @@ function updateDispatchState(instance: AgentInstance, next: DispatchState, trigg
   instance.dispatchState = next;
 }
 
-function queueInput(instance: AgentInstance, input: string, trigger: string): void {
-  instance.queuedInputs.push(input);
-  logger.info("agent", "queueInput", { member: instance.agentName, count: instance.queuedInputs.length, trigger });
-}
-
-function applyPendingAfterPromptSettlement(instance: AgentInstance, trigger: string): void {
-  applyPendingCredentialRefresh(instance, trigger);
-  // Model/credential switches apply immediately (live credential store + setModel);
-  // only thinking-level switches still settle at end of turn.
-  applyPendingThinkingSwitch(instance, trigger);
-}
-
-function markPendingChatReply(instance: AgentInstance, trigger: string): void {
-  if (!instance.pendingChatReply) logger.info("agent", "pendingChatReplySet", { member: instance.agentName, roomId: instance.roomId, trigger });
-  instance.pendingChatReply = true;
-}
-
-function clearPendingChatReply(instance: AgentInstance, trigger: string): void {
-  if (!instance.pendingChatReply) return;
-  instance.pendingChatReply = false;
-  logger.info("agent", "pendingChatReplyCleared", { member: instance.agentName, roomId: instance.roomId, trigger });
-}
-
-const LENGTH_CONTINUATION_PROMPT = "⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat` tool.";
-const LENGTH_CONTINUATION_FAILED_WARNING = "Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
-
-function isLengthStopReason(stopReason: unknown): boolean {
-  if (typeof stopReason !== "string") return false;
-  const normalized = stopReason.toLowerCase();
-  return normalized === "length" || normalized.includes("max_tokens") || normalized.includes("max_output");
-}
-
-/** Drain queued mid-turn inputs into a fresh prompt. Returns true if a new prompt was started. */
-function drainQueuedInputsAsPrompt(instance: AgentInstance, trigger: string): boolean {
-  if (!memberRuntimeAllowed(instance.memberId)) return false;
-  if (instance.queuedInputs.length === 0) return false;
-  // After agent_end, turnActive is false while public status may still read "working"
-  // until transition — gate on turn/dispatch, not public status (fish 2026-08-09).
-  if (instance.turnActive || instance.promptInFlight || instance.dispatchState !== "idle") return false;
-  // Never drain into a prompt while compaction is running or requested —
-  // queued inputs resume once the operation settles (steer-removal §3).
-  if (instance.compacting) return false;
-  const queued = instance.queuedInputs.splice(0);
-  const message = queued.join("\n\n");
-  logger.info("agent", "drainQueuedInputsAsPrompt", { member: instance.agentName, count: queued.length, trigger });
-  void runPrompt(instance, message, "queued", (err) => {
-    logger.error("agent", "queued prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
-    postMessage(instance.roomId, "system", `Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(err)}`);
+function queueDepth(instance:AgentInstance):number{return pendingRuntimeInputCount(runtimeInputOwner(instance.scopeId,instance.memberId));}
+const inputPumps=new Map<string,Promise<void>>();
+// Waiter handles observe committed receipts; they are not queue or reply authority.
+const inputProgress=new Map<string,Set<(error?:unknown)=>void>>();
+function waitForInputSettlement(input:QueuedInput,operation:Promise<void>):Promise<void>{
+  const key=instanceKey(input.scopeId,input.targetActorKey);
+  return new Promise((resolve,reject)=>{
+    const listeners=inputProgress.get(key)??new Set<(error?:unknown)=>void>();inputProgress.set(key,listeners);
+    let finished=false;
+    const cleanup=()=>{finished=true;listeners.delete(check);if(!listeners.size&&inputProgress.get(key)===listeners)inputProgress.delete(key);};
+    const check=(error?:unknown)=>{if(finished)return;try{if(error)throw error;if(!memberRuntimeAllowed(input.targetActorKey)){cleanup();resolve();return;}const row=new InputQueueRepository(getDatabase()).get(input);if(row&&row.status!=="pending"&&row.status!=="dispatched"&&!runtimeInputHasContinuation(input)){cleanup();resolve();}}catch(error){cleanup();reject(error);}};
+    listeners.add(check);
+    void operation.then(()=>check(),error=>check(error));
   });
+}
+const inputScopeEpoch=new Map<string,number>();
+function invalidateInputScope(key:string):void{inputScopeEpoch.set(key,(inputScopeEpoch.get(key)??0)+1);}
+function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
+  applyPendingCredentialRefresh(instance,trigger);applyPendingThinkingSwitch(instance,trigger);
+}
+function drainQueuedInputsAsPrompt(instance:AgentInstance,trigger:string):boolean{
+  if(!memberRuntimeAllowed(instance.memberId)||!queueDepth(instance)||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")return false;
+  void pumpRuntimeInputs(instance.scopeId,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
   return true;
 }
-
-async function maybeRunLengthContinuation(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<boolean> {
-  if (!instance.lengthContinuationPending || opts.skipChatWarning) return false;
-  instance.lengthContinuationPending = false;
-  if (instance.lengthContinuationAttempted) {
-    instance.lastMessageEndWasLength = false;
-    clearPendingChatReply(instance, "length_continuation_loop_guard");
-    logger.warn("agent", "lengthContinuationLoopGuard", { member: instance.agentName, roomId: instance.roomId, trigger });
-    postMessage(instance.roomId, "system", `Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
-    return true;
-  }
-  instance.lengthContinuationAttempted = true;
-  instance.lastMessageEndWasLength = false;
-  markPendingChatReply(instance, "length_continuation");
-  logger.warn("agent", "lengthContinuationPrompt", { member: instance.agentName, roomId: instance.roomId, trigger });
-  await runPrompt(instance, LENGTH_CONTINUATION_PROMPT, "length_continuation", (err) => {
-    logger.error("agent", "length continuation prompt error", { member: instance.agentName, error: formatRuntimeErrorMessage(err) });
-  });
-  return true;
-}
-
-async function finalizePromptSettlement(instance: AgentInstance, trigger: string, opts: { skipChatWarning?: boolean } = {}): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return;
-  updateDispatchState(instance, "idle", trigger);
-  applyPendingAfterPromptSettlement(instance, trigger);
-  if (instance.queuedInputs.length > 0) {
-    // Continue the pipeline without leaving a durable public idle (wait consumer).
-    if (drainQueuedInputsAsPrompt(instance, trigger)) {
-      if (instance.status === "idle") {
-        transition(instance, instance.roomId, instance.agentName, "working", `${trigger}_drain`);
+function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
+  const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(owner.scopeId,memberId);
+  const current=inputPumps.get(key);if(current)return current;
+  if(!memberRuntimeAllowed(memberId)||!pendingRuntimeInputCount(owner))return Promise.resolve();
+  const epoch=inputScopeEpoch.get(key)??0;
+  let failed=false;
+  const operation=trackMemberOperation(memberId,async()=>{
+    const scopeId=owner.scopeId.startsWith("dm:")||owner.scopeId.startsWith("topic:")?owner.scopeId:roomScopeId(owner.scopeId);
+    const instance=await buildMemberAgentSession(memberId,scopeId);
+    if(!instance){
+      if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch)cancelPendingRuntimeInputs(owner,"runtime creation failed","failed");
+      if(memberRuntimeAllowed(memberId)&&(inputScopeEpoch.get(key)??0)===epoch){
+        const member=memberRecordToConfig(memberId);
+        postMessage(owner.scopeId,"system",member&&!isMemberConfigured(member)?memberUnconfiguredMessage(member.name):`Failed to activate member "${getMember(memberId)?.name??memberId}": runtime unavailable.`);
       }
+      return;
+    }
+    for(;;){
+      if(!memberRuntimeAllowed(memberId)||instances.get(key)!==instance||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")break;
+      const inputs=pendingRuntimeInputs(owner);if(!inputs.length)break;
+      await runInputBatch(instance,inputs);
+      for(const notify of [...(inputProgress.get(key)??[])])notify();
+    }
+    if(!queueDepth(instance))maybeFlushPendingReload(instance);
+  }).catch(error=>{
+    failed=true;
+    if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch)cancelPendingRuntimeInputs(owner,"runtime input execution failed","failed");
+    for(const notify of [...(inputProgress.get(key)??[])])notify(error);
+    if(memberRuntimeAllowed(memberId))postMessage(owner.scopeId,"system",`Failed to activate member "${getMember(memberId)?.name??memberId}": ${formatRuntimeErrorMessage(error)}`);
+    throw error;
+  });
+  inputPumps.set(key,operation);
+  return operation.finally(()=>{
+    if(inputPumps.get(key)===operation)inputPumps.delete(key);
+    for(const notify of [...(inputProgress.get(key)??[])])notify();
+    const live=instances.get(key);
+    if(!failed&&memberRuntimeAllowed(memberId)&&pendingRuntimeInputCount(owner)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle")))queueMicrotask(()=>{void pumpRuntimeInputs(owner.scopeId,memberId).catch(error=>logger.error("agent","input wake failed",{memberId,error:String(error)}));});
+  });
+}
+const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat` tool.";
+const LENGTH_CONTINUATION_FAILED_WARNING="Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
+function isLengthStopReason(stopReason:unknown):boolean{
+  if(typeof stopReason!=="string")return false;
+  const value=stopReason.toLowerCase();return value==="length"||value.includes("max_tokens")||value.includes("max_output");
+}
+function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],trigger:string,skipChatWarning:boolean):void{
+  if(instances.get(instanceKey(instance.scopeId,instance.memberId))!==instance)return;
+  updateDispatchState(instance,"idle",trigger);
+  if(!memberRuntimeAllowed(instance.memberId))return;
+  applyPendingAfterPromptSettlement(instance,trigger);
+  // Pending work does not inherit this batch's reply obligations. Complete or
+  // explicitly hand off this batch before the pump chooses its next inputs.
+  if(instance.lengthContinuationPending&&!skipChatWarning){
+    instance.lengthContinuationPending=false;instance.lastMessageEndWasLength=false;
+    if(instance.lengthContinuationAttempted){
+      dismissRuntimeReplies(inputs,"continuation-exhausted","length continuation budget exhausted");
+      postMessage(instance.roomId,"system",`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
+    }else{
+      instance.lengthContinuationAttempted=true;
+      const owed=hasRuntimeReply(runtimeInputOwner(instance.scopeId,instance.memberId),inputs);
+      acceptControlInput(instance.scopeId,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
     }
     return;
   }
-  maybeFlushPendingReload(instance);
-  if (await maybeRunLengthContinuation(instance, trigger, opts)) return;
-  // Final-text fallback (fish 2026-08-07): a turn that owed a reply and never
-  // called chat posts its last *completed* text segment verbatim, marked
-  // autoDelivered. Abort/error turns never fall back (skipChatWarning=true on
-  // abort; hadErrorInTurn on error). Length-truncated segments are not
-  // candidates (the continuation path above runs first; the continuation's
-  // completed segment is). The fallback clears the debt, so the silence
-  // warning below only fires when there was no text at all.
-  if (!opts.skipChatWarning && !instance.hadErrorInTurn && instance.pendingChatReply) {
-    const seg = instance.lastCompletedFinalText;
-    if (seg) {
-      deliverMemberMessage(instance.roomId, instance.memberId, seg, { autoDelivered: true });
-      clearPendingChatReply(instance, "final_text_fallback");
+  const owner=runtimeInputOwner(instance.scopeId,instance.memberId);
+  if(!skipChatWarning&&!instance.hadErrorInTurn&&hasRuntimeReply(owner,inputs)){
+    if(instance.lastCompletedFinalText)deliverMemberMessage(instance.roomId,instance.memberId,instance.lastCompletedFinalText,{autoDelivered:true});
+    if(hasRuntimeReply(owner,inputs)){
+      dismissRuntimeReplies(inputs,"silent","member finished without replying");
+      postMessage(instance.roomId,"system",`Member "${instance.agentName}" finished without replying.`);
     }
-  }
-  if (instance.pendingChatReply && !opts.skipChatWarning && !instance.hadErrorInTurn) {
-    // Silence-visible: a turn ended without a chat reply. Do NOT run a hidden
-    // follow-up prompt (that masked real failures and swallowed their events).
-    // Post an honest system note so the user sees the silence and decides.
-    clearPendingChatReply(instance, "silence_visible");
-    logger.warn("agent", "memberSilent", { member: instance.agentName, roomId: instance.roomId, trigger });
-    postMessage(instance.roomId, "system", `Member "${instance.agentName}" finished without replying.`);
   }
 }
 
@@ -551,66 +555,43 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.roomMembers = room ? roomStore.getRoomMembers(room.id).map(m => m.name) : [member.name];
 }
 
-function runPrompt(
-  instance: AgentInstance,
-  message: string,
-  trigger: string,
-  onError: (err: unknown) => void,
-): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
-  return trackMemberOperation(instance.memberId,()=>runPromptInternal(instance, message, trigger, onError));
-}
-
-async function runPromptInternal(
-  instance: AgentInstance,
-  message: string,
-  trigger: string,
-  onError: (err: unknown) => void,
-): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return;
-  updateDispatchState(instance, "promptSubmitted", trigger);
-  instance.promptInFlight = true;
-  instance.hadErrorInTurn = false;
-  instance.lastTurnError = null;
-  instance.pendingErrorNotice = null;
-  instance.lastMessageEndWasLength = false;
-  instance.lengthContinuationPending = false;
-  if (trigger !== "length_continuation") instance.lengthContinuationAttempted = false;
-  // Activity panel: emit the full composed prompt for user-facing activations
-  // (activate / dm-activate / queued). Steer has its own user_steer event;
-  // length_continuation is a system prompt, not a user message.
-  try {
-  if (trigger === "activate" || trigger === "dm-activate" || trigger === "queued") {
-    emitAgentLocalEvent(instance.roomId, instance.memberId, {
-      type: "user_prompt",
-      text: message,
-      trigger,
-    });
-  }
-    if (instance.profilePromptDirty) {
+async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promise<void>{
+  if(!memberRuntimeAllowed(instance.memberId))return;
+  const payloads=inputs.map(runtimeInputPayload),message=payloads.map(x=>x.prompt).join("\n\n");
+  const trigger=payloads.length===1?payloads[0].trigger:"queued",token=randomUUID();
+  updateDispatchState(instance,"promptSubmitted",trigger);
+  instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
+  instance.lastMessageEndWasLength=false;instance.lengthContinuationPending=false;
+  instance.lengthContinuationAttempted=payloads.some(payload=>payload.trigger==="length_continuation");
+  let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
+  setActivationSource(instance.roomId,instance.memberId,payloads[0].source);
+  try{
+    if(trigger!=="length_continuation")emitAgentLocalEvent(instance.roomId,instance.memberId,{type:"user_prompt",text:message,trigger});
+    if(instance.profilePromptDirty){
       refreshProfileSources(instance);
-      if (!instance.handle.refreshPrompt) throw new Error("Runtime cannot refresh member identity without resetting the session.");
-      instance.handle.refreshPrompt(instance.sessionSources.compiled);
-      instance.profilePromptDirty = false;
+      if(!instance.handle.refreshPrompt)throw new Error("Runtime cannot refresh member identity without resetting the session.");
+      instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;
     }
-    await instance.handle.prompt(message);
-    instance.promptInFlight = false;
-    await finalizePromptSettlement(instance, `${trigger}_prompt_resolved`, { skipChatWarning: instance.dispatchState === "aborting" });
-  } catch (err: any) {
-    instance.promptInFlight = false;
-    const formatted = formatRuntimeErrorMessage(err).trim() || "prompt failed";
-    instance.hadErrorInTurn = true;
-    instance.lastTurnError = formatted;
-    onError(err);
-    updateDispatchState(instance, "idle", `${trigger}_prompt_error`);
-    instance.queuedInputs = [];
-    // Ensure public status goes idle so wait listeners wake with the error mark.
-    if (instance.status !== "idle") {
-      transition(instance, instance.roomId, instance.agentName, "idle", `${trigger}_prompt_error`);
-    } else {
-      try { notifyMemberIdle(instance.roomId, instance.memberId, { error: formatted }); } catch { /* ignore */ }
-    }
+    await instance.handle.prompt(message,{beforeDispatch:(event:{attemptId:string;dispatchIndex:number;message:string})=>{
+      if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
+      else{
+        const continuation=acceptControlInput(instance.scopeId,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(instance.scopeId,instance.memberId),inputs)).input;
+        claimRuntimeInputs([continuation],event.attemptId,token);inputs.push(continuation);
+      }
+    }});
+    if(!dispatched)throw new Error("Runtime returned without a durable input dispatch receipt");
+    outcome=instance.dispatchState==="aborting"?"cancelled":instance.hadErrorInTurn?"failed":"completed";
+  }catch(error){failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);}
+  instance.promptInFlight=false;
+  // Provider settlement is not application publication. Publication failure cannot replay the input.
+  try{finalizePromptSettlement(instance,inputs,`${trigger}_settled`,outcome!=="completed");}
+  catch(error){failure=error;outcome="failed";instance.lastTurnError=formatRuntimeErrorMessage(error);updateDispatchState(instance,"idle",`${trigger}_publication_error`);}
+  finally{finishRuntimeInputs(inputs,token,outcome,failure?"runtime operation or publication failed":outcome);clearActivationSource(instance.roomId,instance.memberId);}
+  if(failure){
+    logger.error("agent","input processing failed",{memberId:instance.memberId,scopeId:instance.scopeId,error:String(failure)});
+    if(instances.get(instanceKey(instance.scopeId,instance.memberId))===instance)postMessage(instance.roomId,"system",`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
   }
+  if(instances.get(instanceKey(instance.scopeId,instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,instance.roomId,instance.agentName,"idle",`${trigger}_settled`);
 }
 
 function normalizeSwitchModelRef(model: string): string {
@@ -907,7 +888,7 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
     if (!scopeById) {
       try {
         const all = loadScopeMessages(roomId);
-        scopeById = new Map(all.map((m) => [m.id, m]));
+        scopeById = new Map(all.filter(m=>!isSystemNoticeHiddenFromMembers(m)).map((m) => [m.id, m]));
       } catch {
         scopeById = new Map();
       }
@@ -1063,14 +1044,10 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
           // Single egress: scope-routed postMessage writes the member-owned DM
           // store, broadcasts to dm:<id> subscribers, and notifies listeners.
           postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
-          const active = instances.get(dmKey);
-          if (active) clearPendingChatReply(active, "callback:chat-dm");
         },
         onMention: async (_target: string, message: string) => {
           // DM has no @ routing — treat as normal chat.
           postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
-          const active = instances.get(dmKey);
-          if (active) clearPendingChatReply(active, "callback:mention-dm");
         },
       };
       var runtime = runtime0;
@@ -1163,15 +1140,11 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       callbacks = {
         onChat: async (message: string) => {
           postMessage(ref.roomId, roomMemberName(), message, [], { senderMemberId: memberId });
-          const active = instances.get(roomKey);
-          if (active) clearPendingChatReply(active, "callback:chat");
         },
         onMention: async (targetMember: string, message: string) => {
           // Mention activation is handled by router listener via message-bus.
           const target = roomStore.resolveRoomMemberRef(ref.roomId, targetMember);
           postMessage(ref.roomId, roomMemberName(), message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
-          const active = instances.get(roomKey);
-          if (active) clearPendingChatReply(active, "callback:mention");
         },
       };
       var runtime = runtime1;
@@ -1279,15 +1252,11 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       callbacks = {
         onChat: async (message: string) => {
           postMessage(topicScopeId, topicMemberName(), message, [], { senderMemberId: memberId });
-          const active = instances.get(topicKey);
-          if (active) clearPendingChatReply(active, "callback:chat-topic");
         },
         onMention: async (target: string, message: string) => {
           // Mentions inside a topic stay in the topic scope.
           const targetMember = roomStore.resolveRoomMemberRef(parentRoomId, target);
           postMessage(topicScopeId, topicMemberName(), message, [target], { senderMemberId: memberId, mentionMemberIds: targetMember ? [targetMember.id] : [] });
-          const active = instances.get(topicKey);
-          if (active) clearPendingChatReply(active, "callback:mention-topic");
         },
       };
       var runtime = runtime2;
@@ -1329,8 +1298,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         status: "idle",
         dispatchState: "idle",
         promptInFlight: false,
-        queuedInputs: [],
-        pendingChatReply: false,
         hadErrorInTurn: false,
         lastTurnError: null,
         pendingErrorNotice: null,
@@ -1397,7 +1364,7 @@ export async function reloadMemberSession(scopeId: string, memberId: string, rea
     const built = await buildMemberAgentSession(memberId, scopeId);
     return { queued: false, rebuilt: !!built };
   }
-  if (instance.status === "working" || instance.compacting || instance.dispatchState !== "idle" || instance.promptInFlight) {
+  if (instance.status === "working" || instance.compacting || instance.dispatchState !== "idle" || instance.promptInFlight || queueDepth(instance)>0) {
     instance.pendingReload = reason;
     logger.info("agent", "reloadQueued", { memberId, scopeId, reason });
     return { queued: true, rebuilt: false };
@@ -1414,15 +1381,16 @@ function rebuildLiveInstance(instance: AgentInstance, reason: string): Promise<A
 async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
   const scopeId = instance.scopeId;
   const memberId = instance.memberId;
-  const carriedInputs = instance.queuedInputs.slice();
-  try { instance.handle.abort(); } catch { /* already stopped */ }
-  try { instance.handle.destroy(); } catch { /* already stopped */ }
-  try { instance.unsubscribe(); } catch { /* already stopped */ }
+  updateDispatchState(instance,"aborting","session-reload");
+  if(!instance.handle.destroyAndWait)throw new Error("Runtime cannot confirm reload teardown");
+  await instance.handle.destroyAndWait();
+  if(instances.get(instanceKey(scopeId,memberId))!==instance||!memberRuntimeAllowed(memberId))return null;
+  instance.unsubscribe();
   instances.delete(instanceKey(scopeId, memberId));
   sessionPublishOwners.delete(instanceKey(scopeId,memberId));
   // Session files are kept — reload means same conversation, fresh assets.
   const built = await buildMemberAgentSession(memberId, scopeId, { resume: true });
-  if (built && carriedInputs.length > 0) built.queuedInputs.push(...carriedInputs);
+  if(built)drainQueuedInputsAsPrompt(built,"session-reloaded");
   logger.info("agent", "sessionReloaded", { memberId, scopeId, reason, rebuilt: !!built });
   return built;
 }
@@ -1433,14 +1401,14 @@ async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: stri
 function maybeFlushPendingReload(instance: AgentInstance): void {
   if (!instance.pendingReload) return;
   if (instance.status !== "idle" || instance.compacting || instance.turnActive || instance.dispatchState !== "idle" || instance.promptInFlight) return;
-  if (instance.queuedInputs.length > 0) return;
+  if (queueDepth(instance) > 0) return;
   const reason = instance.pendingReload;
   instance.pendingReload = null;
   const key = instanceKey(instance.scopeId, instance.memberId);
   // Escape the current event handler before destroying the instance.
   setTimeout(() => {
     if (instances.get(key) !== instance) return; // replaced/destroyed meanwhile
-    void rebuildLiveInstance(instance, reason).catch((err) =>
+    void reloadMemberSession(instance.scopeId,instance.memberId,reason).catch((err) =>
       logger.error("agent", "pendingReload failed", { memberId: instance.memberId, scopeId: instance.scopeId, error: String(err) }),
     );
   }, 0);
@@ -1477,151 +1445,113 @@ function replyObligation(memberId: string, memberName: string, ctx?: ReplyContex
   return { replyDebt, banner };
 }
 
-export async function activateAgent(roomId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
-  if (runtimeIsStopping()) return;
-  const member = resolveRoomMember(roomId, memberRef);
-  const obligation = replyObligation(member?.id || memberRef, member?.name || memberRef, ctx);
-  return activateAgentInternal(roomId, member?.id || memberRef, { source: "room_mention", ...obligation, trigger: "activate" });
-}
+const INTERRUPT_INPUT_BANNER="Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.";
 
-async function activateAgentInternal(
-  roomId: string,
-  memberRef: string,
-  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
-): Promise<void> {
-  if (typeof roomId === "string" && roomId.startsWith("topic:")) {
-    logger.warn("agent", "activateAgentInternal refused topic scope — use activateTopicMember", { roomId, memberRef, trigger: opts.trigger });
-    return;
+function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,capture?:CapturedMessage):{payload:PreparedRuntimeInput;replyExpected:boolean;onAccepted?:()=>void}|null{
+  const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
+  const rec=getMember(memberId);if(!rec)throw new Error(`Member not found: ${memberId}`);
+  const replyExpected=capture
+    ?new ReplyObligationRepository(getDatabase()).listPending(scope,memberId).some(x=>x.messageId===capture.messageId)
+    :replyObligation(memberId,rec.name,ctx).replyDebt;
+  const senderName=capture?.snapshot.origin==="member"?String(capture.snapshot.message.sender):ctx?.senderName;
+  const senderIsMember=capture?capture.snapshot.origin==="member":!!ctx&&ctx.senderOrigin!=="user"&&ctx.senderName!=="user";
+  const banner=replyExpected?(senderIsMember&&senderName?`[REPLY EXPECTED] ${senderName} expects your reply — respond with the chat tool.`:"[REPLY EXPECTED] Respond using the chat tool."):undefined;
+  const captured=capture?.snapshot.message as unknown as RoomMessage|undefined;
+  if(scope.startsWith("dm:")){
+    const all=readAllDmMessages(memberId).filter(m=>!isSystemNoticeHiddenFromMembers(m));
+    const bounded=captured?all.filter(m=>m.id!==captured.id&&(m.seq??0)<(captured.seq??Number.MAX_SAFE_INTEGER)).concat(captured):all;
+    const transcript=bounded.slice(-40).map(m=>`[${m.sender==="user"?"User":m.sender}] ${m.content}`).join("\n\n");
+    let prompt:string;
+    if(transcript)prompt=`You are in a private chat with the user. Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
+    else if(isBlankPersona(readMemberProfile(memberId)))prompt="You are in a private chat with the user. You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.";
+    else prompt="You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.";
+    return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
   }
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberName = member?.name || memberRef;
-  const memberId = member?.id || memberRef;
-  logger.info("agent", "activateAgent", { roomId, member: memberName, memberId });
-
-  if (member && !isMemberConfigured(member)) {
-    postMessage(roomId, "system", memberUnconfiguredMessage(memberName));
-    return;
+  const topicId=scope.startsWith("topic:")?scope.slice(6):undefined;
+  const parent=topicId?resolveTopicRoomId(topicId):scope;
+  if(!parent)throw new Error("Topic parent not found");
+  const room=roomStore.getRoom(parent);if(!room)throw new Error("Room not found");
+  const topic=topicId?getTopic(parent,topicId):undefined;
+  if(topicId&&(!topic||topic.status!=="active"))throw new Error("Topic is closed or missing");
+  const member=resolveRoomMember(parent,memberId);if(!member)throw new Error("Member is not in the room");
+  const cursor=topicId?getTopicCursors(parent,topicId)[memberId]:roomStore.getCursors(parent)[memberId];
+  const all=topicId?getTopicMessagesSince(parent,topicId,cursor??null):getMessagesSince(parent,cursor??null);
+  const visible=filterAgentVisibleMessages(all,rec.name);
+  const index=lastMentionTriggerIndex(visible,rec.name,memberId);
+  const trigger=captured??visible[index>=0?index:visible.length-1];
+  if(!trigger&&!topic)return null;
+  let formatted=trigger?formatMessagesForAgent(scope,[trigger],rec.name,room.name):"";
+  if(topic){
+    formatted=[topic.guideText||buildTopicGuideText({title:topic.title,roomName:room.name,roomId:parent,anchorExcerpt:"",seedMode:topic.seedMode}),formatted].filter(Boolean).join("\n\n");
+  }else if(trigger){
+    const backlog=visible.filter(m=>m.id!==trigger.id&&(m.seq??0)<(trigger.seq??Number.MAX_SAFE_INTEGER)&&!isOwnMessage(m,memberId,rec.name));
+    const limit=(member as any).contextLimit||50;
+    const hint=buildUnreadBacklogHint(backlog.slice(-limit),backlog.length>limit?{total:backlog.length,fromSeq:(backlog[0].seq??1)-1}:undefined);
+    if(hint)formatted=`${hint}\n\n${formatted}`;
   }
-
-  const instance = await getOrCreate(roomId, memberId);
-  if (!memberRuntimeAllowed(memberId)) return;
-  if (!instance) {
-    // getOrCreate posted its own failure detail on the create path.
-    postMessage(roomId, "system", `Failed to activate member "${memberName}": not found or runtime unavailable.`);
-    return;
-  }
-
-  return activateAgentInternalContinue(roomId, memberName, memberId, member, instance, opts);
-}
-
-async function activateAgentInternalContinue(
-  roomId: string,
-  memberName: string,
-  memberId: string,
-  member: ReturnType<typeof resolveRoomMember>,
-  instance: AgentInstance,
-  opts: { source: "room_mention" | "private_instruction" | "system"; replyDebt: boolean; trigger: string; banner?: string; urgent?: boolean },
-): Promise<void> {
-  const cursors = roomStore.getCursors(roomId);
-  const lastCursor = cursors[memberId] ?? (memberId.startsWith("mem_") ? null : cursors[memberName]) ?? null;
-  const allNewMessages = getMessagesSince(roomId, lastCursor);
-  if (allNewMessages.length === 0) return;
-
-  // Context limit
-  const contextLimit = (member as any)?.contextLimit || 50;
-  const visibleMessages = filterAgentVisibleMessages(allNewMessages, memberName);
-  if (visibleMessages.length === 0) {
-    // Nothing member-visible; keep the cursor advancing (avoid re-filtering
-    // the same system notices on every activation).
-    const latestId = getLatestMessageId(roomId);
-    if (latestId) roomStore.setCursor(roomId, memberId, latestId);
-    return;
-  }
-
-  // Hybrid injection (fish-approved spec msg:#14818): the trigger message
-  // (last one mentioning this member, else the newest) is injected in full;
-  // everything between the delivery cursor and the trigger compresses into a
-  // one-line unread hint the member may read via query_room_messages.
-  const triggerIdx = lastMentionTriggerIndex(visibleMessages, memberName, memberId);
-  const triggerIndex = triggerIdx >= 0 ? triggerIdx : visibleMessages.length - 1;
-  const trigger = visibleMessages[triggerIndex];
-  // A member's own messages are never unread to itself (QA 2026-08-06): exclude
-  // them from the backlog so the hint does not ring forever with self-replies.
-  const backlog = visibleMessages.slice(0, triggerIndex).filter((m) => !isOwnMessage(m, memberId, memberName));
-  const truncated = backlog.length > contextLimit;
-  const backlogLimited = truncated ? backlog.slice(-contextLimit) : backlog;
-  const unreadHint = buildUnreadBacklogHint(backlogLimited, truncated
-    ? { total: backlog.length, fromSeq: (backlog[0] as { seq?: number }).seq! - 1 }
-    : undefined);
-  const formattedTrigger = formatMessagesForAgent(roomId, [trigger], memberName, roomStore.getRoom(roomId)?.name || roomId);
-  const payload = opts.banner
-    ? `${opts.banner}\n\n${unreadHint ? `${unreadHint}\n\n` : ""}${formattedTrigger}`
-    : unreadHint ? `${unreadHint}\n\n${formattedTrigger}` : formattedTrigger;
-
-  // Cursor advances only to the trigger — the backlog stays unread until the
-  // member reads it (query_room_messages advances the cursor). Own replies
-  // are skipped too (they are not unread to their author), but NEVER at the
-  // cost of regressing below the trigger: a self message that precedes the
-  // trigger belongs to an earlier turn the cursor already passed. The cursor
-  // target is the later of (trigger, last own message after it) — closed
-  // interval: the trigger itself is consumed (QA 2026-08-06 phantom unread).
-  let cursorTarget: RoomMessage = trigger;
-  let lastSelfIdx = -1;
-  for (let i = allNewMessages.length - 1; i >= 0; i--) {
-    if (isOwnMessage(allNewMessages[i], memberId, memberName)) {
-      lastSelfIdx = i;
-      break;
+  return {payload:{prompt:[banner,formatted].filter(Boolean).join("\n\n"),source:"room_mention",trigger:"activate"},replyExpected,onAccepted:()=>{
+    if(topicId)addTopicParticipant(parent,topicId,memberId);
+    if(trigger?.id){
+      const current=topicId?getTopicCursors(parent,topicId)[memberId]:roomStore.getCursors(parent)[memberId];
+      const currentMessage=current?loadScopeMessages(scope).find(m=>m.id===current):undefined;
+      if(!currentMessage||(currentMessage.seq??0)<=(trigger.seq??Number.MAX_SAFE_INTEGER)){
+        if(topicId)setTopicCursor(parent,topicId,memberId,trigger.id);else roomStore.setCursor(parent,memberId,trigger.id);
+      }
     }
-  }
-  const triggerIdxInBatch = allNewMessages.findIndex((m) => m.id === trigger.id);
-  if (lastSelfIdx > triggerIdxInBatch) cursorTarget = allNewMessages[lastSelfIdx];
-  if (cursorTarget.id) roomStore.setCursor(roomId, memberId, cursorTarget.id);
+  }};
+}
 
-  logger.info("agent", "incrementalMessages", { member: memberName, count: backlogLimited.length + 1, total: allNewMessages.length, filtered: allNewMessages.length - visibleMessages.length, cursorFrom: lastCursor, hybrid: true });
-
-  setActivationSource(roomId, memberId, opts.source);
-  if (opts.replyDebt) markPendingChatReply(instance, opts.trigger);
-
-  // Urgent interrupt: never steer (that would queue behind the turn we just
-  // aborted) — park at the FRONT of the queue so the payload runs the moment
-  // the current dispatch settles (abort landing / compaction finishing).
-  if (opts.urgent && (instance.compacting || instance.status === "working" || instance.dispatchState !== "idle")) {
-    instance.queuedInputs.unshift(payload);
-    logger.info("agent", "urgentQueuedFront", { member: memberName, memberId, roomId, trigger: opts.trigger, queueDepth: instance.queuedInputs.length });
+/** Admission is synchronous. The outbox may acknowledge only after this returns. */
+function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionActivationCtx):void{
+  const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
+  const active=instances.get(instanceKey(scope,memberId));
+  const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
+  const broadcast=!scope.includes(":")&&Array.isArray(ctx.capture.snapshot.message.mentions)&&ctx.capture.snapshot.message.mentions.includes("all");
+  const urgent=ctx.deliveryKind==="urgent";
+  const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
+  const parent=scope.startsWith("topic:")?resolveTopicRoomId(scope.slice(6)):scope;
+  const scopeAllowed=scope.startsWith("dm:")?scope===`dm:${memberId}`:!!parent&&!!roomStore.resolveRoomMemberRef(parent,memberId)&&(!scope.startsWith("topic:")||getTopic(parent,scope.slice(6))?.status==="active");
+  const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
+  const notInTopic=scope.startsWith("topic:")&&urgent&&!active;
+  const skipped=unavailable||notInTopic||(broadcast&&busy);
+  let prepared:ReturnType<typeof prepareScopeInput>;
+  const receipt=acceptRuntimeInput(ctx.capture,{scopeId:scope,messageId:ctx.capture.messageId,targetActorKey:memberId,deliveryKind:ctx.deliveryKind},()=>{
+    if(skipped)return {prompt:"",source:"system",trigger:"not-dispatched"};
+    prepared=prepareScopeInput(scope,memberId,ctx,ctx.capture);
+    if(!prepared)throw new Error("Captured message has no executable input");
+    const payload={...prepared.payload};
+    if(busy&&!active!.compacting)payload.prompt=`${urgent?`[INTERRUPTED] Your previous turn was aborted by an urgent message from ${ctx.senderName}. Verify partial work before continuing.`:INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
+    return payload;
+  },{placement:urgent||(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:notInTopic?"not in topic":unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
+  if(receipt.input.status!=="pending"){
+    if(receipt.accepted&&notInTopic&&scopeAllowed)postMessage(scope,"system",`Member "${getMember(memberId)?.name??memberId}" is not in this topic; urgent interruption was skipped.`);
     return;
   }
+  if(receipt.accepted&&busy&&!active!.compacting){
+    interruptAcceptedInput(scope,active!,urgent?"urgent_interrupt":"message_interrupt");
+    if(urgent)postMessage(scope,"system",`Member "${active!.agentName}"'s current turn was aborted by an urgent message from ${ctx.senderName}.`);
+  }
+  void pumpRuntimeInputs(scope,memberId).catch(error=>logger.error("router","accepted input execution failed",{scopeId:scope,memberId,error:String(error)}));
+}
 
-  if (instance.compacting) {
-    queueInput(instance, payload, opts.trigger);
+async function activateControl(scope:string,memberId:string,ctx?:ReplyContext,urgent=false):Promise<void>{
+  if(!memberRuntimeAllowed(memberId))return;
+  const prepared=prepareScopeInput(scope,memberId,ctx);
+  if(!prepared){
+    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")||scope.startsWith("topic:")?scope:roomScopeId(scope)) as ScopeId);
     return;
   }
-
-  if (instance.status === "working") {
-    // Interrupt-on-message (design-interrupt-on-message-v1, fish 2026-09-04):
-    // a mid-turn mention now aborts the run and processes immediately —
-    // steer (queue-behind-the-turn) is retired for message delivery. Shell
-    // commands keep running; blocking tools return their actual running result.
-    // The SDK owns session history, including interrupted tool calls.
-    // Activity: NO event here — the drained queue emits exactly one user_prompt
-    // (banner + message) when the abort settles (fish 2026-09-05: this path
-    // used to also emit user_steer up front, so one message produced two
-    // activity cards).
-    interruptWorkingInstance(roomId, instance, payload,
-      "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
-      "message_interrupt");
-    return;
-  }
-
-  if (instance.dispatchState !== "idle") {
-    queueInput(instance, payload, opts.trigger);
-    return;
-  }
-
-  logger.info("agent", "prompt", { member: memberName, messageLength: payload.length, trigger: opts.trigger });
-  await runPrompt(instance, payload, opts.trigger, (err) => {
-    logger.error("agent", `prompt error`, { member: memberName, error: formatRuntimeErrorMessage(err) });
-    postMessage(roomId, "system", `Member "${memberName}" error: ${formatRuntimeErrorMessage(err)}`);
-  });
+  const active=instances.get(instanceKey(scope,memberId));
+  const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
+  if(busy&&!active!.compacting)prepared.payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${prepared.payload.prompt}`;
+  const {input}=acceptControlInput(scope,memberId,prepared.payload,prepared.replyExpected,urgent||busy?"front":"tail",prepared.onAccepted);
+  if(busy&&!active!.compacting)interruptAcceptedInput(scope,active!,urgent?"urgent_interrupt":"message_interrupt");
+  const running=pumpRuntimeInputs(scope,memberId);
+  if(!busy&&!active?.compacting)await waitForInputSettlement(input,running);else void running.catch(error=>logger.error("agent","control input failed",{memberId,error:String(error)}));
+}
+export async function activateAgent(roomId:string,memberRef:string,ctx?:ReplyContext):Promise<void>{
+  const member=resolveRoomMember(roomId,memberRef);if(!member)return;
+  return activateControl(roomId,member.id,ctx);
 }
 
 // -- Model switching --
@@ -2247,6 +2177,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   const memberId = member?.id || memberRef;
   const memberName = member?.name || memberRef;
   const key = instanceKey(roomId, memberId);
+  cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"explicit stop");
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
@@ -2260,7 +2191,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
   updateDispatchState(instance, "aborting", "abort");
-  instance.queuedInputs = [];
+  cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"explicit stop");
   logger.info("agent", "aborted", { member: memberName, memberId, roomId });
   return { ok: true, action: "aborted" };
 }
@@ -2280,41 +2211,16 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
  * A sender=system room notice records every interrupt (user-visible; members
  * never see system notices per the rc.5 filter).
  */
-export async function interruptAgent(roomId: string, memberRef: string, urgentByName: string, ctx?:ReplyContext): Promise<{ ok: boolean; action: string }> {
-  if (typeof roomId === "string" && roomId.startsWith("topic:")) {
-    const topicId = roomId.slice("topic:".length);
-    const parent = resolveTopicRoomId(topicId);
-    if (!parent) return { ok: false, action: "not_in_topic" };
-    return interruptTopicMember(parent, topicId, memberRef, urgentByName, ctx);
+export async function interruptAgent(roomId:string,memberRef:string,urgentByName:string,ctx?:ReplyContext):Promise<{ok:boolean;action:string}>{
+  if(roomId.startsWith("topic:")){
+    const parent=resolveTopicRoomId(roomId.slice(6));if(!parent)return {ok:false,action:"not_in_topic"};
+    return interruptTopicMember(parent,roomId.slice(6),memberRef,urgentByName,ctx);
   }
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const memberName = member?.name || memberRef;
-  const {replyDebt}=replyObligation(memberId,memberName,ctx);
-  const key = instanceKey(roomId, memberId);
-  const instance = instances.get(key);
-
-  if (!instance || (instance.status !== "working" && instance.dispatchState === "idle")) {
-    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt" });
-    return { ok: true, action: "activated" };
-  }
-
-  if (instance.status === "working" && !instance.compacting) {
-    const banner = `[INTERRUPTED] Your previous turn was aborted by an urgent message (!${memberName}) from ${urgentByName}. That turn may have left partial work — verify its state before building on it.`;
-    try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
-    try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
-    try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
-    instance.handle.abort({ preserveCompaction: true });
-    updateDispatchState(instance, "aborting", "urgent_interrupt");
-    postMessage(roomId, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
-    logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId, urgentBy: urgentByName });
-    await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt", banner, urgent: true });
-    return { ok: true, action: "interrupted" };
-  }
-
-  // Compacting or dispatch-busy (e.g. prompt settling): queue front, no abort.
-  await activateAgentInternal(roomId, memberId, { source: "room_mention", replyDebt, trigger: "urgent_interrupt", urgent: true });
-  return { ok: true, action: "queued_front" };
+  const member=resolveRoomMember(roomId,memberRef);if(!member)return {ok:false,action:"not_found"};
+  const active=instances.get(instanceKey(roomId,member.id));
+  const action=active?.compacting?"queued_front":active?.status==="working"?"interrupted":"activated";
+  await activateControl(roomId,member.id,ctx,true);
+  return {ok:true,action};
 }
 
 // -- Instance management --
@@ -2412,10 +2318,11 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
   const runtime = instance?.handle.runtimeName || "pi-cli";
 
-  destroyInstance(scopeId, memberId);
+  destroyInstance(scopeId, memberId, {preservePending:true});
   clearActivationSource(scopeId, memberId);
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
+    cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");
     sessionStore.clearSession(scopeId, memberId, runtime);
     clearRuntimeStateEntry(scopeId, memberId);
     if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
@@ -2431,16 +2338,18 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   return { ok: true, message };
 }
 
-export function destroyInstance(roomId: string, memberRef: string): void {
+export function destroyInstance(roomId: string, memberRef: string,options:{preservePending?:boolean}={}): void {
   const resolved = resolveRoomMember(roomId, memberRef);
   const memberId = resolved?.id || memberRef;
   const memberName = resolved?.name || memberRef;
   const key = instanceKey(roomId, memberId);
+  if(!options.preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"instance removed");
+  invalidateInputScope(key);
   sessionPublishOwners.delete(key);
   if (pendingCreations.has(key)) cancelledCreations.add(key);
   const instance = instances.get(key);
   if (instance) {
-    requestInstanceStop(instance);
+    requestInstanceStop(instance,options.preservePending);
     instance.handle.destroy();
     instance.unsubscribe();
     instances.delete(key);
@@ -2457,6 +2366,8 @@ export function getActiveInstanceCount(): number {
 
 /** Tear down every live instance for a topic after End topic (plan §2.1). */
 export function destroyTopicInstances(topicId: string): number {
+  for(const key of inputPumps.keys())if(key.startsWith(`topic:${topicId}:`))invalidateInputScope(key);
+  for(const row of getDatabase().all<{target:string}>("SELECT DISTINCT target_actor_key target FROM queued_inputs WHERE scope_id=? AND status='pending'",`topic:${topicId}`))cancelPendingRuntimeInputs(runtimeInputOwner(`topic:${topicId}`,row.target),"topic closed");
   const prefix = `topic:${topicId}:`;
   for(const key of sessionPublishOwners.keys())if(key.startsWith(prefix))sessionPublishOwners.delete(key);
   for (const key of pendingCreations.keys()) if (key.startsWith(prefix)) cancelledCreations.add(key);
@@ -2516,11 +2427,6 @@ function wireInstanceEvents(
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const memberName = instance.agentName;
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
-    // A successful chat call settles the reply debt — the fallback only fires
-    // when the debt is still pending at settlement (no chat was called).
-    if (event.type === "tool_end" && event.toolName === "chat" && !(event as any).isError) {
-      clearPendingChatReply(instance, `tool:${event.toolName}`);
-    }
     if (event.type === "agent_start") {
       // Fresh turn: reset final-text segment tracking so each turn is numbered independently.
       // Note: pi session retries also emit agent_start; segment reset is intentional per attempt.
@@ -2529,7 +2435,7 @@ function wireInstanceEvents(
       instance.lastCompletedFinalSeq = 0;
       instance.turnActive = true;
       if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
-      updateDispatchState(instance, "running", event.type);
+      if(instance.dispatchState!=="aborting")updateDispatchState(instance, "running", event.type);
     } else if (event.type === "agent_end") {
       // pi session-level retry: willRetry agent_end is not a real turn end — keep
       // turnActive/dispatch/queue as-is so public status stays working and wait
@@ -2556,7 +2462,7 @@ function wireInstanceEvents(
         } else {
           // prompt() still settling — if more work is queued, skip idle now; finalize
           // will drain after prompt resolves (same "queue empty" idle rule).
-          if (instance.queuedInputs.length > 0) {
+          if (queueDepth(instance) > 0) {
             (event as any)._skipIdleTransition = true;
           }
           if (instance.dispatchState === "idle") {
@@ -2577,7 +2483,7 @@ function wireInstanceEvents(
         // assets, resuming from the compacted file (member-invisible). If
         // anything is still settling, defer via the pendingReload flag.
         const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
-          && instance.dispatchState === "idle" && !instance.promptInFlight && instance.queuedInputs.length === 0;
+          && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
         if (settled) {
           const compactionScopeId = instance.scopeId;
           const compactionMemberId = instance.memberId;
@@ -2594,7 +2500,7 @@ function wireInstanceEvents(
       }
     } else if (event.type === "runtime_exit" && event.unexpected) {
       updateDispatchState(instance, "idle", event.type);
-      instance.queuedInputs = [];
+      // Pending SQL inputs survive a runtime exit; uncertain dispatched work is never replayed.
     }
     if (newStatus) {
       if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
@@ -2671,108 +2577,14 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
  * Activate a member in their DM scope (user message path — no @ required).
  * Builds context from recent DM messages and prompts the runtime.
  */
-export async function activateDmMember(memberId: string, ctx?:ReplyContext): Promise<void> {
-  if (runtimeIsStopping()) return;
-  const rec = getMember(memberId);
-  if (!rec) {
-    logger.error("agent", "activateDmMember: not found", { memberId });
-    return;
-  }
-  const member = memberRecordToConfig(memberId);
-  if (!member || !isMemberConfigured(member)) {
-    logger.warn("agent", "activateDmMember: unconfigured", { memberId, name: rec.name });
-    // User-visible, same as the room mention path (G1: no silent DM failures).
-    postMessage(scopeIdOf({ kind: "dm", memberId }), "system", memberUnconfiguredMessage(rec.name));
-    return;
-  }
+export async function activateDmMember(memberId:string,ctx?:ReplyContext):Promise<void>{return activateControl(`dm:${memberId}`,memberId,ctx);}
 
-  const instance = await getOrCreateDm(memberId);
-  if (!memberRuntimeAllowed(memberId)) return;
-  // §10: no activate-heal — a live instance's binding can only change through
-  // switchMemberModel (it applies to every instance atomically), so there is
-  // no drift to heal here. Creation failure already posted a user-visible
-  // notice inside getOrCreateDm; unconfigured is handled above.
-  if (!instance) return;
-
-  const scopeId = instance.scopeId;
-  setActivationSource(scopeId, memberId, "private_instruction");
-
-  try {
-    const recent = readAllDmMessages(memberId).filter((m) => !isSystemNoticeHiddenFromMembers(m)).slice(-40);
-    const transcript = recent
-      .map((m) => {
-        const who = m.sender === "user" ? "User" : m.sender;
-        return `[${who}] ${m.content}`;
-      })
-      .join("\n\n");
-
-    // Birth icebreaker (identity batch 1): empty persona → ask user to initialize.
-    let birthBlank = false;
-    try {
-      const { readMemberProfile, isBlankPersona } = await import("../workspace/member-profile.js");
-      birthBlank = isBlankPersona(readMemberProfile(memberId));
-    } catch { /* profile module optional in tests */ }
-
-    let prompt: string;
-    if (transcript) {
-      prompt = `You are in a private chat with the user. Recent messages:\n\n${transcript}\n\nRespond to the latest user message with the chat tool.`;
-    } else if (birthBlank) {
-      prompt = `You are in a private chat with the user. You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.`;
-    } else {
-      prompt = `You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
-    }
-
-    if (instance.compacting) {
-      queueInput(instance, prompt, "message-during-compaction");
-      return;
-    }
-    if (instance.status === "working") {
-      // Interrupt-on-message (design v1.1): DM messages interrupt a working run.
-      interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
-        "dm-message-interrupt");
-      return;
-    }
-    if (instance.dispatchState !== "idle" || instance.promptInFlight) {
-      queueInput(instance, prompt, "dm-activate");
-      return;
-    }
-
-    if(replyObligation(memberId,rec.name,ctx).replyDebt)markPendingChatReply(instance,"dm-activate");
-    await runPrompt(instance, prompt, "dm-activate", (err) => {
-      logger.error("agent", "dm prompt failed", {
-        memberId,
-        error: formatRuntimeErrorMessage(err),
-      });
-    });
-  } finally {
-    clearActivationSource(scopeId, memberId);
-  }
-}
-
-// -- Topic activation (plan-topic-threads-v1 batch 1, fresh seed) -------------
-
-/** Interrupt a working member so a new message is processed immediately
- * (design-interrupt-on-message-v1). Shared by room, DM and topic activation:
- * abort the run (shell commands keep running and tool waits return normally), then park
- * the banner-wrapped prompt at the FRONT of the queue so it runs the moment
- * the abort settles. */
-function interruptWorkingInstance(scopeId: string, instance: AgentInstance, prompt: string, banner: string, trigger: string): void {
-  if (instance.compacting) {
-    queueInput(instance, prompt, trigger);
-    return;
-  }
-  try { settleWaitOnAbort(scopeId, instance.memberId); } catch { /* ignore */ }
-  // Blocking shell_exec waits end now (running + exec id) so the gentle abort
-  // is not held hostage by a blockUntilMs wait (qa rc.22 note ①).
-  try { settleMemberShellWaits(instance.memberId); } catch { /* ignore */ }
-  // Background waits end the same way: the tool returns the task's real
-  // current status; the task itself keeps running (independent controller).
-  try { settleBackgroundWaits(instance.memberId); } catch { /* ignore */ }
-  instance.handle.abort({ preserveCompaction: true });
-  updateDispatchState(instance, "aborting", trigger);
-  instance.queuedInputs.unshift(`${banner}\n\n${prompt}`);
-  logger.info("agent", "messageInterrupt", { member: instance.agentName, memberId: instance.memberId, roomId: scopeId, trigger, queueDepth: instance.queuedInputs.length });
+function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:string):void{
+  try{settleWaitOnAbort(scopeId,instance.memberId);}catch{}
+  try{settleMemberShellWaits(instance.memberId);}catch{}
+  try{settleBackgroundWaits(instance.memberId);}catch{}
+  instance.handle.abort({preserveCompaction:true});
+  updateDispatchState(instance,"aborting",trigger);
 }
 
 function topicInstanceKey(topicId: string, memberId: string): string {
@@ -2792,94 +2604,9 @@ async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId:
  * Activate a room member inside a topic (batch 1: fresh seed + guide message).
  * Does not touch the parent room instance.
  */
-export async function activateTopicMember(parentRoomId: string, topicId: string, memberRef: string, ctx?: ReplyContext): Promise<void> {
-  if (runtimeIsStopping()) return;
-  const {
-    getTopic,
-    addTopicParticipant,
-    buildTopicGuideText,
-    getTopicCursors,
-    setTopicCursor,
-    getTopicMessagesSince,
-    getLatestTopicMessageId,
-  } = await import("../workspace/topic-store.js");
-  const topic = getTopic(parentRoomId, topicId);
-  if (!topic || topic.status !== "active") {
-    logger.warn("agent", "activateTopicMember: topic missing or closed", { parentRoomId, topicId });
-    return;
-  }
-  const roomMember = resolveRoomMember(parentRoomId, memberRef);
-  const memberId = roomMember?.id || memberRef;
-  const memberName = roomMember?.name || memberRef;
-
-  const instance = await getOrCreateTopic(parentRoomId, topicId, memberId);
-  if (!memberRuntimeAllowed(memberId)) return;
-  if (!instance) return;
-
-  addTopicParticipant(parentRoomId, topicId, memberId);
-
-  const scopeId = instance.scopeId;
-  const roomName = roomStore.getRoom(parentRoomId)?.name || parentRoomId;
-  const cursors = getTopicCursors(parentRoomId, topicId);
-  const lastCursor = cursors[memberId] ?? (memberId.startsWith("mem_") ? null : cursors[memberName]) ?? null;
-  const allNew = getTopicMessagesSince(parentRoomId, topicId, lastCursor);
-  const visible = filterAgentVisibleMessages(allNew, memberName);
-
-  let formattedTrigger = "";
-  if (visible.length > 0) {
-    const triggerIdx = lastMentionTriggerIndex(visible, memberName, memberId);
-    const trigger = visible[triggerIdx >= 0 ? triggerIdx : visible.length - 1];
-    formattedTrigger = formatMessagesForAgent(scopeId, [trigger], memberName, roomName);
-    setTopicCursor(parentRoomId, topicId, memberId, trigger.id);
-  } else {
-    const latest = getLatestTopicMessageId(parentRoomId, topicId);
-    if (latest) setTopicCursor(parentRoomId, topicId, memberId, latest);
-  }
-
-  setActivationSource(scopeId, memberId, "room_mention");
-  try {
-    const guide =
-      topic.guideText
-      || buildTopicGuideText({
-        title: topic.title,
-        roomName,
-        roomId: parentRoomId,
-        anchorExcerpt: "",
-        seedMode: topic.seedMode,
-      });
-
-    const prompt = [
-      guide,
-      formattedTrigger,
-      replyObligation(memberId, memberName, ctx).banner,
-    ].filter(Boolean).join("\n\n");
-
-    if (replyObligation(memberId, memberName, ctx).replyDebt) markPendingChatReply(instance, "topic-activate");
-    if (instance.compacting) {
-      queueInput(instance, prompt, "message-during-compaction");
-      return;
-    }
-    if (instance.status === "working") {
-      // Interrupt-on-message (design v1.1): topic mentions interrupt a working run.
-      interruptWorkingInstance(scopeId, instance, prompt,
-        "Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.",
-        "topic-message-interrupt");
-      return;
-    }
-    if (instance.dispatchState !== "idle" || instance.promptInFlight) {
-      queueInput(instance, prompt, "topic-activate");
-      return;
-    }
-    await runPrompt(instance, prompt, "activate", (err) => {
-      logger.error("agent", "topic prompt failed", {
-        memberId,
-        topicId,
-        error: formatRuntimeErrorMessage(err),
-      });
-    });
-  } finally {
-    clearActivationSource(scopeId, memberId);
-  }
+export async function activateTopicMember(parentRoomId:string,topicId:string,memberRef:string,ctx?:ReplyContext):Promise<void>{
+  const member=resolveRoomMember(parentRoomId,memberRef);if(!member)return;
+  return activateControl(`topic:${topicId}`,member.id,ctx);
 }
 
 /** Abort a live topic instance only. No topic instance → error, never touch the room instance. */
@@ -2912,28 +2639,8 @@ async function interruptTopicMember(parentRoomId: string, topicId: string, membe
 }
 
 /** Single mention-router wiring for production server + acceptance tests (no topic: leak into room getOrCreate). */
-export function wireMentionRouter(): () => void {
-  return initRouter({
-    mention: (scopeId,memberRef,ctx) => {
-      if(scopeId.startsWith("dm:")){
-        void activateDmMember(memberRef,ctx).catch(error=>logger.error("router","DM activate failed",{scopeId,memberRef,error:String(error)}));
-      }else if(scopeId.startsWith("topic:")){
-        const topicId=scopeId.slice("topic:".length);const parent=resolveTopicParent(topicId);if(!parent)return;
-        void activateTopicMember(parent,topicId,memberRef,ctx).catch(error=>logger.error("router","topic activate failed",{scopeId,memberRef,error:String(error)}));
-      }else{
-        // Preserve room-broadcast admission without expanding the current roster.
-        const mentions=ctx.capture.snapshot.message.mentions;
-        if(Array.isArray(mentions)&&mentions.includes("all")){
-          const active=instances.get(instanceKey(scopeId,memberRef));
-          if(active&&(active.status==="working"||active.dispatchState!=="idle"))return;
-        }
-        void activateAgent(scopeId,memberRef,ctx).catch(error=>logger.error("router","activate failed",{scopeId,memberRef,error:String(error)}));
-      }
-    },
-    urgent:(scopeId,memberRef,ctx)=>{
-      void interruptAgent(scopeId,memberRef,ctx.senderName,ctx).catch(error=>logger.error("router","urgent interrupt failed",{scopeId,memberRef,error:String(error)}));
-    },
-  });
+export function wireMentionRouter():()=>void{
+  return initRouter({mention:admitCapturedActivation,urgent:admitCapturedActivation});
 }
 
 function resolveTopicParent(topicId: string): string | null {
@@ -2942,9 +2649,9 @@ function resolveTopicParent(topicId: string): string | null {
   return parent;
 }
 
-function requestInstanceStop(instance: AgentInstance): void {
+function requestInstanceStop(instance: AgentInstance,preservePending=false): void {
   const failures: unknown[] = [];
-  instance.queuedInputs = [];
+  if(!runtimeIsStopping()&&!preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"member quiescence");
   for (const stop of [
     () => settleWaitOnAbort(instance.roomId,instance.memberId),
     () => settleMemberShellWaits(instance.memberId),
@@ -2959,6 +2666,7 @@ function requestInstanceStop(instance: AgentInstance): void {
 export async function quiesceMember(memberId: string): Promise<void> {
   if (memberRuntimeAllowed(memberId)) throw new Error("member_admission_must_close_before_quiescence");
   const errors: unknown[] = [];
+  for(const row of getDatabase().all<{scope:string}>("SELECT DISTINCT scope_id scope FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId))cancelPendingRuntimeInputs(runtimeInputOwner(row.scope,memberId),"member archived");
   settleMemberWaits(memberId); settleMemberShellWaits(memberId); settleBackgroundWaits(memberId);
   const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}

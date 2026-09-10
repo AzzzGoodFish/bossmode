@@ -74,6 +74,11 @@ export function runtimeInputPayload(input:QueuedInput):PreparedRuntimeInput{
 export function runtimeReplySources(inputs:readonly QueuedInput[]):string[]{
   return [...new Set(inputs.flatMap(input=>[input.messageId,...(runtimeInputPayload(input).replySources??[])]))];
 }
+/** A public activation waits for its own explicit continuations, not unrelated future inputs. */
+export function runtimeInputHasContinuation(input:QueuedInput):boolean{
+  return !!getDatabase().get(`SELECT 1 FROM queued_inputs q JOIN json_each(q.payload_json,'$.replySources') s
+    WHERE q.scope_id=? AND q.target_actor_key=? AND q.status IN ('pending','dispatched') AND s.value=? LIMIT 1`,input.scopeId,input.targetActorKey,input.messageId);
+}
 export function hasRuntimeReply(owner:RuntimeInputOwner,inputs:readonly QueuedInput[]):boolean{
   const ids=new Set(runtimeReplySources(inputs));
   return new ReplyObligationRepository(getDatabase()).listPending(owner.scopeId,owner.targetActorKey).some(debt=>ids.has(debt.messageId));
@@ -102,12 +107,12 @@ export function dismissRuntimeReplies(inputs:readonly QueuedInput[],disposition:
     for(const input of inputs)replies.dismissPending(input.scopeId,input.targetActorKey,disposition,diagnosis,Date.now(),runtimeReplySources([input]));
   });
 }
-export function cancelPendingRuntimeInputs(owner:RuntimeInputOwner,diagnosis:string):void{
+export function cancelPendingRuntimeInputs(owner:RuntimeInputOwner,diagnosis:string,disposition:"cancelled"|"failed"="cancelled"):void{
   const db=getDatabase();db.transaction(()=>{
     const queue=new InputQueueRepository(db),replies=new ReplyObligationRepository(db);
     for(;;){
       const pending=queue.listReady(owner);if(!pending.length)break;
-      for(const input of pending){queue.interrupt(input,{status:"pending"},diagnosis,Date.now());replies.dismissPending(input.scopeId,input.targetActorKey,"cancelled",diagnosis,Date.now(),runtimeReplySources([input]));}
+      for(const input of pending){queue.interrupt(input,{status:"pending"},diagnosis,Date.now());replies.dismissPending(input.scopeId,input.targetActorKey,disposition,diagnosis,Date.now(),runtimeReplySources([input]));}
     }
   });
 }

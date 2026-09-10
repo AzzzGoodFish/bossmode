@@ -1,5 +1,7 @@
 // Mock runtime for testing — implements AgentRuntime + AgentHandle
 import { vi } from "vitest";
+import {randomUUID} from "node:crypto";
+import {getDatabase} from "../../src/storage/database.js";
 import type {
   AgentRuntime,
   AgentHandle,
@@ -49,7 +51,8 @@ export class MockAgentHandle implements AgentHandle {
     return mockIsWorking;
   }
 
-  async prompt(message: string): Promise<void> {
+  async prompt(message: string,options?:{beforeDispatch?:(event:{attemptId:string;dispatchIndex:number;message:string})=>void}): Promise<void> {
+    if(options?.beforeDispatch)getDatabase().transaction(()=>options.beforeDispatch!({attemptId:`mock:${randomUUID()}`,dispatchIndex:0,message}));
     this.emit({ type: "agent_start" });
     try {
       return await mockPromptFn(message);

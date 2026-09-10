@@ -44,6 +44,7 @@ class TestHandle implements AgentHandle {
   runtimeParams: any;
   /** When true, prompt() emits agent_start/agent_end but does not resolve until resolvePendingPrompt() is called — simulates the real-world window where the SDK is still finalizing (e.g. running compaction) after agent_end but before prompt() settles. */
   holdPrompt = false;
+  holdAgentEnd = false;
   private pendingPromptResolve: (() => void) | null = null;
 
   constructor(model: string) {
@@ -53,11 +54,13 @@ class TestHandle implements AgentHandle {
   async prompt(message = "", options?: PromptOptions): Promise<void> {
     dispatch(message, options);
     this.promptCalls.push(message);
+    const deferEnd=this.holdAgentEnd;
     this.emit({ type: "agent_start" });
-    this.emit({ type: "agent_end" });
+    if(!deferEnd)this.emit({ type: "agent_end" });
     if (this.holdPrompt) {
       await new Promise<void>((resolve) => { this.pendingPromptResolve = resolve; });
     }
+    if(deferEnd)this.emit({ type: "agent_end" });
   }
 
   resolvePendingPrompt(): void {
@@ -354,6 +357,9 @@ describe("agent-manager model hot switch", () => {
     // Not delivered yet — the in-flight prompt() has not settled (dispatchState still busy).
     expect(first.promptCalls).toHaveLength(baseline + 1);
 
+    // The queued turn must actually remain active; emitting agent_end before
+    // the assertion would model completed SDK work, not a working avatar.
+    first.holdAgentEnd=true;
     first.resolvePendingPrompt();
     await pending;
     expect(first.promptCalls.length).toBeGreaterThan(baseline + 1);
@@ -377,7 +383,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(1);
 
     first.emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
-    expect(first.promptCalls.length).toBeGreaterThan(baseline);
+    await vi.waitFor(()=>expect(first.promptCalls.length).toBeGreaterThan(baseline));
     expect(first.promptCalls[first.promptCalls.length - 1]).toContain("are you there");
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
   });

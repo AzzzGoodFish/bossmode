@@ -10,7 +10,7 @@ import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
 import { removePidFile, writePidFile, ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter } from "../engine/agent-manager.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../engine/agent-manager.js";
 import { sweepInterruptedBackgroundTasks } from "../engine/background-task-store.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
@@ -161,6 +161,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     if (publicationAttempted) try { removePidFile(); } catch (error) { failures.push(error); }
     if (failures.length) throw new AggregateError(failures,"Startup resources did not close");
   });
+  resumePendingRuntimeInputs();
   server.on("error", error => logger.error("server", "HTTP server error", {error:String(error)}));
   const address = `http://${opts.host === "0.0.0.0" ? "localhost" : opts.host}:${opts.port}`;
   logger.info("server", `running at ${address}`, {host:opts.host,port:opts.port});
