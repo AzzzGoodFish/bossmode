@@ -472,18 +472,16 @@ export interface RoomMessage {
   /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
   attachments?: RoomMessageAttachment[];
   /**
-   * Member names the sender wants a reply from (chat tool need_response string[]).
+   * Captured reply-target labels; stable IDs take precedence when present.
    * Omitted/empty = FYI (no reply debt). User posts omit this; user @ always debts.
    */
   needResponse?: string[];
-  /** Inert historical boolean; retained as provenance, never a recipient list or delivery intent. */
-  legacyNeedResponse?: boolean;
   /** Stable reply-obligation targets, captured when the message is sent. */
   needResponseMemberIds?: string[];
   /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */
   autoDelivered?: boolean;
   /**
-   * This message replies to another message in the same scope (chat tool reply_to).
+   * Retained reference to another message in the same scope.
    * seq for display/jump; messageId is the stable anchor.
    */
   replyTo?: { seq: number; messageId: string };

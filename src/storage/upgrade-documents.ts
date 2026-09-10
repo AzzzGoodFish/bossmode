@@ -15,6 +15,22 @@ function object(value:unknown,path:string):Record<string,any>{
 function text(bytes:Uint8Array,path:string):string{
  try{return new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new Error(`Invalid document UTF-8: ${path}`);}
 }
+/** Pre-Principles prompt supplements recorded metadata, never historical bodies
+ * (prompt-supplement-store before 1094dd7). Retire that obsolete bookkeeping in
+ * the one-time upgrade; the source remains in the upgrade backup. Do not invent
+ * a snapshot, add a live compatibility record, or excuse a damaged newer entry.
+ */
+function obsoleteSupplementHistory(entry:LegacySourceEntry,event:Record<string,any>):boolean{
+ const keys=new Set(["ts","scope","memberId","revision","contentHash","contentLength","actorType","actorMemberId","actorName","operation","note"]);
+ return entry.layer==="principles"&&(entry.layout==="room-memory"||entry.layout==="copy-forward")
+  &&Object.keys(event).every(key=>keys.has(key))
+  &&Number.isFinite(event.ts)&&Number.isSafeInteger(event.revision)&&event.revision>=1
+  &&typeof event.contentHash==="string"&&/^[a-f0-9]{64}$/.test(event.contentHash)
+  &&Number.isSafeInteger(event.contentLength)&&event.contentLength>=0
+  &&(event.scope==="room"&&event.memberId===undefined||event.scope==="member"&&typeof event.memberId==="string"&&!!event.memberId)
+  &&(event.actorType==="user"||event.actorType==="member")&&(event.operation==="write"||event.operation==="edit")
+  &&[event.actorMemberId,event.actorName,event.note].every(value=>value===undefined||typeof value==="string");
+}
 /** Current layouts and old copy-forward layouts remain separate document identities.
  * History is never fabricated from today's body; body assets stay outside SQLite. */
 export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],personas:MemberSourceImport["personas"]):Promise<Set<string>>{
@@ -53,6 +69,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   }else{
    for await(const row of readLegacyJsonl(ctx.sourceRoot,e)){
     const event=object(row.value,e.path);
+    if(obsoleteSupplementHistory(e,event)){if(++completed%128===0)ctx.progress(completed);continue;}
     const p=e.layout==="member"?direct(e):roomDocument(e,event.scope==="room"?undefined:event.memberId);
     if(e.layout!=="member"&&event.scope!=="room"&&typeof event.memberId!=="string")throw new Error(`Missing document history subject: ${e.path}`);
     if(typeof event.content!=="string")throw new Error(`Missing historical document body: ${e.path}`);

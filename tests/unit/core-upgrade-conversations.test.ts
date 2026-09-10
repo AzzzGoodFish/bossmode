@@ -53,9 +53,9 @@ it("retains original nonblank event order, unknown event kinds and archived mess
  expect(ctx.db.all<{seq:number;member_id:null;payload_json:string}>("SELECT seq,member_id,payload_json FROM agent_events ORDER BY seq").map(r=>({seq:r.seq,memberId:r.member_id,event:JSON.parse(r.payload_json)}))).toEqual(events.map((event,i)=>({seq:i+1,memberId:null,event})));
  expect(readArchivedMessages(room.id,123,ctx.db)).toEqual([message]);expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
 });
-it("imports legacy response flags without recipient inference or historical execution",async()=>{
+it("retires obsolete response flags without recipient inference or historical execution",async()=>{
  const raw={...message,needResponse:true,mentions:["unknown literal name"]};
- const expected={...message,mentions:raw.mentions,legacyNeedResponse:true};
+ const expected={...message,mentions:raw.mentions};
  const {ctx,entries}=setup({
   "rooms/room-one/messages.jsonl":JSON.stringify(raw)+"\n",
   "rooms/room-one/topics/topic-one/messages.jsonl":JSON.stringify(raw)+"\n",
@@ -64,7 +64,7 @@ it("imports legacy response flags without recipient inference or historical exec
  });
  await importLegacyConversations(ctx,entries);
  for(const scope of ["room-one","topic:topic-one","dm:mem_one"])expect(readMessages(scope,ctx.db)).toEqual([expected]);
- expect(readArchivedMessages("room-one",123,ctx.db)).toEqual([{...expected,legacyNeedResponse:false}]);
+ expect(readArchivedMessages("room-one",123,ctx.db)).toEqual([expected]);
  for(const table of ["outbox","reply_obligations","queued_inputs","execution_attempts"])expect(ctx.db.all(`SELECT * FROM ${table}`)).toEqual([]);
 });
 it("preserves empty archives and independent summary metadata",async()=>{
