@@ -1,3 +1,5 @@
+import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
+import { readTemplateBody } from "../../src/workforce/template-files.js";
 import {readFileSync,writeFileSync,unlinkSync} from "node:fs";
 import {join} from "node:path";
 import {it,expect,vi} from "vitest";
@@ -64,20 +66,19 @@ it("tool mutations use the same rollback boundary and reject invalid participant
   }finally{getDatabase().exec("DROP TRIGGER IF EXISTS task_failure");await closeTestServer(server);}
 });
 
-it("roster and task transactions read avatar metadata without opening template bodies",async()=>{
+it("roster and task transactions ignore damaged historical template bodies",async()=>{
   const server=await createTestServer();let file:string|undefined;let body:Buffer|undefined;
   try{
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Metadata only",["metadata-only"]);const id=room.globalMemberIds![0];
     const {TemplateRepository}=await import("../../src/storage/repositories/templates.js");
+    importHistoricalAgentTemplate({root:getTestBossmodeDir(),db:getDatabase()},"general","---\nname: General\navatar: historical-icon\n---\nhistorical body");
     const template=new TemplateRepository(getDatabase()).get("general")!;
     file=join(getTestBossmodeDir(),template.personaPath);body=readFileSync(file);unlinkSync(file);
     const rooms=await import("../../src/workspace/room-store.js");
     expect(getDatabase().transaction(()=>rooms.getRoom(room.id)?.members)).toContain("metadata-only");
     const response=await jsonRequest(server.port,"POST",`/api/rooms/${room.id}/tasks`,{token,body:{title:"Does not need a template body",assignee:id}});
     expect(response.status,response.body).toBe(200);
-    const {loadAgentDefinition,saveAgentDefinition}=await import("../../src/workforce/agent-store.js");
-    expect(()=>getDatabase().transaction(()=>loadAgentDefinition("general"))).toThrow("no enclosing database transaction");
-    expect(()=>getDatabase().transaction(()=>saveAgentDefinition("general","---\nname: General\n---\nbody"))).toThrow("no enclosing database transaction");
-    expect(()=>loadAgentDefinition("general")).toThrow(); // explicit body reads still fail honestly
+    expect(getDatabase().transaction(()=>new TemplateRepository(getDatabase()).get("general"))).toMatchObject({name:"General",avatar:"historical-icon"});
+    expect(()=>readTemplateBody(getTestBossmodeDir(),template)).toThrow(); // explicit historical body reads fail honestly
   }finally{if(file&&body)writeFileSync(file,body);await closeTestServer(server);}
 });

@@ -4,7 +4,6 @@ import { MockRuntime, resetMocks, setMockPromptFn } from "./helpers/mock-runtime
 import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
 import { abortAgent, activateAgent, buildMemberAgentSession, getAgentInstanceForScope, initAgentManager, shutdownAll } from "../src/engine/agent-manager.js";
 import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
-import { saveAgentDefinition } from "../src/workforce/agent-store.js";
 import { createMember } from "../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../src/workspace/room-store.js";
 import { addMessage } from "../src/workspace/message-store.js";
@@ -21,7 +20,6 @@ beforeEach(() => {
   release = () => {};
   activation = undefined;
   writeConfig(getDefaultConfig());
-  saveAgentDefinition("general", "---\nname: general\nskills: []\n---\nGeneral");
   memberId = createMember({ name: "worker", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" }).id;
   roomId = createRoom("Abort", undefined, []).id;
   stampGlobalMemberIds(roomId, [memberId], memberId);

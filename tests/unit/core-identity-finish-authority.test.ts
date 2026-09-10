@@ -7,7 +7,9 @@ import { getDefaultConfig } from "../../src/shared/config.js";
 import * as registry from "../../src/workspace/member-registry.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { resolveRoomMember } from "../../src/workforce/room-member-resolver.js";
-import { saveAgentDefinition, getAgentTemplateMetadata, loadAgentDefinition } from "../../src/workforce/agent-store.js";
+import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
+import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { readTemplateBody } from "../../src/workforce/template-files.js";
 import { readMemberProfile } from "../../src/workspace/member-profile.js";
 import type { Database } from "../../src/storage/database.js";
 
@@ -29,29 +31,29 @@ describe("stable identity and body-free metadata", () => {
     expect(new ConversationsRepository(fixture.db).getRoom(room.id)?.globalMemberIds).toEqual([original.id,namedLikeId.id]);
   });
   it("resolves metadata and identity without loading template/persona bodies, while actual body reads fail", () => {
-    saveAgentDefinition("engineer","---\nname: Display\navatar: icon\n---\nprivate template body");
+    importHistoricalAgentTemplate(fixture,"engineer","---\nname: Display\navatar: icon\n---\nprivate template body");
     const member=registry.createMember({name:"member",agentTemplate:"engineer"});
     const room={id:"room-one",name:"Room",members:[],globalMemberIds:[member.id],createdAt:1};
     new ConversationsRepository(fixture.db).upsertRoom(room);
-    rmSync(join(fixture.root,getAgentTemplateMetadata("engineer")!.personaPath));
+    rmSync(join(fixture.root,new TemplateRepository(fixture.db).get("engineer")!.personaPath));
     rmSync(join(fixture.root,"members",member.id,"persona.md"));
     mkdirSync(join(fixture.root,"members",member.id,"persona.md"));
     fixture.db.transaction(() => {
       expect(registry.getMember(member.id)?.name).toBe("member");
       expect(registry.listMembers()).toHaveLength(1);
-      expect(resolveRoomMember(room.id,member.id)).toMatchObject({id:member.id,name:"member",avatar:"icon"});
-      expect(getAgentTemplateMetadata("engineer")?.name).toBe("Display");
+      expect(resolveRoomMember(room.id,member.id)).toMatchObject({id:member.id,name:"member"});
+      expect(resolveRoomMember(room.id,member.id)?.avatar).toBeUndefined();
+      expect(new TemplateRepository(fixture.db).get("engineer")).toMatchObject({name:"Display",avatar:"icon"});
     });
-    expect(() => loadAgentDefinition("engineer")).toThrow();
+    expect(() => readTemplateBody(fixture.root, new TemplateRepository(fixture.db).get("engineer")!)).toThrow();
     expect(() => readMemberProfile(member.id)).toThrow();
   });
-  // Verified ordinary failure: /tmp/bm-core-identity-extra-red.log.
-  it("adding a direct Agent member preserves the no-legacy-config contract", async () => {
-    saveAgentDefinition("engineer","---\nname: Engineer\n---\nbody");
-    const { createRoom, addRoomMemberFromAgent } = await import("../../src/workspace/room-store.js");
+  it("inviting a current contact preserves the no-legacy-config contract", async () => {
+    const { createRoom, inviteGlobalMember } = await import("../../src/workspace/room-store.js");
     const room=createRoom("Direct",undefined,[]);
     writeFileSync(join(fixture.root,"members.json"),JSON.stringify([{id:"legacy",name:"direct",model:"stale"}]));
-    expect(addRoomMemberFromAgent(room.id,{agentName:"engineer",memberName:"direct"})).toMatchObject({ok:true});
+    const member = registry.createMember({ name: "direct" });
+    expect(inviteGlobalMember(room.id,member)).toMatchObject({ok:true});
     expect(resolveRoomMember(room.id,"direct")).toMatchObject({name:"direct",model:undefined,credentialId:undefined});
   });
 

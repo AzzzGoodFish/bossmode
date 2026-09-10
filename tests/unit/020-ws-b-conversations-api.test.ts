@@ -77,7 +77,6 @@ describe("020 conversations / scope surface", () => {
       scopeId: `dm:${m.id}`,
       memberId: m.id,
       memberName: "architect",
-      agentDef: { name: "architect", description: "", systemPrompt: "You are architect.", tags: [], skills: [] },
       room: null,
       docsRoot: join(dir, "docs"),
     });

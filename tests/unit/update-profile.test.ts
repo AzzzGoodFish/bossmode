@@ -1,3 +1,4 @@
+import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -142,7 +143,9 @@ describe("self-only update_profile", () => {
     const next = `创建者 ${randomUUID().slice(0, 6)}`;
     updateProfileForMember(f.own.id, { name: next });
     expect(await pending).toMatchObject({ ok: true, leader: next, leaderMemberId: f.own.id });
-    const legacyRoom = f.rooms.createRoom("Historical room", undefined, [{ agent: "developer", name: "Historical-template" }]);
+    const legacyRoom = { id: "historical-room", name: "Historical room", members: ["Historical-template"], createdAt: 1,
+      roomMembers: [{ id: "rm_historical", roomId: "historical-room", name: "Historical-template", sourceAgent: "developer", createdAt: 1, updatedAt: 1 }] };
+    new ConversationsRepository(getTestWorkspace().db).upsertRoom(legacyRoom);
     const local = f.rooms.getRoomMembers(legacyRoom.id)[0];
     const unrelated = f.registry.createMember({ name: local.name });
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");

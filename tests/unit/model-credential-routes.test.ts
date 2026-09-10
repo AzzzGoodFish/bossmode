@@ -368,7 +368,7 @@ describe("model credential profile API routes", () => {
 
     const ok = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name: `dev-${providerSlug}`, agentTemplate: "developer", model: `${providerSlug}/anthropic/claude-sonnet`, credentialId: created.id, thinkingLevel: "off" },
+      body: { name: `dev-${providerSlug}`, model: `${providerSlug}/anthropic/claude-sonnet`, credentialId: created.id, thinkingLevel: "off" },
     });
     expect(ok.status).toBe(200);
     const member = JSON.parse(ok.body).member || JSON.parse(ok.body);
@@ -643,7 +643,7 @@ describe("model credential profile API routes", () => {
 
     const createdRes = await jsonRequest(ts.port, "POST", "/api/members", {
       token,
-      body: { name, agentTemplate: "developer", thinkingLevel: "off" },
+      body: { name, thinkingLevel: "off" },
     });
     expect(createdRes.status).toBe(200);
     const created = JSON.parse(createdRes.body).member || JSON.parse(createdRes.body);
@@ -695,7 +695,6 @@ describe("model credential profile API routes", () => {
       token,
       body: {
         name: `member-${Date.now()}`,
-        agentTemplate: "developer",
         model: `${profileA.providerSlug}/model-x`,
         credentialId: profileA.id,
         thinkingLevel: "off",

@@ -60,7 +60,6 @@ describe("020 WS-B prompt + instanceKey", () => {
       scopeId: `room:${room.id}`,
       memberId: member.id,
       memberName: "architect",
-      agentDef: { name: "architect", description: "", systemPrompt: "You are the architect.", tags: [], skills: [] },
       room,
       docsRoot: join(dir, "docs"),
     });
@@ -85,7 +84,6 @@ describe("020 WS-B prompt + instanceKey", () => {
       scopeId: `dm:${member.id}`,
       memberId: member.id,
       memberName: "pm",
-      agentDef: { name: "pm", description: "", systemPrompt: "You are pm.", tags: [], skills: [] },
       room: null,
       docsRoot: join(dir, "docs"),
       activeScopes: [`dm:${member.id}`],

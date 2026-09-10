@@ -87,8 +87,6 @@ beforeEach(async () => {
   runner = await import("../../src/engine/background-task-runner.js");
   tools = await import("../../src/engine/tools.js");
 
-  const {saveAgentDefinition}=await import("../../src/workforce/agent-store.js");
-  saveAgentDefinition("general","---\nname: general\nskills: []\n---\ngeneral");
   const member=registryMod.createMember({name:"bgrunner",agentTemplate:"general",model:"anthropic/model-x",credentialId:"cred-a",thinkingLevel:"off"});
   memberId = member.id;
   const room = roomStore.createRoom("bg room", undefined, []);

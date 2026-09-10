@@ -14,7 +14,7 @@ describe("member system-prompt preview", () => {
     const token = await loginAndGetToken(ts.port);
 
     const created = await jsonRequest(ts.port, "POST", "/api/members", {
-      token, body: { name: "prompt-bot", agentTemplate: "pm" },
+      token, body: { name: "prompt-bot" },
     });
     const memberId = JSON.parse(created.body).member.memberId as string;
 
@@ -62,11 +62,11 @@ describe("member system-prompt preview", () => {
     const token = await loginAndGetToken(ts.port);
 
     const created = await jsonRequest(ts.port, "POST", "/api/members", {
-      token, body: { name: "scope-bot", agentTemplate: "pm" },
+      token, body: { name: "scope-bot" },
     });
     const memberId = JSON.parse(created.body).member.memberId as string;
     const outsider = await jsonRequest(ts.port, "POST", "/api/members", {
-      token, body: { name: "outsider-bot", agentTemplate: "pm" },
+      token, body: { name: "outsider-bot" },
     });
     const outsiderId = JSON.parse(outsider.body).member.memberId as string;
 

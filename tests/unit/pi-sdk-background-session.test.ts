@@ -135,8 +135,6 @@ describe("PiSdkRuntime background session variant", () => {
     const { coreFixture } = await import("../helpers/core-fixture.js");
     fixture = coreFixture();
     dir = fixture.root;
-    const { saveAgentDefinition } = await import("../../src/workforce/agent-store.js");
-    saveAgentDefinition("general", "---\nname: general\nskills: []\n---\nGeneral");
     const { createMember } = await import("../../src/workspace/member-registry.js");
     const { createRoom, stampGlobalMemberIds } = await import("../../src/workspace/room-store.js");
     memberId = createMember({ name: "pm", agentTemplate: "general" }).id;

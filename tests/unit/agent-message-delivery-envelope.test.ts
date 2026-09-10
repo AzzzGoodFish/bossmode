@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, mockPromptFn, resetMocks } from "../helpers/mock-runtime.js";
@@ -24,10 +21,6 @@ beforeEach(() => {
   writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
   resetMocks();
-  new TemplateRepository(fixture.db).upsert({ slug: "general", name: "General", description: "Test agent",
-    personaPath: "agents/general/persona.md", extensions: {} });
-  mkdirSync(join(fixture.root, "agents/general"), { recursive: true });
-  writeFileSync(join(fixture.root, "agents/general/persona.md"), "You are a test agent.");
   memberId = createMember({ name: "pm", model: "test/model", credentialId: "fixture-credential" }).id;
   roomId = createRoom("bossmode dev", undefined, []).id;
   stampGlobalMemberIds(roomId, [memberId]);

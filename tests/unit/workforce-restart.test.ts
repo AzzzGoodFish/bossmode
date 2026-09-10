@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-
 const routes = new Map<string, any>();
 const sendJsonMock = vi.fn();
 const destroyInstanceMock = vi.fn();
@@ -17,15 +16,6 @@ vi.mock("../../src/api/index.js", () => ({
   parseBody: vi.fn(),
 }));
 
-vi.mock("../../src/workforce/agent-store.js", () => ({
-  loadAgentDefinitions: vi.fn(() => []),
-  loadAgentDefinition: vi.fn(() => null),
-  saveAgentDefinition: vi.fn(),
-  deleteAgentDefinition: vi.fn(() => true),
-  loadAgentTemplates: vi.fn(() => []),
-  getAgentsDir: vi.fn(() => "/tmp"),
-}));
-
 vi.mock("../../src/workforce/skill-store.js", () => ({
   loadSkillDefinitions: vi.fn(() => []),
   loadSkillDefinition: vi.fn(() => null),
@@ -33,7 +23,6 @@ vi.mock("../../src/workforce/skill-store.js", () => ({
   deleteSkillDefinition: vi.fn(() => true),
   loadSkillTemplates: vi.fn(() => []),
 }));
-
 
 
 vi.mock("../../src/engine/agent-manager.js", () => ({

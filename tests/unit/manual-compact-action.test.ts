@@ -2,7 +2,6 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/storage/database.js";
 import { MembersRepository } from "../../src/storage/repositories/members.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -148,11 +147,9 @@ beforeEach(async () => {
     members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
       unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
     conversations.ensureDmScope(id);
-    new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath: `agents/${name}/persona.md`, extensions: {} });
-    for (const path of [`agents/${name}`, `members/${id}`]) {
-      mkdirSync(join(fixture.root, path), { recursive: true });
-      writeFileSync(join(fixture.root, path, "persona.md"), `You are ${name}.`);
-    }
+    const memberPath = join(fixture.root, "members", id);
+    mkdirSync(memberPath, { recursive: true });
+    writeFileSync(join(memberPath, "persona.md"), `You are ${name}.`);
   }
   for (const id of ["room", "room2", "room3"]) {
     conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });

@@ -1,10 +1,9 @@
+import { createMember, findMemberByName } from "../../src/workspace/member-registry.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeTestServer, createTestServer, getTestBossmodeDir, httpRequest, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
-
-const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
 setupTestWorkspace();
 
@@ -41,7 +40,7 @@ describe("chat attachment artifacts", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-chat-attach-"));
-    const room = roomStore.createRoom("Attachments", cwd, drafts(["pm"]));
+    const room = roomStore.createRoom("Attachments", cwd, [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
 
     const uploaded = await uploadText(ts.port, room.id, token, "note.md", "# Note\n\nBody");
     expect(uploaded.previewType).toBe("markdown");
@@ -86,7 +85,7 @@ describe("chat attachment artifacts", () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const messageStore = await import("../../src/workspace/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const room = roomStore.createRoom("Empty Chat", undefined, drafts(["developer"]));
+    const room = roomStore.createRoom("Empty Chat", undefined, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
     const rejected = await handleToolCallback("chat", room.id, "developer", {
       message: "",
@@ -120,7 +119,7 @@ describe("chat attachment artifacts", () => {
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
     const missingPath = join(cwd, "missing.md");
-    const room = roomStore.createRoom("Agent Missing Attach", cwd, drafts(["developer"]));
+    const room = roomStore.createRoom("Agent Missing Attach", cwd, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
     const result = await handleToolCallback("chat", room.id, "developer", {
       message: "should not send",
@@ -130,8 +129,7 @@ describe("chat attachment artifacts", () => {
     expect(result.error).toContain(missingPath);
     expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
 
-    const { createMember, findMemberByName } = await import("../../src/workspace/member-registry.js");
-    const caller = findMemberByName("developer") || createMember({ name: "developer" });
+    const caller = findMemberByName("developer")!;
     roomStore.stampGlobalMemberIds(room.id, [caller.id]);
     const chatTool = createBossmodeSdkTools({ roomId: room.id, memberId: caller.id })[0];
     await expect(chatTool.execute("call-1", {
@@ -152,7 +150,7 @@ describe("chat attachment artifacts", () => {
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-"));
     const sourcePath = join(cwd, "agent-note.html");
     writeFileSync(sourcePath, "<h1>Agent Note</h1>", "utf8");
-    const room = roomStore.createRoom("Agent Attach", cwd, drafts(["developer"]));
+    const room = roomStore.createRoom("Agent Attach", cwd, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
     const result = await handleToolCallback("chat", room.id, "developer", {
       message: "attached",

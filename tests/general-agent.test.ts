@@ -55,17 +55,12 @@ describe("General Agent: prompt-assembler split (G3)", () => {
     expect(result.envPrompt).toContain("Documents are stored at");
   });
 
-  it("general safe prompt plus knowledge keeps Bossmode append prompt", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const content = readFileSync(join(import.meta.dirname, "../templates/agents/general.md"), "utf-8");
-    const body = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/)?.[1] ?? "";
-    const agent = makeAgent(body, "general");
+  it("member persona plus knowledge keeps Bossmode append prompt", async () => {
+    const agent = makeAgent("My current member persona.", "general");
     const entries = [makeEntry("Design Doc", "The system uses React")];
     const result = buildAgentPrompt(agent, entries, ["general"], "bossmode dev");
 
-    expect(result.agentPrompt).toContain("You are a practical coding assistant with tool access.");
-    expect(result.agentPrompt).toContain("avoid unnecessary product framing or harness-specific meta commentary");
+    expect(result.agentPrompt).toBe("My current member persona.");
     expect(result.envPrompt).toContain("Design Doc");
     expect(result.envPrompt).toContain('group chat room "bossmode dev"');
     expect(result.fullPrompt).toContain(result.agentPrompt);
@@ -88,23 +83,15 @@ describe("General Agent: prompt-assembler split (G3)", () => {
   });
 });
 
-describe("General Agent: builtin tag template (G1)", () => {
-  it("general.md template has builtin tag and safe prompt body", async () => {
-    const { readFileSync } = await import("node:fs");
+describe("historical general template provenance", () => {
+  it("retains builtin tags and literal historical body without a bundled live template", async () => {
+    const { parseAgentDefinitionMarkdown } = await import("../src/workforce/template-files.js");
+    const { existsSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const content = readFileSync(join(import.meta.dirname, "../templates/agents/general.md"), "utf-8");
-
-    // Has frontmatter with builtin tag
-    expect(content).toContain("tags:");
-    expect(content).toContain("builtin");
-    expect(content).toContain("name: general");
-
-    const match = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
-    expect(match).not.toBeNull();
-    const body = match![1].trim();
-    expect(body).toContain("You are a practical coding assistant with tool access.");
-    expect(body).toContain("Available capabilities are defined by the tool schemas in this session.");
-    expect(body).toContain("Prefer checking files, running commands, or inspecting outputs over guessing.");
-    expect(body).toContain("Do not describe yourself as a special harness, product, or first-party CLI unless the user explicitly asks.");
+    const body = "Historical general persona.\n  Keep literal bytes.\n";
+    const parsed = parseAgentDefinitionMarkdown("general", `---\nname: general\ntags: [builtin]\n---\n${body}`);
+    expect(parsed.metadata).toMatchObject({ slug: "general", name: "general", tags: ["builtin"] });
+    expect(parsed.body).toBe(body);
+    expect(existsSync(join(import.meta.dirname, "../templates/agents/general.md"))).toBe(false);
   });
 });

@@ -1,10 +1,9 @@
+import { createMember, findMemberByName } from "../../src/workspace/member-registry.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeTestServer, createMockRoom, createTestServer, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
-
-const drafts = (names: string[]) => names.map((name) => ({ agent: name, name }));
 
 setupTestWorkspace();
 
@@ -81,7 +80,7 @@ describe("artifact preview API", () => {
     const token = await login(ts.port);
     const roomStore = await import("../../src/workspace/room-store.js");
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-artifact-preview-"));
-    const room = roomStore.createRoom("Preview", cwd, drafts(["pm"]));
+    const room = roomStore.createRoom("Preview", cwd, [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
 
     const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/artifact-preview?path=${encodeURIComponent("docs/missing.md")}`, { token });
     expect(res.status).toBe(404);

@@ -161,13 +161,6 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
 
   it("compileMemberPromptForScope topic shares Member+Communication with room (cache invariant)", () => {
     const room = seedRoom("roomB", "Boss Room");
-    const agentDef = {
-      name: "developer",
-      description: "dev",
-      systemPrompt: "You are the developer.",
-      tags: [] as string[],
-      skills: [] as string[],
-    };
     const docsRoot = join(state.dir, "docs");
     mkdirSync(docsRoot, { recursive: true });
 
@@ -175,7 +168,6 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
       scopeId: `room:${room.id}`,
       memberId: "mem_dev",
       memberName: "developer",
-      agentDef,
       room,
       docsRoot,
     });
@@ -184,7 +176,6 @@ describe("prompt cache invariant (topic == parent room compile)", () => {
       scopeId: `topic:${topic.id}`,
       memberId: "mem_dev",
       memberName: "developer",
-      agentDef,
       room,
       docsRoot,
       topicTitle: "xyz",

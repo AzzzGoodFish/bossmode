@@ -1,4 +1,3 @@
-import { saveAgentDefinition } from "../../src/workforce/agent-store.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn, mockPromptFn } from "../helpers/mock-runtime.js";
@@ -23,7 +22,6 @@ describe("user_prompt activity event", () => {
     resetMocks();
     vi.mocked(broadcastToAgentSubscribers).mockClear();
     writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-    saveAgentDefinition("developer", "---\nname: developer\n---\nDeveloper template.\n");
     new MembersRepository(fixture.db).insert({ id: "mem_dev", name: "developer", agentTemplate: "developer",
       global: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, unifiedModel: true,
       unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });

@@ -13,7 +13,6 @@ import { join } from "node:path";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/storage/database.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
 import { randomUUID } from "node:crypto";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
@@ -32,13 +31,6 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
     broadcastToAgentSubscribers: vi.fn(),
   };
 });
-
-function seedAgent(name: string) {
-  const personaPath = `agents/${name}/persona.md`;
-  mkdirSync(join(dir, "agents", name), { recursive: true });
-  writeFileSync(join(dir, personaPath), `You are ${name}.`);
-  new TemplateRepository(fixture.db).upsert({ slug: name, name, description: name, personaPath, extensions: {} });
-}
 
 const PROFILE = {
   name: "Test provider",
@@ -61,10 +53,9 @@ async function seedCredential() {
   return creds.saveModelCredentialProfile(PROFILE);
 }
 
-async function makeStampedRoom(memberId: string, memberName = "pm") {
+async function makeStampedRoom(memberId: string) {
   const roomStore = await import("../../src/workspace/room-store.js");
-  const room = roomStore.createRoom("R", dir, [{ agent: memberName, name: memberName }], undefined);
-  roomStore.stampGlobalMemberIds(room.id, [memberId], memberId);
+  const room = roomStore.createRoom("R", dir, [memberId], undefined, { promptLeaderMemberId: memberId });
   return room;
 }
 
@@ -76,9 +67,6 @@ describe("F4 model binding persists to the registry", () => {
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("pm");
-    seedAgent("dev");
-    seedAgent("qa");
     broadcastToRoom.mockClear();
 
   });
@@ -156,7 +144,7 @@ describe("F4 model binding persists to the registry", () => {
       unifiedModel: false,
       unifiedExtensions: false,
     });
-    const room2 = await makeStampedRoom(scoped.id, "dev");
+    const room2 = await makeStampedRoom(scoped.id);
     manager.persistRoomMemberConfigPatch(room2.id, scoped.id, { mcpServers: ["playwright"] });
     rec = reg.getMember(scoped.id)!;
     expect(rec.global.mcpServers).toEqual(["playwright"]);
@@ -217,7 +205,6 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
-    seedAgent("pm");
     broadcastToRoom.mockClear();
     subscribeCb = undefined;
     createAgentCalls = 0;

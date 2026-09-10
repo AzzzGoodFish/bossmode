@@ -8,7 +8,7 @@ beforeAll(async () => { server = await createTestServer(); token = await loginAn
 afterAll(async () => { if (server) await closeTestServer(server); });
 
 it("serves SQL-owned MCP definitions, member file assets and the generated public SSH key", async () => {
-  const created = await jsonRequest(server.port, "POST", "/api/members", { token, body: { name: "Assets", agentTemplate: "general" } });
+  const created = await jsonRequest(server.port, "POST", "/api/members", { token, body: { name: "Assets" } });
   expect(created.status, created.body).toBe(200);
   const id = JSON.parse(created.body).member.memberId;
   const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");

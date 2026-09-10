@@ -162,7 +162,6 @@ describe("Environment prompt line", () => {
       scopeId: `dm:${MEMBER}`,
       memberId: MEMBER,
       memberName: "wsbot",
-      agentDef: { name: "pm", description: "", systemPrompt: "You are wsbot.", tags: [], skills: [] },
       room: null,
       docsRoot: join(dir, "docs"),
     });

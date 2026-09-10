@@ -6,7 +6,6 @@ import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
 import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
 import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
-import { saveAgentDefinition } from "../src/workforce/agent-store.js";
 import { createMember, updateMemberIdentity } from "../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/workspace/room-store.js";
 import { createTopic } from "../src/workspace/topic-store.js";
@@ -42,7 +41,6 @@ beforeEach(() => {
   resetMocks();
   vi.clearAllMocks();
   writeConfig(getDefaultConfig());
-  saveAgentDefinition("general", "---\nname: general\nskills: []\n---\nGeneral");
   memberId = createMember({ name: "pm", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" }).id;
   roomId = createRoom("Reset", undefined, []).id;
   stampGlobalMemberIds(roomId, [memberId], memberId);

@@ -1,3 +1,4 @@
+import { createMember, findMemberByName } from "../../src/workspace/member-registry.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   closeTestServer,
@@ -10,10 +11,6 @@ import {
 
 setupTestWorkspace();
 
-function drafts(names: string[]) {
-  return names.map((name) => ({ agent: name === "dev" ? "developer" : name, name }));
-}
-
 describe("member active tools", () => {
   const servers: Awaited<ReturnType<typeof createTestServer>>[] = [];
 
@@ -24,7 +21,7 @@ describe("member active tools", () => {
   it("returns empty session when member has no running instance", async () => {
     const roomStore = await import("../../src/workspace/room-store.js");
     const agentManager = await import("../../src/engine/agent-manager.js");
-    const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), drafts(["pm"]));
+    const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
     const result = agentManager.getMemberActiveTools(room.id, "pm");
     expect(result.sessionActive).toBe(false);
     expect(result.tools).toEqual([]);
@@ -37,7 +34,7 @@ describe("member active tools", () => {
     const token = await loginAndGetToken(ts.port);
 
     const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("API Tools", getTestBossmodeDir(), drafts(["pm"]));
+    const room = roomStore.createRoom("API Tools", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
 
     const missRoom = await jsonRequest(ts.port, "GET", "/api/rooms/nope/members/pm/tools", { token });
     expect(missRoom.status).toBe(404);

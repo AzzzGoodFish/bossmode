@@ -11,7 +11,7 @@ import { ConversationsRepository } from "../../src/storage/repositories/conversa
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentDefinition, AgentMemberConfig, Room } from "../../src/shared/types.js";
+import type { AgentMemberConfig, Room } from "../../src/shared/types.js";
 
 const tmpDir = process.env.BOSSMODE_DIR!;
 let fixture: ReturnType<typeof coreFixture>;
@@ -38,7 +38,6 @@ function room(): Room {
   };
 }
 
-const agentDef: AgentDefinition = { name: "qa", description: "QA", systemPrompt: "QA ROLE", tags: [] };
 const member: AgentMemberConfig = { id: "rm_qa", name: "qa", sourceAgent: "qa" };
 
 describe("environment-communication asset", () => {
@@ -92,7 +91,7 @@ describe("environment-communication asset", () => {
     const asset = await import("../../src/workspace/environment-communication-asset.js");
     asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
     const { compileMemberPrompt, compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const roomCompiled = compileMemberPrompt({ room: room(), member, agentDef, docsRoot: "/docs" });
+    const roomCompiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
     expect(roomCompiled.fullPrompt).toContain("The chat tool is the only way your messages reach the room");
     expect(roomCompiled.fullPrompt).not.toContain("Custom framing.");
@@ -102,7 +101,6 @@ describe("environment-communication asset", () => {
       scopeId: "dm:rm_qa",
       memberId: "rm_qa",
       memberName: "qa",
-      agentDef,
       room: null,
       docsRoot: "/docs",
     });
