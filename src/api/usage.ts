@@ -1,16 +1,7 @@
-// Usage API (0.19.1 S2): token usage read endpoints backed by the SQLite
-// projection's token_usage_daily rollup.
-//
-//   GET /api/rooms/:id/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&member=&agent=&model=
-//     → { kpis, series, breakdown, byAgent, backfillStatus }
-//
-// The prototype's identity dimension (agent → room → member) needs member→agent
-// mapping, which lives in room.json, not the DB. We resolve names/agents here and
-// join them onto the rollup rows so the frontend gets ready-to-render buckets.
+// Usage reports read authoritative SQL facts and stable identity metadata.
 import { addRoute, sendJson } from "./index.js";
-import { getProjectionDb } from "../workspace/db/projection.js";
-import { getBackfillStatus } from "../workspace/db/projection.js";
-import { getRoom, deriveRoomMembers, listRooms } from "../workspace/room-store.js";
+import { readUsageReport } from "../storage/usage-repository.js";
+import { getRoom } from "../workspace/room-store.js";
 import { logger } from "../foundation/logger.js";
 
 interface RollupRow {
@@ -185,58 +176,16 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
   const agentFilter = url.searchParams.get("agent") || undefined;
   const modelFilter = url.searchParams.get("model") || undefined;
 
-  const db = getProjectionDb();
-  if (!db) {
-    // Projection unavailable → honest empty payload (file-only mode).
-    sendJson(res, 200, {
-      kpis: emptyKpis(),
-      series: [],
-      breakdown: [],
-      byAgent: [],
-      backfillStatus: getBackfillStatus().status,
-    });
-    return;
+  let report: ReturnType<typeof readUsageReport>;
+  try { report = readUsageReport({scopeId: roomId, from, to, memberId: memberFilter, model: modelFilter}); }
+  catch (err) {
+    logger.error("db", "usage query failed", {roomId, error: String(err)});
+    sendJson(res, 500, {error: "usage query failed"}); return;
   }
+  const { memberMeta } = report;
+  let rows = report.rows;
 
-  // member→{name, agent} map for joining identity onto rollup rows.
-  const members = deriveRoomMembers(room);
-  const memberMeta = new Map<string, { name: string; agent: string }>();
-  for (const m of members) memberMeta.set(m.id, { name: m.name, agent: m.sourceAgent });
-
-  const where: string[] = ["room_id = ?"];
-  const args: unknown[] = [roomId];
-  if (from) {
-    where.push("date >= ?");
-    args.push(from);
-  }
-  if (to) {
-    where.push("date <= ?");
-    args.push(to);
-  }
-  if (memberFilter) {
-    where.push("member_id = ?");
-    args.push(memberFilter);
-  }
-  if (modelFilter) {
-    where.push("model = ?");
-    args.push(modelFilter);
-  }
-  const whereSql = where.join(" AND ");
-
-  let rows: RollupRow[];
-  try {
-    rows = db.all<RollupRow>(
-      `SELECT member_id, date, model, input_tokens, output_tokens, cache_read, cache_write, cost, turns
-       FROM token_usage_daily WHERE ${whereSql}`,
-      ...args,
-    );
-  } catch (err) {
-    logger.error("db", "usage query failed", { roomId, error: String(err) });
-    sendJson(res, 500, { error: "usage query failed" });
-    return;
-  }
-
-  // Agent filter applied post-query (agent lives in room.json, not the rollup):
+  // Join the stable member identity to its template after the SQL query:
   // keep only rows whose member maps to the requested agent — same mapping the
   // platform endpoint uses.
   if (agentFilter) {
@@ -250,7 +199,6 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
     series: fillSeriesGaps(agg.series, from, to),
     breakdown: agg.breakdown,
     byAgent: agg.byAgent,
-    backfillStatus: getBackfillStatus().status,
   });
 });
 
@@ -300,59 +248,16 @@ addRoute("GET", "/api/usage", async (req, res) => {
   const agentFilter = url.searchParams.get("agent") || undefined;
   const modelFilter = url.searchParams.get("model") || undefined;
 
-  const db = getProjectionDb();
-  if (!db) {
-    sendJson(res, 200, {
-      kpis: emptyKpis(),
-      series: [],
-      breakdown: [],
-      byAgent: [],
-      byRoom: [],
-      backfillStatus: getBackfillStatus().status,
-    });
-    return;
+  let report: ReturnType<typeof readUsageReport>;
+  try { report = readUsageReport({from, to, model: modelFilter}); }
+  catch (err) {
+    logger.error("db", "platform usage query failed", {error: String(err)});
+    sendJson(res, 500, {error: "usage query failed"}); return;
   }
+  const { memberMeta, roomNames } = report;
+  let rows = report.rows;
 
-  // Build the platform-wide member→{name,agent} map + room name map from every
-  // room's room.json (this is where the identity mapping lives, not the DB).
-  const memberMeta = new Map<string, { name: string; agent: string }>();
-  const roomNames = new Map<string, string>();
-  for (const room of listRooms()) {
-    roomNames.set(room.id, room.name);
-    for (const m of deriveRoomMembers(room)) memberMeta.set(m.id, { name: m.name, agent: m.sourceAgent });
-  }
-
-  const where: string[] = [];
-  const args: unknown[] = [];
-  if (from) {
-    where.push("date >= ?");
-    args.push(from);
-  }
-  if (to) {
-    where.push("date <= ?");
-    args.push(to);
-  }
-  if (modelFilter) {
-    where.push("model = ?");
-    args.push(modelFilter);
-  }
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-  let rows: RollupRowWithRoom[];
-  try {
-    rows = db.all<RollupRowWithRoom>(
-      `SELECT room_id, member_id, date, model, input_tokens, output_tokens, cache_read, cache_write, cost, turns
-       FROM token_usage_daily ${whereSql}`,
-      ...args,
-    );
-  } catch (err) {
-    logger.error("db", "platform usage query failed", { error: String(err) });
-    sendJson(res, 500, { error: "usage query failed" });
-    return;
-  }
-
-  // Agent filter is applied here (not in SQL) since agent lives in room.json, not
-  // the rollup: keep only rows whose member maps to the requested agent.
+  // Keep only rows whose proven member ID maps to the requested template.
   if (agentFilter) {
     rows = rows.filter((r) => memberMeta.get(r.member_id)?.agent === agentFilter);
   }
@@ -365,7 +270,6 @@ addRoute("GET", "/api/usage", async (req, res) => {
     breakdown,
     byAgent,
     byRoom,
-    backfillStatus: getBackfillStatus().status,
   });
 });
 

@@ -1262,7 +1262,6 @@ export interface UsageResponse {
   breakdown: UsageBreakdownRow[];
   byAgent: UsageAgentRow[];
   byRoom?: UsageRoomRow[];
-  backfillStatus: string;
 }
 
 /** Platform-wide usage (all rooms). Optional agent/model filters. */

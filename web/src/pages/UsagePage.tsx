@@ -180,7 +180,6 @@ function TotalView({ roomId }: UsagePageProps) {
   const rangeLabel = useMemo(() => resolveTotalQuery(preset, customFrom, customTo).label, [preset, customFrom, customTo]);
 
   const { data, loading, error, effectiveRoom } = useUsageData(roomId, roomFilter, query);
-  const backfilling = data?.backfillStatus === "running";
   const roomLabel = roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms";
 
   const totals = useMemo(() => {
@@ -239,7 +238,7 @@ function TotalView({ roomId }: UsagePageProps) {
         </div>
       </div>
 
-      <UsageStates data={data} loading={loading} error={error} backfilling={backfilling}>
+      <UsageStates data={data} loading={loading} error={error}>
         {data && (
           <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
             <ShareDonut
@@ -282,7 +281,6 @@ function TrendView({ roomId }: UsagePageProps) {
   const span = useMemo(() => resolveTrendQuery(quick, customFrom, customTo), [quick, customFrom, customTo]);
 
   const { data, loading, error, effectiveRoom } = useUsageData(roomId, roomFilter, query);
-  const backfilling = data?.backfillStatus === "running";
   const roomLabel = roomFilter ? roomOptions.find((r) => r.roomId === roomFilter)?.roomName || roomFilter : "All rooms";
 
   const totals = useMemo(() => {
@@ -358,7 +356,7 @@ function TrendView({ roomId }: UsagePageProps) {
         </div>
       </div>
 
-      <UsageStates data={data} loading={loading} error={error} backfilling={backfilling}>
+      <UsageStates data={data} loading={loading} error={error}>
         {data && <TrendChart data={data} agentFilter={agentFilter} />}
       </UsageStates>
     </div>
@@ -377,25 +375,20 @@ function UsageStates({
   data,
   loading,
   error,
-  backfilling,
   children,
 }: {
   data: UsageResponse | null;
   loading: boolean;
   error: string | null;
-  backfilling: boolean;
   children?: React.ReactNode;
 }) {
   return (
     <>
-      {backfilling && (
-        <div className="text-[12px] text-ink-3 mb-3">Building usage index… numbers will fill in shortly.</div>
-      )}
       {error && <div className="text-[12px] text-blocked mb-3">Failed to load usage: {error}</div>}
       {loading && !data ? (
         <div className="text-sm text-ink-3 py-12 text-center">Loading…</div>
       ) : data && data.byAgent.length === 0 && data.breakdown.length === 0 ? (
-        <EmptyState backfilling={backfilling} />
+        <EmptyState />
       ) : (
         children
       )}
@@ -403,14 +396,12 @@ function UsageStates({
   );
 }
 
-function EmptyState({ backfilling }: { backfilling: boolean }) {
+function EmptyState() {
   return (
     <div className="text-center py-16 text-ink-3">
       <div className="text-sm font-medium text-ink-2 mb-1">No usage yet</div>
       <div className="text-xs">
-        {backfilling
-          ? "The usage index is still building — check back in a moment."
-          : "Usage appears here once members start running turns."}
+        Usage appears here once members start running turns.
       </div>
     </div>
   );
