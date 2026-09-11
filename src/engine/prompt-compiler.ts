@@ -126,8 +126,6 @@ Room mechanics:
   an urgent interrupt — emergencies only. Multiple @ activate all at
   once; for "A then B", @ only the first and let them hand off.
 - In a DM every user message reaches you directly — no @ needed.
-- need_response lists who must reply; omit it for FYI.
-- reply_to quotes a previous message (msg:#<seq>) — quote, don't restate.
 
 Internal operations are the one exception. recall, memorize and other
 background tasks run in a private session of yours: there you do not

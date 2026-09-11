@@ -99,7 +99,7 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
   return { mentions, mentionMemberIds: mentions.includes("all") ? roomMembers.map(member => member.id) : toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
 }
 
-// -- Final-text fallback delivery (chat need_response debt turn) --
+// -- Final-text fallback delivery (pending reply debt) --
 
 /**
  * Deliver a member's text into the conversation (room or DM, same rule).
@@ -133,10 +133,7 @@ function messageMeta(meta: {
   urgentMentions?: string[];
   urgentMentionMemberIds?: string[];
   mentions?: string[];
-  needResponse?: string[];
-  needResponseMemberIds?: string[];
   autoDelivered?: boolean;
-  replyTo?: { seq: number; messageId: string };
 }) {
   const out: {
     attachments?: RoomMessageAttachment[];
@@ -145,10 +142,7 @@ function messageMeta(meta: {
     mentionMemberIds?: string[];
     urgentMentions?: string[];
     urgentMentionMemberIds?: string[];
-    needResponse?: string[];
-  needResponseMemberIds?: string[];
     autoDelivered?: boolean;
-    replyTo?: { seq: number; messageId: string };
   } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
@@ -156,31 +150,11 @@ function messageMeta(meta: {
   if (meta.mentionMemberIds !== undefined) out.mentionMemberIds = meta.mentionMemberIds;
   if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
   if (meta.urgentMentionMemberIds !== undefined) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
-  if (meta.needResponse !== undefined) out.needResponse = meta.needResponse;
-  if (meta.needResponseMemberIds !== undefined) out.needResponseMemberIds = meta.needResponseMemberIds;
   if (meta.autoDelivered) out.autoDelivered = true;
-  if (meta.replyTo) out.replyTo = meta.replyTo;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-const REPLY_TO_RE = /^msg:#(\d+)$/i;
 const REPLY_EXCERPT_MAX = 200;
-
-/** Parse chat reply_to (`msg:#<seq>`). Validates the target exists in the given scope. */
-export function parseReplyToParam(
-  raw: unknown,
-  scopeMessages: RoomMessage[],
-): { ok: true; replyTo: { seq: number; messageId: string } } | { ok: false; error: string } | { ok: true; replyTo: undefined } {
-  if (raw === undefined || raw === null || raw === "") return { ok: true, replyTo: undefined };
-  if (typeof raw !== "string") return { ok: false, error: "reply_to must be a string like msg:#123" };
-  const m = raw.trim().match(REPLY_TO_RE);
-  if (!m) return { ok: false, error: "reply_to must match msg:#<seq> (e.g. msg:#42)" };
-  const seq = Number(m[1]);
-  if (!Number.isInteger(seq) || seq < 1) return { ok: false, error: `reply_to seq out of range: ${m[1]}` };
-  const target = scopeMessages.find((msg) => msg.seq === seq);
-  if (!target) return { ok: false, error: `reply_to target not found in current scope: msg:#${seq}` };
-  return { ok: true, replyTo: { seq, messageId: target.id } };
-}
 
 export function excerptForReply(content: string, max = REPLY_EXCERPT_MAX): string {
   const oneLine = String(content || "").replace(/\s+/g, " ").trim();
@@ -228,37 +202,6 @@ function filterMessagesInMemory(
     return msgs.slice(Math.max(0, center - half), center + half + 1);
   }
   return msgs.slice(-limit);
-}
-
-/** Parse chat need_response: string[] of member names. Invalid type → error string. */
-export function parseNeedResponseParam(
-  raw: unknown,
-  roomMembers: Array<{ id: string; name: string }>,
-  mentionedNames: string[],
-  mentionedIds: string[],
-): { ok: true; names: string[] } | { ok: false; error: string } {
-  if (raw === undefined || raw === null) return { ok: true, names: [] };
-  if (!Array.isArray(raw)) {
-    return { ok: false, error: "need_response must be an array of member names (e.g. [\"developer\"])" };
-  }
-  const mentionedNameSet = new Set(mentionedNames);
-  const mentionedIdSet = new Set(mentionedIds);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (typeof item !== "string" || !item.trim()) {
-      return { ok: false, error: "need_response entries must be non-empty member name strings" };
-    }
-    const ref = item.trim();
-    const member = roomMembers.find((m) => m.name === ref || m.id === ref);
-    if (!member) continue; // unknown name — ignore
-    // Only @-mentioned members can carry debt (activation gate).
-    if (!mentionedNameSet.has(member.name) && !mentionedIdSet.has(member.id)) continue;
-    if (seen.has(member.name)) continue;
-    seen.add(member.name);
-    out.push(member.name);
-  }
-  return { ok: true, names: out };
 }
 
 /** Truncate a serialized tool result if it exceeds the limit. */
@@ -326,6 +269,9 @@ export async function handleToolCallback(
       }
     }
     case "chat": {
+      const unknownParam = Object.keys(params ?? {}).find((key) => key !== "message" && key !== "attachments");
+      if (unknownParam !== undefined) return { ok: false, error: `Unknown chat parameter: ${unknownParam}` };
+
       // 2026-09-04 pm order / designer incident: a model deep in a full context
       // sent chat with an empty string twice and the tool happily posted both.
       // Reject empty text (attachment-only posts still carry content).
@@ -342,12 +288,6 @@ export async function handleToolCallback(
       const senderMember = context?.memberId ? boundActor() : roomStore.resolveRoomMemberRef(rosterId, actorRef);
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
       const { mentions, mentionMemberIds, urgentMentions, urgentMentionMemberIds } = info;
-
-      const parsedNeed = roomId.startsWith("dm:") ? { ok: true as const, names: [] as string[] } : parseNeedResponseParam(params?.need_response, roomMembers, mentions, mentionMemberIds);
-      if (!parsedNeed.ok) return { ok: false, error: parsedNeed.error };
-      const needResponse = parsedNeed.names;
-      const needResponseMemberIds = roomMembers.filter((m: { id: string; name: string }) => needResponse.includes(m.name)).map((m: { id: string }) => m.id);
-
 
       const attachments: RoomMessageAttachment[] = [];
       // Process agent attachments (file paths → validate + copy → structured message metadata).
@@ -376,38 +316,19 @@ export async function handleToolCallback(
         }
       }
 
-      // Resolve reply_to against the current conversation scope (room or dm).
-      const scopeMessages = loadScopeMessages(roomId);
-      const parsedReply = parseReplyToParam(params?.reply_to, scopeMessages);
-      if (!parsedReply.ok) return { ok: false, error: parsedReply.error };
-      const replyTo = parsedReply.replyTo;
-
       // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
       if (typeof roomId === "string" && roomId.startsWith("dm:")) {
-        const dmMeta = messageMeta({
-          attachments,
-          replyTo,
-        });
+        const dmMeta = messageMeta({ attachments });
         postMessage(roomId, actorName(), message, [], { ...dmMeta, senderMemberId: actorRef });
-        const hasNeed = Array.isArray(params?.need_response) && params.need_response.length > 0;
-        return { ok: true, ...(hasNeed ? { note: "no @target — need_response ignored" } : {}) };
+        return { ok: true };
       }
-
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
-      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: actorName(), mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions, needResponse, needResponseMemberIds, replyTo });
+      const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: actorName(), mentionMemberIds, urgentMentions, urgentMentionMemberIds, mentions });
       if (meta) postMessage(roomId, actorName(), message, mentions, meta);
       else postMessage(roomId, actorName(), message, mentions);
 
-      if (Array.isArray(params?.need_response) && params.need_response.length > 0 && needResponse.length === 0) {
-        return {
-          ok: true,
-          note: info.mentionMemberIds.length === 0
-            ? "no @target — need_response ignored"
-            : "need_response matched no @-mentioned members — treated as FYI",
-        };
-      }
       return { ok: true };
     }
     case "query_room_messages": {

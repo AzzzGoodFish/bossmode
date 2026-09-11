@@ -134,7 +134,6 @@ describe("chat attachment artifacts", () => {
     const chatTool = createBossmodeSdkTools({ roomId: room.id, memberId: caller.id })[0];
     await expect(chatTool.execute("call-1", {
       message: "should not report sent",
-      target: "room",
       attachments: [missingPath],
     })).rejects.toThrow(missingPath);
     expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);

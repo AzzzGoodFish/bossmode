@@ -1,11 +1,4 @@
-/**
- * chat 工具回归 + need_response + 最终文本兜底 acceptance（fish 2026-08-07 定稿）:
- * ① user @ → member 只写裸文本 → 房间仍收到（兜底必达 — 失声事故直接回归）
- * ② member need_response=true → 目标信封带 [REPLY EXPECTED] + 无 chat 时兜底
- * ③ need_response 缺省 @ → 目标激活但无债无兜底无警告（FYI 通道）
- * ④ chat 工具全参可用（attachments/artifacts 恢复）
- * ⑤ DM 同规则：用户消息带期待，裸文本兜底投递
- */
+/** Chat surface, retained internal reply obligations and final-text fallback. */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
@@ -13,7 +6,7 @@ import { mockPromptFn, resetMocks, setMockPromptFn, emitMockEvent } from "../hel
 
 setupTestWorkspace();
 
-describe("Acceptance: chat tool + need_response + final-text fallback", () => {
+describe("Acceptance: chat tool and final-text fallback", () => {
   let ts: TestServer;
   let token: string;
 
@@ -68,7 +61,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(false);
   });
 
-  it("② member chat need_response=true → target envelope has [REPLY EXPECTED] + bare-text fallback on target", async () => {
+  it("② captured member reply debt keeps the sender banner and bare-text fallback", async () => {
     const room = await createRoomWithMembers("ftd-need-response", ["pm", "qa"]);
     const prompts: string[] = [];
     setMockPromptFn(async (msg: string) => {
@@ -76,9 +69,8 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
       emitMockEvent({ type: "message_end", text: "qa bare reply under expectation", stopReason: "stop" });
     });
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const res = await handleToolCallback("chat", room.id, "pm", { message: "@qa verify the fallback", need_response: ["qa"] });
-    expect((res as any).ok).toBe(true);
+    const { postMessage } = await import("../../src/communication/message-bus.js");
+    postMessage(room.id, "pm", "@qa verify the fallback", ["qa"], { senderMemberId: room.globalMemberIds![0], mentionMemberIds: [room.globalMemberIds![1]], needResponse: ["qa"], needResponseMemberIds: [room.globalMemberIds![1]] });
 
     await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "qa"));
     const messages = await roomMessages(room.id);
@@ -93,7 +85,7 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     expect(qaMsg.autoDelivered).toBe(true);
   });
 
-  it("③ member chat without need_response → target activates FYI: no banner, no fallback, no warning", async () => {
+  it("③ member chat activates FYI: no banner, no fallback, no warning", async () => {
     const room = await createRoomWithMembers("ftd-fyi", ["pm", "qa"]);
     const prompts: string[] = [];
     setMockPromptFn(async (msg: string) => {
@@ -114,22 +106,24 @@ describe("Acceptance: chat tool + need_response + final-text fallback", () => {
     expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(false);
   });
 
-  it("④ chat tool is back with attachments; need_response with no @target is ignored with a note", async () => {
+  it("④ chat exposes only message/attachments and rejects unknown parameters before posting", async () => {
     const room = await createRoomWithMembers("ftd-chat-tool", ["pm"]);
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
 
-    // SDK tool surface exposes chat (first tool) with need_response param.
+    // SDK tool surface exposes only current supported arguments.
     const chatTool = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: room.id })[0];
     expect(chatTool.name).toBe("chat");
-    expect(JSON.stringify(chatTool.parameters)).toContain("need_response");
+    expect(Object.keys((chatTool.parameters as any).properties)).toEqual(["message", "attachments"]);
+    expect((chatTool.parameters as any).additionalProperties).toBe(false);
     // artifacts param removed from chat tool.
     expect(JSON.stringify(chatTool.parameters)).not.toContain("artifacts");
 
-    // need_response without @target → posted normally, note attached.
+    // Obsolete arguments are rejected, not silently honored or ignored.
     const noTarget = await handleToolCallback("chat", room.id, "pm", { message: "plain post", need_response: ["qa"] });
-    expect((noTarget as any).ok).toBe(true);
-    expect((noTarget as any).note).toContain("no @target");
+    expect(noTarget).toEqual({ ok: false, error: "Unknown chat parameter: need_response" });
+    expect(await roomMessages(room.id)).toEqual([]);
+    expect(await handleToolCallback("chat", room.id, "pm", { message: "plain post" })).toEqual({ ok: true });
   });
 
   it("⑤ DM same rule: user DM message expects a reply → bare text fallback-delivered into the DM", async () => {

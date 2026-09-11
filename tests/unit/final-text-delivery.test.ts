@@ -109,7 +109,7 @@ afterEach(async () => {
   fixture.close();
 });
 
-describe("final-text fallback (chat need_response debt turn)", () => {
+describe("final-text fallback (pending reply debt)", () => {
   beforeEach(async () => {
     state.promptImpl = vi.fn(async () => {});
     vi.mocked(bus.postMessage).mockClear();
@@ -194,7 +194,7 @@ describe("final-text fallback (chat need_response debt turn)", () => {
     expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
   });
 
-  it("member need_response @ carries the sender-named banner and debt", async () => {
+  it("internal member reply expectation carries the sender-named banner and debt", async () => {
     const payloads: string[] = [];
     state.promptImpl = vi.fn(async (msg: string) => {
       payloads.push(msg);

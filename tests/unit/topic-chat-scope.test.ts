@@ -32,7 +32,7 @@ function writeRoom(roomId: string): Room {
   return room;
 }
 
-describe("topic chat scope: mentions / need_response / attachments", () => {
+describe("topic chat scope: mentions / attachments", () => {
   beforeEach(() => {
     fixture = coreFixture();
     state.dir = fixture.root;
@@ -48,19 +48,19 @@ describe("topic chat scope: mentions / need_response / attachments", () => {
     expect(resolveChatScopeRoomId("dm:mem_x")).toBeNull();
   });
 
-  it("chat in topic: persists @ mentions and need_response from parent roster", async () => {
+  it("chat in topic: persists stable @ mentions from parent roster without obsolete reply controls", async () => {
     const room = writeRoom("roomA");
     const topic = createTopic({ roomId: "roomA", title: "T", anchorMessageId: "m1", seedMode: "fresh" });
     const scope = `topic:${topic.id}`;
     const result = await handleToolCallback("chat", scope, "alice", {
       message: "@bob please ack NR",
-      need_response: ["bob"],
     }, { memberId: room.globalMemberIds![0] });
     expect(result).toMatchObject({ ok: true });
     const msgs = readAllTopicMessages("roomA", topic.id);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].mentions).toContain("bob");
-    expect(msgs[0].needResponse).toEqual(["bob"]);
+    expect(msgs[0].mentionMemberIds).toEqual([room.globalMemberIds![1]]);
+    expect(msgs[0].needResponse).toBeUndefined();
   });
 
   it("attachments on topic: land in the parent room store", async () => {

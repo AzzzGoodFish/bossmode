@@ -4,7 +4,7 @@ setupTestWorkspace();
 const processAttachments = vi.hoisted(() => vi.fn());
 vi.mock("../../src/engine/agent-attachments.js", () => ({ processAgentAttachments: processAttachments }));
 
-it("captures mention/reply target IDs before attachment IO while refreshing the sender label after IO", async () => {
+it("captures mention target IDs before attachment IO while refreshing the sender label after IO", async () => {
   const reg = await import("../../src/workspace/member-registry.js");
   const rooms = await import("../../src/workspace/room-store.js");
   const own = reg.createMember({ name: "Sender" });
@@ -21,14 +21,15 @@ it("captures mention/reply target IDs before attachment IO while refreshing the 
   const activate = vi.fn();
   const stop = router.initRouter({mention:activate});
   try {
-    const pending = handleToolCallback("chat", room.id, own.name, { message: "@Target answer", need_response: ["Target"], attachments: ["simulated-IO"] }, { memberId: own.id });
+    const pending = handleToolCallback("chat", room.id, own.name, { message: "@Target answer", attachments: ["simulated-IO"] }, { memberId: own.id });
     expect(processAttachments).toHaveBeenCalledOnce();
     updateProfileForMember(target.id, { name: "Renamed target" });
     updateProfileForMember(reuse.id, { name: "Target" });
     updateProfileForMember(own.id, { name: "Current sender" });
     release();
     expect(await pending).toMatchObject({ ok: true });
-    expect(activate).toHaveBeenCalledWith(room.id, target.id, expect.objectContaining({ needResponseMemberIds: [target.id] }));
-    expect(loadScopeMessages(room.id).at(-1)).toMatchObject({ sender: "Current sender", senderMemberId: own.id, mentions: ["Target"], mentionMemberIds: [target.id], needResponseMemberIds: [target.id] });
+    expect(activate).toHaveBeenCalledWith(room.id, target.id, expect.objectContaining({ senderOrigin: "member" }));
+    expect(loadScopeMessages(room.id).at(-1)?.needResponseMemberIds).toBeUndefined();
+    expect(loadScopeMessages(room.id).at(-1)).toMatchObject({ sender: "Current sender", senderMemberId: own.id, mentions: ["Target"], mentionMemberIds: [target.id] });
   } finally { release(); stop(); }
 });

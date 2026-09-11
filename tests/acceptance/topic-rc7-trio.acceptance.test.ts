@@ -43,7 +43,7 @@ describe("Acceptance: topic rc.7 trio", () => {
     return createMockRoom(ts.port, token, name, ["pm"]);
   }
 
-  it("close FYIs participants with reply_to on the summary card and empty needResponse", async () => {
+  it("close FYIs participants with a stored quote of the summary card and empty needResponse", async () => {
     const room = await makeRoom("close-fyi");
     const anchor = JSON.parse((await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, {
       token, body: { content: "anchor" },

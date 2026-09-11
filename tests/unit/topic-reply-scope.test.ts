@@ -19,7 +19,7 @@ vi.mock("../../src/shared/config.js", () => ({
 }));
 
 import { createTopic, addTopicMessage } from "../../src/workspace/topic-store.js";
-import { loadScopeMessages, parseReplyToParam } from "../../src/engine/tools.js";
+import { loadScopeMessages, handleToolCallback } from "../../src/engine/tools.js";
 import { wrapRoomContextMessage } from "../../src/engine/message-envelope.js";
 import type { Room } from "../../src/shared/types.js";
 
@@ -31,7 +31,7 @@ function writeRoom(roomId: string): Room {
   return room;
 }
 
-describe("topic scope reply_to + envelope lookup", () => {
+describe("topic scope stored replies + envelope lookup", () => {
   beforeEach(() => {
     fixture = coreFixture();
     state.dir = fixture.root;
@@ -57,25 +57,17 @@ describe("topic scope reply_to + envelope lookup", () => {
     expect(loadScopeMessages("roomA")).toHaveLength(0);
   });
 
-  it("parseReplyToParam hits a topic-scope seq", () => {
-    writeRoom("roomA");
-    const topic = createTopic({
-      roomId: "roomA",
-      title: "T",
-      anchorMessageId: "m1",
-      seedMode: "fresh",
-    });
-    addTopicMessage("roomA", topic.id, { sender: "user", content: "please fix auth", mentions: [] });
-    const scope = loadScopeMessages(`topic:${topic.id}`);
-    const hit = parseReplyToParam("msg:#1", scope);
-    expect(hit.ok).toBe(true);
-    if (hit.ok && hit.replyTo) {
-      expect(hit.replyTo.seq).toBe(1);
-      expect(hit.replyTo.messageId).toBe(scope[0].id);
-    }
-    const miss = parseReplyToParam("msg:#99", scope);
-    expect(miss.ok).toBe(false);
-    if (!miss.ok) expect(miss.error).toMatch(/not found/i);
+  it("queries a stored topic reply across the page window and degrades a missing target", async () => {
+    const room = writeRoom("roomA");
+    const topic = createTopic({ roomId: room.id, title: "T", anchorMessageId: "m1", seedMode: "fresh" });
+    const target = addTopicMessage(room.id, topic.id, { sender: "user", content: "please fix auth", mentions: [] });
+    const replyTo = { seq: target.seq!, messageId: target.id };
+    addTopicMessage(room.id, topic.id, { sender: "pm", content: "patched", mentions: [], replyTo });
+    const scope = `topic:${topic.id}`;
+    const query = () => handleToolCallback("query_room_messages", scope, "pm", { limit: 1 }, { memberId: room.globalMemberIds![0] });
+    expect(await query()).toMatchObject([{ content: "patched", replyTo: { ...replyTo, excerpt: "please fix auth" } }]);
+    addTopicMessage(room.id, topic.id, { sender: "pm", content: "missing target", mentions: [], replyTo: { seq: 99, messageId: "missing" } });
+    expect(await query()).toMatchObject([{ replyTo: { seq: 99, messageId: "missing", unavailable: true } }]);
   });
 
   it("envelope quote shows the topic target excerpt", () => {

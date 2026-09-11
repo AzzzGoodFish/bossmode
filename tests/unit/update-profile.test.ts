@@ -110,12 +110,15 @@ describe("self-only update_profile", () => {
     let captured: any;
     const stop = router.initRouter({mention:(_scope,id,ctx)=>{captured={id,ctx};}});
     try {
-      await f.call("chat", { message: `@${f.peer.name} please reply`, need_response: [f.peer.name] });
+      await f.call("chat", { message: `@${f.peer.name} please reply` });
+      expect(captured).toMatchObject({ id: f.peer.id });
+      const { postMessage } = await import("../../src/communication/message-bus.js");
+      postMessage(f.room.id, f.own.name, "captured internal reply obligation", [f.peer.name], { senderMemberId: f.own.id, mentionMemberIds: [f.peer.id], needResponseMemberIds: [f.peer.id] });
+      await Promise.resolve();
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });
       const originalContext = captured.ctx;
       const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
       const { waitForMember, isMemberWaiting } = await import("../../src/engine/wait-wait.js");
-      const { postMessage } = await import("../../src/communication/message-bus.js");
       const pending = waitForMember({ roomId: f.room.id, waiterMemberId: f.own.id, waiterName: f.own.name, targetMemberId: f.peer.id, targetName: f.peer.name, targetStatus: "working", timeoutMinutes: 1 });
       await f.call("update_profile", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
