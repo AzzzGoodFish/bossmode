@@ -18,7 +18,8 @@ import { importAgentEvent } from "../../src/storage/event-repository.js";
 let root: string;
 let db: Database | undefined;
 const withoutRetirement = () => coreStorageMigrations.filter((m) =>
-  m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1");
+  m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1"
+  && m.id !== "core-background-retirement-v1");
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "topic-retire-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });
@@ -26,7 +27,10 @@ afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, f
 function scopeTables(database: Database): string[] {
   return database.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")
     .map((r) => r.name)
-    .filter((name) => database.all<{ name: string }>(`PRAGMA table_info(${name})`).some((c) => c.name === "scope_id"));
+    .filter((name) => database.all<{ name: string }>(`PRAGMA table_info(${name})`).some((c) => c.name === "scope_id"))
+    // background_tasks is dropped by its own retirement migration
+    // (core-background-retirement-v1); its removal is covered there.
+    .filter((name) => name !== "background_tasks");
 }
 
 /** Dynamic ownership scan: every table carrying scope_id + the special keys. */

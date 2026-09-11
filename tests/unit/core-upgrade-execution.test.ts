@@ -9,7 +9,6 @@ import {importLegacyExecution} from "../../src/storage/upgrade-execution.js";
 import {MembersRepository} from "../../src/storage/repositories/members.js";
 import {SessionRepository} from "../../src/storage/repositories/session-repository.js";
 import {RuntimeRepository} from "../../src/storage/repositories/runtime-repository.js";
-import {BackgroundRepository} from "../../src/storage/repositories/background-repository.js";
 import type {UpgradeImportContext} from "../../src/storage/upgrade-runner.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
@@ -42,11 +41,13 @@ it("retains runtime entries by explicit scope/member key without binding old lab
  expect(new RuntimeRepository(ctx.db).get("room-one","mem_one")).toEqual({contractFingerprint:"old",staleMounts:{since:1,fields:["mcpServers"]}});
  expect(ctx.db.all("SELECT * FROM execution_import_ambiguities")).toHaveLength(1);
 });
-it("keeps background outcomes exact and takes session directory ownership from the inventory",()=>{
+it("retires background task sources: consumed, never imported, table gone",()=>{
  const taskId="bgt-00000000-0000-4000-8000-000000000001";const path=`members/mem_one/background-tasks/2026-09-09/${taskId}/task.json`;
  const task={taskId,memberId:"mem_one",scopeId:"room:room-one",kind:"generic",sessionMode:"fork",prompt:"private",snapshot:{model:null,credentialId:null,thinkingLevel:null},status:"done",startedAt:"2026-09-09T01:00:00Z",endedAt:"2026-09-09T01:01:00Z",result:" exact result \n",error:null,sessionDir:"/untrusted/old/location",parentSessionRef:"/retained/old/reference.jsonl"};
- const {ctx,entries}=setup({[path]:task});importLegacyExecution(ctx,entries);
- expect(new BackgroundRepository(ctx.db).get("mem_one",taskId)).toEqual({...task,sessionDir:join(ctx.root,dirname(path))});
+ const {ctx,entries}=setup({[path]:task});
+ const consumed=importLegacyExecution(ctx,entries);
+ expect(consumed.has(path)).toBe(true);
+ expect(ctx.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='background_tasks'")).toBeUndefined();
 });
 it("rejects conflicting canonical associations and escaped file references",()=>{
  const {ctx,entries}=setup({"members/mem_one/sessions/current.json":{"room:room-one":{runtime:"pi",sessionId:"one"},"room-one":{runtime:"pi",sessionId:"two"}}});

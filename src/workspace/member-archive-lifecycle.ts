@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../storage/database.js";
 import { MembersRepository } from "../storage/repositories/members.js";
 import { MemberArchivesRepository, validateArchivePath, type MemberArchiveIntent } from "../storage/repositories/member-archives.js";
-import { BackgroundRepository, terminalBackgroundStatus } from "../storage/repositories/background-repository.js";
 import { ConversationsRepository } from "../storage/repositories/conversations.js";
 
 /** Resolve a logical relative or old absolute member-owned reference, including immutable D/E snapshots.
@@ -118,9 +117,6 @@ export class MemberArchiveService {
     }
     await this.hooks.quiesce(memberId);
     this.db.assertOutsideTransaction();
-    if (new BackgroundRepository(this.db).list(memberId).some(r => !terminalBackgroundStatus(r.status))) {
-      throw new Error("member_backgrounds_not_terminal");
-    }
     const location = this.checkLocation(intent, false);
     const source = checkedAssetPath(this.root, intent.sourcePath);
     const destination = checkedAssetPath(this.root, intent.archivePath);

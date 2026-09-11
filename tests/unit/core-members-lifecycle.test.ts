@@ -18,7 +18,6 @@ import { MemberArchivesRepository } from "../../src/storage/repositories/member-
 import { MembersRepository } from "../../src/storage/repositories/members.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
-import { BackgroundRepository } from "../../src/storage/repositories/background-repository.js";
 import { SshCredentialsRepository, WorkspacesRepository } from "../../src/storage/repositories/workspace-settings.js";
 
 let root: string;
@@ -58,15 +57,6 @@ function service(quiesce: (id:string) => Promise<void> = async () => {}): Member
 function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
   return {id,name,title:"Engineer",agentTemplate:"general",global:{model:"p/m",credentialId:"chosen",skills:["one"]},
     unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:2};
-}
-function background(memberId: string, status: "starting" | "done" = "done") {
-  const taskId = `bgt-${randomUUID()}`;
-  const dir = join(root,"members",memberId,"background-tasks","2026-09-09",taskId);
-  file(join(dir,"session.jsonl"),"SDK background\r\n");
-  return {taskId,memberId,scopeId:`dm:${memberId}`,kind:"generic" as const,sessionMode:"new" as const,prompt:"do not replay",
-    snapshot:{model:null,credentialId:null,thinkingLevel:null},status,startedAt:"2026-09-09T00:00:00Z",
-    endedAt:status === "done" ? "2026-09-09T00:00:01Z" : null,result:status === "done" ? "literal answer" : null,error:null,
-    sessionDir:dir,parentSessionRef:null};
 }
 beforeEach(() => {
   failRename = false; failSyncAfterRename = false; moved = false; forcedUUID = undefined;
@@ -195,7 +185,7 @@ describe("durable quiescent archive and recovery", () => {
     expect(existsSync(join(root,result.archived,"member.json"))).toBe(false);
     expect(await s.archive(m.id,{confirm:true})).toEqual(result);
   });
-  it("keeps identity, terminal records, SDK bytes and B historical snapshots while allowing name reuse", async () => {
+  it("keeps identity, SDK bytes and B historical snapshots while allowing name reuse", async () => {
     const m = registry.createMemberWithPersona({name:"Archive Me",title:"Engineer"}," \r\nPersona  \r\n");
     const other = registry.createMember({name:"Other"});
     const conversations = new ConversationsRepository(db);
@@ -206,17 +196,13 @@ describe("durable quiescent archive and recovery", () => {
     file(join(registry.memberDir(m.id),session),'{"type":"session","id":"unchanged"}\r\n');
     new SessionRepository(db).importAssociation({memberId:m.id,scopeId:"r",referenceKind:"member-relative",createdAt:1,updatedAt:2,
       session:{runtime:"pi-sdk",sessionId:"unchanged",sessionFile:session}});
-    const task = background(m.id); new BackgroundRepository(db).importRecord(task);
     const logicalSnapshot = `members/${m.id}/history/persona/hash.md`; file(join(root,logicalSnapshot),"historical E bytes");
-    const before = db.all("SELECT * FROM background_tasks");
     const result = await service().archive(m.id,{confirm:true});
     expect(registry.getMember(m.id)).toBeNull();
     expect(new MembersRepository(db).getRetained(m.id)).toEqual(m);
-    expect(db.all("SELECT * FROM background_tasks")).toEqual(before);
     expect(() => db.run("DELETE FROM members WHERE id=?",m.id)).toThrow(/FOREIGN KEY/);
     expect(new SessionRepository(db).get(m.id,"r")?.session.sessionFile).toBe(session);
     expect(readFileSync(resolveMemberArtifactPath(db,root,m.id,session),"utf8")).toContain("unchanged");
-    expect(readFileSync(join(resolveMemberArtifactPath(db,root,m.id,task.sessionDir),"session.jsonl"),"utf8")).toBe("SDK background\r\n");
     expect(readFileSync(resolveMemberDocumentPath(db,root,m.id,logicalSnapshot),"utf8")).toBe("historical E bytes");
     expect(conversations.getRoom("r")).toMatchObject({globalMemberIds:[other.id],roomMembers:[historical],members:["historical label"]});
     expect(conversations.getRoom("r")?.promptLeaderMemberId).toBeUndefined();
@@ -234,16 +220,6 @@ describe("durable quiescent archive and recovery", () => {
     await service().archive(m.id,{confirm:true});
     expect(conversations.getRoom("local")?.roomMembers).toEqual([unrelated]);
     expect(conversations.getRoom("local")?.promptLeaderMemberId).toBeUndefined();
-  });
-  it("refuses nonterminal backgrounds after quiesce and can recover after caller interruption", async () => {
-    const m = registry.createMember({name:"Busy"}); const task = background(m.id,"starting");
-    new BackgroundRepository(db).create(task);
-    await expect(service().archive(m.id,{confirm:true})).rejects.toThrow("member_backgrounds_not_terminal");
-    expect(existsSync(registry.memberDir(m.id))).toBe(true);
-    new BackgroundRepository(db).interruptIncomplete("2026-09-09T00:01:00Z");
-    reopen(); await service().recoverPending();
-    expect(service().admission(m.id)).toBe("archived");
-    expect(new BackgroundRepository(db).get(m.id,task.taskId)?.status).toBe("interrupted");
   });
   it("quiesce failure leaves assets in place and the persisted admission block survives reopen", async () => {
     const m = registry.createMember({name:"Quiesce"});

@@ -107,6 +107,7 @@ for (const [file, kind, format, retire] of [
 for (const [file, kind, format] of [
   ["dm-messages.jsonl", "messages", "jsonl"], [".dm-seq", "message-sequence", "json"], ["dm-cursor.json", "dm-member-cursor", "json"],
 ] as const) rule(`members/:member/${file}`, p => ({ ...description(kind, format), memberId: p.member, scopeId: `dm:${p.member}` }));
+// Retired background-task layout (fish #19454): recognized and consumed, never imported.
 rule("members/:member/background-tasks/:day/:task/task.json", (p, path) => ({
   ...description("background-task"), memberId: p.member, taskId: p.task, sessionDir: path.slice(0, -"/task.json".length),
 }));

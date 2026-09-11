@@ -12,7 +12,6 @@ import { MembersRepository } from "../../src/storage/repositories/members.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
-import { BackgroundRepository } from "../../src/storage/repositories/background-repository.js";
 import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
 import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
 
@@ -142,7 +141,7 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
     expect(readFileSync(join(ctx.sourceRoot, entries[0].path), "utf8")).toBe("{ not json");
   });
 
-  it("imports terminal background evidence exactly, without replay or trusting embedded sessionDir", () => {
+  it("consumes retired background task sources without import or replay", () => {
     seedMember();
     const taskId = "bgt-00000000-0000-4000-8000-000000000001";
     const path = `members/mem_one/background-tasks/2026-09-09/${taskId}/task.json`;
@@ -151,11 +150,11 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
       startedAt: "2026-09-09T01:00:00Z", endedAt: "2026-09-09T02:00:00Z", result: " exact answer\r\n", error: null,
       sessionDir: "/forged/path", parentSessionRef: "/historical/sdk/session.jsonl"};
     const {ctx, entries} = source({[path]: task});
+    const consumed = importLegacyExecution(ctx, entries);
     importLegacyExecution(ctx, entries);
-    importLegacyExecution(ctx, entries);
-    expect(new BackgroundRepository(fixture.db).get(member.id, taskId)).toEqual({...task, sessionDir: join(fixture.root, dirname(path))});
+    expect(consumed.has(path)).toBe(true);
+    expect(fixture.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='background_tasks'")).toBeUndefined();
     expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
-    expect(fixture.db.all("SELECT * FROM background_tasks")).toHaveLength(1);
   });
 
   it("preserves user/member cursor kinds, timestamps and unresolved historical actor keys separately", async () => {

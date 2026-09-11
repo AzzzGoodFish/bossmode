@@ -13,6 +13,7 @@ import {importLegacyDocuments} from "./upgrade-documents.js";
 import {importAgentTemplates} from "../workforce/template-files.js";
 import {archiveRetiredTasks} from "./task-retirement.js";
 import {cleanupRetiredTopicSessionFiles} from "./topic-session-cleanup.js";
+import {cleanupRetiredBackgroundSessionFiles} from "./background-session-cleanup.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
@@ -89,5 +90,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
  }
  // Topic retirement §3.4 (fish #19358): retire topic session files once the DB settles.
  cleanupRetiredTopicSessionFiles(options.root,result.db);
+ // Background retirement (fish #19454): retire background task directories once the DB settles.
+ cleanupRetiredBackgroundSessionFiles(options.root,result.db);
  return result;
 }

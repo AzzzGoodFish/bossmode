@@ -25,7 +25,7 @@ export function assertExecutionOwner(db: Database, memberId: string, scopeValue:
 
 /** Import quarantine only: these records are never returned by runtime getters. */
 export function importExecutionAmbiguity(db: Database, entry: {
-  sourcePath: string; sourceKey: string; domain: "session" | "runtime" | "background" | "cursor";
+  sourcePath: string; sourceKey: string; domain: "session" | "runtime" | "cursor";
   reason: string; recordJson: string; importedAt: number;
 }): void {
   JSON.parse(entry.recordJson);
