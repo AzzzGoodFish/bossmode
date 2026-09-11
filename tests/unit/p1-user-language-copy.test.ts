@@ -7,14 +7,14 @@ function source(path: string): string {
 }
 
 describe("P1 user-language hygiene", () => {
-  it("uses the English Settings terminology baseline", () => {
+  it("uses the approved Chinese chat navigation without restoring retired settings", () => {
     const sidebar = source("web/src/components/Sidebar.tsx");
-    expect(sidebar).toContain('title="Settings"');
+    expect(sidebar).toContain("设置");
+    expect(sidebar).toContain("模型");
     // Extensions settings section retired with the platform extension store (batch 7 closeout).
     expect(sidebar).not.toContain('title: "Extensions"');
     expect(sidebar).not.toContain("Built-in Updates");
-    expect(sidebar).toContain("No conversations yet.");
-    expect(sidebar).not.toMatch(/[\u3400-\u9fff]/u);
+    expect(sidebar).toContain("还没有会话");
   });
 
   it("keeps member controls free of implementation and mixed-language copy", () => {

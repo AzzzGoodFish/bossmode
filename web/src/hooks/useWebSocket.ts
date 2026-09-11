@@ -1,3 +1,4 @@
+import { webSocketUrl } from "../utils/websocket-url";
 import { useEffect, useRef, useCallback, useState } from "react";
 import { getToken } from "../api/client";
 
@@ -37,8 +38,7 @@ export function useWebSocket({ onEvent }: UseWebSocketOptions = {}) {
     const token = getToken();
     if (!token || destroyed.current) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}?token=${token}`;
+    const wsUrl = webSocketUrl(token);
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

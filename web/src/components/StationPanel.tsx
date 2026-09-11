@@ -1,3 +1,4 @@
+import { webSocketUrl } from "../utils/websocket-url";
 import { useMemberProfileRevision, currentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -150,8 +151,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onMem
   useEffect(() => {
     const token = getToken();
     if (!token || !eventWatchId || members.length === 0) return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    const ws = new WebSocket(webSocketUrl(token));
     ws.onopen = () => {
       for (const { name, memberId } of subscriptionMembers) ws.send(JSON.stringify({ type: "subscribe:agent", roomId: eventWatchId, agent: name, memberId }));
     };

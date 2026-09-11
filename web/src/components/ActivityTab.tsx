@@ -1,3 +1,4 @@
+import { webSocketUrl } from "../utils/websocket-url";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronRight, MessageSquareText, Search, User } from "lucide-react";import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
 import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isActivityStreamEvent, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
@@ -73,8 +74,7 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope }: {
   useEffect(() => {
     const token = getToken();
     if (!token) return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    const ws = new WebSocket(webSocketUrl(token));
     const watchRoomId = dmScope ? `dm:${dmScope.memberId}` : roomId;
     const watchMemberId = dmScope?.memberId || memberId;
     ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: historyMemberRef, memberId: watchMemberId }));

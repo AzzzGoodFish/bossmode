@@ -159,6 +159,7 @@ function MemberDetailFloat({ memberId, scopeId, initialTab, liveStatuses, onClos
         className="w-[720px] max-w-[calc(100vw-48px)] max-h-[calc(100vh-96px)] rounded-2xl border border-line-strong bg-surface-1 shadow-2xl overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        data-member-float
         aria-label={member ? `${member.name} details` : "Member details"}
       >
         {/* header — no banner strip (fish 2026-09-02: drop the gradient) */}

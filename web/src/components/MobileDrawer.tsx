@@ -4,7 +4,7 @@ interface MobileDrawerProps {
   open: boolean;
   side: "left" | "right";
   onClose: () => void;
-  width?: string;  // Tailwind width class, default "w-72"
+  width?: string; // Tailwind width class, default "w-72"
   children: React.ReactNode;
 }
 
@@ -13,10 +13,21 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
     container.querySelectorAll<HTMLElement>(
       'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((el) => !el.closest("[disabled]") && getComputedStyle(el).display !== "none");
+  ).filter(
+    (el) =>
+      !el.closest("[disabled],[inert]") &&
+      el.getClientRects().length > 0 &&
+      getComputedStyle(el).visibility !== "hidden",
+  );
 }
 
-export function MobileDrawer({ open, side, onClose, width = "w-72", children }: MobileDrawerProps) {
+export function MobileDrawer({
+  open,
+  side,
+  onClose,
+  width = "w-72",
+  children,
+}: MobileDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -26,13 +37,20 @@ export function MobileDrawer({ open, side, onClose, width = "w-72", children }: 
       previousFocusRef.current = document.activeElement as HTMLElement;
       document.body.classList.add("overflow-hidden");
       // Focus first focusable inside drawer
-      const t = setTimeout(() => {
-        if (drawerRef.current) {
-          const items = getFocusable(drawerRef.current);
-          items[0]?.focus();
+      const frame = window.requestAnimationFrame(() => {
+        const drawer = drawerRef.current;
+        if (
+          drawer &&
+          !drawer.contains(document.activeElement) &&
+          !document.querySelector(".bm-popover,[data-member-float]")
+        ) {
+          getFocusable(drawer)[0]?.focus({ preventScroll: true });
         }
-      }, 320); // after animation
-      return () => clearTimeout(t);
+      });
+      return () => {
+        window.cancelAnimationFrame(frame);
+        document.body.classList.remove("overflow-hidden");
+      };
     } else {
       document.body.classList.remove("overflow-hidden");
       previousFocusRef.current?.focus();
@@ -43,29 +61,50 @@ export function MobileDrawer({ open, side, onClose, width = "w-72", children }: 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (document.querySelector(".bm-popover,[data-member-float]")) return;
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
       if (e.key !== "Tab") return;
       const drawer = drawerRef.current;
       if (!drawer) return;
       const items = getFocusable(drawer);
-      if (items.length === 0) { e.preventDefault(); return; }
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
       const first = items[0];
       const last = items[items.length - 1];
       if (e.shiftKey) {
-        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
       } else {
-        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  const translateOut = side === "left" ? "-translate-x-full" : "translate-x-full";
+  const translateOut =
+    side === "left" ? "-translate-x-full" : "translate-x-full";
   const positionCls = side === "left" ? "left-0" : "right-0";
 
   return (
-    <div aria-modal="true" role="dialog" className={`fixed inset-0 z-40 ${open ? "" : "pointer-events-none"}`}>
+    <div
+      aria-modal={open ? true : undefined}
+      role={open ? "dialog" : undefined}
+      aria-hidden={!open || undefined}
+      inert={!open}
+      data-mobile-drawer
+      className={`fixed inset-0 z-40 ${open ? "" : "pointer-events-none"}`}
+    >
       {/* Overlay */}
       <div
         onClick={onClose}

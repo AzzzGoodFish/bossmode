@@ -10,7 +10,7 @@ class HostNode {
   childNodes: HostNode[] = [];
   parentNode: HostNode | null = null;
   attributes: Record<string, string> = {};
-  style = {};
+  style = { setProperty(name: string, value: string) { Object.defineProperty(this, name, { value, configurable: true, writable: true }); } };
   value = "";
   selected = false;
   multiple = false;
@@ -118,7 +118,7 @@ describe("current names in real rendered historical messages", () => {
   it("keeps human labels and clearable directory state separate from historical facts", async () => {
     profiles.seedCurrentMemberNames([{id:"mem_clear",name:"current"}],profiles.getMemberProfileRevision());
     await render({sender:"user",content:"user body"});
-    expect(authorNames()).toEqual(["you"]);
+    expect(authorNames()).toEqual(["你"]);
     await render({sender:"recorded",senderMemberId:"mem_clear",content:"body"});
     expect(authorNames()).toEqual(["current"]);
     await act(async()=>profiles.clearCurrentMemberNames());

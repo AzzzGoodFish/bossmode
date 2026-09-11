@@ -105,7 +105,7 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search messages..."
-          className="flex-1 bg-transparent text-sm text-ink-1 placeholder:text-ink-4 focus:outline-none"
+          className="flex-1 min-w-0 bg-transparent text-sm text-ink-1 placeholder:text-ink-4 focus:outline-none"
         />
         {/* Sender filter */}
         <select

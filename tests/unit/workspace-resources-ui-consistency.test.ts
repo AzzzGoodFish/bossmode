@@ -23,6 +23,7 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
 
   it("keeps the one-click member creation entry in the sidebar, not duplicated in lists", () => {
     const sidebar = source("web/src/components/Sidebar.tsx");
-    expect(sidebar).toContain("New member");
+    expect(sidebar).toContain("创建成员");
+    expect(sidebar).toContain("createGlobalMember({})");
   });
 });

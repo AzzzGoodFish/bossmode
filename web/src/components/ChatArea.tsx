@@ -1,12 +1,34 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, BookOpen, FileText, Square, Eye, MessagesSquare, ArrowDown } from "lucide-react";
-import type { RoomMessage, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
+import {
+  Loader2,
+  BookOpen,
+  FileText,
+  Square,
+  Eye,
+  MessagesSquare,
+  ArrowDown,
+} from "lucide-react";
+import type {
+  RoomMessage,
+  KnowledgeEventMeta,
+  TopicEventMeta,
+  RoomMessageAttachment,
+} from "../api/client";
 import { MemberName } from "./MemberName";
 import { MessageBubble } from "./MessageBubble";
 import { MessageSearchBar } from "./MessageSearchBar";
-import type { MessageArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
-import { GROUP_INTERVAL_MS, isGroupedWithPrev } from "../utils/message-grouping";
-import { formatMessageDateSeparator, isSameLocalDate } from "../utils/message-date";
+import type {
+  MessageArtifactPreviewState,
+  ChatAttachmentPreviewState,
+} from "./ArtifactPreviewPanel";
+import {
+  GROUP_INTERVAL_MS,
+  isGroupedWithPrev,
+} from "../utils/message-grouping";
+import {
+  formatMessageDateSeparator,
+  isSameLocalDate,
+} from "../utils/message-date";
 import { getUsername } from "../api/client";
 
 interface ChatAreaProps {
@@ -19,20 +41,43 @@ interface ChatAreaProps {
   searchOpen?: boolean;
   onCloseSearch?: () => void;
   members?: string[];
-  memberIdentities?: Array<{id: string; name: string}>;
+  memberIdentities?: Array<{ id: string; name: string }>;
   onPreviewArtifact?: (preview: MessageArtifactPreviewState) => void;
   onPreviewAttachment?: (preview: ChatAttachmentPreviewState) => void;
   activeArtifactPreview?: { messageId: string; selectedIndex: number } | null;
-  activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
+  activeAttachmentPreview?: {
+    messageId: string;
+    storedFilename: string;
+  } | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
   onReturnToLatest?: () => void;
   inHistoryView?: boolean;
   /** Hover action bar: reply quote. */
   onReplyMessage?: (msg: RoomMessage) => void;
+  onMemberClick?: (memberId: string) => void;
 }
 
-
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage }: ChatAreaProps) {
+export function ChatArea({
+  messages,
+  roomName,
+  roomId,
+  hasMore,
+  loadingOlder,
+  onLoadOlder,
+  searchOpen,
+  onCloseSearch,
+  members,
+  memberIdentities = [],
+  onPreviewArtifact,
+  onPreviewAttachment,
+  activeArtifactPreview,
+  activeAttachmentPreview,
+  onJumpToMessage,
+  onReturnToLatest,
+  inHistoryView,
+  onReplyMessage,
+  onMemberClick,
+}: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
   const [atBottom, setAtBottom] = useState(true);
@@ -41,24 +86,34 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCount = useRef(messages.length);
   const isNearBottom = useRef(true);
+  const viewportSize = useRef({ width: 0, height: 0 });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  const scrollToMessage = useCallback(async (messageId: string) => {
-    let el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
-    if (!el && onJumpToMessage) {
-      // Message not in DOM — fetch around window from server
-      await onJumpToMessage(messageId);
-      // Wait for React to render the new messages
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
-    }
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setHighlightedId(messageId);
-      setTimeout(() => setHighlightedId(null), 1500);
-    }
-    // Search bar stays open — user closes via X / Esc
-  }, [onJumpToMessage]);
+  const scrollToMessage = useCallback(
+    async (messageId: string) => {
+      let el = containerRef.current?.querySelector(
+        `[data-message-id="${messageId}"]`,
+      ) as HTMLElement | null;
+      if (!el && onJumpToMessage) {
+        // Message not in DOM — fetch around window from server
+        await onJumpToMessage(messageId);
+        // Wait for React to render the new messages
+        await new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        );
+        el = containerRef.current?.querySelector(
+          `[data-message-id="${messageId}"]`,
+        ) as HTMLElement | null;
+      }
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightedId(messageId);
+        setTimeout(() => setHighlightedId(null), 1500);
+      }
+      // Search bar stays open — user closes via X / Esc
+    },
+    [onJumpToMessage],
+  );
 
   // Auto-scroll to bottom on new messages (only if user was near bottom)
   useEffect(() => {
@@ -122,6 +177,17 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
     const el = containerRef.current;
     if (!el) return;
 
+    // A width/height change is layout, not a request to read older messages.
+    const layoutChanged =
+      el.clientWidth !== viewportSize.current.width ||
+      el.clientHeight !== viewportSize.current.height;
+    viewportSize.current = { width: el.clientWidth, height: el.clientHeight };
+    if (layoutChanged && isNearBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      setAtBottom(true);
+      setAwayCount(0);
+      return;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
     isNearBottom.current = near;
     setAtBottom(near);
@@ -132,7 +198,8 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
       if (!loadOlderTimer.current) {
         loadOlderTimer.current = setTimeout(() => {
           loadOlderTimer.current = null;
-          if (containerRef.current && containerRef.current.scrollTop === 0) onLoadOlder();
+          if (containerRef.current && containerRef.current.scrollTop === 0)
+            onLoadOlder();
         }, 300);
       }
     } else if (loadOlderTimer.current) {
@@ -179,136 +246,230 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
           onClose={() => onCloseSearch?.()}
         />
       )}
-      <div ref={containerRef} className="flex-1 overflow-y-auto min-w-0 px-4 py-3" onScroll={handleScroll}>
-      <div ref={contentRef}>
-        {/* Top indicator */}
-        {hasMore === false && messages.length > 0 && (
-          <div className="text-center text-xs text-ink-4 py-4">Beginning of conversation</div>
-        )}
-        {loadingOlder && (
-          <div className="flex items-center justify-center gap-1.5 py-3">
-            <Loader2 size={14} className="animate-spin text-ink-4" />
-            <span className="text-[11px] text-ink-4">Loading earlier messages</span>
-          </div>
-        )}
-
-        {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-ink-3 text-lg"># {roomName}</p>
-              <p className="text-ink-4 text-sm mt-1">
-                Start a conversation by sending a message
-              </p>
+      <div
+        ref={containerRef}
+        className="bm-scroll-messages"
+        onScroll={handleScroll}
+      >
+        <div ref={contentRef} className="bm-message-flow">
+          {/* Top indicator */}
+          {hasMore === false && messages.length > 0 && (
+            <div className="text-center text-xs text-ink-4 py-4">
+              会话从这里开始
             </div>
-          </div>
-        ) : (
-          <div>
-            {messages.map((msg, i) => {
-              const prev = i > 0 ? messages[i - 1] : null;
-              const showDateSep = shouldShowDateSeparator(prev, msg);
-              const grouped = isGroupedWithPrev(prev, msg);
+          )}
+          {loadingOlder && (
+            <div className="flex items-center justify-center gap-1.5 py-3">
+              <Loader2 size={14} className="animate-spin text-ink-4" />
+              <span className="text-[11px] text-ink-4">正在加载更早的消息</span>
+            </div>
+          )}
 
-              const time = new Date(msg.ts).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-              const fullTime = new Date(msg.ts).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              });
+          {messages.length === 0 ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-ink-3 text-lg"># {roomName}</p>
+                <p className="text-ink-4 text-sm mt-1">
+                  还没有消息，发一句开始聊吧。
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {messages.map((msg, i) => {
+                const prev = i > 0 ? messages[i - 1] : null;
+                const showDateSep = shouldShowDateSeparator(prev, msg);
+                const grouped = isGroupedWithPrev(prev, msg);
 
-              const isNewPrepend = i < newPrependCount;
-              const animDelay = isNewPrepend ? `${Math.min(i, 10) * 30}ms` : undefined;
+                const time = new Date(msg.ts).toLocaleTimeString("zh-CN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const fullTime = new Date(msg.ts).toLocaleTimeString("zh-CN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                });
 
-              return (
-                <div key={msg.id} data-message-id={msg.id} className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`} style={animDelay ? { animationDelay: animDelay } : undefined}>
-                  {showDateSep && <DateSeparator ts={msg.ts} />}
-                  {msg.type === "task_event" && msg.task_event_meta ? (
-                    <RetiredTaskEventCard content={msg.content} />
-                  ) : msg.type === "knowledge_event" && msg.knowledge_event_meta ? (
-                    <KnowledgeEventCard
-                      messageId={msg.id}
-                      meta={msg.knowledge_event_meta}
-                      onPreview={onPreviewArtifact ? () => onPreviewArtifact({ kind: "message", messageId: msg.id, title: msg.knowledge_event_meta!.title, artifacts: [msg.knowledge_event_meta!.path], selectedIndex: 0 }) : undefined}
-                    />
-                  ) : msg.type === "topic_event" && msg.topic_event_meta ? (
-                    <RetiredTopicEventCard meta={msg.topic_event_meta} />
-                  ) : (
-                    <MessageBubble
-                      sender={msg.sender}
-                      senderMemberId={msg.senderMemberId}
-                      content={msg.content}
-                      time={time}
-                      fullTime={fullTime}
-                      grouped={grouped}
-                      isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
-                      mentions={msg.mentions}
-                      members={members}
-                      loginName={getUsername()}
-                      roomId={roomId}
-                      messageId={msg.id}
-                      attachments={msg.attachments}
-                      activeAttachmentPreview={activeAttachmentPreview}
-                      quote={resolveQuote(messages, msg)}
-                      onJumpToMessage={(targetId) => void scrollToMessage(targetId)}
-                      onReply={onReplyMessage && msg.sender !== "system" ? () => onReplyMessage(msg) : undefined}
-                      onPreviewAttachment={roomId && onPreviewAttachment ? (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => onPreviewAttachment({ kind: "attachment", messageId, title: "Attachment preview", attachments, selectedIndex }) : undefined}
-                    />
-                  )}
-                  {msg.artifacts?.length ? (
-                    <MessageArtifactChips
-                      messageId={msg.id}
-                      artifacts={msg.artifacts}
-                      activeArtifactPreview={activeArtifactPreview}
-                      onPreviewArtifact={onPreviewArtifact}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
+                const isNewPrepend = i < newPrependCount;
+                const animDelay = isNewPrepend
+                  ? `${Math.min(i, 10) * 30}ms`
+                  : undefined;
+
+                return (
+                  <div
+                    key={msg.id}
+                    data-message-id={msg.id}
+                    className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`}
+                    style={
+                      animDelay ? { animationDelay: animDelay } : undefined
+                    }
+                  >
+                    {showDateSep && <DateSeparator ts={msg.ts} />}
+                    {msg.type === "task_event" && msg.task_event_meta ? (
+                      <RetiredTaskEventCard content={msg.content} />
+                    ) : msg.type === "knowledge_event" &&
+                      msg.knowledge_event_meta ? (
+                      <KnowledgeEventCard
+                        messageId={msg.id}
+                        meta={msg.knowledge_event_meta}
+                        onPreview={
+                          onPreviewArtifact
+                            ? () =>
+                                onPreviewArtifact({
+                                  kind: "message",
+                                  messageId: msg.id,
+                                  title: msg.knowledge_event_meta!.title,
+                                  artifacts: [msg.knowledge_event_meta!.path],
+                                  selectedIndex: 0,
+                                })
+                            : undefined
+                        }
+                      />
+                    ) : msg.type === "topic_event" && msg.topic_event_meta ? (
+                      <RetiredTopicEventCard meta={msg.topic_event_meta} />
+                    ) : (
+                      <MessageBubble
+                        sender={msg.sender}
+                        senderMemberId={msg.senderMemberId}
+                        onAuthorClick={
+                          onMemberClick &&
+                          (msg.senderMemberId ||
+                            memberIdentities.find((m) => m.name === msg.sender)
+                              ?.id)
+                            ? () =>
+                                onMemberClick(
+                                  (msg.senderMemberId ||
+                                    memberIdentities.find(
+                                      (m) => m.name === msg.sender,
+                                    )?.id)!,
+                                )
+                            : undefined
+                        }
+                        content={msg.content}
+                        time={time}
+                        fullTime={fullTime}
+                        grouped={grouped}
+                        isMarkdown={
+                          msg.sender !== "user" && msg.sender !== "system"
+                        }
+                        mentions={msg.mentions}
+                        members={members}
+                        loginName={getUsername()}
+                        roomId={roomId}
+                        messageId={msg.id}
+                        attachments={msg.attachments}
+                        activeAttachmentPreview={activeAttachmentPreview}
+                        quote={resolveQuote(messages, msg)}
+                        onJumpToMessage={(targetId) =>
+                          void scrollToMessage(targetId)
+                        }
+                        onReply={
+                          onReplyMessage && msg.sender !== "system"
+                            ? () => onReplyMessage(msg)
+                            : undefined
+                        }
+                        onPreviewAttachment={
+                          roomId && onPreviewAttachment
+                            ? (
+                                messageId: string,
+                                attachments: RoomMessageAttachment[],
+                                selectedIndex: number,
+                              ) =>
+                                onPreviewAttachment({
+                                  kind: "attachment",
+                                  messageId,
+                                  title: "Attachment preview",
+                                  attachments,
+                                  selectedIndex,
+                                })
+                            : undefined
+                        }
+                      />
+                    )}
+                    {msg.artifacts?.length ? (
+                      <MessageArtifactChips
+                        messageId={msg.id}
+                        artifacts={msg.artifacts}
+                        activeArtifactPreview={activeArtifactPreview}
+                        onPreviewArtifact={onPreviewArtifact}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+        {/* W1-3: scrolled-up pill — back to bottom, badge counts arrivals while away */}
+        {!atBottom && messages.length > 0 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+            <button
+              onClick={() => {
+                bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+                setAwayCount(0);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-surface-3 border border-line-strong text-ink-1 rounded-full shadow-lg hover:bg-surface-2 transition-colors cursor-pointer"
+              title="Back to the latest messages"
+            >
+              <ArrowDown size={12} />
+              {awayCount > 0 ? (
+                <>
+                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-accent text-accent-contrast text-[9.5px] font-bold flex items-center justify-center tabular-nums">
+                    {awayCount}
+                  </span>{" "}
+                  new
+                </>
+              ) : (
+                "Back to latest"
+              )}
+            </button>
           </div>
         )}
-        <div ref={bottomRef} />
+        {inHistoryView && onReturnToLatest && (
+          <div className="absolute bottom-4 right-4 z-10">
+            <button
+              onClick={onReturnToLatest}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-accent text-accent-contrast rounded-full shadow-lg hover:opacity-90 transition-opacity"
+            >
+              ↓ Jump to latest
+            </button>
+          </div>
+        )}
       </div>
-      {/* W1-3: scrolled-up pill — back to bottom, badge counts arrivals while away */}
-      {!atBottom && messages.length > 0 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-          <button
-            onClick={() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); setAwayCount(0); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-surface-3 border border-line-strong text-ink-1 rounded-full shadow-lg hover:bg-surface-2 transition-colors cursor-pointer"
-            title="Back to the latest messages"
-          >
-            <ArrowDown size={12} />
-            {awayCount > 0 ? <><span className="min-w-[16px] h-4 px-1 rounded-full bg-accent text-accent-contrast text-[9.5px] font-bold flex items-center justify-center tabular-nums">{awayCount}</span> new</> : "Back to latest"}
-          </button>
-        </div>
-      )}
-      {inHistoryView && onReturnToLatest && (
-        <div className="absolute bottom-4 right-4 z-10">
-          <button
-            onClick={onReturnToLatest}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-accent text-accent-contrast rounded-full shadow-lg hover:opacity-90 transition-opacity"
-          >
-            ↓ Jump to latest
-          </button>
-        </div>
-      )}
-    </div>
     </div>
   );
 }
 
 /** Resolve a quote reply target against the loaded window — sender/first-line excerpt when present, seq-only fallback (jump still works via fetch-around). */
-function resolveQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; senderMemberId?: string; excerpt?: string } | undefined {
+function resolveQuote(
+  messages: RoomMessage[],
+  msg: RoomMessage,
+):
+  | {
+      seq: number;
+      messageId: string;
+      sender?: string;
+      senderMemberId?: string;
+      excerpt?: string;
+    }
+  | undefined {
   if (!msg.replyTo) return undefined;
-  const target = messages.find((m) => m.id === msg.replyTo!.messageId) ?? messages.find((m) => m.seq === msg.replyTo!.seq);
-  if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
-  const firstLine = String(target.content || "").split("\n").find((l) => l.trim()) ?? "";
+  const target =
+    messages.find((m) => m.id === msg.replyTo!.messageId) ??
+    messages.find((m) => m.seq === msg.replyTo!.seq);
+  if (!target)
+    return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
+  const firstLine =
+    String(target.content || "")
+      .split("\n")
+      .find((l) => l.trim()) ?? "";
   return {
     seq: msg.replyTo.seq,
     messageId: msg.replyTo.messageId,
-    sender: target.sender === "user" ? "you" : target.sender, senderMemberId: target.senderMemberId,
+    sender: target.sender === "user" ? "you" : target.sender,
+    senderMemberId: target.senderMemberId,
     excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine,
   };
 }
@@ -321,14 +482,38 @@ function RetiredTopicEventCard({ meta }: { meta: TopicEventMeta }) {
       <div className="flex items-center gap-2 text-xs text-ink-3">
         <MessagesSquare size={13} className="text-ink-4 shrink-0" />
         <span className="flex-1 min-w-0">
-          {meta.action === "closed"
-            ? <><span className="text-ink-2">topic closed</span> · <span className="font-medium text-ink-1">{meta.title}</span></>
-            : <><span className="font-medium text-ink-2">{meta.actor === "user" ? "you" : meta.actor}</span> opened topic <span className="font-medium text-ink-1">{meta.title}</span></>}
+          {meta.action === "closed" ? (
+            <>
+              <span className="text-ink-2">topic closed</span> ·{" "}
+              <span className="font-medium text-ink-1">{meta.title}</span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-ink-2">
+                {meta.actor === "user" ? "you" : meta.actor}
+              </span>{" "}
+              opened topic{" "}
+              <span className="font-medium text-ink-1">{meta.title}</span>
+            </>
+          )}
         </span>
       </div>
-      {meta.anchorExcerpt && <div className="mt-1 text-[11px] text-ink-4 truncate">↳ {meta.anchorExcerpt}</div>}
+      {meta.anchorExcerpt && (
+        <div className="mt-1 text-[11px] text-ink-4 truncate">
+          ↳ {meta.anchorExcerpt}
+        </div>
+      )}
       {meta.action === "closed" && (
-        <div className="mt-1.5 text-xs text-ink-2 leading-relaxed">{meta.summary ? <><span className="font-semibold text-ink-1">Summary</span> · {meta.summary}</> : <span className="text-ink-3">No summary.</span>}</div>
+        <div className="mt-1.5 text-xs text-ink-2 leading-relaxed">
+          {meta.summary ? (
+            <>
+              <span className="font-semibold text-ink-1">Summary</span> ·{" "}
+              {meta.summary}
+            </>
+          ) : (
+            <span className="text-ink-3">No summary.</span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -357,7 +542,8 @@ function KnowledgeEventCard({
   meta: KnowledgeEventMeta;
   onPreview?: () => void;
 }) {
-  const verb = meta.tool === "write" ? "updated the document" : "edited the document";
+  const verb =
+    meta.tool === "write" ? "updated the document" : "edited the document";
   return (
     <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
       <div className="flex items-center gap-2 text-xs text-ink-3">
@@ -365,7 +551,10 @@ function KnowledgeEventCard({
         <span className="flex-1 min-w-0">
           <span className="font-medium text-ink-2">{meta.actor}</span> {verb}{" "}
           {onPreview ? (
-            <button onClick={onPreview} className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline">
+            <button
+              onClick={onPreview}
+              className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline"
+            >
               {meta.title}
             </button>
           ) : (
@@ -377,7 +566,12 @@ function KnowledgeEventCard({
             outside room space
           </span>
         )}
-        <span className="font-mono text-[10px] text-ink-4 truncate max-w-[200px]" title={meta.path}>{meta.path}</span>
+        <span
+          className="font-mono text-[10px] text-ink-4 truncate max-w-[200px]"
+          title={meta.path}
+        >
+          {meta.path}
+        </span>
       </div>
     </div>
   );
@@ -404,9 +598,13 @@ export function MessageArtifactChips({
 }) {
   if (!artifacts.length) return null;
   return (
-    <div className={`${compact ? "mt-2" : "ml-11 mt-1.5"} flex flex-col gap-1.5 max-w-2xl`}>
+    <div
+      className={`${compact ? "mt-2" : "ml-11 mt-1.5"} flex flex-col gap-1.5 max-w-2xl`}
+    >
       {artifacts.map((artifact, index) => {
-        const active = activeArtifactPreview?.messageId === messageId && activeArtifactPreview.selectedIndex === index;
+        const active =
+          activeArtifactPreview?.messageId === messageId &&
+          activeArtifactPreview.selectedIndex === index;
         const kind = artifactKind(artifact);
         return (
           <div
@@ -414,11 +612,26 @@ export function MessageArtifactChips({
             className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-[11px] ${active ? "border-accent/40 bg-accent-dim/50" : "border-line-soft bg-surface-0/30"}`}
           >
             <FileText size={11} className="shrink-0 text-ink-4" />
-            <span className="uppercase font-bold text-[8px] text-ink-4 shrink-0">{kind}</span>
-            <span className="font-mono truncate text-ink-3 flex-1 min-w-0" title={artifact}>{artifact}</span>
+            <span className="uppercase font-bold text-[8px] text-ink-4 shrink-0">
+              {kind}
+            </span>
+            <span
+              className="font-mono truncate text-ink-3 flex-1 min-w-0"
+              title={artifact}
+            >
+              {artifact}
+            </span>
             {onPreviewArtifact && (
               <button
-                onClick={() => onPreviewArtifact({ kind: "message", messageId: messageId, title: "Artifacts", artifacts, selectedIndex: index })}
+                onClick={() =>
+                  onPreviewArtifact({
+                    kind: "message",
+                    messageId: messageId,
+                    title: "Artifacts",
+                    artifacts,
+                    selectedIndex: index,
+                  })
+                }
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-accent-ink hover:bg-accent-dim cursor-pointer shrink-0"
               >
                 <Eye size={11} />
@@ -432,7 +645,10 @@ export function MessageArtifactChips({
   );
 }
 
-export function shouldShowDateSeparator(prev: RoomMessage | null, current: RoomMessage): boolean {
+export function shouldShowDateSeparator(
+  prev: RoomMessage | null,
+  current: RoomMessage,
+): boolean {
   if (!prev) return true;
   return !isSameLocalDate(prev.ts, current.ts);
 }
@@ -442,7 +658,7 @@ export { isGroupedWithPrev };
 export function DateSeparator({ ts }: { ts: number }) {
   const formatted = formatMessageDateSeparator(ts);
   return (
-    <div className="flex items-center gap-3 my-4">
+    <div className="bm-date-separator">
       <div className="flex-1 border-t border-line-soft" />
       <span className="text-xs text-ink-4">{formatted}</span>
       <div className="flex-1 border-t border-line-soft" />

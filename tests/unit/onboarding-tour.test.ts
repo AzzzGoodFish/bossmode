@@ -117,11 +117,11 @@ describe("onboarding geometry", () => {
 });
 
 describe("onboarding product anchors (source)", () => {
-  it("wires data-tour anchors and Help/tour entry points", () => {
+  it("wires data-tour anchors and the account-menu tour entry", () => {
     const sidebar = source("web/src/components/Sidebar.tsx");
     expect(sidebar).toContain('data-tour="new-room"');
     expect(sidebar).toContain('data-tour="settings"');
-    expect(sidebar).toContain("HelpMenu");
+    expect(sidebar).toContain('data-tour="help"');
     expect(sidebar).toContain("onReplayTour");
 
     const settings = source("web/src/pages/SettingsPage.tsx");
