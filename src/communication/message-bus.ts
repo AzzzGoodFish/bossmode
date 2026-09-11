@@ -25,14 +25,14 @@ export function onMessage(fn: MessageListener): () => void {
 /**
  * Unified message posting: write to store + WS broadcast + notify listeners.
  * All message sources (API, tool callback, MCP) call this.
- * Optional `extra` fields are spread into the stored message (e.g. type, task_event_meta).
+ * Optional `extra` fields are spread into the stored message (e.g. type, knowledge_event_meta).
  */
 export function postMessage(
   roomId: string,
   sender: string,
   content: string,
   mentions: string[] = [],
-  extra?: Partial<Pick<RoomMessage, "type" | "task_event_meta" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "autoDelivered" | "replyTo">>,
+  extra?: Partial<Pick<RoomMessage, "type" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "autoDelivered" | "replyTo">>,
 ): RoomMessage {
   const message = appendCapturedMessage(roomId, { sender, content, mentions, ...extra });
   // A microtask runs after any enclosing synchronous business transaction has

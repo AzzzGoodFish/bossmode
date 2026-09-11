@@ -1,6 +1,5 @@
 import { coreFixture } from "../helpers/core-fixture.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { TasksRepository } from "../../src/storage/repositories/tasks.js";
 
 /** Domain seed helpers over the shared complete current schema, never an old projection. */
 export function conversationsFixture() {
@@ -10,7 +9,6 @@ export function conversationsFixture() {
     ...storage,
     get db() { return storage.db; },
     repository,
-    tasks: () => new TasksRepository(),
     member(id: string, name: string, createdAt = 1) {
       storage.db.run(`INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at)
         VALUES (?,?,?,'general','{}',?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,name_key=excluded.name_key,updated_at=excluded.updated_at`,

@@ -29,7 +29,7 @@ describe("createBossmodeSdkTools schema normalization", () => {
   });
 
   it("marks all-optional tools with required: []", () => {
-    for (const name of ["query_room_messages", "list_tasks"]) {
+    for (const name of ["query_room_messages", "list_scopes"]) {
       const tool = tools.find((t) => t.name === name);
       expect(tool, `tool "${name}" should exist`).toBeDefined();
       expect((tool!.parameters as { required?: unknown }).required).toEqual([]);
@@ -37,9 +37,9 @@ describe("createBossmodeSdkTools schema normalization", () => {
   });
 
   it("keeps genuinely required fields intact", () => {
-    const commentTask = tools.find((t) => t.name === "comment_task");
-    expect((commentTask!.parameters as { required?: string[] }).required).toEqual(
-      expect.arrayContaining(["taskId", "comment"]),
+    const workspaceCreate = tools.find((t) => t.name === "workspace_create");
+    expect((workspaceCreate!.parameters as { required?: string[] }).required).toEqual(
+      expect.arrayContaining(["id", "host", "user"]),
     );
   });
 
@@ -57,8 +57,8 @@ describe("createBossmodeSdkTools error surfacing", () => {
     await expect((tool.execute as any)?.("id", { query: "x" })).rejects.toThrow("boom: explicit error");
   });
 
-  it("list_tasks surfaces backend ok:false as a thrown error", async () => {
-    const tool = tools.find((t) => t.name === "list_tasks")!;
+  it("list_scopes surfaces backend ok:false as a thrown error", async () => {
+    const tool = tools.find((t) => t.name === "list_scopes")!;
     await expect((tool.execute as any)?.("id", {})).rejects.toThrow("boom: explicit error");
   });
 });

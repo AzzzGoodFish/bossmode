@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, BookOpen, FileText, Plus, Pencil, ArrowRight, Trash2, Eye, MessagesSquare, ArrowDown } from "lucide-react";
-import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
+import { Loader2, BookOpen, FileText, Square, Eye, MessagesSquare, ArrowDown } from "lucide-react";
+import type { RoomMessage, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
 import { getTopicMessages } from "../api/client";
 import { MemberName } from "./MemberName";
 import { MessageBubble } from "./MessageBubble";
@@ -21,7 +21,6 @@ interface ChatAreaProps {
   onCloseSearch?: () => void;
   members?: string[];
   memberIdentities?: Array<{id: string; name: string}>;
-  onNavigateToTask?: (taskId: string) => void;
   onPreviewArtifact?: (preview: MessageArtifactPreviewState) => void;
   onPreviewAttachment?: (preview: ChatAttachmentPreviewState) => void;
   activeArtifactPreview?: { messageId: string; selectedIndex: number } | null;
@@ -36,7 +35,7 @@ interface ChatAreaProps {
 }
 
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onNavigateToTask, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
   const [atBottom, setAtBottom] = useState(true);
@@ -229,7 +228,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                 <div key={msg.id} data-message-id={msg.id} className={`${isNewPrepend ? "msg-enter" : ""} ${highlightedId === msg.id ? "message-pulse" : ""}`} style={animDelay ? { animationDelay: animDelay } : undefined}>
                   {showDateSep && <DateSeparator ts={msg.ts} />}
                   {msg.type === "task_event" && msg.task_event_meta ? (
-                    <TaskEventCard meta={msg.task_event_meta} content={msg.content} mentions={msg.mentions} onJump={onNavigateToTask ? () => onNavigateToTask(msg.task_event_meta!.taskId) : undefined} />
+                    <RetiredTaskEventCard content={msg.content} />
                   ) : msg.type === "knowledge_event" && msg.knowledge_event_meta ? (
                     <KnowledgeEventCard
                       messageId={msg.id}
@@ -384,34 +383,15 @@ function TopicEventCard({ meta, roomId, onOpen, onJumpToAnchor }: { meta: TopicE
   );
 }
 
-function TaskEventCard({ meta, content, mentions, onJump }: { meta: TaskEventMeta; content: string; mentions?: string[]; onJump?: () => void }) {
-  const Icon = meta.action === "created" ? Plus : meta.action === "deleted" ? Trash2 : meta.action === "status_changed" ? ArrowRight : Pencil;
-  const activatedAgent = mentions?.length ? mentions[0] : null;
+function RetiredTaskEventCard({ content }: { content: string }) {
+  // Task feature retired (fish 2026-09-11): historical task_event messages stay
+  // readable as plain text — no task detail navigation, no live task identity.
   return (
     <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
       <div className="flex items-center gap-2 text-xs text-ink-3">
-        <Icon size={13} className="text-ink-4 shrink-0" />
-        <span className="flex-1">
-          {onJump && meta.action !== "deleted" ? (
-            <button onClick={onJump} className="text-accent-ink hover:opacity-80 cursor-pointer underline-offset-2 hover:underline">
-              {content}
-            </button>
-          ) : (
-            content
-          )}
-        </span>
-        {meta.newStatus && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-2 text-ink-3">
-            {meta.newStatus}
-          </span>
-        )}
+        <Square size={13} className="text-ink-4 shrink-0" />
+        <span className="flex-1">{content}</span>
       </div>
-      {meta.snippet && (
-        <div className="mt-1.5 pl-6 text-xs text-ink-4 border-l-2 border-line ml-1 leading-relaxed">{meta.snippet}</div>
-      )}
-      {activatedAgent && (
-        <div className="mt-1 text-[10px] text-ink-4">→ assigned to @{activatedAgent}</div>
-      )}
     </div>
   );
 }

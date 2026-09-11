@@ -10,17 +10,7 @@ Use this tool when:
 
 For large result sets, set output="file" — the result is written to a temp markdown file and the path is returned. Read it with the Read tool to avoid context truncation.`;
 
-export const CREATE_TASK_DESCRIPTION = `Create a task in the current room and return its id. Assignment and subscribers record ownership/watchers only; they never activate members.`;
-
-export const UPDATE_TASK_DESCRIPTION = `Update fields of an existing task (status, assignee, priority, title, description, references, subscribers). Status changes are posted as room system messages. Assignment and subscriber changes never activate members.`;
-
-export const LIST_TASKS_DESCRIPTION = `List tasks in the current room (or a target room via the scope parameter — 'room:<id>', membership-checked; tasks are room-scoped, a DM scope has no task list), optionally filtered by status or assignee. Returns id, title, status, priority, assignee, references, subscribers, and commentCount per task — comment bodies not included (use get_task).`;
-
-export const GET_TASK_DESCRIPTION = `Get full details of a task: description, references, subscribers, and comments.`;
-
-export const COMMENT_TASK_DESCRIPTION = `Add a markdown comment to a task. Comments are persisted on the task only: their content does not appear in the room stream (the room sees just a "commented on task" event) and they never activate members.`;
-
-export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / list_tasks / get_task / read_memory.`;
+export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages / read_memory.`;
 
 export const SHELL_CREATE_DESCRIPTION = `Open a persistent shell session (a real terminal) in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
 
@@ -103,19 +93,5 @@ export const PARAM_DESCRIPTIONS = {
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
   scope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
-
-  // task tools
-  taskTitle: "Task title",
-  taskDescription: "Task description (markdown)",
-  taskStatus: "todo | in-progress | review | done (default: todo)",
-  taskStatusUpdate: "New status",
-  taskPriority: "P0 | P1 | P2 (default: P1)",
-  taskAssignee: "Member name to assign",
-  taskSubscribers: "Passive watcher member names. Subscribers never activate members; use room chat exact @name only when requesting action/reply.",
-  taskId: "Task ID",
-  taskComment: "Markdown comment to append. Persisted on the task only — not shown in the room stream, does not activate members.",
-  taskStatusFilter: "Filter: todo | in-progress | review | done",
-  taskAssigneeFilter: "Filter by assignee name",
-  taskReferences: "Reference document paths or URLs (e.g., 'docs/bossmode/prds/prd-x.md'). Soft links — file existence is not validated.",
 
 } as const;

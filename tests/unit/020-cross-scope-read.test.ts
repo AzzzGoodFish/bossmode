@@ -120,21 +120,13 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(fromDm.map((m) => m.content)).toEqual(["private beta question"]);
   });
 
-  it("list_tasks / get_task: cross-room read works; DM scope rejected explicitly", async () => {
-    const { dev, roomA, roomB } = await seedWorld();
-    const taskStore = await import("../../src/workspace/task-store.js");
-    taskStore.createTask(roomB.id, { title: "beta task", createdBy: "pm" });
-
+  it("retired task tools are gone from the member surface", async () => {
+    const { dev, roomA } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
-    const tasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
-    expect(tasks.map((t) => t.title)).toEqual(["beta task"]);
-
-    const detail = (await tools.handleToolCallback("get_task", roomA.id, "dev", { scope: `room:${roomB.id}`, taskId: tasks[0].id }, { memberId: dev.id })) as string;
-    expect(detail).toContain("beta task");
-
-    const dmTasks = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { scope: `dm:${dev.id}` }, { memberId: dev.id })) as any;
-    expect(dmTasks.ok).toBe(false);
-    expect(dmTasks.error).toMatch(/room-scoped/);
+    for (const tool of ["list_tasks", "get_task", "create_task", "update_task", "comment_task"]) {
+      await expect(tools.handleToolCallback(tool, roomA.id, "dev", {}, { memberId: dev.id }))
+        .rejects.toThrow(/Unknown tool/);
+    }
   });
 
   it("supported query tools reject retired target_scope without silent fallback", async () => {
@@ -145,13 +137,6 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(Array.isArray(q)).toBe(false);
     expect(q.ok).toBe(false);
     expect(q.error).toMatch(/unknown parameter 'target_scope'/);
-    // Retired target_scope on list_tasks / get_task.
-    const lt = (await tools.handleToolCallback("list_tasks", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
-    expect(lt.ok).toBe(false);
-    expect(lt.error).toMatch(/unknown parameter 'target_scope'/);
-    const gt = (await tools.handleToolCallback("get_task", roomA.id, "dev", { taskId: "x", target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
-    expect(gt.ok).toBe(false);
-    expect(gt.error).toMatch(/unknown parameter 'target_scope'/);
   });
 
   it("list_scopes: rooms (id+name) + own DM; excludes non-member rooms", async () => {

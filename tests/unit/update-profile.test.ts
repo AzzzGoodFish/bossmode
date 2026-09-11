@@ -158,16 +158,4 @@ describe("self-only update_profile", () => {
     expect(f.registry.getMember(unrelated.id)!.title).toBeUndefined();
   });
 
-  it("keeps creator subscription on the caller when its name looks like another member ID", async () => {
-    const f = await fixture();
-    f.rooms.stampGlobalMemberIds(f.room.id, [f.peer.id, f.own.id]);
-    await f.call("update_profile", { name: f.peer.id });
-    const result: any = await f.call("create_task", { title: "ID-shaped creator name" });
-    expect(result.ok).toBe(true);
-    const { getTask } = await import("../../src/workspace/task-store.js");
-    const task = getTask(f.room.id, result.taskId)!;
-    expect(task.createdBy).toBe(f.peer.id);
-    expect(task.subscriberMemberIds).toEqual([f.own.id]);
-  });
-
 });

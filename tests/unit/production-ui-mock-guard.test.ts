@@ -10,7 +10,6 @@ describe("production UI mock guard", () => {
   it("does not let member/contact surfaces import or render mock data sources", () => {
     for (const path of [
       "pages/ChatsPage.tsx",
-      "pages/ContactsPage.tsx",
       "pages/DmPage.tsx",
       "pages/MemberCreatePage.tsx",
       "components/member-float.tsx",

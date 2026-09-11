@@ -8,7 +8,6 @@ import { MobileTopBar } from "../components/MobileTopBar";
 import { Sheet } from "../components/Sheet";
 import { ContractDriftDialog } from "../components/ContractDriftDialog";
 import { Search, Plus, Settings, X } from "lucide-react";
-import { TasksTab } from "./TasksTab";
 import {
   createRoom as apiCreateRoom,
   inviteRoomMember,
@@ -24,7 +23,6 @@ import type { WsEvent } from "../hooks/useWebSocket";
 import { ChatArea } from "../components/ChatArea";
 import { ArtifactPreviewPanel, type MessageArtifactPreviewState, type ChatAttachmentPreviewState } from "../components/ArtifactPreviewPanel";
 import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSurface";
-import { TaskPreviewSurface, TaskPreviewPanel } from "../components/TaskPreviewSurface";
 import { StationPanel } from "../components/StationPanel";
 import { ResizableRail } from "../components/ResizableRail";
 import { MessageInput } from "../components/MessageInput";
@@ -51,7 +49,6 @@ interface MainProps {
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
-  onNavigateToTask?: (roomId: string, taskId: string, from?: string) => void;
   /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
   onOpenTopicPage?: (roomId: string, topicId: string) => void;
   /** Open an unsent topic draft on a message (topic-threads v3 — creates on first send, Feishu semantics). */
@@ -61,7 +58,7 @@ interface MainProps {
   onConsumeJump?: () => void;
 }
 
-type RoomView = "chat" | "tasks";
+type RoomView = "chat";
 
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
@@ -69,7 +66,6 @@ export function Main({
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
-  onNavigateToTask,
   onOpenTopicPage,
   onOpenTopicDraft,
   pendingJump,
@@ -86,7 +82,6 @@ export function Main({
     setSurfaceExpandedRaw(v);
     localStorage.setItem("bossmode_preview_surface", v ? "expanded" : "panel");
   };
-  const [taskPreviewId, setTaskPreviewId] = useState<string | null>(null);
   // ── Topic rail (fish pick 2026-08-19: direction A + collapsible) ──
   const [topicRailOpen, toggleTopicRail] = useTopicRailOpen(selectedRoomId);
   const { topics: roomTopics, activeCount: topicActiveCount } = useRoomTopics(selectedRoomId);
@@ -201,24 +196,21 @@ export function Main({
   useEffect(() => {
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
     sessionStorage.removeItem("bossmode_main_restore_tab");
-    setView(restoreTab === "tasks" ? "tasks" : "chat");
+    setView("chat");
     setArtifactPreview(null);
-    setTaskPreviewId(null);
   }, [selectedRoomId]);
 
   // 通知 Layout 当前关注的 tab key（unread 逻辑）
   useEffect(() => {
-    const key = view === "chat" ? "room" : "tasks";
-    onActiveTabKeyChange(key);
-  }, [view, onActiveTabKeyChange]);
+    onActiveTabKeyChange("room");
+  }, [onActiveTabKeyChange]);
 
   const switchView = useCallback((v: RoomView) => {
     setView(v);
     if (v !== "chat") {
       setArtifactPreview(null);
-      setTaskPreviewId(null);
     }
-    if (selectedRoomId) onClearUnreadTab(selectedRoomId, v === "chat" ? "room" : "tasks");
+    if (selectedRoomId) onClearUnreadTab(selectedRoomId, "room");
   }, [selectedRoomId, onClearUnreadTab]);
 
   const handlePreviewResizeStart = useCallback((e: ReactMouseEvent) => {
@@ -334,10 +326,6 @@ export function Main({
         <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">
           <button onClick={() => switchView("chat")} className={segBtn(view === "chat")}>
             Chat
-            {unreadTabs?.has("room") && view !== "chat" && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent ml-1.5 align-middle" />}
-          </button>
-          <button onClick={() => switchView("tasks")} className={segBtn(view === "tasks")}>
-            Tasks
           </button>
         </div>
 
@@ -376,9 +364,8 @@ export function Main({
           />
         )}
         <div className="flex-1 flex flex-col min-w-0">
-          {view === "chat" ? (
-            <>
-              <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onNavigateToTask={selectedRoomId ? (taskId) => { setArtifactPreview(null); setTaskPreviewId(taskId); } : undefined} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setTaskPreviewId(null); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
+          <>
+            <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
                 if (!selectedRoomId) return;
                 const firstLine = (msg.content || "").split("\n").find((l) => l.trim())?.trim() ?? "";
                 const excerpt = (msg.content || "").replace(/\s+/g, " ").slice(0, 120);
@@ -391,16 +378,9 @@ export function Main({
               }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
               <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content, ...(atts?.length ? { attachments: atts } : {}) }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
             </>
-          ) : selectedRoomId ? (
-            <TasksTab
-              roomId={selectedRoomId}
-              members={displayMembers}
-              onOpenTaskDetail={(taskId) => onNavigateToTask?.(selectedRoomId, taskId, "tasks")}
-            />
-          ) : null}
         </div>
 
-        {(artifactPreview || taskPreviewId) && view === "chat" && selectedRoomId && !isMobile && (
+        {artifactPreview && view === "chat" && selectedRoomId && !isMobile && (
           <>
             <div
               role="separator"
@@ -412,30 +392,20 @@ export function Main({
               <div className="h-10 w-0.5 rounded-full bg-line-strong group-hover:bg-accent" />
             </div>
             <div className="hidden md:block shrink-0 min-h-0" style={{ width: `${previewPct}%` }}>
-              {artifactPreview ? (
-                <ArtifactPreviewPanel
-                  roomId={selectedRoomId}
-                  state={artifactPreview}
-                  onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
-                  onClose={() => setArtifactPreview(null)}
-                  variant="panel"
-                  onExpand={() => setSurfaceExpanded(true)}
-                />
-              ) : (
-                <TaskPreviewPanel
-                  roomId={selectedRoomId}
-                  taskId={taskPreviewId!}
-                  onExpand={() => setSurfaceExpanded(true)}
-                  onOpenFull={() => { const id = taskPreviewId; setTaskPreviewId(null); onNavigateToTask?.(selectedRoomId, id!, "chat"); }}
-                  onClose={() => setTaskPreviewId(null)}
-                />
-              )}
+              <ArtifactPreviewPanel
+                roomId={selectedRoomId}
+                state={artifactPreview}
+                onSelect={(selectedIndex) => setArtifactPreview((prev) => prev ? { ...prev, selectedIndex } : prev)}
+                onClose={() => setArtifactPreview(null)}
+                variant="panel"
+                onExpand={() => setSurfaceExpanded(true)}
+              />
             </div>
           </>
         )}
 
         {/* 工位墙（桌面，可拖拽调宽 fish 2026-08-21） */}
-        <ResizableRail className={`${(artifactPreview || taskPreviewId) && view === "chat" ? "hidden xl:block" : "hidden md:block"}`}>
+        <ResizableRail className={`${artifactPreview && view === "chat" ? "hidden xl:block" : "hidden md:block"}`}>
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}
@@ -476,16 +446,6 @@ export function Main({
             />
           </div>
         </Sheet>
-      )}
-
-      {taskPreviewId && selectedRoomId && (surfaceExpanded || isMobile) && (
-        <TaskPreviewSurface
-          roomId={selectedRoomId}
-          taskId={taskPreviewId}
-          onOpenFull={() => { const id = taskPreviewId; setTaskPreviewId(null); onNavigateToTask?.(selectedRoomId, id!, "chat"); }}
-          onCollapse={!isMobile ? () => setSurfaceExpanded(false) : undefined}
-          onClose={() => setTaskPreviewId(null)}
-        />
       )}
 
       {artifactPreview && selectedRoomId && surfaceExpanded && (

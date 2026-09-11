@@ -261,7 +261,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
               {inviteOpen && (
                 <div className="rounded-lg border border-line bg-surface-1 divide-y divide-line-soft max-h-44 overflow-y-auto">
                   {inviteCandidates.length === 0 ? (
-                    <p className="px-3 py-3 text-xs text-ink-4">Every contact is already in this room. Hire a new member from Contacts first.</p>
+                    <p className="px-3 py-3 text-xs text-ink-4">Every contact is already in this room. Hire a new member from the Chats panel first.</p>
                   ) : (
                     inviteCandidates.map((c) => (
                       <button

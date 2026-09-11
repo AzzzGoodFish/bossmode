@@ -1,6 +1,6 @@
 // WYSIWYG Markdown editor — lazy-loaded MDXEditor wrapper
 // Minimal chrome: no toolbar, pure markdown shortcuts (`# `, `- `, ` ``` `, etc.).
-// Only loaded when TaskDetailPage / KnowledgePage renders; zero impact on other views.
+// Only loaded when the knowledge editor renders; zero impact on other views.
 import { Suspense, lazy, useRef, useEffect, useState } from "react";
 
 // Lazy import — only loaded on demand

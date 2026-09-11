@@ -362,7 +362,7 @@ export interface PromptAssetBudget {
 
 /** Structured view of a Mainline document, parsed from the two-section markdown. */
 export interface MainlineIndexEntry {
-  kind: "doc" | "task" | "msg" | "other";
+  kind: "doc" | "msg" | "other";
   /** The reference token as written (e.g. docs/..., task:<id>, msg:#<seq>); empty for non-reference lines. */
   ref: string;
   /** Trailing note after the ref (the em-dash separated remark), or the full line for non-reference entries. */
@@ -464,7 +464,8 @@ export interface RoomMessage {
   urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event" | "topic_event";
-  task_event_meta?: TaskEventMeta;
+  /** Historical task_event payload (task feature retired 2026-09-11) — kept only so old stored messages still type-check. */
+  task_event_meta?: { action: string; taskId: string; taskTitle: string; newStatus?: string; commentId?: string; actor: string; snippet?: string };
   knowledge_event_meta?: KnowledgeEventMeta;
   topic_event_meta?: TopicEventMeta;
   /** Message-level deliverable/document references previewable through artifact-preview. */
@@ -518,51 +519,6 @@ export interface ArchiveSummary {
   archivedCount: number;
   range: [string, string]; // [firstId, lastId]
   ts: number;
-}
-
-// -- Task Board --
-
-export type TaskStatus = "todo" | "in-progress" | "review" | "done";
-export type TaskPriority = "P0" | "P1" | "P2";
-
-export interface TaskComment {
-  id: string;
-  author: string;
-  content: string;
-  createdAt: number;
-}
-
-export interface Task {
-  id: string;
-  roomId: string;
-  title: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  assignee?: string;       // member name snapshot
-  assigneeMemberId?: string;
-  description?: string;   // markdown stable spec / acceptance criteria
-  references?: string[];   // soft links to knowledge docs or URLs
-  subscribers?: string[];  // passive watchers; never activates members
-  subscriberMemberIds?: string[];
-  comments?: TaskComment[];
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface TaskListItem extends Omit<Task, "comments"> {
-  commentCount: number;
-}
-
-export interface TaskEventMeta {
-  action: "created" | "updated" | "status_changed" | "commented" | "deleted";
-  taskId: string;
-  taskTitle: string;
-  newStatus?: TaskStatus;
-  commentId?: string;
-  actor: string;
-  /** Short excerpt of the task description / comment body, surfaced inline in chat. */
-  snippet?: string;
 }
 
 // -- Background tasks (member-owned; result delivered only via background_wait) --
@@ -649,10 +605,7 @@ export type WsServerEvent =
   | { type: "room:message"; roomId: string; message: RoomMessage }
   | { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }
   | { type: "agent:event"; roomId: string; agent: string; memberId?: string; event: unknown }
-  | { type: "agent:context_usage"; roomId: string; agent: string; memberId?: string; usage: ContextUsage | null }
-  | { type: "task:created"; roomId: string; task: Task }
-  | { type: "task:updated"; roomId: string; task: Task }
-  | { type: "task:deleted"; roomId: string; taskId: string };
+  | { type: "agent:context_usage"; roomId: string; agent: string; memberId?: string; usage: ContextUsage | null };
 
 // -- WebSocket Commands (client → server) --
 

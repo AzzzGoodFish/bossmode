@@ -95,20 +95,18 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
   });
 
-  it("tool surface: dm has create_room, room has wait/tasks", async () => {
+  it("tool surface: dm has create_room, room has wait", async () => {
     const { toolSurfaceForScope, familyEnabled } = await import("../../src/engine/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
     expect(dm.families).toContain("create_room");
     expect(dm.families).not.toContain("wait");
     expect(dm.families).not.toContain("memory");
-    expect(dm.families).not.toContain("tasks");
 
     const room = toolSurfaceForScope("room:r1", { isRoomLeader: false });
     expect(room.families).toContain("wait");
     expect(room.families).not.toContain("memory");
     expect(room.families).toContain("edit_room"); // any member
-    expect(room.families).toContain("tasks");
     expect(room.families).not.toContain("create_room");
     expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: false })).toBe(true);
     expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: true })).toBe(true);

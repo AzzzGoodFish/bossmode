@@ -10,6 +10,7 @@ import {importLegacyConversations} from "./upgrade-conversations.js";
 import {importLegacyExecution} from "./upgrade-execution.js";
 import {importLegacyDocuments} from "./upgrade-documents.js";
 import {importAgentTemplates} from "../workforce/template-files.js";
+import {archiveRetiredTasks} from "./task-retirement.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
@@ -44,6 +45,9 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
   onProgress:options.onProgress,
   collectLegacySources:async root=>{assertNoMissingMemberDatabase(root);entries=discoverLegacyInventory(root).entries;return entries;},
   verifyReady:db=>verifyActiveMemberAssets(options.root,db),
+  // Task feature retirement (fish #19259): export the four task tables to a verified
+  // archive before the core-task-retirement-v1 migration drops them.
+  archiveRetiredData:(stagingDb,root)=>{archiveRetiredTasks(stagingDb,root);},
   importData:async ctx=>{
    if(!ctx.legacy)return;
    const consumed=new Set<string>();const add=(paths:Iterable<string>)=>{for(const path of paths)consumed.add(path);};

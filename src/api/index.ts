@@ -101,7 +101,6 @@ async function ensureRoutesRegistered(): Promise<void> {
   await import("./engine-routes.js");
   await import("./mcp.js");
   await import("./fs.js");
-  await import("./tasks.js");
   await import("./artifacts.js");
   await import("./usage.js");
 }

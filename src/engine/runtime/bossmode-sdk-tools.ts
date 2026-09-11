@@ -4,12 +4,7 @@ import { buildChatToolDescription, CHAT_MESSAGE_PARAM_DESCRIPTION } from "../../
 import { renderQueryRowsForMember } from "../query-render.js";
 import {
   QUERY_ROOM_MESSAGES_DESCRIPTION,
-  CREATE_TASK_DESCRIPTION,
-  UPDATE_TASK_DESCRIPTION,
-  LIST_TASKS_DESCRIPTION,
   LIST_SCOPES_DESCRIPTION,
-  GET_TASK_DESCRIPTION,
-  COMMENT_TASK_DESCRIPTION,
   WAIT_DESCRIPTION,
   RELOAD_DESCRIPTION,
   WORKSPACE_LIST_DESCRIPTION,
@@ -129,43 +124,6 @@ export function createBossmodeSdkTools(opts: {
     }),
 
     defineTool({
-      name: "create_task",
-      label: "Create Task",
-      description: CREATE_TASK_DESCRIPTION,
-      parameters: Type.Object({
-        title: Type.String({ description: PARAM_DESCRIPTIONS.taskTitle }),
-        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskDescription })),
-        status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatus })),
-        priority: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskPriority })),
-        assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
-        references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
-        subscribers: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskSubscribers })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("create_task", params as any) as any;
-        return data?.ok ? textResult("Task created: " + data.taskId + " — " + data.title) : textResult("Failed: " + data?.error);
-      },
-    }),
-    defineTool({
-      name: "update_task",
-      label: "Update Task",
-      description: UPDATE_TASK_DESCRIPTION,
-      parameters: Type.Object({
-        taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
-        title: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskTitle })),
-        status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatusUpdate })),
-        priority: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskPriority })),
-        assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssignee })),
-        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskDescription })),
-        references: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskReferences })),
-        subscribers: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.taskSubscribers })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("update_task", params as any) as any;
-        return data?.ok ? textResult("Task updated: " + data.taskId + " — status: " + data.status) : textResult("Failed: " + data?.error);
-      },
-    }),
-    defineTool({
       name: "list_scopes",
       label: "List Scopes",
       description: LIST_SCOPES_DESCRIPTION,
@@ -176,47 +134,6 @@ export function createBossmodeSdkTools(opts: {
         const scopes = Array.isArray(data?.scopes) ? data.scopes : [];
         if (scopes.length === 0) return textResult("No scopes found.");
         return textResult(scopes.map((s: any) => `- ${s.name} (${s.scope})`).join("\n"));
-      },
-    }),
-    defineTool({
-      name: "list_tasks",
-      label: "List Tasks",
-      description: LIST_TASKS_DESCRIPTION,
-      parameters: Type.Object({
-        status: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskStatusFilter })),
-        assignee: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.taskAssigneeFilter })),
-        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("list_tasks", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Failed to load tasks");
-        const tasks = Array.isArray(data) ? data : [];
-        if (tasks.length === 0) return textResult("No tasks found.");
-        return textResult(tasks.map((t) => "[" + t.status + "] " + t.priority + " " + t.title + (t.assignee ? " (@" + t.assignee + ")" : "") + (t.commentCount ? " comments:" + t.commentCount : "") + " id:" + t.id).join("\n"));
-      },
-    }),
-    defineTool({
-      name: "get_task",
-      label: "Get Task",
-      description: GET_TASK_DESCRIPTION,
-      parameters: Type.Object({
-        taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }),
-        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("get_task", params as any) as any;
-        if (data?.ok === false) return textResult("Failed: " + data.error);
-        return textResult(typeof data === "string" ? truncate(data) : truncate(JSON.stringify(data, null, 2)));
-      },
-    }),
-    defineTool({
-      name: "comment_task",
-      label: "Comment Task",
-      description: COMMENT_TASK_DESCRIPTION,
-      parameters: Type.Object({ taskId: Type.String({ description: PARAM_DESCRIPTIONS.taskId }), comment: Type.String({ description: PARAM_DESCRIPTIONS.taskComment }) }),
-      execute: async (_id, params) => {
-        const data = await call("comment_task", params as any) as any;
-        return data?.ok ? textResult("Comment added: " + data.commentId + " on " + data.taskId) : textResult("Failed: " + data?.error);
       },
     }),
     // ── Batch 7 P1: workspace tools + file tool overrides (read/write/edit
@@ -562,7 +479,7 @@ export function createBossmodeSdkTools(opts: {
 
     // Strip room-only write tools from the DM surface (reads — list_tasks,
     // get_task — stay: they accept a target scope since 0.20.0 flagship ①).
-    const dmDeny = new Set(["create_task", "update_task", "comment_task", "wait"]);
+    const dmDeny = new Set(["wait"]);
     for (let i = tools.length - 1; i >= 0; i--) {
       if (dmDeny.has(tools[i].name)) tools.splice(i, 1);
     }

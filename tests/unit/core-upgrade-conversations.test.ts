@@ -8,7 +8,6 @@ import {discoverLegacyInventory} from "../../src/storage/legacy-inventory.js";
 import {importLegacyConversations} from "../../src/storage/upgrade-conversations.js";
 import {readMessages,readArchivedMessages,appendMessageInTransaction} from "../../src/storage/message-repository.js";
 import {ConversationsRepository} from "../../src/storage/repositories/conversations.js";
-import {TasksRepository} from "../../src/storage/repositories/tasks.js";
 import {UserCursorRepository} from "../../src/storage/repositories/user-cursor-repository.js";
 import {prepareStorageUpgrade,type UpgradeImportContext} from "../../src/storage/upgrade-runner.js";
 let db:Database|undefined;let root:string|undefined;
@@ -23,7 +22,7 @@ function setup(files:Record<string,string>){
  const ctx:UpgradeImportContext={db,root,sourceRoot,previousDatabase:undefined,sourceFiles:entries.map(e=>e.path),legacy:true,progress(){},stageAsset(){throw new Error("unexpected body");}};
  return {ctx,entries};
 }
-it("preserves room/topic/DM facts, explicit empty rosters, task history and independent cursors",async()=>{
+it("preserves room/topic/DM facts, explicit empty rosters and independent cursors (legacy task files archived)",async()=>{
  const topic={id:"topic-one",roomId:room.id,title:"Topic",anchorMessageId:message.id,createdBy:"old-label",createdAt:3,status:"active",seedMode:"fresh",participants:[]};
  const task={id:"task-one",roomId:room.id,title:"Task",status:"todo",priority:"P1",createdBy:"historic",createdAt:1,updatedAt:2,assignee:"old-label",subscriberMemberIds:[],subscribers:["old-label"],comments:[{id:"c1",author:"historic",content:"literal",createdAt:1}]};
  const {ctx,entries}=setup({
@@ -41,7 +40,10 @@ it("preserves room/topic/DM facts, explicit empty rosters, task history and inde
  expect(new ConversationsRepository(ctx.db).getTopic(room.id,topic.id)).toEqual(topic);
  expect(readMessages(room.id,ctx.db)).toEqual([message]);expect(readMessages("dm:mem_one",ctx.db)[0].id).toBe("dm-message");
  expect(readMessages("topic:topic-one",ctx.db)[0].id).toBe("topic-message");
- expect(new TasksRepository(ctx.db).get(room.id,task.id)).toMatchObject(task);
+ // Legacy task files are consumed (archived, not imported): the source is not left unhandled.
+ const {existsSync,readdirSync}=await import("node:fs");
+ expect(existsSync(join(root!,"archive"))).toBe(true);
+ expect(readdirSync(join(root!,"archive")).some((n)=>n.startsWith("task-retirement-"))).toBe(true);
  expect(new UserCursorRepository(ctx.db).get(room.id)?.updatedAt).toBe(10);
  expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
  expect(appendMessageInTransaction(ctx.db,room.id,{sender:"user",content:"next",mentions:[]}).seq).toBe(20);

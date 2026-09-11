@@ -30,7 +30,7 @@ describe("linear teardown", () => {
     await new Promise<void>((r) => ts.server.close(() => r()));
   });
 
-  it("task payloads carry no linear fields", async () => {
+  it("task endpoints and linear fields are gone", async () => {
     const ts = await createTestServer();
     const token = await login(ts.port);
     const { mkdtempSync } = await import("node:fs");
@@ -41,13 +41,11 @@ describe("linear teardown", () => {
       token, body: { name: "teardown-room", cwd, memberIds: [] },
     });
     const roomId = JSON.parse(room.body).id as string;
+    // The Task feature is retired: the create route no longer exists.
     const task = await jsonRequest(ts.port, "POST", `/api/rooms/${roomId}/tasks`, {
       token, body: { title: "no-linear", createdBy: "testuser" },
     });
-    expect(task.status).toBe(200);
-    expect(JSON.parse(task.body).linearIssueId).toBeUndefined();
-    expect(JSON.parse(task.body).linearSyncError).toBeUndefined();
-    expect(JSON.stringify(JSON.parse(task.body))).not.toContain("linearIssue");
+    expect(task.status).toBe(404);
     await new Promise<void>((r) => ts.server.close(() => r()));
   });
 });

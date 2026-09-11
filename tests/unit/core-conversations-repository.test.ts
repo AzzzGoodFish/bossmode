@@ -218,19 +218,21 @@ describe("normalized conversation authority", () => {
     expect(getTopicById(t.id)).toMatchObject({ title: "Topic", brief: "Scope", participants: ["mem_unknown"] });
   });
 
-  it("deletes owned room/topic/task relations, but never member identities or another DM", () => {
+  it("deletes owned room/topic relations, but never member identities or another DM", () => {
     const room = f.room();
     const other = f.room("other");
     f.member("mem_a", "alive");
     ensureDmScope("mem_a");
     f.repository().upsertTopic(topic(room.id));
     f.repository().setCursor(`topic:${topic(room.id).id}`, "mem_a", null);
-    f.tasks().upsert({ id: "task", roomId: room.id, title: "t", status: "todo", priority: "P1", createdBy: "user", createdAt: 0, updatedAt: 0,
-      subscribers: ["user"], references: ["doc"], comments: [{ id: "c", content: "c", author: "old", createdAt: 0 }] });
     expect(deleteRoom(room.id)).toBe(true);
     expect(deleteRoom(room.id)).toBe(false);
-    for (const table of ["tasks", "task_comments", "task_references", "task_subscribers", "topics", "topic_participants", "read_cursors"]) {
+    for (const table of ["topics", "topic_participants", "read_cursors"]) {
       expect(f.db.get<{ n: number }>(`SELECT COUNT(*) n FROM ${table}`)!.n).toBe(0);
+    }
+    // Task tables are retired and gone from the schema entirely.
+    for (const table of ["tasks", "task_comments", "task_references", "task_subscribers"]) {
+      expect(f.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", table)).toBeUndefined();
     }
     expect(f.repository().getRoom(other.id)).not.toBeNull();
     expect(f.db.get("SELECT * FROM members WHERE id='mem_a'")).toBeDefined();

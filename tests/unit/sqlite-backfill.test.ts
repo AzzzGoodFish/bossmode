@@ -5,7 +5,6 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
 import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
 import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
-import { TasksRepository } from "../../src/storage/repositories/tasks.js";
 import { readUsageReport } from "../../src/storage/usage-repository.js";
 import { readStats, rebuildEventAggregates } from "../../src/storage/event-repository.js";
 
@@ -57,13 +56,21 @@ describe("strict historical event and task imports, not projection backfill", ()
     expect(readStats("room", "legacy-unresolved:historical")).toEqual(stats);
     expect(fixture.db.all("SELECT * FROM outbox")).toEqual([]);
   });
-  it("imports task ownership from its source path, preserving missing/stale embedded IDs and full comments", async () => {
+  it("archives legacy task files instead of importing them (task feature retired)", async () => {
     file("rooms/room/room.json", JSON.stringify({ id: "room", name: "room", members: [], createdAt: 1 }));
     const common = { title: "Activity", status: "todo", priority: "P1", assignee: "old-label", createdBy: "historic", createdAt: 1, updatedAt: 2, comments: [{ id: "c1", author: "old-label", content: "literal", createdAt: 1 }] };
     file("rooms/room/tasks.json", JSON.stringify([{ ...common, id: "missing" }, { ...common, id: "stale", roomId: "other" }]));
-    await runImport();
-    expect(new TasksRepository().list("room")).toMatchObject([{ ...common, id: "missing", roomId: "room" }, { ...common, id: "stale", roomId: "room" }]);
-    expect(new TasksRepository().list("other")).toEqual([]);
+    const consumed = await runImport();
+    // The legacy source is consumed (never left as an unhandled missing adapter) and
+    // preserved verbatim in the retirement archive.
+    expect(consumed.has("rooms/room/tasks.json")).toBe(true);
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const archiveRoot = join(fixture.root, "archive");
+    const dir = readdirSync(archiveRoot).find((n) => n.startsWith("task-retirement-"))!;
+    expect(dir).toBeTruthy();
+    const archived = readdirSync(join(archiveRoot, dir)).find((n) => n.startsWith("legacy-source__") && n.includes("tasks.json"))!;
+    expect(archived).toBeTruthy();
+    expect(JSON.parse(readFileSync(join(archiveRoot, dir, archived), "utf8"))).toHaveLength(2);
   });
   it("preserves known, omitted and blank model buckets and every usage dimension", async () => {
     events("historical", [end(100, "p/m"), end(50, "p/m"), end(20), end(10, "  ")]);

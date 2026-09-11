@@ -92,7 +92,7 @@ export function HelpMenu({ onReplayTour }: HelpMenuProps) {
           {aboutOpen && (
             <div className="px-3.5 pb-3 pt-0 text-[11.5px] text-ink-3 border-t border-line-soft">
               <div className="font-semibold text-ink-1 mt-2 mb-0.5">Bossmode</div>
-              <p>Run work with your member team — roles, chat, tasks and shared memory.</p>
+              <p>Run work with your member team — roles, chat and shared memory.</p>
             </div>
           )}
         </div>

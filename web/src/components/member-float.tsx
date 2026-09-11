@@ -14,7 +14,7 @@ import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
  * from anywhere with useMemberFloat().open(memberId, scopeId?).
  *   scopeId `room:<id>`   → scope view tagged "this room"
  *   scopeId `dm:<member>` → scope view tagged "this DM"
- *   absent (Contacts)     → global-only: Profile + Settings (no Activity tab)
+ *   absent (global)       → global-only: Profile + Settings (no Activity tab)
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Info, Loader2, SendHorizonal, X } from "lucide-react";
@@ -620,7 +620,7 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
 
 /** The member's assembled system prompt for the current scope — same compiler
  * as activation, byte-identical (fish 2026-09-02 item 5). Falls back to the
- * member's DM scope when the float is opened globally (Contacts). */
+ * member's DM scope when the float is opened globally (chat list). */
 function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: MemberScopeInfo | null }) {
   const [doc, setDoc] = useState<MemberSystemPromptDoc | null>(null);
   const [failed, setFailed] = useState(false);

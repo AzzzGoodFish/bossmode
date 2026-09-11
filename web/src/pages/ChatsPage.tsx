@@ -52,7 +52,7 @@ export function ChatsPage({ onOpenDm, onOpenRoom }: {
         ) : sorted.length === 0 ? (
           <div className="rounded-xl border border-line bg-inset/50 py-14 text-center">
             <div className="text-sm font-medium text-ink-2 mb-1">No conversations yet</div>
-            <div className="text-xs text-ink-3">Open a DM from Contacts, or create a room.</div>
+            <div className="text-xs text-ink-3">Open a DM from the chat list, or create a room.</div>
           </div>
         ) : (
           <div className="rounded-xl border border-line bg-inset/50 overflow-hidden">

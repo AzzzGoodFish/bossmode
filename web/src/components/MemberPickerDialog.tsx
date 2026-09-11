@@ -51,7 +51,7 @@ function OpenMemberPicker({ onClose, selectedMemberIds, onPickMember }: MemberPi
       <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-ink-1">Add member</h2>
-          <p className="mt-0.5 text-xs text-ink-4">Choose an existing contact. Create new members in Contacts first.</p>
+          <p className="mt-0.5 text-xs text-ink-4">Choose an existing contact. Create new members from the Chats panel first.</p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close member picker" className="rounded-md p-1 text-ink-4 hover:bg-surface-2 hover:text-ink-1">
           <X size={18} />
@@ -67,7 +67,7 @@ function OpenMemberPicker({ onClose, selectedMemberIds, onPickMember }: MemberPi
             <button type="button" onClick={() => setAttempt((value) => value + 1)} className="rounded border border-blocked/40 px-2 py-1">Retry</button>
           </div>
         ) : displayState === "empty" ? (
-          <p className="py-6 text-center text-sm text-ink-4">No contacts yet. Create a member in Contacts, then return here.</p>
+          <p className="py-6 text-center text-sm text-ink-4">No contacts yet. Create a member from the Chats panel, then return here.</p>
         ) : (
           <div className="space-y-2">
             {contacts.every((member) => selected.has(member.id)) && (

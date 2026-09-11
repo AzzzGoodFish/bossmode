@@ -9,7 +9,9 @@ function database(){const root=mkdtempSync(join(tmpdir(),"core-plan-"));roots.pu
 afterEach(()=>{for(const db of handles.splice(0))db.close();for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
 it("applies every domain with explicit ordering and leaves no invalid foreign keys",()=>{
  const db=database();applyStorageMigrations(db,coreStorageMigrations);
- for(const table of ["members","rooms","tasks","messages","agent_events","memory_documents","member_archives","mcp_oauth_entries"]){expect(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table)).toBeDefined();}
+ for(const table of ["members","rooms","messages","agent_events","memory_documents","member_archives","mcp_oauth_entries"]){expect(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table)).toBeDefined();}
+ // Task tables are retired: the migration plan ends by dropping them.
+ for(const table of ["tasks","task_references","task_subscribers","task_comments"]){expect(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",table)).toBeUndefined();}
  expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
  expect(db.get<{integrity_check:string}>("PRAGMA integrity_check")?.integrity_check).toBe("ok");
  db.run("INSERT INTO storage_meta VALUES ('test-preserved','yes')");
@@ -26,6 +28,7 @@ it("preserves converted member authority while replacing only old projection tab
  db.run("INSERT INTO members VALUES (?,?,?,?,?,?,?,?)","mem_retained","言实","言实","Engineer","general",'{"skills":[],"model":null}',1,2);
  applyStorageMigrations(db,coreStorageMigrations);
  expect(db.get("SELECT id,name,title,global_json,archived_at FROM members")).toMatchObject({id:"mem_retained",name:"言实",title:"Engineer",global_json:'{"skills":[],"model":null}',archived_at:null});
- expect(db.all("SELECT * FROM tasks")).toEqual([]);
+ // The legacy tasks projection is dropped by the retirement migration.
+ expect(db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'")).toBeUndefined();
  expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
 });

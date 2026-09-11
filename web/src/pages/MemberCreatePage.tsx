@@ -1,7 +1,7 @@
 /**
  * MemberCreatePage — import-only (batch-1 identity rework, fish 2026-08-25).
  *
- * New members are created one-click from the Contacts header (zero form — the
+ * New members are created one-click from the Chats panel (zero form — the
  * backend assigns a unique default name, the member wakes up in its DM). This
  * page keeps the remaining reason to visit: importing a member from a legacy /
  * fired archive (memory comes back, chat windows start fresh).
@@ -47,7 +47,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
       <div className="w-full px-6 md:px-10 pt-7 pb-16">
-        <BackLink label="Contacts" onClick={onBack} />
+        <BackLink label="Chats" onClick={onBack} />
 
         <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Import member</h1>
         <p className="text-[12.5px] text-ink-3 mt-1 mb-6">
@@ -62,7 +62,7 @@ export function MemberCreatePage({ onBack, onCreated }: {
         ) : archives.length === 0 ? (
           <div className="rounded-xl border border-line-soft bg-surface-1 px-4 py-8 text-center">
             <div className="text-[13px] text-ink-3">No archived members.</div>
-            <div className="text-[11.5px] text-ink-4 mt-1">Fired or legacy members show up here. To hire a new one, use New member on the Contacts page.</div>
+            <div className="text-[11.5px] text-ink-4 mt-1">Fired or legacy members show up here. To hire a new one, use New member in the Chats panel.</div>
           </div>
         ) : (
           <div className="space-y-2">

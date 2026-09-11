@@ -1,7 +1,7 @@
 // Mainline store — member-level runtime-layer prompt memory asset.
 // Single markdown file, two sections: `## Focus` (domain cornerstones) and
-// `## Dynamic Index` (pinned refs: docs/..., task:<id>, msg:#<seq>).
-// The index stores pointers only — chat/tasks/docs remain the source of truth.
+// `## Dynamic Index` (pinned refs: docs/..., msg:#<seq>).
+// The index stores pointers only — chat/docs remain the source of truth.
 // References are resolved at read/inject time; unresolvable lines are honestly
 // marked `[stale]`, never silently deleted.
 import { existsSync, readFileSync } from "node:fs";
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
 import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../shared/types.js";
-import { getTask } from "./task-store.js";
+import { logger } from "../foundation/logger.js";
 import { readAllMessages } from "./message-store.js";
 import { readAllDmMessages } from "./dm-message-store.js";
 import { entryExists } from "../knowledge/store.js";
@@ -148,7 +148,6 @@ export function buildMsgLookup(messages: ReturnType<typeof readAllMessages>): Ma
 
 type RefToken =
   | { kind: "docs"; path: string }
-  | { kind: "task"; id: string }
   | { kind: "msg-seq"; seq: number }
   | { kind: "msg-id"; id: string };
 
@@ -161,7 +160,6 @@ type RefToken =
 export function parseIndexRef(body: string): { ref: RefToken; raw: string } | null {
   const token = body.trim().split(/\s+/)[0] || "";
   if (/^docs\/\S+$/.test(token)) return { ref: { kind: "docs", path: token }, raw: token };
-  if (/^task:\S+$/.test(token)) return { ref: { kind: "task", id: token.slice("task:".length) }, raw: token };
   if (/^msg:#\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("msg:#".length), 10) }, raw: token };
   if (/^msg:\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("msg:".length), 10) }, raw: token };
   if (/^No\.\d+$/.test(token)) return { ref: { kind: "msg-seq", seq: parseInt(token.slice("No.".length), 10) }, raw: token };
@@ -175,12 +173,6 @@ function resolveRef(ref: RefToken, ctx: { roomId: string; messages: ReturnType<t
     case "docs": {
       const stripped = ref.path.replace(/^docs\//, "");
       return entryExists(stripped) || entryExists(ref.path);
-    }
-    case "task": {
-      // Canonical task ids always carry the `task-` prefix; the ref's id part may be
-      // written with it (`task:task-7bbf2d48`) or without (`task:7bbf2d48`) — same reference.
-      const taskId = ref.id.startsWith("task-") ? ref.id : `task-${ref.id}`;
-      return getTask(ctx.roomId, taskId) !== null;
     }
     case "msg-seq":
       return ctx.messages.some((m) => (m as { seq?: number }).seq === ref.seq);
@@ -226,7 +218,7 @@ export function parseMainline(content: string, msgLookup?: Map<string, { msgId: 
       continue;
     }
     const note = body.slice(body.indexOf(parsed.raw) + parsed.raw.length).replace(/^\s*—\s*/, "").trim();
-    const kind = parsed.ref.kind === "docs" ? "doc" : parsed.ref.kind === "task" ? "task" : "msg";
+    const kind = parsed.ref.kind === "docs" ? "doc" : "msg";
     let msgId: string | undefined;
     let summary: string | undefined;
     if (kind === "msg" && msgLookup) {

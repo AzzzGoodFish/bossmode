@@ -25,7 +25,6 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
     for (const path of [
       "web/src/pages/MemberCreatePage.tsx",
       "web/src/pages/ChatsPage.tsx",
-      "web/src/pages/ContactsPage.tsx",
     ]) {
       const src = source(path);
       expect(src).not.toMatch(/max-w-(2xl|3xl|4xl) mx-auto/);
@@ -33,8 +32,8 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
     }
   });
 
-  it("keeps the member creation entry on Contacts, not duplicated in lists", () => {
-    const contacts = source("web/src/pages/ContactsPage.tsx");
-    expect(contacts).toContain("New member");
+  it("keeps the one-click member creation entry in the sidebar, not duplicated in lists", () => {
+    const sidebar = source("web/src/components/Sidebar.tsx");
+    expect(sidebar).toContain("New member");
   });
 });

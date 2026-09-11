@@ -12,7 +12,6 @@ import {
 import { Sidebar, type ActivePage } from "../components/Sidebar";
 import { OnboardingTour } from "../components/OnboardingTour";
 import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
-import { ContactsPage } from "./ContactsPage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 import { MemberCreatePage } from "./MemberCreatePage";
@@ -23,8 +22,6 @@ import { createTopic } from "../api/client";
 import { useDialog } from "../components/dialogs";
 import { MemberFloatProvider } from "../components/member-float";
 import { SettingsPage } from "./SettingsPage";
-import { AllTasksPage } from "./AllTasksPage";
-import { TaskDetailPage } from "./TaskDetailPage";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
 
 interface LayoutProps {
@@ -283,7 +280,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
   );
 
   return (
-    <MemberFloatProvider onFired={() => handleNavigate({ type: "contacts" })} liveStatuses={liveStatuses}>
+    <MemberFloatProvider onFired={() => handleNavigate({ type: "chats" })} liveStatuses={liveStatuses}>
     <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
       {/* Desktop sidebar */}
       <div className="hidden md:flex">{sidebarEl}</div>
@@ -314,7 +311,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            onNavigateToTask={(roomId, taskId, from) => setActivePage({ type: "task", roomId, taskId, from: (from as "chat" | "tasks" | "all-tasks") || "chat" })}
             onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
             onOpenTopicDraft={(roomId, anchor) => handleNavigate({ type: "topic-draft", roomId, anchorMessageId: anchor.anchorMessageId, anchorSeq: anchor.anchorSeq, anchorTitle: anchor.title, anchorExcerpt: anchor.excerpt })}
             pendingJump={pendingJump}
@@ -392,48 +388,21 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onOpenRoom={(roomId) => handleNavigate({ type: "room", id: roomId })}
           />
         )}
-        {activePage?.type === "contacts" && (
-          <ContactsPage
-            onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
-            onOpenImport={() => handleNavigate({ type: "member-create" })}
-          />
-        )}
         {activePage?.type === "member-create" && (
           <MemberCreatePage
-            onBack={() => handleNavigate({ type: "contacts" })}
+            onBack={() => handleNavigate({ type: "chats" })}
             onCreated={(memberId) => handleNavigate({ type: "dm", memberId })}
           />
         )}
         {activePage?.type === "dm" && (
           <DmPage
             memberId={activePage.memberId}
-            onBack={() => handleNavigate({ type: "contacts" })}
+            onBack={() => handleNavigate({ type: "chats" })}
           />
         )}
         {/* Settings */}
         {activePage?.type === "settings" && (
           <SettingsPage section={activePage.section ?? "models"} onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
-        )}
-        {activePage?.type === "all-tasks" && (
-          <AllTasksPage
-            onSelectTask={(roomId, taskId) => setActivePage({ type: "task", roomId, taskId, from: "all-tasks" })}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          />
-        )}
-        {activePage?.type === "task" && (
-          <TaskDetailPage
-            roomId={activePage.roomId}
-            taskId={activePage.taskId}
-            onBack={() => {
-              const from = activePage.type === "task" ? activePage.from : undefined;
-              if (from === "all-tasks") {
-                setActivePage({ type: "all-tasks" });
-              } else {
-                sessionStorage.setItem("bossmode_main_restore_tab", from === "chat" ? "room" : "tasks");
-                setActivePage({ type: "room", id: activePage.roomId });
-              }
-            }}
-          />
         )}
 
         {/* Home */}

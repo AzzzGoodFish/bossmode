@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
-import * as taskStore from "../workspace/task-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
@@ -16,12 +15,10 @@ import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages, createTopic, saveTopic, buildTopicGuideText, titleFromMessage, normalizeAnchorExcerpt } from "../workspace/topic-store.js";
 import { scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { getTopicSeedMode } from "../shared/config.js";
-import * as taskService from "../services/task-service.js";
-import type { Task, TaskStatus, TaskPriority } from "../shared/types.js";
+import type { RoomMessage } from "../shared/types.js";
 import { parseMentions, parseUrgentMentions, parseMentionMemberIds, parseUrgentMentionMemberIds } from "../communication/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import { logger } from "../foundation/logger.js";
-import type { RoomMessage } from "../shared/types.js";
 import { processAgentAttachments } from "./agent-attachments.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
@@ -118,10 +115,6 @@ export function deliverMemberMessage(roomId: string, memberId: string, text: str
     : mentionInfoFromText(text,roomStore.getRoomMembers(resolveOwningRoomId(roomId)));
   postMessage(roomId,sender.name,text,info.mentions,messageMeta({senderMemberId:memberId,...info,autoDelivered:opts?.autoDelivered}));
   logger.info("agent","finalTextDelivered",{memberId,chars:text.length,autoDelivered:opts?.autoDelivered===true});
-}
-
-function taskAssigneeMatches(roomId: string, task: Task, assigneeRef: string): boolean {
-  return taskStore.taskMatchesAssignee(roomId, task, assigneeRef);
 }
 
 function messageMeta(meta: {
@@ -492,82 +485,11 @@ export async function handleToolCallback(
       });
       return { ok: true, topicId: topic.id, scopeId, title: topic.title };
     }
-    case "create_task": {
-      try {
-        let taskRoomId=roomId;let autoTopicRef:string|undefined;
-        if(roomId.startsWith("topic:")){
-          const parent=resolveTopicRoomId(roomId.slice("topic:".length));
-          if(!parent)return {ok:false,error:`Unknown topic scope: ${roomId}`};
-          taskRoomId=parent;autoTopicRef=roomId;
-        }
-        if(taskRoomId.startsWith("dm:"))return {ok:false,error:"Tasks are room-scoped — a DM scope has no task list"};
-        let references=Array.isArray(params?.references)?params.references.map(String):[];
-        if(autoTopicRef&&!references.includes(autoTopicRef))references=[...references,autoTopicRef];
-        const task=taskService.createTask(taskRoomId,{...params,references:references.length?references:undefined},
-          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
-        return {ok:true,taskId:task.id,title:task.title,status:task.status};
-      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
-    }
-    case "update_task": {
-      const taskId=params?.taskId?String(params.taskId):"";
-      if(!taskId)return {ok:false,error:"taskId is required"};
-      try {
-        const taskRoomId=resolveChatScopeRoomId(roomId)||roomId;
-        const task=taskService.updateTask(taskRoomId,taskId,params,
-          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
-        if(!task)return {ok:false,error:`Task not found: ${taskId}`};
-        return {ok:true,taskId:task.id,title:task.title,status:task.status};
-      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
-    }
     case "list_scopes": {
       const actor = resolveMemoryActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
       const rooms = listRoomsForMember(actor.id).map((r) => ({ scope: `room:${r.id}`, name: r.name }));
       return { ok: true, scopes: [...rooms, { scope: `dm:${actor.id}`, name: "Direct message with user" }] };
-    }
-    case "list_tasks": {
-      const tActor = resolveMemoryActor(roomId, actorRef);
-      if (!tActor) return { ok: false, error: "Current member is not in this room" };
-      const tTarget = resolveReadTarget(roomId, tActor, params?.scope);
-      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
-      if (!tTarget.ok) return { ok: false, error: tTarget.error };
-      if (tTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
-      const tasksRoomId = resolveChatScopeRoomId(tTarget.roomId) || tTarget.roomId;
-      let tasks = taskStore.listTasks(tasksRoomId);
-      if (params?.status) tasks = tasks.filter((t) => t.status === params.status);
-      if (params?.assignee) tasks = tasks.filter((t) => taskAssigneeMatches(tasksRoomId, t, String(params.assignee)));
-      return tasks.map((t) => ({
-        id: t.id, title: t.title, status: t.status, priority: t.priority,
-        assignee: t.assignee, createdBy: t.createdBy,
-        references: t.references,
-        subscribers: t.subscribers,
-        commentCount: t.comments?.length ?? 0,
-      }));
-    }
-    case "get_task": {
-      const gActor = resolveMemoryActor(roomId, actorRef);
-      if (!gActor) return { ok: false, error: "Current member is not in this room" };
-      const gTarget = resolveReadTarget(roomId, gActor, params?.scope);
-      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>')" };
-      if (!gTarget.ok) return { ok: false, error: gTarget.error };
-      if (gTarget.roomId.startsWith("dm:")) return { ok: false, error: "Tasks are room-scoped — a DM scope has no task list" };
-      const taskId = params?.taskId ? String(params.taskId) : "";
-      if (!taskId) return { ok: false, error: "taskId is required" };
-      const getTaskRoomId = resolveChatScopeRoomId(gTarget.roomId) || gTarget.roomId;
-      const task = taskStore.getTask(getTaskRoomId, taskId);
-      if (!task) return { ok: false, error: `Task not found: ${taskId}` };
-      return truncateToolResult(renderTaskAsMarkdown(task));
-    }
-    case "comment_task": {
-      const taskId=params?.taskId?String(params.taskId):"";
-      if(!taskId)return {ok:false,error:"taskId is required"};
-      try {
-        const taskRoomId=resolveChatScopeRoomId(roomId)||roomId;
-        const result=taskService.commentTask(taskRoomId,taskId,String(params?.comment||""),
-          {name:actorName(),memberId:context?.memberId??resolveMemoryActor(roomId,actorRef)?.id});
-        if(!result)return {ok:false,error:`Task not found: ${taskId}`};
-        return {ok:true,taskId:result.task.id,commentId:result.comment.id};
-      }catch(error){return {ok:false,error:String((error as Error)?.message||error)};}
     }
     case "member_status": {
       // Room-scope read-only live status (same source as the member panel lamp).
@@ -1029,32 +951,6 @@ function parseTimeArg(input: string): number | undefined {
   if (!Number.isNaN(num) && num > 0) return num;
   const parsed = Date.parse(input);
   return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function renderTaskAsMarkdown(task: Task | null): string {
-  if (!task) return "Task not found.";
-  const lines = [
-    `# ${task.title}`,
-    `Status: ${task.status}`,
-    `Priority: ${task.priority}`,
-    `Assignee: ${task.assignee || "Unassigned"}`,
-    `Subscribers: ${(task.subscribers || []).join(", ") || "None"}`,
-    `References: ${(task.references || []).join(", ") || "None"}`,
-    "",
-    "## Description",
-    task.description || "(none)",
-    "",
-    "## Comments",
-  ];
-  const comments = task.comments || [];
-  if (comments.length === 0) {
-    lines.push("(none)");
-  } else {
-    for (const c of comments) {
-      lines.push(`- [${new Date(c.createdAt).toISOString()}] ${c.author}: ${c.content}`);
-    }
-  }
-  return lines.join("\n");
 }
 
 /** Resolve a message's attachments for member-facing reads (fish No.16834):

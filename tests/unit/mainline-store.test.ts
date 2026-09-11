@@ -19,12 +19,10 @@ const ACTOR = { type: "member" as const, memberId: "rm_1", name: "pm" };
 
 async function seedRefs() {
   const { addMessage } = await import("../../src/workspace/message-store.js");
-  const { createTask } = await import("../../src/workspace/task-store.js");
   mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
   writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "prd.md"), "# PRD", "utf-8");
-  const task = createTask("room-a", { title: "版本主任务", createdBy: "pm" });
   const message = addMessage("room-a", { sender: "user", content: "裁定", mentions: [] });
-  return { task, message };
+  return { message };
 }
 
 describe("mainline-store", () => {
@@ -71,17 +69,16 @@ describe("mainline-store", () => {
 
   it("edits index entries via targeted text replacement", async () => {
     const { writeMainline, editMainline, readMainline } = await import("../../src/workspace/mainline-store.js");
-    const { task } = await seedRefs();
-    const content = `## Focus\n\nF\n\n## Dynamic Index\n\n- task:${task.id} — 主任务\n`;
+    const content = `## Focus\n\nF\n\n## Dynamic Index\n\n- docs/bossmode/prd.md — PRD\n`;
     writeMainline({ roomId: "room-a", memberId: "rm_1", content, actor: ACTOR, reason: "pin" });
-    const edited = editMainline({ roomId: "room-a", memberId: "rm_1", oldText: `- task:${task.id} — 主任务`, newText: "", actor: ACTOR, reason: "task done" });
-    expect(edited.content).not.toContain(task.id);
+    const edited = editMainline({ roomId: "room-a", memberId: "rm_1", oldText: `- docs/bossmode/prd.md — PRD`, newText: "", actor: ACTOR, reason: "doc dropped" });
+    expect(edited.content).not.toContain("prd.md");
     expect(readMainline("room-a", "rm_1").revision).toBe(2);
   });
 
-  it("resolves docs/task/msg refs and marks unresolvable lines [stale] without deleting them", async () => {
+  it("resolves docs/msg refs and marks unresolvable lines [stale] without deleting them", async () => {
     const { writeMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
-    const { task, message } = await seedRefs();
+    const { message } = await seedRefs();
     const content = [
       "## Focus",
       "",
@@ -91,9 +88,6 @@ describe("mainline-store", () => {
       "",
       `- docs/bossmode/prd.md — PRD 存在`,
       `- docs/bossmode/gone.md — 已删除的文档`,
-      `- task:${task.id} — 任务存在(全 id 形式)`,
-      `- task:${task.id.replace(/^task-/, "")} — 任务存在(短形式)`,
-      `- task:task-deadbeef — 不存在的任务`,
       `- msg:${message.id} — 消息存在(id 形式)`,
       `- msg:#10235 — 尚无 seq 的消息`,
       `- 每周五发版 — 非引用行不动`,
@@ -102,10 +96,6 @@ describe("mainline-store", () => {
     const resolved = resolveMainlineRefs("room-a", content);
     expect(resolved).toContain("- docs/bossmode/prd.md — PRD 存在");
     expect(resolved).toContain("- [stale] docs/bossmode/gone.md — 已删除的文档");
-    expect(resolved).toContain(`- task:${task.id} — 任务存在(全 id 形式)`);
-    expect(resolved).toContain(`- task:${task.id.replace(/^task-/, "")} — 任务存在(短形式)`);
-    expect(resolved).not.toContain(`[stale] task:${task.id.replace(/^task-/, "")}`);
-    expect(resolved).toContain("- [stale] task:task-deadbeef — 不存在的任务");
     expect(resolved).toContain(`- msg:${message.id} — 消息存在(id 形式)`);
     expect(resolved).toContain("- [stale] msg:#10235 — 尚无 seq 的消息");
     expect(resolved).toContain("- 每周五发版 — 非引用行不动");
@@ -149,7 +139,8 @@ describe("mainline-store", () => {
 
   it("parseMainline returns structured focus + index with kind/ref/note/stale", async () => {
     const { parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
-    const { task } = await seedRefs();
+    mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
+    writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "prd.md"), "# PRD", "utf-8");
     const content = [
       "## Focus",
       "",
@@ -159,7 +150,6 @@ describe("mainline-store", () => {
       "## Dynamic Index",
       "",
       "- docs/bossmode/prd.md — PRD 文档",
-      `- task:${task.id} — 主任务`,
       "- [stale] docs/bossmode/gone.md — 已删",
       "- 每周五发版 — 非引用行",
       "- docs/bossmode/nonote.md",
@@ -170,12 +160,11 @@ describe("mainline-store", () => {
     ].join("\n");
     const parsed = parseMainline(content);
     expect(parsed.focus).toBe("产品理念 X。\n第二行。");
-    expect(parsed.index).toHaveLength(5);
+    expect(parsed.index).toHaveLength(4);
     expect(parsed.index[0]).toMatchObject({ kind: "doc", ref: "docs/bossmode/prd.md", note: "PRD 文档", stale: false });
-    expect(parsed.index[1]).toMatchObject({ kind: "task", ref: `task:${task.id}`, note: "主任务", stale: false });
-    expect(parsed.index[2]).toMatchObject({ kind: "doc", ref: "docs/bossmode/gone.md", note: "已删", stale: true });
-    expect(parsed.index[3]).toMatchObject({ kind: "other", ref: "", note: "每周五发版 — 非引用行" });
-    expect(parsed.index[4]).toMatchObject({ kind: "doc", ref: "docs/bossmode/nonote.md", note: "" });
+    expect(parsed.index[1]).toMatchObject({ kind: "doc", ref: "docs/bossmode/gone.md", note: "已删", stale: true });
+    expect(parsed.index[2]).toMatchObject({ kind: "other", ref: "", note: "每周五发版 — 非引用行" });
+    expect(parsed.index[3]).toMatchObject({ kind: "doc", ref: "docs/bossmode/nonote.md", note: "" });
     // parse of stale-resolved content matches resolve+parse round trip
     const resolved = resolveMainlineRefs("room-a", content);
     expect(parseMainline(resolved).index[0].stale).toBe(false);

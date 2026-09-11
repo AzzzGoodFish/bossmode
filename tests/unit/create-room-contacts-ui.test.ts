@@ -109,7 +109,7 @@ describe("contacts room creation through React state and the HTTP client", () =>
     const onSubmit = vi.fn();
     await render(createElement(CreateRoomDialog, { onClose: vi.fn(), onSubmit }));
     expect(container.textContent).toContain("Room details");
-    expect(container.textContent).toContain("Create new members in Contacts first.");
+    expect(container.textContent).toContain("Create new members from the Chats panel first.");
     await submit();
     expect(container.textContent).toContain("Enter a Room name.");
     expect(container.textContent).toContain("Add at least one member.");
@@ -259,7 +259,7 @@ describe("current contact picker loading and recovery", () => {
     expect(container.textContent).not.toContain("No contacts yet.");
     fetchMock.mockResolvedValue(ok({ members: [] }));
     await click(button("Retry"));
-    expect(container.textContent).toContain("No contacts yet. Create a member in Contacts, then return here.");
+    expect(container.textContent).toContain("No contacts yet. Create a member from the Chats panel, then return here.");
     expect(container.textContent).not.toContain("Couldn’t load contacts.");
   });
 

@@ -129,7 +129,7 @@ export function CreateRoomDialog({ onClose, onSubmit }: CreateRoomDialogProps) {
                   <div className="flex min-h-40 flex-col items-center justify-center px-4 py-6 text-center">
                     <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-2 text-ink-4"><Users size={19} /></div>
                     <p className="text-sm font-medium text-ink-2">No members yet</p>
-                    <p className="mt-1 text-xs text-ink-4">Choose existing contacts. Create new members in Contacts first.</p>
+                    <p className="mt-1 text-xs text-ink-4">Choose existing contacts. Create new members from the Chats panel first.</p>
                     <button type="button" onClick={() => setPickerOpen(true)} className="mt-4 flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-contrast hover:opacity-90">
                       <Plus size={14} /> Add member
                     </button>

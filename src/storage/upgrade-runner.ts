@@ -36,6 +36,10 @@ export interface UpgradeOptions {
   activate?(db: Database): Promise<void>;
   /** Dependency-injected failure hook for isolated tests, never read from environment. */
   checkpoint?(phase: "backup" | "import" | "validated" | "activated"): void;
+  /** Archive data that a later migration is about to drop, from the staging database,
+   *  before migrations apply. Receives the staging DB (still at the pre-migration
+   *  schema) and the archive root. Throws to abort the upgrade if archiving fails. */
+  archiveRetiredData?(stagingDb: Database, root: string): void | Promise<void>;
 }
 export interface UpgradeResult { db: Database; migrated: boolean; backupDirectory?: string; warnings: string[]; }
 interface Authority { format: number; schema: string; }
@@ -203,6 +207,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     options.checkpoint?.("backup");
 
     db = openDatabase(stage);
+    if (options.archiveRetiredData) await options.archiveRetiredData(db, root);
     applyStorageMigrations(db, options.migrations);
     db.transaction(tx => {
       for (const row of records) tx.run("INSERT INTO storage_upgrade_files(path,backup_path,hash,retire) VALUES(?,?,?,?)", row.path, row.backup_path, row.hash, row.retire);

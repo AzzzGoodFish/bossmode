@@ -104,12 +104,10 @@ describe("020 WS-B DM tools", () => {
     expect(names).not.toContain("wait");
     expect(names).not.toContain("read_memory");
     expect(names).not.toContain("write_memory");
-    expect(names).not.toContain("create_task");
 
     const room = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: "r1", scopeKind: "room" });
     const roomNames = room.map((t) => t.name);
     expect(roomNames).toContain("wait");
-    expect(roomNames).toContain("create_task");
     expect(roomNames).not.toContain("create_room");
   });
 });

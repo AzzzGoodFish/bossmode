@@ -33,7 +33,7 @@ export const TOUR_STEPS: TourStep[] = [
     key: "welcome",
     title: "Welcome to Bossmode",
     paragraphs: [
-      "Bossmode is where you run work with your member team — like a real team: roles, chat, tasks and shared memory.",
+      "Bossmode is where you run work with your member team — like a real team: roles, chat and shared memory.",
       "Two things to get started: connect a model, then create a room and chat.",
     ],
     primary: "Start tour",
@@ -74,7 +74,7 @@ export const TOUR_STEPS: TourStep[] = [
     key: "room",
     title: "2 · Create a room",
     paragraphs: [
-      "A room is your team's workspace: conversations, tasks and memory live here.",
+      "A room is your team's workspace: conversations and memory live here.",
       "Click +, pick New member — it wakes up in a DM; give it a model and it introduces itself.",
     ],
     primary: "Next",

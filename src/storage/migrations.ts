@@ -11,6 +11,7 @@ import { mcpOauthMigration } from "./schema/mcp-oauth.js";
 import { deliveryMigration } from "./schema/delivery.js";
 import { messageArchivesMigration } from "./schema/message-archives.js";
 import { runtimeInputsMigration } from "./schema/runtime-inputs.js";
+import { taskRetirementMigration } from "./schema/task-retirement.js";
 import type { StorageMigration } from "./database.js";
 
 // The sole ordered schema plan. Initial conversion runs on the upgrade staging DB,
@@ -19,6 +20,6 @@ export const coreStorageMigrations: readonly StorageMigration[] = Object.freeze(
   baseStorageMigration, membersMigration, settingsMigration, conversationsMigration,
   messagesMigration, eventSourceMigration, executionMigration, assetsMigration,
   templatesMigration, memberArchivesMigration, mcpOauthMigration, deliveryMigration,
-  messageArchivesMigration, runtimeInputsMigration,
+  messageArchivesMigration, runtimeInputsMigration, taskRetirementMigration,
 ]);
 export const CORE_STORAGE_FORMAT = 1;

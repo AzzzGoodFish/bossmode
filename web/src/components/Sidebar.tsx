@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   LogOut, MessageSquare, Settings, Sun, Moon,
-  CheckSquare, Loader2, Plus, Contact, Hash, Search, MessagesSquare,
+  Loader2, Plus, Contact, Hash, Search, MessagesSquare,
   
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -16,7 +16,6 @@ export type SettingsSection = "models" | "runtime" | "prompt" | "usage";
 
 export type ActivePage =
   | { type: "chats" }
-  | { type: "contacts" }
   | { type: "dm"; memberId: string }
   | { type: "member-create" }
   | { type: "room"; id: string }
@@ -24,8 +23,6 @@ export type ActivePage =
   /** Topic draft (topic-threads v3, fish): opened from a message's topic button; nothing persists until the first message sends. */
   | { type: "topic-draft"; roomId: string; anchorMessageId: string; anchorSeq?: number; anchorTitle: string; anchorExcerpt: string }
   | { type: "settings"; section?: SettingsSection }
-  | { type: "all-tasks" }
-  | { type: "task"; roomId: string; taskId: string; from?: "chat" | "tasks" | "all-tasks" }
   | null;
 
 type Domain = "chats" | "system";
@@ -34,7 +31,6 @@ export function domainOf(page: ActivePage): Domain {
   switch (page?.type) {
     case "chats":
       return "chats";
-    case "contacts":
     case "dm":
     case "member-create":
       return "chats";
@@ -116,7 +112,6 @@ export function Sidebar({
   const activeSettingsSection = activePage?.type === "settings" ? (activePage.section ?? "models") : null;
 
   const hasAnyUnreadRoom = (unreadRoomIds?.size || 0) > 0;
-  const openTasksLabel = useMemo(() => "All Tasks", []);
 
   const toggleTheme = () => {
     const isDark = document.documentElement.classList.toggle("dark");
@@ -244,26 +239,15 @@ export function Sidebar({
       {domain === "chats" && (
         <div className="border-t border-line-soft shrink-0 p-2 space-y-px">
           <button
-            onClick={() => onNavigate({ type: "contacts" })}
+            onClick={() => onNavigate({ type: "chats" })}
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
-              activePage?.type === "contacts" || activePage?.type === "member-create"
+              activePage?.type === "chats" || activePage?.type === "member-create" || activePage?.type === "dm"
                 ? "bg-surface-2 text-ink-1"
                 : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
             }`}
           >
-            <Contact size={14} />
-            <span>Contacts</span>
-          </button>
-          <button
-            onClick={() => onNavigate({ type: "all-tasks" })}
-            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
-              activePage?.type === "all-tasks" || activePage?.type === "task"
-                ? "bg-surface-2 text-ink-1"
-                : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
-            }`}
-          >
-            <CheckSquare size={14} />
-            <span>{openTasksLabel}</span>
+            <MessagesSquare size={14} />
+            <span>All chats</span>
           </button>
         </div>
       )}

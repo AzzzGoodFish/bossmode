@@ -3,14 +3,16 @@ import {isDeepStrictEqual} from "node:util";
 import type {Database} from "./database.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
+import {readFileSync} from "node:fs";
+import {join} from "node:path";
+import {archiveRawRetiredSource} from "./task-retirement.js";
 import {ConversationsRepository} from "./repositories/conversations.js";
 import {MessageArchivesRepository,type ArchiveSummary} from "./repositories/message-archives.js";
-import {TasksRepository} from "./repositories/tasks.js";
 import {UserCursorRepository} from "./repositories/user-cursor-repository.js";
 import {executionScopeId} from "./repositories/execution-identity.js";
 import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "./message-repository.js";
 import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "./event-repository.js";
-import type {Room,RoomMessage,Task} from "../shared/types.js";
+import type {Room,RoomMessage} from "../shared/types.js";
 import type {TopicRecord} from "../workspace/topic-store.js";
 
 function object(value:unknown,path:string):Record<string,any>{
@@ -173,7 +175,16 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
    consumed.add(e.path);continue;
   }
   if(!["tasks","messages","message-sequence","member-cursors","dm-member-cursor","agent-events","message-archive","message-archive-summary","derived-event-stats"].includes(e.kind))continue;
-  check(e);if(!e.scopeId)throw new Error(`Conversation source has no scope: ${e.path}`);
+  check(e);if(!e.scopeId&&e.kind!=="tasks")throw new Error(`Conversation source has no scope: ${e.path}`);
+  // Task feature retired (fish #19259): legacy rooms/<room>/tasks.json files are no
+  // longer imported into SQL. Their bytes are preserved in the retirement archive so
+  // nothing is silently discarded; the file is then consumed (source retired).
+  if(e.kind==="tasks"){
+   const bytes=readFileSync(join(ctx.sourceRoot,e.path));
+   archiveRawRetiredSource(ctx.root,e.path,bytes);
+   consumed.add(e.path);continue;
+  }
+  if(!e.scopeId)throw new Error(`Conversation source has no scope: ${e.path}`);
   if(e.kind==="agent-events"){
    const source=eventSource(e,options);let bytes=0;let count=0;
    const flush=()=>{ctx.db.transaction(tx=>importEventRows(tx,source));completed+=source.rows.length;source.rows=[];bytes=0;ctx.progress(completed);};
@@ -189,12 +200,6 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   const scope=ensureImportedScope(ctx.db,e.scopeId,e.path.startsWith("rooms/")?e.path.split("/")[1]:undefined);
   if(e.kind==="message-archive-summary"){
    new MessageArchivesRepository(ctx.db).saveSummary(scope,Number(e.archiveTimestamp),object(read(e),e.path) as ArchiveSummary);
-  }else if(e.kind==="tasks"){
-   const tasks=read(e);if(!Array.isArray(tasks))throw new Error(`Invalid legacy task list: ${e.path}`);
-   const ids=new Set<string>();for(const task of tasks){const row=object(task,e.path);if(typeof row.id!=="string"||ids.has(row.id))throw new Error(`Duplicate or missing task identity: ${e.path}`);ids.add(row.id);}
-   // The legacy readTasks adapter took room ownership from its containing file,
-   // overriding an absent/stale embedded roomId before presenting records.
-   new TasksRepository(ctx.db).importTasks(scope,tasks.map(task=>({...task,roomId:scope})) as Task[]);
   }else if(e.kind==="message-sequence")importMessageNextSequence(ctx.db,scope,read(e) as number);
   else if(e.kind==="member-cursors"){
    const cursors=object(read(e),e.path);for(const [actor,value]of Object.entries(cursors)){

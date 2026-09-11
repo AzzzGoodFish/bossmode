@@ -804,15 +804,6 @@ export async function getMemberActiveTools(roomId: string, memberRef: string): P
 
 // -- Messages --
 
-export interface TaskEventMeta {
-  action: "created" | "updated" | "status_changed" | "commented" | "deleted";
-  taskId: string;
-  taskTitle: string;
-  newStatus?: string;
-  actor: string;
-  snippet?: string;
-}
-
 export interface KnowledgeEventMeta {
   path: string;
   title: string;
@@ -853,7 +844,8 @@ export interface RoomMessage {
   urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event" | "topic_event";
-  task_event_meta?: TaskEventMeta;
+  /** Historical task_event payload (task feature retired 2026-09-11) — kept only so old messages still parse. */
+  task_event_meta?: { action: string; taskId: string; taskTitle: string; newStatus?: string; actor: string; snippet?: string };
   knowledge_event_meta?: KnowledgeEventMeta;
   topic_event_meta?: TopicEventMeta;
   artifacts?: string[];
@@ -1321,81 +1313,6 @@ export async function checkMcpServers(server?: string, timeoutMs?: number): Prom
   });
 }
 
-
-// -- Tasks --
-
-export type TaskStatus = "todo" | "in-progress" | "review" | "done";
-export type TaskPriority = "P0" | "P1" | "P2";
-
-export interface TaskComment {
-  id: string;
-  author: string;
-  content: string;
-  createdAt: number;
-}
-
-export interface Task {
-  id: string;
-  roomId: string;
-  title: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  assignee?: string;
-  assigneeMemberId?: string;
-  description?: string;
-  references?: string[];
-  subscribers?: string[];
-  subscriberMemberIds?: string[];
-  comments?: TaskComment[];
-  commentCount?: number;
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-  /** Only present in listAllTasks results */
-  roomName?: string;
-}
-
-export async function listAllTasks(opts: { status?: TaskStatus; query?: string } = {}): Promise<Task[]> {
-  const qs = new URLSearchParams();
-  if (opts.status) qs.set("status", opts.status);
-  if (opts.query) qs.set("query", opts.query);
-  return apiFetch(`/api/tasks${qs.toString() ? `?${qs}` : ""}`);
-}
-
-export async function listRoomTasks(roomId: string): Promise<Task[]> {
-  return apiFetch(`/api/rooms/${roomId}/tasks`);
-}
-
-export async function getTask(roomId: string, taskId: string): Promise<Task> {
-  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`);
-}
-
-export async function createTask(
-  roomId: string,
-  input: { title: string; createdBy: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string; description?: string; references?: string[]; subscribers?: string[] },
-): Promise<Task> {
-  return apiFetch(`/api/rooms/${roomId}/tasks`, { method: "POST", body: JSON.stringify(input) });
-}
-
-export async function updateTask(
-  roomId: string,
-  taskId: string,
-  patch: { title?: string; status?: TaskStatus; priority?: TaskPriority; assignee?: string | null; description?: string; references?: string[]; subscribers?: string[]; updatedBy?: string },
-): Promise<Task> {
-  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
-}
-
-export async function commentTask(
-  roomId: string,
-  taskId: string,
-  input: { author: string; comment: string },
-): Promise<Task> {
-  return apiFetch(`/api/rooms/${roomId}/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify(input) });
-}
-
-export async function deleteTaskApi(roomId: string, taskId: string, deletedBy?: string): Promise<void> {
-  await apiFetch(`/api/rooms/${roomId}/tasks/${taskId}`, { method: "DELETE", body: JSON.stringify({ deletedBy }) });
-}
 
 // -- Filesystem --
 
