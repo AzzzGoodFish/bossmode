@@ -9,7 +9,6 @@ import {importLegacyArchives} from "../../src/storage/upgrade-archives.js";
 import {MembersRepository} from "../../src/storage/repositories/members.js";
 import {MemberArchivesRepository} from "../../src/storage/repositories/member-archives.js";
 import {getConversationMember} from "../../src/storage/repositories/conversations.js";
-import {decodeArchivePersona} from "../../src/workspace/member-archive.js";
 import type {UpgradeImportContext} from "../../src/storage/upgrade-runner.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
@@ -46,8 +45,4 @@ it("refuses ambiguous physical locations for one archived ID",()=>{
  const second="backups/fired-copy-2026-09-09T01-00-00-000Z";
  const {ctx,entries}=setup({[`${archive}/member.json`]:JSON.stringify(record),[`${second}/member.json`]:JSON.stringify(record)});
  expect(()=>importLegacyArchives(ctx,entries)).toThrow("Conflicting archived identity locations");
-});
-it("uses the same exact-byte frontmatter conversion for later archive import",()=>{
- expect(decodeArchivePersona("\ufeff---\r\n---\r\n  body 🐟\r\n","frontmatter").body).toBe("  body 🐟\r\n");
- expect(decodeArchivePersona("---\n---\nbody","plain").body).toBe("---\n---\nbody");
 });

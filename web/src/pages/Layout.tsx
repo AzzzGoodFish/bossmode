@@ -14,7 +14,6 @@ import { OnboardingTour } from "../components/OnboardingTour";
 import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
-import { MemberCreatePage } from "./MemberCreatePage";
 
 import { Main } from "./Main";
 import { TopicPage } from "./TopicPage";
@@ -386,12 +385,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <ChatsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
             onOpenRoom={(roomId) => handleNavigate({ type: "room", id: roomId })}
-          />
-        )}
-        {activePage?.type === "member-create" && (
-          <MemberCreatePage
-            onBack={() => handleNavigate({ type: "chats" })}
-            onCreated={(memberId) => handleNavigate({ type: "dm", memberId })}
           />
         )}
         {activePage?.type === "dm" && (

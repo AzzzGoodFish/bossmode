@@ -55,14 +55,6 @@ function file(path: string, content: string): string {
 function service(quiesce: (id:string) => Promise<void> = async () => {}): MemberArchiveService {
   return new MemberArchiveService(db, root, {quiesce});
 }
-// E is not merged. Exercise the exact SQL-only adapter seam using a base-schema test marker,
-// not a document/history file fallback or a claim of E integration coverage.
-function importArchive(opts: Parameters<typeof wizard.importMemberFromArchive>[0]) {
-  return wizard.importMemberFromArchive(opts, {commitPersona: (tx, prepared) => {
-    expect(() => tx.assertOutsideTransaction()).toThrow(/enclosing/);
-    tx.run("INSERT INTO storage_meta(key,value) VALUES(?,?)", `test-persona:${prepared.identity.memberId}`, JSON.stringify(prepared));
-  }});
-}
 function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
   return {id,name,title:"Engineer",agentTemplate:"general",global:{model:"p/m",credentialId:"chosen",skills:["one"]},
     unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:2};
@@ -229,8 +221,8 @@ describe("durable quiescent archive and recovery", () => {
     expect(conversations.getRoom("r")).toMatchObject({globalMemberIds:[other.id],roomMembers:[historical],members:["historical label"]});
     expect(conversations.getRoom("r")?.promptLeaderMemberId).toBeUndefined();
     expect(registry.createMember({name:m.name}).id).not.toBe(m.id);
-    expect(wizard.listArchives()).toMatchObject([{name:m.name,archivePath:result.archived,kind:"fired",hasPersona:true}]);
-    reopen(); expect(wizard.listArchives()).toHaveLength(1);
+    expect(new MemberArchivesRepository(db).list()).toMatchObject([{name:m.name,archivePath:result.archived,kind:"fired",hasPersona:true}]);
+    reopen(); expect(new MemberArchivesRepository(db).list()).toHaveLength(1);
     expect(readFileSync(resolveMemberArtifactPath(db,root,m.id,join(root,"members",m.id,"persona.md")),"utf8")).toBe(" \r\nPersona  \r\n");
   });
   it("detaches proven local-roster IDs but preserves unrelated same-label records and global historical shadows", async () => {
@@ -273,14 +265,14 @@ describe("durable quiescent archive and recovery", () => {
     if (phase === "sync") failSyncAfterRename = true;
     if (phase === "SQL") db.exec("CREATE TRIGGER fail_archive BEFORE INSERT ON member_archives BEGIN SELECT RAISE(ABORT,'catalog failure'); END;");
     await expect(service().archive(m.id,{confirm:true})).rejects.toThrow();
-    expect(registry.getMember(m.id)).toEqual(m); expect(wizard.listArchives()).toEqual([]);
+    expect(registry.getMember(m.id)).toEqual(m); expect(new MemberArchivesRepository(db).list()).toEqual([]);
     const intent = service().pending()[0];
     expect(existsSync(registry.memberDir(m.id))).toBe(phase === "rename");
     failRename = false; failSyncAfterRename = false;
     if (phase === "SQL") db.exec("DROP TRIGGER fail_archive");
     reopen(); await service().recoverPending();
     expect(readFileSync(join(root,intent.archivePath,"persona.md"),"utf8")).toBe("unchanged\r\n");
-    expect(wizard.listArchives()).toHaveLength(1);
+    expect(new MemberArchivesRepository(db).list()).toHaveLength(1);
   });
   it.each(["both","neither","replaced","symlink"])("fails closed on %s path conflict", async conflict => {
     const m = registry.createMember({name:"Conflict"});
@@ -303,23 +295,8 @@ describe("durable quiescent archive and recovery", () => {
   });
 });
 
-describe("DB archive catalog and explicit source import", () => {
-  it("does not scan or read legacy metadata during normal listing/import; explicit null overrides archived credential", () => {
-    const path = "backups/fired-export";
-    file(join(root,path,"member.json"),"malformed legacy JSON is inert");
-    file(join(root,path,"persona.md"),"  ---\nname: literal\n---\n  Body\r\n ");
-    expect(wizard.listArchives()).toEqual([]);
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path, member:record("mem_retired","Old Name"),
-      persona:{path:`${path}/persona.md`,format:"plain",hasContent:true}}));
-    expect(new MemberArchivesRepository(db).list()[0].memberId).toBeUndefined();
-    const m = importArchive({archivePath:path,name:"New Name",credentialId:null,agentTemplate:"chosen",global:{model:"chosen/model"}});
-    expect(m.id).not.toBe("mem_retired"); expect(m).toMatchObject({name:"New Name",title:"Engineer",agentTemplate:"chosen",global:{credentialId:null,model:"chosen/model",skills:["one"]}});
-    expect(profile.readMemberProfile(m.id).raw).toBe("  ---\nname: literal\n---\n  Body\r\n ");
-    expect(readFileSync(join(root,path,"member.json"),"utf8")).toContain("malformed");
-    expect(() => importArchive({archivePath:path,name:"new name"})).toThrow(registry.MemberNameTakenError);
-    expect(registry.listMembers()).toHaveLength(1);
-  });
-  it("retains legacy wizard grouping and explicit source selection without name-to-ID inference", () => {
+describe("DB archive catalog", () => {
+  it("retains legacy manifest grouping without name-to-ID inference", () => {
     const path = "backups/legacy-old"; file(join(root,path,"rooms/r/principles.md"),"legacy persona\r\n");
     const sources = wizard.catalogFromLegacyManifest({archivePath:path,members:[
       {name:"Old",sourceAgent:"writer",credentialId:"hint",personaPath:`${path}/rooms/r/principles.md`,rooms:[{room:"r",hasPrinciples:true}],conflicts:["first"]},
@@ -328,69 +305,14 @@ describe("DB archive catalog and explicit source import", () => {
     for (const source of sources) new MemberArchivesRepository(db).importCatalog(source);
     registry.importMemberRecord(record("mem_live","Old"));
     expect(new MemberArchivesRepository(db).list().every(s => !s.memberId)).toBe(true);
-    expect(wizard.listArchives().find(s => s.name === "Old")).toMatchObject({roomScopes:[{room:"r",hasPrinciples:true},{room:"s",hasMainline:true}],conflicts:["first","second"]});
-    expect(() => importArchive({archivePath:path,name:"New"})).toThrow("archive_source_name_required");
-    const m = importArchive({archivePath:path,sourceName:"Old",name:"New"});
-    expect(profile.readMemberProfile(m.id).body).toBe("legacy persona\r\n");
-    expect(m.global.credentialId).toBe("hint"); expect(m.agentTemplate).toBe("writer");
+    expect(new MemberArchivesRepository(db).list().find(s => s.name === "Old")).toMatchObject({roomScopes:[{room:"r",hasPrinciples:true},{room:"s",hasMainline:true}],conflicts:["first","second"]});
   });
-  it("decodes only explicitly tagged old frontmatter, keeps whitespace and imports no old ID", () => {
-    const path = "backups/old-profile"; file(join(root,path,"member.md"),"---\r\nname: Wrong\r\ntitle: Old title\r\n---\r\n\r\n  Body  \r\n");
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,member:{name:"Old",agentTemplate:"general",global:{}},
-      persona:{path:`${path}/member.md`,format:"frontmatter",hasContent:true}}));
-    const m = importArchive({archivePath:path,name:"Fresh"});
-    expect(m.title).toBe("Old title"); expect(profile.readMemberProfile(m.id).body).toBe("\r\n  Body  \r\n");
-    expect(existsSync(join(registry.memberDir(m.id),"member.md"))).toBe(false);
-  });
-  it("missing body, invalid paths, symlinks and DB failures leave no successful partial import", () => {
+  it("rejects invalid catalog paths", () => {
     const path = "backups/import";
     const source = wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:true}});
-    const repo = new MemberArchivesRepository(db); repo.importCatalog(source);
-    expect(() => importArchive({archivePath:path,name:"Missing"})).toThrow(/ENOENT/);
+    const repo = new MemberArchivesRepository(db);
     expect(() => repo.importCatalog({...source,archivePath:"backups/../escape"})).toThrow(/invalid_archive_path/);
     expect(() => repo.importCatalog({...source,name:"Other",personaPath:"backups/outside/p.md"})).toThrow(/outside_root/);
-    file(join(root,"external.md"),"external"); mkdirSync(join(root,path),{recursive:true}); symlinkSync(join(root,"external.md"),join(root,path,"persona.md"));
-    expect(() => importArchive({archivePath:path,name:"Link"})).toThrow(/symlink/);
-    rmSync(join(root,path,"persona.md")); file(join(root,path,"persona.md"),"body");
-    db.exec("CREATE TRIGGER fail_import BEFORE INSERT ON ssh_credentials BEGIN SELECT RAISE(ABORT,'DB import failure'); END;");
-    expect(() => importArchive({archivePath:path,name:"DB fails"})).toThrow("DB import failure");
-    expect(registry.listMembers()).toEqual([]); expect(db.all("SELECT * FROM scopes")).toEqual([]);
-    expect(readdirSync(join(root,"members"))).toEqual([]);
-  });
-  it("never lets exported global fields override the caller-selected new identity", () => {
-    const path = "backups/config-fields";
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,
-      member:{name:"Old",agentTemplate:"general",global:{name:"Injected",agentTemplate:"injected",title:"injected",model:"p/m",credentialId:"retained"} as any}}));
-    const m = importArchive({archivePath:path,name:"Chosen",agentTemplate:"selected",global:{credentialId:undefined}});
-    expect(m).toMatchObject({name:"Chosen",agentTemplate:"selected",global:{model:"p/m",credentialId:"retained"}});
-    expect(m.title).toBeUndefined();
-  });
-  it("requires E audit integration, preserves its prepared snapshot DTO and rolls back if its commit fails", () => {
-    const path = "backups/e-import"; file(join(root,path,"persona.md"),"Exact \r\n");
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:true}}));
-    expect(() => wizard.importMemberFromArchive({archivePath:path,name:"No adapter"})).toThrow("archive_document_integration_required");
-    expect(() => wizard.importMemberFromArchive({archivePath:path,name:"Fail adapter"},{commitPersona:(tx,p) => {
-      tx.run("INSERT INTO storage_meta VALUES('rolled-back',?)",p.identity.path);
-      throw new Error("E metadata failure");
-    }})).toThrow("E metadata failure");
-    expect(db.get("SELECT * FROM storage_meta WHERE key='rolled-back'")).toBeUndefined();
-    expect(registry.listMembers()).toEqual([]); expect(readdirSync(join(root,"members"))).toEqual([]);
-    const m = importArchive({archivePath:path,name:"With adapter"});
-    const saved = JSON.parse(db.get<{value:string}>("SELECT value FROM storage_meta WHERE key=?",`test-persona:${m.id}`)!.value);
-    expect(saved).toMatchObject({identity:{path:`members/${m.id}/persona.md`,layer:"persona",memberId:m.id},event:{reason:"importFromArchive",actorType:"user",revision:1,contentLength:8}});
-    expect(readFileSync(join(root,saved.event.snapshotPath),"utf8")).toBe("Exact \r\n");
-  });
-  it("rejects over-budget imports before creating identity/assets", () => {
-    const path = "backups/over-budget"; file(join(root,path,"persona.md"),"x".repeat(4001));
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:true}}));
-    expect(() => importArchive({archivePath:path,name:"Too long"})).toThrow(/exceed its budget/);
-    expect(registry.listMembers()).toEqual([]);
-  });
-  it("rejects over-budget whitespace without requiring a history hook", () => {
-    const path = "backups/whitespace-budget"; file(join(root,path,"persona.md")," ".repeat(4001));
-    new MemberArchivesRepository(db).importCatalog(wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:false}}));
-    expect(() => wizard.importMemberFromArchive({archivePath:path,name:"Whitespace"})).toThrow(/exceed its budget/);
-    expect(registry.listMembers()).toEqual([]);
   });
   it("catalog SQL import rolls back rooms/conflicts and refuses a current-ID association", () => {
     registry.importMemberRecord(record()); const repo = new MemberArchivesRepository(db);

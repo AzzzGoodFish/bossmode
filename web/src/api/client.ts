@@ -1528,7 +1528,7 @@ export async function getChats(): Promise<{ chats: ChatEntry[] }> {
   return res;
 }
 
-// -- 0.20: member creation + archive import --
+// -- 0.20: member creation --
 
 export interface CreateMemberInput {
   /** Omit for one-click birth — the backend assigns "New Member N" (auto-increment). */
@@ -1536,25 +1536,10 @@ export interface CreateMemberInput {
   model?: string;
   credentialId?: string;
   thinkingLevel?: string;
-  importFromArchive?: string;
 }
 
 export async function createGlobalMember(input: CreateMemberInput): Promise<{ member: MemberDetail }> {
   return apiFetch("/api/members", { method: "POST", body: JSON.stringify(input) });
-}
-
-export interface ArchiveEntry {
-  name: string;
-  template: string;
-  hasPersona: boolean;
-  roomScopes: Array<{ room: string; hasPrinciples: boolean; hasMainline: boolean }>;
-  archivePath: string;
-  credentialHint?: string;
-  kind: "legacy" | "fired";
-}
-
-export async function getMemberArchiveList(): Promise<{ archives: ArchiveEntry[] }> {
-  return apiFetch("/api/members/archive-list");
 }
 
 // -- 0.20: member scopes + fire --

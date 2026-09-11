@@ -9,21 +9,10 @@ describe("workspace resources UI consistency (Members / Chats)", () => {
     const back = source("web/src/components/BackLink.tsx");
     expect(back).toContain("ArrowLeft");
     expect(back).toContain("size={18}");
-
-    // Member detail lives in the peek card + float window (member UI v2) — no page, no BackLink.
-    for (const path of [
-      "web/src/pages/MemberCreatePage.tsx",
-    ]) {
-      const src = source(path);
-      expect(src).toContain("BackLink");
-      expect(src).not.toMatch(/<ArrowLeft\b/);
-      expect(src).not.toMatch(/BackLink[^>]*className=/);
-    }
   });
 
   it("lays pages out on the full-width canvas (no narrow centered column)", () => {
     for (const path of [
-      "web/src/pages/MemberCreatePage.tsx",
       "web/src/pages/ChatsPage.tsx",
     ]) {
       const src = source(path);

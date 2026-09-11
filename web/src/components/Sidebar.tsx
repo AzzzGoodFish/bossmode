@@ -17,7 +17,6 @@ export type SettingsSection = "models" | "runtime" | "prompt" | "usage";
 export type ActivePage =
   | { type: "chats" }
   | { type: "dm"; memberId: string }
-  | { type: "member-create" }
   | { type: "room"; id: string }
   | { type: "topic"; roomId: string; topicId: string }
   /** Topic draft (topic-threads v3, fish): opened from a message's topic button; nothing persists until the first message sends. */
@@ -32,7 +31,6 @@ export function domainOf(page: ActivePage): Domain {
     case "chats":
       return "chats";
     case "dm":
-    case "member-create":
       return "chats";
     case "settings":
       return "system";
@@ -241,7 +239,7 @@ export function Sidebar({
           <button
             onClick={() => onNavigate({ type: "chats" })}
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
-              activePage?.type === "chats" || activePage?.type === "member-create" || activePage?.type === "dm"
+              activePage?.type === "chats" || activePage?.type === "dm"
                 ? "bg-surface-2 text-ink-1"
                 : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
             }`}

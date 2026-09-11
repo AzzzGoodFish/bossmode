@@ -1,17 +1,15 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MemberArchivesRepository } from "../../src/storage/repositories/member-archives.js";
 import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
-import { commitDocumentRevision } from "../../src/storage/document-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;
 beforeEach(() => { fixture = coreFixture(); root = fixture.root; });
 afterEach(() => fixture.close());
-it("archive retains SQL metadata, import preserves title/configuration and literal persona", async () => {
+it("archive retains SQL metadata and literal persona bytes", async () => {
   const { createMember, getMember, memberDir } = await import("../../src/workspace/member-registry.js");
-  const { listArchives, importMemberFromArchive } = await import("../../src/workspace/member-archive.js");
   const m = createMember({ name: "before", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: ["skill-a"], mcpServers: ["server-a"] });
   const markdown = "---\nname: this is Markdown, not identity\n---\n\n自由正文\n\n";
   writeFileSync(join(memberDir(m.id), "persona.md"), markdown);
@@ -21,11 +19,4 @@ it("archive retains SQL metadata, import preserves title/configuration and liter
   expect(fixture.db.get("SELECT archive_path FROM members WHERE id=?", m.id)).toEqual({ archive_path: archived });
   expect(new MemberArchivesRepository(fixture.db).get(archived, m.name)).toMatchObject({ title: "Engineer", global: m.global });
   expect(existsSync(join(root, archived, "member.json"))).toBe(false);
-  expect(listArchives().find((a) => a.archivePath === archived)?.hasPersona).toBe(true);
-  const imported = importMemberFromArchive({ archivePath: archived, name: "after" }, { commitPersona: (db, p) => commitDocumentRevision(db, p.identity, p.meta, p.event, 0) });
-  expect(imported.id).not.toBe(m.id);
-  expect(imported.title).toBe("Engineer");
-  expect(imported.global).toEqual(m.global);
-  expect(readFileSync(join(memberDir(imported.id), "persona.md"), "utf8")).toBe(markdown);
-  expect(existsSync(join(memberDir(imported.id), "member.md"))).toBe(false);
 });

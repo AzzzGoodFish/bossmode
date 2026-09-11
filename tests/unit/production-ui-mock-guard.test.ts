@@ -11,7 +11,6 @@ describe("production UI mock guard", () => {
     for (const path of [
       "pages/ChatsPage.tsx",
       "pages/DmPage.tsx",
-      "pages/MemberCreatePage.tsx",
       "components/member-float.tsx",
       "components/CreateRoomDialog.tsx",
       "components/MemberPickerDialog.tsx",

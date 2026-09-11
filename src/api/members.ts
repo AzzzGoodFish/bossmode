@@ -23,7 +23,6 @@ import {
 import { readMemoryLayer, readMemoryLayerInfo } from "../workspace/member-memory-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
-import { listArchives, importMemberFromArchive } from "../workspace/member-archive.js";
 import {
   readAllDmMessages,
   getLatestDmSeq,
@@ -333,14 +332,6 @@ addRoute("GET", "/api/members/identities", async (_req, res) => {
   sendJson(res, 200, { members: listMemberIdentities() });
 });
 
-addRoute("GET", "/api/members/archive-list", async (_req, res) => {
-  try {
-    sendJson(res, 200, { archives: listArchives() });
-  } catch (err) {
-    sendJson(res, 500, { error: "internal", message: String(err) });
-  }
-});
-
 addRoute("POST", "/api/members", async (req, res) => {
   try {
     const body = (await parseBody(req)) as {
@@ -350,44 +341,21 @@ addRoute("POST", "/api/members", async (req, res) => {
       thinkingLevel?: string | null;
       skills?: string[];
       mcpServers?: string[];
-      importFromArchive?: string;
     };
     if ("agentTemplate" in body) {
       sendJson(res, 400, { error: "agent_templates_retired", message: "Agent templates are retired; configure the member directly." });
       return;
     }
     // Batch-1 one-click create: name optional → "New Member" (+ suffix).
-    let member: MemberRecord;
-    if (body.importFromArchive) {
-      if (!body.name?.trim()) {
-        sendJson(res, 400, { error: "invalid_member_name", message: "name is required for import" });
-        return;
-      }
-      member = importMemberFromArchive({
-        archivePath: body.importFromArchive,
-        name: body.name.trim(),
-        credentialId: body.credentialId,
-      });
-      if (body.model !== undefined) {
-        member = updateMember(member.id, {
-          global: {
-            model: body.model,
-            credentialId: body.credentialId,
-            thinkingLevel: body.thinkingLevel,
-          },
-        });
-      }
-    } else {
-      member = createMember({
-        name: body.name,
-        model: body.model,
-        credentialId: body.credentialId,
-        thinkingLevel: body.thinkingLevel,
-        skills: body.skills,
-        mcpServers: body.mcpServers,
-        title: (body as { title?: string }).title,
-      });
-    }
+    const member = createMember({
+      name: body.name,
+      model: body.model,
+      credentialId: body.credentialId,
+      thinkingLevel: body.thinkingLevel,
+      skills: body.skills,
+      mcpServers: body.mcpServers,
+      title: (body as { title?: string }).title,
+    });
     sendJson(res, 200, { member: publicMember(member) });
   } catch (err) {
     const e = errCode(err);

@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { prepareCoreStorage } from "../../src/storage/core-startup.js";
 import { bindDatabase, type Database } from "../../src/storage/database.js";
 import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/storage/document-repository.js";
-import { MemberArchivesRepository } from "../../src/storage/repositories/member-archives.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { catalogFromFiredExport, importMemberFromArchive, type ArchiveImportHooks } from "../../src/workspace/member-archive.js";
 import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/workspace/member-registry.js";
 import { readMemberProfile } from "../../src/workspace/member-profile.js";
 import { writeMemoryLayer } from "../../src/workspace/member-memory-store.js";
@@ -23,16 +21,6 @@ async function start() {
   db = result.db;
   bindDatabase(db);
   return result;
-}
-function archiveSource(body: string) {
-  const archivePath = "backups/birth-import";
-  mkdirSync(join(root, archivePath), { recursive: true });
-  writeFileSync(join(root, archivePath, "persona.md"), body, "utf8");
-  new MemberArchivesRepository(db!).importCatalog(catalogFromFiredExport({ archivePath,
-    member: { id: "mem_historical", name: "Archived", agentTemplate: "general", global: {} },
-    persona: { path: `${archivePath}/persona.md`, format: "plain", hasContent: !!body.trim() },
-  }));
-  return archivePath;
 }
 function assertPersona(id: string, body: string, revision = 0) {
   expect(readFileSync(join(root, personaPath(id)))).toEqual(Buffer.from(body, "utf8"));
@@ -84,46 +72,25 @@ it("commits initial ownership before returning, preserves it across profile upda
   expect(listDocumentHistory(db!, personaPath(member.id))).toEqual(history);
 });
 
-it.each(["", " \t\r\n", literal])("archive birth retains literal bytes and only records an actual import revision: %j", async body => {
-  await start();
-  const archivePath = archiveSource(body);
-  const commitPersona = vi.fn<ArchiveImportHooks["commitPersona"]>((tx, prepared) => {
-    expect(() => tx.assertOutsideTransaction()).toThrow(/enclosing/);
-    expect(getDocument(tx, prepared.identity.path)?.meta.revision).toBe(0);
-    commitDocumentRevision(tx, prepared.identity, prepared.meta, prepared.event, 0);
-  });
-  const member = importMemberFromArchive({ archivePath, name: "Imported" }, body.trim() ? { commitPersona } : undefined);
-  const revision = body.trim() ? 1 : 0;
-  expect(commitPersona).toHaveBeenCalledTimes(revision);
-  expect(member.id).not.toBe("mem_historical");
-  db!.close(); expect((await start()).migrated).toBe(false);
-  assertPersona(member.id, body, revision);
-  const history = listDocumentHistory(db!, personaPath(member.id));
-  expect(history).toHaveLength(revision);
-  if (revision) {
-    expect(history[0]).toMatchObject({ ordinal: 1, revision: 1, reason: "importFromArchive", actorType: "user" });
-    expect(readFileSync(join(root, history[0].snapshotPath))).toEqual(Buffer.from(body, "utf8"));
-  }
-  expect(readFileSync(join(root, archivePath, "persona.md"))).toEqual(Buffer.from(body, "utf8"));
-  writeMemoryLayer(member.id, "persona", "next", { type: "user" });
-  assertPersona(member.id, "next", revision + 1);
-});
-
 it.each(["memory_documents", "memory_document_history"])("rolls back identity, metadata and owned assets when %s insertion fails", async table => {
   await start();
   const survivor = createMemberWithPersona({ name: "Keep" }, literal);
-  const archivePath = archiveSource(literal);
   const tables = ["members", "scopes", "workspace_registries", "ssh_credentials", "memory_documents", "memory_document_history"];
   const before = tables.map(name => db!.all(`SELECT * FROM ${name}`));
   db!.exec(`CREATE TRIGGER fail_birth BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT, 'birth metadata failure'); END`);
   expect(() => table === "memory_documents"
     ? createMemberWithPersona({ name: "Failed" }, literal)
-    : importMemberFromArchive({ archivePath, name: "Failed" }, {
-      commitPersona: (tx, prepared) => commitDocumentRevision(tx, prepared.identity, prepared.meta, prepared.event, 0),
+    : createMemberWithPersona({ name: "Failed" }, literal, record => tx => {
+      const contentHash = documentContentMeta(literal).contentHash;
+      commitDocumentRevision(tx, { path: personaPath(record.id), layer: "persona", memberId: record.id },
+        { revision: 1, contentHash, contentLength: literal.length, updatedAt: record.createdAt, updatedBy: "user" },
+        { revision: 1, ts: record.createdAt, actorType: "user", operation: "write", reason: "test history insertion",
+          contentHash, contentLength: literal.length, snapshotPath: `members/${record.id}/history/persona/prepared.md`,
+          snapshotHash: contentHash, snapshotBytes: Buffer.byteLength(literal, "utf8") },
+        0);
     })).toThrow("birth metadata failure");
   for (const [index, name] of tables.entries()) expect(db!.all(`SELECT * FROM ${name}`)).toEqual(before[index]);
   expect(readdirSync(join(root, "members"))).toEqual([survivor.id]);
-  expect(readFileSync(join(root, archivePath, "persona.md"))).toEqual(Buffer.from(literal, "utf8"));
   db!.exec("DROP TRIGGER fail_birth");
   db!.close(); expect((await start()).migrated).toBe(false);
   assertPersona(survivor.id, literal);

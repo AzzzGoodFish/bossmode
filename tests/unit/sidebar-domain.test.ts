@@ -15,7 +15,6 @@ describe("Sidebar domainOf — 0.20 merged chat IA", () => {
   it("routes all chat-family pages into the chats domain", () => {
     expect(domainOf({ type: "chats" })).toBe("chats");
     expect(domainOf({ type: "dm", memberId: "mem_1" })).toBe("chats");
-    expect(domainOf({ type: "member-create" })).toBe("chats");
     expect(domainOf({ type: "member-settings", memberId: "mem_1" })).toBe("chats");
     expect(domainOf({ type: "room", id: "r1" })).toBe("chats");
     expect(domainOf(null)).toBe("chats");
