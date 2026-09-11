@@ -45,7 +45,16 @@ export function importLegacyMembers(ctx:UpgradeImportContext,entries:readonly Le
   const converted:ReturnType<typeof parseLegacyMemberPersona>=profile?parseLegacyMemberPersona(read(profilePath),profilePath):{body:Buffer.alloc(0)};
   if(converted.title!==undefined)record.title=converted.title;
   const unmigrated=`members/${record.id}/memory/persona.md`;
-  if(ctx.sourceFiles.includes(unmigrated)&&read(unmigrated).toString("utf8").trim())throw new Error(`Unmerged legacy persona: ${record.id}`);
+  if(ctx.sourceFiles.includes(unmigrated)){
+   const legacyBody=read(unmigrated);
+   try{new TextDecoder("utf-8",{fatal:true}).decode(legacyBody);}catch{throw new Error(`Invalid legacy persona UTF-8: ${record.id}`);}
+   // Before member.md existed, memory/persona.md was the current persona, not
+   // an unresolved merge. Copy its exact bytes only when that newer profile is
+   // absent. An existing profile, including an explicitly empty one, must not
+   // silently resurrect an older body. The document importer retains history.
+   if(!profile)converted.body=legacyBody;
+   else if(legacyBody.toString("utf8").trim())throw new Error(`Unmerged legacy persona: ${record.id}`);
+  }
   prepared.push({record,path:`members/${record.id}/persona.md`,body:converted.body});
   consumed.add(entry.path);if(profile)consumed.add(profilePath);
  }
@@ -55,7 +64,7 @@ export function importLegacyMembers(ctx:UpgradeImportContext,entries:readonly Le
   if(ctx.sourceFiles.includes(item.path)){
    // An earlier attempt may have published this generated persona before DB cutover.
    // Reuse only this importer's ID-owned retained body, byte-identical to conversion
-   // of the verified snapshot's member.json/member.md. Never relax stageAsset's
+   // of the verified snapshot's selected persona source. Never relax stageAsset's
    // application-storage/source protection. The runner rechecks all live source
    // hashes before cutover; the document importer still verifies body ownership.
    const source=entries.find(e=>e.path===item.path);

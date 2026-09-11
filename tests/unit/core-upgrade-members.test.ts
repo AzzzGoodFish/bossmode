@@ -48,3 +48,23 @@ it("rejects profile-only input and file services inside an ambient transaction",
  expect(()=>importLegacyMembers(ctx,entries,"files")).toThrow("no identity metadata");
  expect(()=>ctx.db.transaction(()=>importLegacyMembers(ctx,entries,"files"))).toThrow(/outside|transaction/i);
 });
+
+it.each(["\uFEFF---\r\nLiteral older persona. 中文\r\n---\r\n", "", " \r\n "])("imports pre-member.md persona bytes without treating them as an unresolved merge (%j)",body=>{
+ const {ctx,entries,staged,repo}=setup({"members/mem_one/member.json":JSON.stringify(member),"members/mem_one/memory/persona.md":body});
+ const result=importLegacyMembers(ctx,entries,"files");
+ expect(repo.get(member.id)?.id).toBe(member.id);
+ expect(staged.get("members/mem_one/persona.md")).toEqual(Buffer.from(body));
+ expect(result.personas[0].body).toEqual(Buffer.from(body));
+});
+it.each(["", "Current body"])("does not resurrect an older persona when a newer mixed profile exists (%j)",body=>{
+ const {ctx,entries,repo,staged}=setup({"members/mem_one/member.json":JSON.stringify(member),"members/mem_one/member.md":body,"members/mem_one/memory/persona.md":"Older body"});
+ expect(()=>importLegacyMembers(ctx,entries,"files")).toThrow("Unmerged legacy persona");
+ expect(repo.list()).toEqual([]);expect(staged.size).toBe(0);
+});
+
+it("rejects invalid UTF-8 in the older persona before publishing identities or assets",()=>{
+ const {ctx,entries,repo,staged}=setup({"members/mem_one/member.json":JSON.stringify(member),"members/mem_one/memory/persona.md":"placeholder"});
+ writeFileSync(join(ctx.sourceRoot,"members/mem_one/memory/persona.md"),Buffer.from([0xc3,0x28]));
+ expect(()=>importLegacyMembers(ctx,entries,"files")).toThrow("Invalid legacy persona UTF-8");
+ expect(repo.list()).toEqual([]);expect(staged.size).toBe(0);
+});
