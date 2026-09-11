@@ -32,7 +32,7 @@ export function postMessage(
   sender: string,
   content: string,
   mentions: string[] = [],
-  extra?: Partial<Pick<RoomMessage, "type" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "autoDelivered" | "replyTo">>,
+  extra?: Partial<Pick<RoomMessage, "type" | "knowledge_event_meta" | "topic_event_meta" | "artifacts" | "attachments" | "senderMemberId" | "mentionMemberIds" | "urgentMentions" | "urgentMentionMemberIds" | "needResponse" | "needResponseMemberIds" | "replyTo">>,
 ): RoomMessage {
   const message = appendCapturedMessage(roomId, { sender, content, mentions, ...extra });
   // A microtask runs after any enclosing synchronous business transaction has

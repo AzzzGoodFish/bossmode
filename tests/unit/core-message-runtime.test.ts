@@ -65,23 +65,27 @@ it("a failed active prompt does not discard a later accepted instruction",async(
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(2));expect(String(mockPromptFn.mock.calls[1][0])).toContain("still deliver this");
   }finally{release?.();await closeTestServer(server);}
 });
-it("explicit FYI never triggers automatic final-text delivery",async()=>{
+it("explicit FYI (no debt) never delivers bare text and fires no note",async()=>{
   const server=await createTestServer();
   try{
     resetMocks();const token=await loginAndGetToken(server.port),room=await createMockRoom(server.port,token,"FYI debt",["fyi-owner"]),id=room.globalMemberIds![0];
     mockPromptFn.mockImplementation(async()=>{emitMockEvent({type:"message_end",text:"do not publish",stopReason:"stop"});});
     postMessage(room.id,"user","@fyi-owner information only",["fyi-owner"],{needResponse:[],needResponseMemberIds:[]});
     await vi.waitFor(()=>expect(getDatabase().get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND status='settled'",room.id)?.n).toBe(1));
-    expect(readMessages(room.id).some(m=>m.senderMemberId===id)).toBe(false);expect(new ReplyObligationRepository(getDatabase()).listPending(room.id,id)).toEqual([]);
+    expect(readMessages(room.id).some(m=>m.senderMemberId===id)).toBe(false);
+    expect(readMessages(room.id).some(m=>m.sender==="system"&&String(m.content).includes("finished without replying"))).toBe(false);
+    expect(new ReplyObligationRepository(getDatabase()).listPending(room.id,id)).toEqual([]);
   }finally{await closeTestServer(server);}
 });
 it("a successful chat tool event alone cannot settle debt without a committed own chat",async()=>{
   const server=await createTestServer();
   try{
     resetMocks();const token=await loginAndGetToken(server.port),room=await createMockRoom(server.port,token,"Reply facts",["reply-owner"]),id=room.globalMemberIds![0];
-    mockPromptFn.mockImplementation(async()=>{emitMockEvent({type:"tool_end",toolName:"chat",isError:false} as any);emitMockEvent({type:"message_end",text:"actual fallback",stopReason:"stop"});});
+    mockPromptFn.mockImplementation(async()=>{emitMockEvent({type:"tool_end",toolName:"chat",isError:false} as any);emitMockEvent({type:"message_end",text:"not a committed chat",stopReason:"stop"});});
     const response=await jsonRequest(server.port,"POST",`/api/rooms/${room.id}/messages`,{token,body:{content:"@reply-owner answer"}});expect(response.status,response.body).toBe(200);
-    await vi.waitFor(()=>expect(readMessages(room.id).find(m=>m.senderMemberId===id)?.content).toBe("actual fallback"));
-    expect(new ReplyObligationRepository(getDatabase()).listPending(room.id,id)).toEqual([]);
+    await vi.waitFor(()=>expect(new ReplyObligationRepository(getDatabase()).listPending(room.id,id)).toEqual([]));
+    // No committed own chat → nothing is published as the member; the silence note is the only signal.
+    expect(readMessages(room.id).some(m=>m.senderMemberId===id)).toBe(false);
+    expect(readMessages(room.id).some(m=>m.sender==="system"&&String(m.content).includes("finished without replying"))).toBe(true);
   }finally{await closeTestServer(server);}
 });

@@ -82,10 +82,10 @@ function section(args: {
 export const COMMUNICATION_SEGMENT = `## Communication
 
 The chat tool is the only way your messages reach the room. Text you
-write outside a chat call is a private scratchpad — nobody sees it. A
-reply counts only when it goes out as a chat call. (One safety net: if
-a reply was expected and your turn ends without a chat call, your final
-text is posted automatically — a net, not a habit.)
+write outside a chat call is a private scratchpad — nobody sees it.
+A reply counts only when it goes out as a chat call — chat is the only
+channel. Nothing else is delivered; if it didn't go out through chat,
+it was never sent.
 
 Reply first. When the user or another member reaches you, your first
 move is a chat reply, before any tool call: the direct answer if it's

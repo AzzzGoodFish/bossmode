@@ -1,3 +1,6 @@
+// Reply-debt turns without a chat call: nothing is delivered, the silence is
+// made visible as a system note. The final-text fallback (autoDelivered) was
+// retired 2026-09-11 (fish #19368/#19381; plan-retire-chat-fallback-v1).
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/storage/database.js";
 import { MembersRepository } from "../../src/storage/repositories/members.js";
@@ -71,10 +74,11 @@ async function setup() {
   initAgentManager(registry);
 }
 
-function deliveredMessages(): Array<{ text: string; extra?: Record<string, unknown> }> {
-  return bus.getMessagesSince("room1", null)
+/** Messages posted as the member itself — must stay empty when chat was not called. */
+function memberMessages(scope = "room1"): Array<{ text: string }> {
+  return bus.getMessagesSince(scope, null)
     .filter((message) => message.senderMemberId === "mem_developer")
-    .map((message) => ({ text: message.content, extra: { autoDelivered: message.autoDelivered } }));
+    .map((message) => ({ text: message.content }));
 }
 
 function silenceNoteCalls() {
@@ -109,14 +113,14 @@ afterEach(async () => {
   fixture.close();
 });
 
-describe("final-text fallback (pending reply debt)", () => {
+describe("reply debt turns without chat (final-text fallback retired)", () => {
   beforeEach(async () => {
     state.promptImpl = vi.fn(async () => {});
     vi.mocked(bus.postMessage).mockClear();
     await setup();
   });
 
-  it("delivers the last completed text verbatim when a debt turn never calls chat — autoDelivered, debt cleared, no silence note", async () => {
+  it("a debt turn that never calls chat delivers nothing — the silence note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "I checked the logs. The fix is in place.", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -124,14 +128,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    const delivered = deliveredMessages();
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0].text).toBe("I checked the logs. The fix is in place.");
-    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
-    expect(silenceNoteCalls()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("a successful chat call clears the debt: bare final text is NOT fallback-posted, no silence note", async () => {
+  it("a successful chat call delivers via chat and clears the debt: no silence note", async () => {
     state.promptImpl = vi.fn(async () => {
       // Exercise the runtime callback: real publication, no successful-tool-event shortcut.
       await handle.onChat("Sent via chat");
@@ -141,11 +142,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toEqual([{ text: "Sent via chat", extra: { autoDelivered: undefined } }]);
+    expect(memberMessages()).toEqual([{ text: "Sent via chat" }]);
     expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("a failed chat call does NOT clear the debt: the fallback still posts the final text", async () => {
+  it("a failed chat call leaves the debt pending: nothing delivered, silence note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       expect(() => getDatabase().transaction(() => {
         bus.postMessage("room1", "developer", "Uncommitted chat", [], { senderMemberId: "mem_developer" });
@@ -158,14 +159,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    const delivered = deliveredMessages();
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0].text).toBe("chat failed but here is the result anyway");
-    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
-    expect(silenceNoteCalls()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("FYI turn (no debt): bare text is NOT delivered and no silence note fires", async () => {
+  it("an FYI turn (no debt) posts neither text nor a silence note", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "noting this for later", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -173,11 +171,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer", { needResponse: [], senderName: "qa" });
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("user @ carries debt: bare text fallback-posted with [REPLY EXPECTED] banner in the payload", async () => {
+  it("user @ carries debt: banner stays in the payload, nothing is delivered, note fires", async () => {
     const payloads: string[] = [];
     state.promptImpl = vi.fn(async (msg: string) => {
       payloads.push(msg);
@@ -188,13 +186,11 @@ describe("final-text fallback (pending reply debt)", () => {
     await activateAgent("room1", "developer", { needResponse: ["developer"], senderName: "user" });
 
     expect(payloads[0]).toContain("[REPLY EXPECTED] Respond using the chat tool.");
-    const delivered = deliveredMessages();
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0].text).toBe("bare text reply to the user");
-    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
+    expect(memberMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("internal member reply expectation carries the sender-named banner and debt", async () => {
+  it("internal member reply expectation carries the sender-named banner; no text → note", async () => {
     const payloads: string[] = [];
     state.promptImpl = vi.fn(async (msg: string) => {
       payloads.push(msg);
@@ -204,12 +200,11 @@ describe("final-text fallback (pending reply debt)", () => {
     await activateAgent("room1", "developer", { needResponse: ["developer"], senderName: "qa" });
 
     expect(payloads[0]).toContain("[REPLY EXPECTED] qa expects your reply — respond with the chat tool.");
-    // No text and debt pending → silence note.
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("an error turn falls back to nothing: no delivery, no silence note (error notice already shown)", async () => {
+  it("an error turn delivers nothing and fires no note (error notice already shown)", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "partial before crash", stopReason: "stop" });
       handle.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "provider exploded" });
@@ -218,11 +213,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(0);
   });
 
-  it("abort (dispatchState aborting) does not fall back", async () => {
+  it("abort (dispatchState aborting) delivers nothing", async () => {
     state.promptImpl = vi.fn(async () => {
       const { abortAgent } = await import("../../src/engine/agent-manager.js");
       void abortAgent("room1", "developer");
@@ -232,10 +227,10 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
   });
 
-  it("a turn ending with an aborted message_end fragment has no completed segment → silence note", async () => {
+  it("a turn ending with an aborted message_end fragment delivers nothing — silence note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "this fragment was cut off by abort", stopReason: "aborted" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -243,28 +238,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("fallback text with @mention routes the mention (activation handled by router)", async () => {
-    state.promptImpl = vi.fn(async () => {
-      handle.emit({ type: "message_end", text: "@qa please verify the fallback", stopReason: "stop" });
-      handle.emit({ type: "agent_end", messages: [] });
-    });
-
-    await activateAgent("room1", "developer");
-
-    const calls = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
-    expect(calls).toHaveLength(1);
-    expect(calls[0][2]).toBe("@qa please verify the fallback");
-    // mentions list carries the target for the router listener.
-    expect(calls[0][3]).toEqual(["qa"]);
-    // The mention inside a fallback delivery does NOT carry needResponse (FYI for the target).
-    expect(calls[0][4]?.needResponse).toBeUndefined();
-  });
-
-  it("a debt turn with no text at all falls into the silence branch", async () => {
+  it("a debt turn with no text at all delivers nothing and fires the note", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -272,11 +250,11 @@ describe("final-text fallback (pending reply debt)", () => {
 
     await activateAgent("room1", "developer");
 
-    expect(deliveredMessages()).toHaveLength(0);
+    expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("length-truncated segment is not a fallback candidate; the continuation's completed text is", async () => {
+  it("length truncation still runs one continuation; its text is not delivered and the note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       const call = handle.prompt.mock.calls.length;
       if (call === 1) {
@@ -293,46 +271,22 @@ describe("final-text fallback (pending reply debt)", () => {
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
     expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
-    const delivered = deliveredMessages();
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0].text).toBe("Full result after continuation.");
-    expect(delivered[0].extra).toMatchObject({ autoDelivered: true });
+    expect(memberMessages()).toHaveLength(0);
+    expect(silenceNoteCalls()).toHaveLength(1);
   });
 
-  it("delivers for the captured member ID after a rename, never for a reused display name", async () => {
-    state.promptImpl = vi.fn(async () => {
-      (await import("../../src/workspace/member-registry.js")).updateMemberIdentity("mem_developer", { name: "renamed" });
-      new MembersRepository(fixture.db).insert({ id: "mem_replacement", name: "developer", agentTemplate: "developer", global: {},
-        unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 2, updatedAt: 2 });
-      handle.emit({ type: "message_end", text: "Reply from original owner", stopReason: "stop" });
-      handle.emit({ type: "agent_end" });
-    });
-    await activateAgent("room1", "mem_developer");
-    const replies = bus.getMessagesSince("room1", null).filter((message) => message.autoDelivered);
-    expect(replies).toHaveLength(1);
-    expect(replies[0]).toMatchObject({ sender: "renamed", senderMemberId: "mem_developer", content: "Reply from original owner" });
-    expect(bus.getMessagesSince("room1", null).some((message) => message.senderMemberId === "mem_replacement")).toBe(false);
-  });
-
-
-  it.each(["dm", "topic"])("commits final-text fallback in the owning %s scope without leaking into the room", async (kind) => {
+  it("DM: a debt turn without chat delivers nothing — the silence note lands in the DM scope", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const scope = kind === "dm" ? "dm:mem_developer" : "topic:fixture-topic";
-    if (kind === "topic") {
-      new ConversationsRepository(fixture.db).upsertTopic({ id: "fixture-topic", roomId: "room1", title: "Scoped reply",
-        anchorMessageId: bus.getLatestMessageId("room1")!, createdBy: "user", createdAt: 1, status: "active", seedMode: "fresh", participants: ["mem_developer"] });
-    }
-    bus.postMessage(scope, "user", "@developer scoped question", ["developer"]);
+    bus.postMessage("dm:mem_developer", "user", "@developer scoped question", ["developer"]);
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "Scoped answer", stopReason: "stop" });
       handle.emit({ type: "agent_end" });
     });
-    if (kind === "dm") await manager.activateDmMember("mem_developer");
-    else await manager.activateTopicMember("room1", "fixture-topic", "mem_developer");
-    const replies = bus.getMessagesSince(scope, null).filter((message) => message.senderMemberId === "mem_developer");
-    expect(replies).toHaveLength(1);
-    expect(replies[0]).toMatchObject({ content: "Scoped answer", autoDelivered: true });
-    expect(deliveredMessages()).toHaveLength(0);
+    await manager.activateDmMember("mem_developer");
+    const dmMessages = bus.getMessagesSince("dm:mem_developer", null);
+    expect(dmMessages.some((message) => message.senderMemberId === "mem_developer")).toBe(false);
+    expect(dmMessages.some((message) => message.sender === "system" && message.content.includes("finished without replying"))).toBe(true);
+    // Nothing leaks into the room scope.
+    expect(memberMessages()).toHaveLength(0);
   });
-
 });

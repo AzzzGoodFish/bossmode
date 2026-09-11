@@ -7,7 +7,7 @@ import {getDatabase} from "../../src/storage/database.js";
 import {ReplyObligationRepository} from "../../src/storage/repositories/reply-obligation-repository.js";
 import {readMessages} from "../../src/storage/message-repository.js";
 import {postMessage} from "../../src/communication/message-bus.js";
-import * as tools from "../../src/engine/tools.js";
+import * as bus from "../../src/communication/message-bus.js";
 setupTestWorkspace();
 const barrier=()=>{let release!:()=>void;const promise=new Promise<void>(r=>release=r);return {promise,release};};
 async function fixture(){const server=await createTestServer();resetMocks();const token=await loginAndGetToken(server.port),room=await createMockRoom(server.port,token,"Runtime races",["race-owner"]),id=room.globalMemberIds![0];return {server,room,id,post:(text:string)=>jsonRequest(server.port,"POST",`/api/rooms/${room.id}/messages`,{token,body:{content:`@race-owner ${text}`}})};}
@@ -60,7 +60,12 @@ it("a length-truncated FYI continuation does not acquire reply debt or auto-publ
   }finally{await closeTestServer(f.server);}
 });
 it("publication failure closes the workflow as failed, without replaying successful SDK work",async()=>{
-  const f=await fixture();const spy=vi.spyOn(tools,"deliverMemberMessage").mockImplementationOnce(()=>{throw new Error("publication fixture failure");});
+  const f=await fixture();const original=bus.postMessage as (...args:any[])=>unknown;
+  const spy=vi.spyOn(bus,"postMessage").mockImplementation((((...args:any[])=>{
+    // Fail only the silence-note publication (the settle-side write this turn performs).
+    if(String(args[2]).includes("finished without replying"))throw new Error("publication fixture failure");
+    return original(...args);
+  }) as any));
   try{
     mockPromptFn.mockImplementation(async()=>emitMockEvent({type:"message_end",text:"finished result",stopReason:"stop"}));
     await f.post("reply");await vi.waitFor(()=>expect(getDatabase().get<{outcome:string}>("SELECT outcome FROM queued_inputs WHERE scope_id=?",f.room.id)?.outcome).toBe("failed"));
@@ -97,7 +102,7 @@ it.each(["stop","length"])("queued FYI during post-run compaction cannot orphan 
     await f.post("reply required");await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));mockAbortFn.mockClear();
     postMessage(f.room.id,"user","@race-owner subsequent FYI",["race-owner"],{needResponse:[],needResponseMemberIds:[]});expect(mockAbortFn).not.toHaveBeenCalled();gate.release();
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(2));await vi.waitFor(()=>expect(debts(f.room.id,f.id)).toEqual([]));
-    const own=readMessages(f.room.id).filter(m=>m.senderMemberId===f.id);expect(own).toHaveLength(1);expect(own[0].content).toBe(stopReason==="stop"?"original completed result":"continued result");
+    const own=readMessages(f.room.id).filter(m=>m.senderMemberId===f.id);expect(own).toHaveLength(0);
   }finally{gate.release();await closeTestServer(f.server);}
 });
 

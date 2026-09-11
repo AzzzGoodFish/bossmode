@@ -74,6 +74,9 @@ describe("prompt compiler (three-segment)", () => {
     expect(prompt).toContain("I am qa.");
     expect(prompt).toContain("I prefer short answers.");
     expect(prompt).toContain("The chat tool is the only way your messages reach the room");
+    // Final-text fallback retired (2026-09-11): no auto-delivery safety net is promised.
+    expect(prompt).not.toContain("safety net");
+    expect(prompt).toContain("Nothing else is delivered");
     expect(prompt).toContain('You are in room "Prompt Lab"');
     expect(prompt).toContain("this file IS your persona");
     // Old assets not injected

@@ -96,27 +96,6 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
   return { mentions, mentionMemberIds: mentions.includes("all") ? roomMembers.map(member => member.id) : toIds(mentions), urgentMentions, urgentMentionMemberIds: toIds(urgentMentions) };
 }
 
-// -- Final-text fallback delivery (pending reply debt) --
-
-/**
- * Deliver a member's text into the conversation (room or DM, same rule).
- * Requires a trusted stable sender ID. Room scope: mention scan + messageMeta, then
- * postMessage (mention activation handled by router listener). DM scope:
- * direct postMessage, no mention routing.
- * `opts.autoDelivered` marks a fallback-posted message (no chat call was made
- * on a debt turn) — persisted and queryable, not rendered in the UI.
- */
-export function deliverMemberMessage(roomId: string, memberId: string, text: string, opts?: { autoDelivered?: boolean }): void {
-  const sender=getMember(memberId);
-  if(!sender)throw new Error(`Member not found: ${memberId}`);
-  if(roomId.startsWith("dm:") && roomId!==`dm:${memberId}`)throw new Error("DM sender does not own the scope");
-  const info=roomId.startsWith("dm:")
-    ? {mentions:[],mentionMemberIds:[],urgentMentions:[],urgentMentionMemberIds:[]}
-    : mentionInfoFromText(text,roomStore.getRoomMembers(resolveOwningRoomId(roomId)));
-  postMessage(roomId,sender.name,text,info.mentions,messageMeta({senderMemberId:memberId,...info,autoDelivered:opts?.autoDelivered}));
-  logger.info("agent","finalTextDelivered",{memberId,chars:text.length,autoDelivered:opts?.autoDelivered===true});
-}
-
 function messageMeta(meta: {
   attachments?: RoomMessageAttachment[];
   artifacts?: string[];
@@ -126,7 +105,6 @@ function messageMeta(meta: {
   urgentMentions?: string[];
   urgentMentionMemberIds?: string[];
   mentions?: string[];
-  autoDelivered?: boolean;
 }) {
   const out: {
     attachments?: RoomMessageAttachment[];
@@ -135,7 +113,6 @@ function messageMeta(meta: {
     mentionMemberIds?: string[];
     urgentMentions?: string[];
     urgentMentionMemberIds?: string[];
-    autoDelivered?: boolean;
   } = {};
   if (meta.attachments?.length) out.attachments = meta.attachments;
   if (meta.artifacts?.length) out.artifacts = meta.artifacts;
@@ -143,7 +120,6 @@ function messageMeta(meta: {
   if (meta.mentionMemberIds !== undefined) out.mentionMemberIds = meta.mentionMemberIds;
   if (meta.urgentMentions?.length) out.urgentMentions = meta.urgentMentions;
   if (meta.urgentMentionMemberIds !== undefined) out.urgentMentionMemberIds = meta.urgentMentionMemberIds;
-  if (meta.autoDelivered) out.autoDelivered = true;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
