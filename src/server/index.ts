@@ -11,7 +11,6 @@ import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js
 import { removePidFile, writePidFile, ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../engine/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../engine/agent-manager.js";
-import { sweepInterruptedBackgroundTasks } from "../engine/background-task-store.js";
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
@@ -54,16 +53,6 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 
 async function startApplication(opts: ServerOptions): Promise<void> {
   seedBuiltinAssets();
-  // Background tasks: service-startup-only sweep. Non-terminal tasks from a
-  // previous daemon run are marked interrupted (terminal; never resumed).
-  // Runs exactly here — never on member reload or session rebuild.
-  try {
-    const marked = sweepInterruptedBackgroundTasks();
-    if (marked > 0) logger.info("server", "background tasks marked interrupted by restart", { marked });
-  } catch (err) {
-    logger.error("server", "background task restart sweep failed", { error: String(err) });
-    throw err;
-  }
 
   await recoverMemberArchives();
 

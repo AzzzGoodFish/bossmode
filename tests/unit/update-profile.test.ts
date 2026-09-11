@@ -74,7 +74,7 @@ describe("self-only update_profile", () => {
       const last = loadScopeMessages(scope).at(-1)!;
       expect(last.sender).toBe(next);
       expect(last.senderMemberId).toBe(f.own.id);
-      expect(await handleToolCallback("background_status", scope, originalName, {}, { memberId: f.own.id, execution: "background" })).toMatchObject({ ok: true });
+      expect(await handleToolCallback("list_scopes", scope, originalName, {}, { memberId: f.own.id })).toMatchObject({ ok: true });
     }
     expect(loadScopeMessages(f.room.id)[0].sender).toBe(originalName);
     expect(f.registry.getMember(f.peer.id)!.title).toBeUndefined();

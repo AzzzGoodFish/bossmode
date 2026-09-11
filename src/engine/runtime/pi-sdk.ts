@@ -390,7 +390,8 @@ async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => v
 export class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
-  /** SDK session id (background runner records it; live path reports via onSessionChanged). */
+  /** SDK session id when the runtime exposes one (live sessions report
+   *  identity through onSessionChanged instead). */
   readonly sessionId: string | undefined;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
   private mcpConfigs = new Set<McpRuntimeSettings>();
@@ -773,8 +774,8 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (errors.length > 0) {
       throw new Error(`teardown incomplete (${errors.length}): ${errors.join("; ")}`);
     }
-    // A completed background task must not retain its full PiSdkAgentHandle
-    // (and session) until service shutdown. Failed teardown stays registered so
+    // A fully torn-down handle must not stay registered (and hold its session)
+    // until service shutdown. Failed teardown stays registered so
     // shutdownAll can surface it rather than pretending cleanup succeeded.
     this.onTeardownSuccess?.();
   }
@@ -782,18 +783,6 @@ export class PiSdkAgentHandle implements AgentHandle {
   async waitForIdle(): Promise<void> {
     if (this.promptOperation) await this.promptOperation.catch(() => {});
     else if (this.currentRun) await this.currentRun.catch(() => {});
-  }
-
-  forkSnapshot(): { sessionFile: string; branchEntries: unknown[] } | null {
-    try {
-      const sm = (this.session as any).sessionManager;
-      const sessionFile: string | undefined = this.session.sessionFile ?? sm?.getSessionFile?.();
-      if (!sessionFile) return null;
-      const branchEntries: unknown[] = typeof sm?.getBranch === "function" ? sm.getBranch() : [];
-      return { sessionFile, branchEntries };
-    } catch {
-      return null;
-    }
   }
 
   refreshModelRegistry(_opts?: { allowNetwork?: boolean }): Promise<void> {
@@ -1081,7 +1070,7 @@ export class PiSdkRuntime implements AgentRuntime {
 
     const defaultAgentDir = resolvePiAgentDir(opts.roomId, opts.member.id);
     const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
-    const sessionDir = opts.background?.sessionDir ?? opts.sessionDir ?? join(runtimeAgentDir, "sessions");
+    const sessionDir = opts.sessionDir ?? join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
@@ -1100,10 +1089,10 @@ export class PiSdkRuntime implements AgentRuntime {
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
-    if (opts.background?.sessionManager || opts.sessionManager) {
-      // A forked manager has an in-memory branch cut. Never re-open its file
-      // before the first append, or the SDK would restore the old leaf.
-      sessionManager = (opts.background?.sessionManager ?? opts.sessionManager) as SessionManager;
+    if (opts.sessionManager) {
+      // A provided manager must not be re-opened before the first append —
+      // re-opening the file would restore the old leaf.
+      sessionManager = opts.sessionManager as SessionManager;
     } else
     try {
       const resumeFile = opts.resumeSession?.sessionFile;
@@ -1196,7 +1185,6 @@ export class PiSdkRuntime implements AgentRuntime {
       roomId: opts.roomId,
       memberId: opts.member.id,
       scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-      execution: opts.background ? "background" : "live"
   });
       const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
       // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
@@ -1250,7 +1238,7 @@ export class PiSdkRuntime implements AgentRuntime {
         customTools.map((t) => t.name),
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
         () => this.handles.delete(handle),
-        opts.background ? undefined : opts.onSessionChanged,
+        opts.onSessionChanged,
         mcpSettings,
       );
       this.handles.set(handle, opts.member.id);

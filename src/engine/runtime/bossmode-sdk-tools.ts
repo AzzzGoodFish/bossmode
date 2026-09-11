@@ -20,12 +20,6 @@ import {
   SHELL_WAIT_DESCRIPTION,
   SHELL_LIST_DESCRIPTION,
   SHELL_CLOSE_DESCRIPTION,
-  BACKGROUND_START_DESCRIPTION,
-  BACKGROUND_STATUS_DESCRIPTION,
-  BACKGROUND_WAIT_DESCRIPTION,
-  BACKGROUND_CANCEL_DESCRIPTION,
-  RECALL_DESCRIPTION,
-  MEMORIZE_DESCRIPTION,
   PARAM_DESCRIPTIONS,
 } from "../../shared/mcp-tool-descriptions.js";
 function textResult(text: string) {
@@ -37,33 +31,17 @@ function truncate(text: string): string {
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
 }
 
-/** Tools forbidden inside a background task session (same declarations stay
- *  registered so the fork prefix is unchanged; only execution is rejected). */
-const BACKGROUND_FORBIDDEN_TOOLS = new Set([
-  "chat",
-  "wait",
-  "background_start",
-  "recall",
-  "memorize",
-]);
-
 export function createBossmodeSdkTools(opts: {
   roomId: string;
   memberId: string;
   /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
   scopeKind?: "dm" | "room";
-  /** "background" = background task child session: same tool declarations, but
-   *  scope-posting and background-start tools are rejected at execution time. */
-  execution?: "live" | "background";
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
   const scopeKind = opts.scopeKind || "room";
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
-    if (opts.execution === "background" && BACKGROUND_FORBIDDEN_TOOLS.has(tool)) {
-      throw new Error(`tool "${tool}" is not available inside a background task; finish the task and return the result as your final text`);
-    }
     const { handleToolCallback } = await import("../tools.js");
-    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, execution: opts.execution, ...(signal ? {signal} : {}) });
+    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
   const tools: ToolDefinition[] = [
@@ -212,87 +190,6 @@ export function createBossmodeSdkTools(opts: {
         workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
       }),
       execute: async (_id, params) => (await call("edit", params as any)) as any,
-    }),
-    // ── Background tasks (foundation: start/status/wait/cancel + parameter-free memory entries) ──
-    defineTool({
-      name: "background_start",
-      label: "Background Start",
-      description: BACKGROUND_START_DESCRIPTION,
-      parameters: Type.Object({
-        prompt: Type.String({ description: PARAM_DESCRIPTIONS.backgroundPrompt }),
-        sessionMode: Type.String({ description: PARAM_DESCRIPTIONS.backgroundSessionMode }),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("background_start", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Background start failed");
-        return textResult(`Background task ${data.taskId} started (status: ${data.status}). Result is collected with background_wait.`);
-      },
-    }),
-    defineTool({
-      name: "background_status",
-      label: "Background Status",
-      description: BACKGROUND_STATUS_DESCRIPTION,
-      parameters: Type.Object({}),
-      execute: async () => {
-        const data = await call("background_status", {}) as any;
-        if (data?.ok === false) throw new Error(data.error || "Background status failed");
-        const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
-        if (tasks.length === 0) return textResult("No background tasks in this scope.");
-        return textResult(tasks.map((t: any) => `[${t.status}] ${t.kind} ${t.taskId} started ${t.startedAt}${t.endedAt ? ` ended ${t.endedAt}` : ""}`).join("\n"));
-      },
-    }),
-    defineTool({
-      name: "background_wait",
-      label: "Background Wait",
-      description: BACKGROUND_WAIT_DESCRIPTION,
-      parameters: Type.Object({
-        taskId: Type.String({ description: PARAM_DESCRIPTIONS.backgroundTaskId }),
-        blockMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.backgroundBlockMs })),
-      }),
-      execute: async (_id, params, signal) => {
-        const data = await call("background_wait", params as any, signal) as any;
-        if (data?.ok === false) throw new Error(data.error || "Background wait failed");
-        if (data.status === "running" || data.status === "starting" || data.status === "cancelling") {
-          return textResult(`Task ${data.taskId} is still ${data.status}. ${data.note ?? ""}`.trim());
-        }
-        if (data.status === "done") return textResult(truncate(`Result:\n${data.result ?? ""}`));
-        return textResult(`Task ${data.taskId} ${data.status}. Reason: ${data.error ?? "(none)"}`);
-      },
-    }),
-    defineTool({
-      name: "background_cancel",
-      label: "Background Cancel",
-      description: BACKGROUND_CANCEL_DESCRIPTION,
-      parameters: Type.Object({
-        taskId: Type.String({ description: PARAM_DESCRIPTIONS.backgroundTaskId }),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("background_cancel", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Background cancel failed");
-        return textResult(`Task ${data.taskId}: ${data.status}${data.note ? ` (${data.note})` : ""}.`);
-      },
-    }),
-    defineTool({
-      name: "recall",
-      label: "Recall",
-      description: RECALL_DESCRIPTION,
-      parameters: Type.Object({}),
-      execute: async () => {
-        const data = await call("recall", {}) as any;
-        if (data?.ok === false) throw new Error(data.error || "Recall failed");
-        return textResult(`Recall task ${data.taskId} started (status: ${data.status}). Collect findings with background_wait.`);
-      },
-    }),
-    defineTool({
-      name: "memorize",
-      label: "Memorize",
-      description: MEMORIZE_DESCRIPTION,
-      parameters: Type.Object({}),
-      execute: async () => {
-        const data = await call("memorize", {}) as any;
-        if (data?.ok === false) throw new Error(data.error || "Memorize failed");
-        return textResult(`Memorize task ${data.taskId} started (status: ${data.status}). Collect the change report with background_wait.`);
-      },
     }),
     // ── Batch 7 P2: persistent shells (real PTYs; bash is retired).
     defineTool({

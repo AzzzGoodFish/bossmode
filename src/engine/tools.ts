@@ -179,11 +179,6 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
   /** Trusted runtime-owned caller identity, never taken from tool arguments. */
   memberId?: string;
-  /** "background" = background task child session: same tool implementations,
-   *  but side effects that belong to the LIVE member conversation are
-   *  suppressed — history queries must not advance the member's unread
-   *  cursor (read-to-clear is a live-turn behavior only). */
-  execution?: "live" | "background";
 }
 
 export async function handleToolCallback(
@@ -332,11 +327,7 @@ export async function handleToolCallback(
       // member's own room advances the delivery cursor to the furthest message
       // seen — the unread hint disappears on the next activation. Cross-scope
       // reads and DM (which has no backlog semantics) never touch the cursor.
-      // Background child sessions never advance the cursor: the read is an
-      // internal lookup, not the member reading their room — unread
-      // positions must survive recall/memorize runs.
-      const isBackgroundRead = context?.execution === "background";
-      if (!isBackgroundRead && !targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
+      if (!targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
         let maxSeq = -1;
         let maxMsg: RoomMessage | null = null;
         for (const m of messages) {
@@ -709,120 +700,9 @@ export async function handleToolCallback(
         members: (updated?.members || room.members),
       };
     }
-    case "background_start":
-    case "recall":
-    case "memorize": {
-      const actor = resolveBackgroundActor(roomId, actorRef);
-      if (!actor) return { ok: false, error: "Member or scope not found" };
-      const { startBackgroundTask } = await import("./background-task-runner.js");
-      const kind = tool === "background_start" ? "generic" : tool === "recall" ? "recall" : "memorize";
-      const result = startBackgroundTask({
-        memberId: actor.memberId,
-        scopeId: actor.scopeId,
-        kind,
-        sessionMode: tool === "background_start" ? (String(params?.sessionMode ?? "") as "new" | "fork") : "fork",
-        prompt: String(params?.prompt ?? ""),
-      });
-      if (!result.ok) return { ok: false, error: result.error };
-      return { ok: true, taskId: result.taskId, status: result.status, note: "result is collected with background_wait" };
-    }
-    case "background_status": {
-      const actor = resolveBackgroundActor(roomId, actorRef);
-      if (!actor) return { ok: false, error: "Member or scope not found" };
-      const { listBackgroundTasks } = await import("./background-task-store.js");
-      const tasks = listBackgroundTasks(actor.memberId)
-        .filter((t) => t.scopeId === actor.scopeId)
-        .map((t) => ({ taskId: t.taskId, kind: t.kind, scopeId: t.scopeId, status: t.status, startedAt: t.startedAt, endedAt: t.endedAt }));
-      return { ok: true, tasks };
-    }
-    case "background_wait": {
-      const actor = resolveBackgroundActor(roomId, actorRef);
-      if (!actor) return { ok: false, error: "Member or scope not found" };
-      const { getBackgroundTask, whenTerminal, isTerminalBackgroundTaskStatus, registerBackgroundWaitSettle } = await import("./background-task-store.js");
-      const taskId = String(params?.taskId ?? "").trim();
-      const record = getBackgroundTask(actor.memberId, taskId);
-      if (!record) return { ok: false, error: `background task not found: ${taskId || "(none)"}` };
-      // Scope authorization in addition to member ownership: the caller's
-      // current access must cover the task's scope.
-      try {
-        assertMemberScopeAccess(actor.memberId, record.scopeId as ScopeId);
-      } catch {
-        return { ok: false, error: `background task not found: ${taskId}` };
-      }
-      const blockMs = params?.blockMs === undefined ? 30000 : Number(params.blockMs);
-      if (!Number.isFinite(blockMs) || blockMs < 0) return { ok: false, error: "blockMs must be a non-negative number (0 = wait until completion)" };
-      if (isTerminalBackgroundTaskStatus(record.status)) {
-        return terminalWaitResult(record);
-      }
-      const wait = whenTerminal(actor.memberId, taskId);
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      let unregisterSettle: (() => void) | undefined;
-      const interrupted = new Promise<null>((resolveInterrupt) => {
-        const interrupt = () => resolveInterrupt(null);
-        const unregister = registerBackgroundWaitSettle(actor.memberId,interrupt);
-        context?.signal?.addEventListener("abort",interrupt,{once:true});
-        unregisterSettle = () => {unregister();context?.signal?.removeEventListener("abort",interrupt);};
-        if(context?.signal?.aborted)interrupt();
-      });
-      const timeout = blockMs > 0 ? new Promise<null>((resolve) => { timeoutHandle = setTimeout(() => resolve(null), blockMs); }) : null;
-      try {
-        const racers: Promise<unknown>[] = [wait.promise];
-        if (timeout) racers.push(timeout);
-        racers.push(interrupted);
-        const settled = await Promise.race(racers) as import("../shared/types.js").BackgroundTaskRecord | null;
-        if (settled) return terminalWaitResult(settled);
-        const current = getBackgroundTask(actor.memberId, taskId);
-        return { ok: true, taskId, status: current?.status ?? record.status, note: "wait ended (timeout or interrupt); the task keeps running — call background_wait again" };
-      } finally {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        unregisterSettle?.();
-        wait.dispose();
-      }
-    }
-    case "background_cancel": {
-      const actor = resolveBackgroundActor(roomId, actorRef);
-      if (!actor) return { ok: false, error: "Member or scope not found" };
-      const { getBackgroundTask } = await import("./background-task-store.js");
-      const taskId = String(params?.taskId ?? "").trim();
-      const record = getBackgroundTask(actor.memberId, taskId);
-      if (!record) return { ok: false, error: `background task not found: ${taskId || "(none)"}` };
-      try {
-        assertMemberScopeAccess(actor.memberId, record.scopeId as ScopeId);
-      } catch {
-        return { ok: false, error: `background task not found: ${taskId}` };
-      }
-      const { cancelBackgroundTask } = await import("./background-task-runner.js");
-      const result = cancelBackgroundTask(actor.memberId, taskId);
-      if (!result.ok) return { ok: false, error: result.error };
-      return { ok: true, taskId: result.taskId, status: result.status, ...(result.note ? { note: result.note } : {}) };
-    }
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
-}
-
-/** Terminal wait payload: result only on done; explicit reason otherwise. */
-function terminalWaitResult(record: import("../shared/types.js").BackgroundTaskRecord) {
-  return {
-    ok: true,
-    taskId: record.taskId,
-    status: record.status,
-    ...(record.status === "done" ? { result: record.result } : { error: record.error }),
-    startedAt: record.startedAt,
-    endedAt: record.endedAt,
-  };
-}
-
-/** Resolve the acting member for background tools from the tool-call scope.
- * Room scopes arrive as the bare room id; dm as full scope ids. */
-function resolveBackgroundActor(roomId: string, agentName: string): { memberId: string; scopeId: string } | null {
-  if (roomId.startsWith("dm:")) {
-    return { memberId: roomId.slice(3), scopeId: roomId };
-  }
-  // bare room id (createAgent binds room scopes by raw id)
-  const roster = roomStore.getRoom(roomId);
-  const actor = roster ? (roomStore as any).resolveRoomMemberRef(roomId, agentName) : undefined;
-  return actor ? { memberId: actor.id, scopeId: `room:${roomId}` } : null;
 }
 
 // -- Tool helpers --

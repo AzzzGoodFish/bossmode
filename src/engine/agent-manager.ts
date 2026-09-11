@@ -52,7 +52,6 @@ import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "./model-credentials.js";
 import { notifyMemberIdle, settleWaitOnAbort, settleMemberWaits } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
-import { settleBackgroundWaits } from "./background-task-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
 
 // -- Registry injection --
@@ -177,8 +176,10 @@ interface PendingCredentialRefresh {
   changeType: "profileUpdated" | "profileDeleted";
 }
 
-/** Start-time sources a background child inherits from a live instance. */
-export interface BackgroundSessionSources {
+/** Start-time sources a live instance was built from: member config as
+ *  applied at build, compiled prompts, skills, cwd, roster, runtime name.
+ *  Refresh paths consume these instead of re-resolving config. */
+export interface SessionSources {
   /** Member config as applied at instance build (model/credential/thinking of that moment). */
   member: AgentMemberConfig;
   compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[] };
@@ -186,8 +187,6 @@ export interface BackgroundSessionSources {
   skillPaths: string[];
   cwd: string;
   roomMembers: string[];
-  /** Scope id the child's tool callbacks bind to (room:…/dm:…). */
-  toolScopeId: string;
   runtimeName: string;
 }
 
@@ -218,11 +217,10 @@ interface AgentInstance {
   compacting: boolean;
   /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
   turnActive: boolean;
-  /** Start-time session sources (background fork snapshot): exactly what this
-   *  instance was built from — member config, compiled prompts, skills, cwd,
-   *  roomMembers, tool-scope id, runtime name. Background children inherit
-   *  these instead of re-resolving config (single assembly path). */
-  sessionSources: BackgroundSessionSources;
+  /** Start-time session sources: exactly what this instance was built from —
+   *  member config, compiled prompts, skills, cwd, roster, runtime name.
+   *  Refresh/reload paths consume these instead of re-resolving config. */
+  sessionSources: SessionSources;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
@@ -1197,11 +1195,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
           skillPaths: [...skillPaths],
           cwd,
           roomMembers: [...roomMembers],
-          // EXACTLY the id createAgent binds tools with (bare room id for rooms;
-          // full scope id for dm) — background children must receive the
-          // same binding format the live parent used, or scope-keyed tool
-          // callbacks (create_task, queries…) misresolve.
-          toolScopeId: keyRoomId,
           runtimeName: member.runtime,
         },
         unsubscribe: () => {},
@@ -2037,7 +2030,6 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   // so the tool call can return mention_interrupt before the turn is torn down.
   try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
   try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
-  try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
 
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
@@ -2384,7 +2376,6 @@ export async function activateDmMember(memberId:string,ctx?:ReplyContext):Promis
 function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:string):void{
   try{settleWaitOnAbort(scopeId,instance.memberId);}catch{}
   try{settleMemberShellWaits(instance.memberId);}catch{}
-  try{settleBackgroundWaits(instance.memberId);}catch{}
   instance.handle.abort({preserveCompaction:true});
   updateDispatchState(instance,"aborting",trigger);
 }
@@ -2402,7 +2393,6 @@ function requestInstanceStop(instance: AgentInstance,preservePending=false): voi
   for (const stop of [
     () => settleWaitOnAbort(instance.roomId,instance.memberId),
     () => settleMemberShellWaits(instance.memberId),
-    () => settleBackgroundWaits(instance.memberId),
     () => updateDispatchState(instance,"aborting","quiescence"),
     () => instance.handle.abort(),
   ]) { try { stop(); } catch (error) { failures.push(error); } }
@@ -2414,16 +2404,15 @@ export async function quiesceMember(memberId: string): Promise<void> {
   if (memberRuntimeAllowed(memberId)) throw new Error("member_admission_must_close_before_quiescence");
   const errors: unknown[] = [];
   for(const row of getDatabase().all<{scope:string}>("SELECT DISTINCT scope_id scope FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId))cancelPendingRuntimeInputs(runtimeInputOwner(row.scope,memberId),"member archived");
-  settleMemberWaits(memberId); settleMemberShellWaits(memberId); settleBackgroundWaits(memberId);
+  settleMemberWaits(memberId); settleMemberShellWaits(memberId);
   const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}
   for (const instance of instances.values()) if (instance.memberId===memberId) {
     try {requestInstanceStop(instance);} catch(error){errors.push(error);}
   }
   await Promise.allSettled([...pendingCreationsFor(memberId), ...(memberSwitchGates.has(memberId) ? [memberSwitchGates.get(memberId)!] : [])]);
-  const {shutdownBackgroundTasks}=await import("./background-task-runner.js");
   const {closeAllShellsForMember}=await import("./shell-manager.js");
-  const resources = await Promise.allSettled([shutdownBackgroundTasks(memberId),closeAllShellsForMember(memberId)]);
+  const resources = await Promise.allSettled([closeAllShellsForMember(memberId)]);
   for (const result of resources) if (result.status === "rejected") errors.push(result.reason);
   for (const [key,instance] of [...instances]) if(instance.memberId===memberId) {
     try {
@@ -2456,9 +2445,8 @@ export async function shutdownAll(): Promise<void> {
     for (const pending of await Promise.allSettled([...pendingCreations.values(), ...memberSwitchGates.values()])) {
       if (pending.status === "rejected") failures.push(pending.reason);
     }
-    const { shutdownBackgroundTasks } = await import("./background-task-runner.js");
     const {closeAllShellsForMember}=await import("./shell-manager.js");
-    const resources = await Promise.allSettled([shutdownBackgroundTasks(),closeAllShellsForMember()]);
+    const resources = await Promise.allSettled([closeAllShellsForMember()]);
     for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
     if (registry) for (const rt of registry.getAll()) {
       try { await rt.shutdownAll(); } catch (error) { failures.push(error); }

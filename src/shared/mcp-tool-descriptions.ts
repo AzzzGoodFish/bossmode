@@ -52,18 +52,6 @@ If the target's turn fails (e.g. request terminated), wait wakes with reason "er
 Only one wait at a time. If the target is already idle, returns immediately. Prefer wait over sleeping/polling.`;
 
 // Parameter descriptions shared across runtimes
-export const BACKGROUND_START_DESCRIPTION = `Start a background task: a private child session with your current model, account and thinking level runs the prompt and saves its final text. sessionMode "fork" copies this conversation's history before the current turn; "new" starts empty. Returns the task id and its real current status immediately — collect the result with background_wait.`;
-
-export const BACKGROUND_STATUS_DESCRIPTION = `List your background tasks in this scope with lifecycle facts only (kind, status, start/end times). Never includes results, errors or intermediate process.`;
-
-export const BACKGROUND_WAIT_DESCRIPTION = `The only way to receive a background task result. Waits up to blockMs (default 30000; 0 = unlimited) for a terminal state, then returns the saved final result or the explicit failure/cancel/interrupt reason. On timeout returns the task's real current status without the answer — wait again to keep waiting. Repeat calls re-read the same saved result; nothing is consumed.`;
-
-export const BACKGROUND_CANCEL_DESCRIPTION = `Request cancellation of a background task you own. Returns cancelling immediately; the task becomes cancelled once the child session has actually stopped. Tasks already finished keep their terminal status and answer.`;
-
-export const RECALL_DESCRIPTION = `Start a background recall task: searches shared memory assets (project memories, user memory, workspace records) for information relevant to this conversation and organizes the findings. No parameters — the goal is derived from context. Returns the task id; collect findings with background_wait.`;
-
-export const MEMORIZE_DESCRIPTION = `Start a background memorize task: reviews the current conversation and maintains the shared memory assets, then reports exactly what changed. No parameters. Returns the task id; collect the change report with background_wait.`;
-
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
   sshHost: "Remote host (hostname or IP).",
@@ -77,11 +65,6 @@ export const PARAM_DESCRIPTIONS = {
   shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
   shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with shell_read.",
   shellWaitBlockUntilMs: "Max milliseconds to wait for the exec to finish. Default 30000; 0 waits until completion.",
-  // background tasks
-  backgroundPrompt: "What the background child session should do. Sent as its activation prompt.",
-  backgroundSessionMode: "Child session history: 'fork' copies this conversation before the current turn; 'new' starts empty. Required.",
-  backgroundTaskId: "Background task id returned by the start call.",
-  backgroundBlockMs: "Max milliseconds to wait for a terminal state. Default 30000; 0 waits until completion.",
   // query_room_messages
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",

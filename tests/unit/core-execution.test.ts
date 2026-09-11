@@ -8,26 +8,17 @@ import { executionMigration } from "../../src/storage/schema/execution.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
-import { BackgroundRepository } from "../../src/storage/repositories/background-repository.js";
 import { ExecutionAttemptRepository } from "../../src/storage/repositories/execution-attempt-repository.js";
 import { importExecutionAmbiguity } from "../../src/storage/repositories/execution-identity.js";
 import * as sessions from "../../src/workspace/session-store.js";
 import * as runtime from "../../src/workspace/runtime-state.js";
 import * as cursors from "../../src/workspace/user-read-cursors.js";
-import * as background from "../../src/engine/background-task-store.js";
 
 let sandbox: string;
 let db: Database;
-let forcedUUID: string | undefined;
-vi.mock("node:crypto", async importOriginal => {
-  const actual = await importOriginal<typeof import("node:crypto")>();
-  return {...actual, randomUUID: () => forcedUUID ?? actual.randomUUID()};
-});
 vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => sandbox}));
 const owner = "mem_owner";
 const other = "mem_other";
-const input = () => ({memberId: owner, scopeId: "room:r", kind: "generic" as const, sessionMode: "new" as const,
-  prompt: "work", snapshot: {model: "provider/model", credentialId: "account-a", thinkingLevel: "high"}});
 function sessionFile(scope = "rooms/r", member = owner, filename = "session.jsonl"): string {
   const path = join(sandbox, "members", member, "sessions", "2026-09-09", scope, filename);
   mkdirSync(dirname(path), {recursive: true});
@@ -42,7 +33,6 @@ function restart(): void {
   bindDatabase(db);
 }
 beforeEach(() => {
-  forcedUUID = undefined;
   sandbox = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!, "execution-"));
   mkdirSync(join(sandbox, "knowledge"));
   // Frozen historical schema on an absolute isolated path, closed before core
@@ -138,11 +128,6 @@ describe("DB session associations, unchanged SDK files", () => {
     fork.appendMessage({role:"user",content:[{type:"text",text:"dm-only continuation"}]} as any);
     fork.appendMessage({role:"assistant",content:[{type:"text",text:"dm answer"}]} as any);
     expect(readFileSync(file)).toEqual(bytes);
-    const task=background.createBackgroundTask({...input(),sessionMode:"fork",parentSessionRef:file});
-    const child=SessionManager.forkFrom(file,sandbox,task.sessionDir);
-    expect(JSON.stringify(child.buildSessionContext())).toBe(context);
-    expect(readFileSync(file)).toEqual(bytes);
-    expect(existsSync(join(task.sessionDir,"task.json"))).toBe(false);
     sessions.clearCurrentSession(owner,`dm:${owner}`);
     expect(existsSync(fork.getSessionFile()!)).toBe(true);
     expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe(manager.getSessionId());
@@ -225,139 +210,6 @@ describe("runtime checkpoints and numeric user cursor semantics", () => {
     db.exec("CREATE TRIGGER reject_cursor BEFORE UPDATE ON user_cursor_messages BEGIN SELECT RAISE(ABORT,'injected'); END");
     expect(() => cursors.setUserReadCursor("room:r",{messageId:"new",seq:2})).toThrow(/injected/);
     expect(cursors.getUserReadCursor("room:r")).toMatchObject({messageId:"old",seq:1});
-  });
-});
-
-describe("background DB lifecycle, cancellation and restart", () => {
-  it("creates only SDK directory, lists DB truth even with missing directories and forged task.json", () => {
-    const a=background.createBackgroundTask(input());
-    expect(existsSync(a.sessionDir)).toBe(true);
-    expect(existsSync(join(a.sessionDir,"task.json"))).toBe(false);
-    writeFileSync(join(a.sessionDir,"task.json"),JSON.stringify({...a,status:"done",result:"forged"}));
-    expect(background.getBackgroundTask(owner,a.taskId)?.status).toBe("starting");
-    rmSync(join(sandbox,"members"),{recursive:true,force:true});
-    expect(background.listBackgroundTasks(owner)).toEqual([a]);
-    expect(background.getBackgroundTask(other,a.taskId)).toBeNull();
-    expect(background.listBackgroundTasks(other)).toEqual([]);
-    expect(background.getBackgroundTask(owner,"../escape")).toBeNull();
-  });
-  it("preserves terminal results immutably with one commit-safe notification, concurrent repeatable waiters", async () => {
-    const a=background.createBackgroundTask(input());
-    const w1=background.whenTerminal(owner,a.taskId), w2=background.whenTerminal(owner,a.taskId), disposed=background.whenTerminal(owner,a.taskId);
-    disposed.dispose();
-    background.updateBackgroundTask(owner,a.taskId,{status:"running"});
-    const done=background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"real answer"});
-    expect(await Promise.all([w1.promise,w2.promise])).toEqual([done,done]);
-    expect(await background.whenTerminal(owner,a.taskId).promise).toEqual(done);
-    expect(() => background.updateBackgroundTask(owner,a.taskId,{status:"failed",error:"late"})).toThrow(/immutable/);
-    expect(() => db.run("UPDATE background_tasks SET result='tamper' WHERE task_id=?",a.taskId)).toThrow(/immutable/);
-    expect(db.all("SELECT kind,dedupe_key,payload_json FROM outbox")).toEqual([{kind:"background.terminal",dedupe_key:`background.terminal:${a.taskId}`,payload_json:JSON.stringify({taskId:a.taskId,memberId:owner,status:"done"})}]);
-    restart();
-    expect(background.getBackgroundTask(owner,a.taskId)).toEqual(done);
-  });
-  it("preserves starting cancel, completion-before-cancel allowance, and rejects invalid terminal results", () => {
-    const a=background.createBackgroundTask(input());
-    expect(() => background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"early"})).toThrow(/illegal/);
-    background.updateBackgroundTask(owner,a.taskId,{status:"cancelling"});
-    expect(() => background.updateBackgroundTask(owner,a.taskId,{status:"running"})).toThrow(/illegal/);
-    expect(() => background.updateBackgroundTask(owner,a.taskId,{status:"done"})).toThrow(/result/);
-    background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"completed before cancel"});
-    const b=background.createBackgroundTask(input());
-    background.updateBackgroundTask(owner,b.taskId,{status:"cancelling"});
-    background.updateBackgroundTask(owner,b.taskId,{status:"cancelled",error:"cancelled"});
-    expect(() => background.updateBackgroundTask(owner,b.taskId,{status:"done",result:"late"})).toThrow(/immutable/);
-    const c=background.createBackgroundTask(input());
-    expect(() => background.updateBackgroundTask(owner,c.taskId,{status:"failed"})).toThrow(/result\/error/);
-    expect(() => background.updateBackgroundTask(owner,c.taskId,{status:"interrupted",error:"not live"})).toThrow(/restart/);
-  });
-  it("imports exact IDs/times/results/references idempotently and refuses conflicting immutable records", () => {
-    const a=background.createBackgroundTask(input());
-    background.updateBackgroundTask(owner,a.taskId,{status:"running"});
-    const done=background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"answer"});
-    const imported={...done, taskId:"bgt-00000000-0000-4000-8000-000000000000", startedAt:"2026-01-01T01:00:00.000Z",endedAt:"2026-01-01T02:00:00.000Z"};
-    imported.sessionDir=join(sandbox,"members",owner,"background-tasks","2026-01-01",imported.taskId);
-    imported.parentSessionRef=join(sandbox,"rooms/r/old-parent.jsonl");
-    const repo=new BackgroundRepository(db);repo.importRecord(imported);repo.importRecord(imported);
-    expect(repo.get(owner,imported.taskId)).toEqual(imported);
-    expect(existsSync(imported.sessionDir)).toBe(false); // Pure importer does not materialize SDK files.
-    expect(() => repo.importRecord({...imported,result:"changed"})).toThrow(/Conflicting/);
-    expect(() => repo.importRecord({...imported,memberId:other})).toThrow(/ownership/);
-  });
-  it("marks all incomplete tasks interrupted once on restart, including deleted directories, never replays", () => {
-    const a=background.createBackgroundTask(input());
-    const b=background.createBackgroundTask({...input(),memberId:other});background.updateBackgroundTask(other,b.taskId,{status:"running"});
-    const c=background.createBackgroundTask(input());background.updateBackgroundTask(owner,c.taskId,{status:"cancelling"});
-    const d=background.createBackgroundTask(input());background.updateBackgroundTask(owner,d.taskId,{status:"failed",error:"already failed"});
-    rmSync(join(sandbox,"members"),{recursive:true,force:true});restart();
-    expect(background.sweepInterruptedBackgroundTasks()).toBe(3);
-    expect(background.sweepInterruptedBackgroundTasks()).toBe(0);
-    for(const task of [a,b,c]) expect(background.getBackgroundTask(task.memberId,task.taskId)).toMatchObject({status:"interrupted",error:"interrupted by service restart; not resumed"});
-    expect(background.getBackgroundTask(owner,d.taskId)?.error).toBe("already failed");
-    expect(existsSync(join(sandbox,"members"))).toBe(false);
-  });
-  it("rolls back terminal/result and notification together on outbox failure and rejects unsaved waiters", async () => {
-    const a=background.createBackgroundTask(input());background.updateBackgroundTask(owner,a.taskId,{status:"running"});
-    const wait=background.whenTerminal(owner,a.taskId);
-    db.exec("CREATE TRIGGER reject_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT,'injected'); END");
-    expect(() => background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"not saved"})).toThrow(/injected/);
-    expect(background.getBackgroundTask(owner,a.taskId)).toMatchObject({status:"running",result:null,endedAt:null});
-    expect(db.all("SELECT * FROM outbox")).toEqual([]);
-    const rejection=expect(wait.promise).rejects.toThrow(/unsaved diagnosis/);
-    background.failBackgroundTaskUnsaved(owner,a.taskId,"disk full");
-    await rejection;
-    expect(background.getBackgroundTask(owner,a.taskId)?.status).toBe("running");
-  });
-  it("does not notify waiters of a nested transaction subsequently rolled back", async () => {
-    const a=background.createBackgroundTask(input());background.updateBackgroundTask(owner,a.taskId,{status:"running"});
-    const wait=background.whenTerminal(owner,a.taskId);let settled=false;void wait.promise.then(()=>settled=true);
-    expect(() => db.transaction(() => {background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"rollback"});throw Error("rollback");})).toThrow(/rollback/);
-    await Promise.resolve();await Promise.resolve();
-    expect(settled).toBe(false);expect(background.getBackgroundTask(owner,a.taskId)?.status).toBe("running");
-    background.updateBackgroundTask(owner,a.taskId,{status:"done",result:"committed"});
-    expect((await wait.promise).result).toBe("committed");
-  });
-  it("aborts the entire startup sweep when a record cannot transition", () => {
-    const a=background.createBackgroundTask(input()),b=background.createBackgroundTask(input());
-    db.exec("CREATE TRIGGER reject_restart BEFORE UPDATE ON background_tasks WHEN NEW.status='interrupted' BEGIN SELECT RAISE(ABORT,'restart failure'); END");
-    expect(() => background.sweepInterruptedBackgroundTasks()).toThrow(/restart failure/);
-    expect(background.getBackgroundTask(owner,a.taskId)?.status).toBe("starting");
-    expect(background.getBackgroundTask(owner,b.taskId)?.status).toBe("starting");
-  });
-  it("propagates unavailable storage with no JSON fallback and settles waiters as errors", async () => {
-    const a=background.createBackgroundTask(input());const w=background.whenTerminal(owner,a.taskId);
-    db.close();
-    expect(() => background.listBackgroundTasks(owner)).toThrow(/not initialized/);
-    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk"})).toThrow(/not initialized/);
-    const reject=expect(w.promise).rejects.toThrow(/unsaved/);background.failBackgroundTaskUnsaved(owner,a.taskId,"closed database");await reject;
-    expect(() => getDatabase()).toThrow(/not initialized/);
-  });
-  it("refuses to reuse an orphan SDK preparation directory", () => {
-    forcedUUID="11111111-1111-4111-8111-111111111111";
-    const dir=join(sandbox,"members",owner,"background-tasks",new Date().toISOString().slice(0,10),`bgt-${forcedUUID}`);
-    mkdirSync(dir,{recursive:true});writeFileSync(join(dir,"orphan.jsonl"),"orphan SDK bytes");
-    expect(() => background.createBackgroundTask(input())).toThrow(/EEXIST/);
-    expect(background.listBackgroundTasks(owner)).toEqual([]);
-    expect(readFileSync(join(dir,"orphan.jsonl"),"utf8")).toBe("orphan SDK bytes");
-  });
-  it("propagates SQLite read-only/full failures without successful terminal writes", () => {
-    const task=background.createBackgroundTask(input());background.updateBackgroundTask(owner,task.taskId,{status:"running"});
-    db.exec("PRAGMA query_only=ON");
-    expect(() => background.updateBackgroundTask(owner,task.taskId,{status:"done",result:"not saved"})).toThrow(/readonly/);
-    expect(() => cursors.setUserReadCursor("room:r",{seq:5})).toThrow(/readonly/);
-    db.exec("PRAGMA query_only=OFF; PRAGMA max_page_count=1");
-    expect(() => background.updateBackgroundTask(owner,task.taskId,{status:"done",result:"x".repeat(1024*1024)})).toThrow(/full/);
-    expect(background.getBackgroundTask(owner,task.taskId)).toMatchObject({status:"running",result:null,endedAt:null});
-    expect(db.all("SELECT * FROM outbox")).toEqual([]);
-    expect(existsSync(join(task.sessionDir,"task.json"))).toBe(false);
-  });
-  it("rejects new-task invalid ownership before preparing filesystem assets", () => {
-    expect(() => background.createBackgroundTask({...input(),memberId:"../outside"})).toThrow(/member ID/);
-    expect(() => background.createBackgroundTask({...input(),scopeId:`room:dm:${owner}`})).toThrow(/Invalid execution scope/);
-    expect(() => background.createBackgroundTask({...input(),scopeId:`dm:${other}`})).toThrow(/belong/);
-    expect(existsSync(join(sandbox,"members",owner,"background-tasks"))).toBe(false);
-    symlinkSync(join(sandbox,"knowledge"),join(sandbox,"members",owner,"background-tasks"));
-    expect(() => background.createBackgroundTask(input())).toThrow(/escapes/);
-    expect(background.listBackgroundTasks(owner)).toEqual([]);
   });
 });
 

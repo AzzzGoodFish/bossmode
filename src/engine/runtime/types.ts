@@ -63,24 +63,11 @@ export interface CreateAgentOpts {
   sessionDir?: string;
   /** A just-forked main-session manager. It must not be re-opened before first append. */
   sessionManager?: unknown;
-  // SDK session id when the runtime exposes one (background runner records it;
-  // live sessions report identity through onSessionChanged instead).
+  // SDK session id when the runtime exposes one (live sessions report
+  // identity through onSessionChanged instead).
   readonly sessionId?: string;
   // Called whenever runtime reports session identity (initial + later changes after compact/fork)
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
-
-  /** Background task child session variant. Same assembly path and prompt
-   *  sources as a live member session; differences: the session writes into the
-   *  task directory, scope-posting/background-start tools are rejected at
-   *  execution time, and member session state is not overwritten. */
-  background?: {
-    sessionDir: string;
-    /** Pre-built child session manager (fork mode): the runner forks the parent
-     *  prefix, applies the cut in memory, and hands the manager over so the
-     *  child continues from the cut leaf — the branch move only persists on
-     *  the next append, so re-opening the file would lose it. */
-    sessionManager?: import("@earendil-works/pi-coding-agent").SessionManager;
-  };
 }
 
 export interface AgentCallbacks {
@@ -129,17 +116,13 @@ export interface AgentHandle {
   /** Abort the run. Message delivery preserves compaction; explicit Stop cancels it. */
   abort(options?: { preserveCompaction?: boolean }): void;
   destroy(): void;
-  /** Awaitable teardown for background children: waits for the extension
-   *  session_shutdown emission AND runs the SDK's synchronous dispose
-   *  (resource cleanups) to completion — a confirmed end of cleanup, not just
-   *  an issued request. Throws when shutdown or dispose fails. */
+  /** Awaitable teardown: waits for the extension session_shutdown emission
+   *  AND runs the SDK's synchronous dispose (resource cleanups) to completion —
+   *  a confirmed end of cleanup, not just an issued request. Throws when
+   *  shutdown or dispose fails. */
   destroyAndWait?(): Promise<void>;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
-  /** Snapshot the live session for a background fork: current session file plus
-   *  the entries of the CURRENT legal branch (read-only; never opens or writes
-   *  the parent file through SDK APIs). Optional — background fork only. */
-  forkSnapshot?(): { sessionFile: string; branchEntries: unknown[] } | null;
 
   // Metadata for status reporting
   readonly pid?: number; // deprecated: CLI rollback metadata
