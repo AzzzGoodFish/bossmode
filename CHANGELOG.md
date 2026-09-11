@@ -4,6 +4,13 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.1] — 2026-09-11
+
+### Fixed
+- Upgrade startup imports members whose current persona lived in `memory/persona.md` before the `member.md` profile layout existed. Exact persona bytes and history are preserved, and a renewed same-name conflict with a real mixed profile is still rejected.
+- Upgrade startup imports every readable legacy runtime event and preserves unreadable lines exactly — raw bytes and hash, plus source path and position — in a SQL quarantine record. This matches the old reader that skipped such lines, instead of failing the entire upgrade; message, configuration and SDK session files remain strict and unchanged.
+- An upgrade retried after an interruption reuses already-published historical document snapshots only when their ownership, path and bytes match, so a second startup no longer fails on its own published assets. Source files are synced without being rewritten.
+
 ## [0.24.0] — 2026-09-11
 
 ### Release
