@@ -328,7 +328,19 @@ export interface LegacyJsonlRecord {
  * must consume to successful EOF before accepting the import transaction.
  * Early return/throw closes the descriptor; no source is repaired.
  */
+export interface InvalidLegacyEventLine {
+  path: string; ordinal: number; lineNumber: number; raw: Buffer;
+}
 export async function* readLegacyJsonl(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">): AsyncGenerator<LegacyJsonlRecord> {
+  yield* readJsonl(sourceRoot, entry);
+}
+/** The old runtime-event reader skipped corrupt JSON. Import retains those exact
+ * terminated lines through the callback; all other sources and errors stay strict. */
+export async function* readLegacyEventJsonl(sourceRoot: string, entry: LegacySourceEntry, preserveInvalid: (line: InvalidLegacyEventLine) => void): AsyncGenerator<LegacyJsonlRecord> {
+  if(entry.kind !== "agent-events") throw new LegacySourceError("wrong-format", entry.path);
+  yield* readJsonl(sourceRoot, entry, preserveInvalid);
+}
+async function* readJsonl(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">, preserveInvalid?: (line: InvalidLegacyEventLine) => void): AsyncGenerator<LegacyJsonlRecord> {
   const fd = openSource(sourceRoot, entry, "jsonl");
   const readChunk = promisify(read);
   let pieces: Buffer[] = [];
@@ -343,9 +355,20 @@ export async function* readLegacyJsonl(sourceRoot: string, entry: Pick<LegacySou
       let start = 0;
       for (let end = bytes.indexOf(10); end !== -1; end = bytes.indexOf(10, start)) {
         pieces.push(bytes.subarray(start, end));
-        const text = decode(Buffer.concat(pieces), entry.path, lineNumber);
+        const raw = Buffer.concat(pieces);
+        const text = decode(raw, entry.path, lineNumber);
         pieces = [];
-        if (!/^[\t\r ]*$/.test(text)) yield { path: entry.path, ordinal: ++ordinal, lineNumber, value: json(text, entry.path, lineNumber) };
+        if (!/^[\t\r ]*$/.test(text)) {
+          ++ordinal;
+          let value: unknown; let valid = true;
+          try { value = json(text, entry.path, lineNumber); }
+          catch(error) {
+            if(!preserveInvalid || !(error instanceof LegacySourceError) || error.code !== "invalid-json") throw error;
+            preserveInvalid({path: entry.path, ordinal, lineNumber, raw: Buffer.concat([raw, Buffer.from("\n")])});
+            valid = false;
+          }
+          if(valid) yield {path: entry.path, ordinal, lineNumber, value};
+        }
         lineNumber++;
         start = end + 1;
       }

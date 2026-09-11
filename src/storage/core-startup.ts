@@ -1,4 +1,5 @@
 import {createRequire} from "node:module";
+import {logger} from "../foundation/logger.js";
 import {readFileSync} from "node:fs";
 import {prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade-runner.js";
 import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./migrations.js";
@@ -39,8 +40,8 @@ export interface CoreStartupOptions{
 /** Ordinary startup owns this coordinator. There is no dry-run/apply/recover mode.
  * Unhandled source domains fail before cutover rather than silently disappearing. */
 export async function prepareCoreStorage(options:CoreStartupOptions){
- let entries:LegacySourceEntry[]=[];
- return prepareStorageUpgrade({root:options.root,formatVersion:CORE_STORAGE_FORMAT,migrations:coreStorageMigrations,
+ let entries:LegacySourceEntry[]=[];let quarantinedEvents=0;
+ const result=await prepareStorageUpgrade({root:options.root,formatVersion:CORE_STORAGE_FORMAT,migrations:coreStorageMigrations,
   onProgress:options.onProgress,
   collectLegacySources:async root=>{assertNoMissingMemberDatabase(root);entries=discoverLegacyInventory(root).entries;return entries;},
   verifyReady:db=>verifyActiveMemberAssets(options.root,db),
@@ -62,6 +63,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
     return {path:e.path,slug:e.slug,markdown};
    }));add(templates.map(e=>e.path));
    add(await importLegacyConversations(ctx,entries));
+   quarantinedEvents=ctx.db.get<{count:number}>("SELECT COUNT(*) count FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'")!.count;
    add(importLegacyExecution(ctx,entries));
    add(await importLegacyDocuments(ctx,entries,members.personas));
    const remaining=entries.filter(e=>!consumed.has(e.path));
@@ -76,4 +78,9 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
   },
   activate:options.activate?async db=>{bindDatabase(db);await options.activate!(db);}:undefined,
  });
+ if(quarantinedEvents){
+  const warning=`Preserved ${quarantinedEvents} unreadable legacy runtime-event lines in SQL quarantine; original files remain in the upgrade backup.`;
+  result.warnings.push(warning);logger.warn("storage-upgrade",warning);
+ }
+ return result;
 }
