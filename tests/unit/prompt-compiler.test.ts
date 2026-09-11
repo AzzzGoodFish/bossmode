@@ -50,8 +50,8 @@ function room(): Room {
 
 const member: AgentMemberConfig = { id: "mem_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
 
-describe("prompt compiler (three-segment)", () => {
-  it("assembles Member → Communication → Environment in order", async () => {
+describe("prompt compiler (four-segment)", () => {
+  it("assembles Member → Working Principles → Communication → Environment in order", async () => {
     const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
     writeMemberProfileSkeleton("mem_qa");
     writeFileSync(
@@ -64,8 +64,9 @@ describe("prompt compiler (three-segment)", () => {
     const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
     const prompt = compiled.fullPrompt;
 
-    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
-    expect(prompt.indexOf("# Member")).toBeLessThan(prompt.indexOf("## Communication"));
+    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
+    expect(prompt.indexOf("# Member")).toBeLessThan(prompt.indexOf("## Working Principles"));
+    expect(prompt.indexOf("## Working Principles")).toBeLessThan(prompt.indexOf("## Communication"));
     expect(prompt.indexOf("## Communication")).toBeLessThan(prompt.indexOf("## Environment"));
     expect(prompt).toContain("I am qa.");
     expect(prompt).toContain("I prefer short answers.");
@@ -75,6 +76,11 @@ describe("prompt compiler (three-segment)", () => {
     expect(prompt).toContain("Nothing else is delivered");
     expect(prompt).toContain('You are in room "Prompt Lab"');
     expect(prompt).toContain("this file IS your persona");
+    // 2026-09-11 restructure: context-first, user precedence, no acknowledgement loops, no ! interrupt.
+    expect(prompt).toContain("precedence over conflicting member requests");
+    expect(prompt).toContain("reply only if you add something");
+    expect(prompt).not.toContain("!name");
+    expect(prompt).not.toContain("urgent interrupt");
     // Old assets not injected
     expect(prompt).not.toContain("## Scope Principles");
     expect(prompt).not.toContain("## Scope Mainline");
@@ -89,7 +95,7 @@ describe("prompt compiler (three-segment)", () => {
     expect(compiled.fullPrompt).toContain("I am qa.");
     // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
     expect(compiled.fullPrompt).toMatch(/bossmode-guide/);
-    expect(compiled.fullPrompt).toMatch(/When unsure how to manage your identity/);
+    expect(compiled.fullPrompt).toMatch(/when unsure how to manage identity/);
     expect(compiled.fullPrompt).not.toMatch(/Legacy notes/);
   });
 

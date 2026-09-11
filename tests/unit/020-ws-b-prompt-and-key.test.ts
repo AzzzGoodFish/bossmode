@@ -40,7 +40,7 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(parseInstanceKey(key)).toEqual({ scopeId: "room:abc", memberId: "mem_x" });
   });
 
-  it("compileMemberPromptForScope (room) is three-segment Member → Communication → Environment", async () => {
+  it("compileMemberPromptForScope (room) is four-segment Member → Working Principles → Communication → Environment", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
 
@@ -65,7 +65,7 @@ describe("020 WS-B prompt + instanceKey", () => {
     });
 
     const ids = compiled.sections.filter((s) => s.included).map((s) => s.id);
-    expect(ids).toEqual(["member", "communication", "environment"]);
+    expect(ids).toEqual(["member", "working-principles", "communication", "environment"]);
     expect(compiled.envPrompt).toContain('room "Test Room"');
     expect(compiled.fullPrompt).toContain("The chat tool is the only way");
     expect(compiled.fullPrompt).not.toContain("[room]");
@@ -90,9 +90,9 @@ describe("020 WS-B prompt + instanceKey", () => {
     });
 
     expect(compiled.envPrompt).toContain("private chat");
-    expect(compiled.fullPrompt).toContain("In a DM every user message reaches you directly");
+    expect(compiled.fullPrompt).toMatch(/In a DM every\s+user message reaches you directly/);
     expect(compiled.fullPrompt).not.toContain("[room]");
-    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
+    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
   });
 
   it("tool surface: dm has create_room, room has wait", async () => {

@@ -92,7 +92,7 @@ describe("environment-communication asset", () => {
     asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
     const { compileMemberPrompt, compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const roomCompiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
-    expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "communication", "environment"]);
+    expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
     expect(roomCompiled.fullPrompt).toContain("The chat tool is the only way your messages reach the room");
     expect(roomCompiled.fullPrompt).not.toContain("Custom framing.");
     expect(roomCompiled.fullPrompt).not.toContain("A colleague, not a system");
