@@ -7,8 +7,8 @@ import {InputQueueRepository} from "../../src/storage/repositories/input-queue-r
 import {ReplyObligationRepository} from "../../src/storage/repositories/reply-obligation-repository.js";
 import {ExecutionAttemptRepository} from "../../src/storage/repositories/execution-attempt-repository.js";
 import {postMessage} from "../../src/communication/message-bus.js";
-import {readMessages,writeMemberCursor,readMemberCursors} from "../../src/storage/message-repository.js";
-import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeInputs,pendingRuntimeInputs,recoverRuntimeInputState} from "../../src/services/runtime-input-service.js";
+import {readMessages,writeMemberCursor,readMemberCursors,importMessage} from "../../src/storage/message-repository.js";
+import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeInputs,pendingRuntimeInputs,recoverRuntimeInputState,runtimeInputPayload} from "../../src/services/runtime-input-service.js";
 let f:ReturnType<typeof coreFixture>;
 const owner={scopeId:"input-room",targetActorKey:"mem_input"};
 beforeEach(()=>{
@@ -58,4 +58,31 @@ it("records broadcast busy-skip once without changing captured recipients or cla
   expect(receipt.input.status).toBe("interrupted");expect(acceptRuntimeInput(capture,key,()=>{throw new Error("no retry");}).accepted).toBe(false);
   expect(new ReplyObligationRepository(f.db).listPending(owner.scopeId,owner.targetActorKey)).toEqual([]);
   expect(new DeliveryRepository(f.db).getCapture(owner.scopeId,msg.id)).toEqual(capture);expect(readMessages(owner.scopeId)).toHaveLength(1);
+});
+it("retired `!` legacy rows stay inert: old fields never surface and legacy urgent queue rows resume via owner keys",()=>{
+  const json=(v:unknown)=>JSON.stringify(v);
+  f.db.run("INSERT INTO messages(scope_id,id,seq,ts,sender,sender_member_id,origin,content,content_lower,type,extra_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    owner.scopeId,"legacy-msg",1,1,"user",null,"user","!Input old ask","!input old ask",null,
+    json({fields:{urgentMentions:["Input"],urgentMentionMemberIds:["mem_input"]},presentLists:["mentions","mentionMemberIds","urgentMentions","urgentMentionMemberIds"]}));
+  for(const [kind,valueKind,value] of [["mention","label","Input"],["mention","id","mem_input"],["urgent","label","Input"],["urgent","id","mem_input"]] as const)
+    f.db.run("INSERT INTO message_mentions VALUES(?,?,?,?,?,?)",owner.scopeId,"legacy-msg",kind,valueKind,0,value);
+  const legacy=readMessages(owner.scopeId)[0]!;
+  expect(legacy.mentions).toEqual(["Input"]);expect(legacy.mentionMemberIds).toEqual(["mem_input"]);
+  expect("urgentMentions" in legacy).toBe(false);expect("urgentMentionMemberIds" in legacy).toBe(false);
+  importMessage(f.db,owner.scopeId,{id:"legacy-import",ts:2,sender:"user",content:"!",mentions:[],urgentMentions:["Input"],urgentMentionMemberIds:["mem_input"]} as any);
+  expect(String(f.db.get<{e:string}>("SELECT extra_json e FROM messages WHERE id='legacy-import'")!.e)).not.toContain("urgent");
+  expect(readMessages(owner.scopeId).at(-1)).not.toHaveProperty("urgentMentions");
+
+  f.db.run("INSERT INTO delivery_captures(scope_id,message_id,snapshot_json,captured_at) VALUES(?,?,?,?)",
+    owner.scopeId,"legacy-msg",json({message:{id:"legacy-msg",content:"!Input old ask",mentions:["Input"]},context:null,origin:"user",messageType:"chat",senderActorKey:null,senderMemberId:null,targets:{ordinary:[],urgent:[{actorKey:"mem_input",memberId:"mem_input"}],dm:[]},needResponse:null}),1);
+  f.db.run("INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at) VALUES(?,?,?,?,?,?)",
+    owner.scopeId,"legacy-msg","mem_input","urgent","mem_input",1);
+  f.db.run("INSERT INTO queued_inputs(scope_id,message_id,target_actor_key,delivery_kind,payload_json,trigger,status,created_at,placement) VALUES(?,?,?,?,?,?,?,?,?)",
+    owner.scopeId,"legacy-msg","mem_input","urgent",json({prompt:"legacy urgent prompt",source:"room_mention",trigger:"activate"}),"activate","pending",1,"tail");
+  const queue=new InputQueueRepository(f.db);
+  const pending=pendingRuntimeInputs(owner);expect(pending.map(x=>x.messageId)).toEqual(["legacy-msg"]);
+  expect(runtimeInputPayload(pending[0]!).prompt).toBe("legacy urgent prompt");
+  claimRuntimeInputs([pending[0]!],"attempt-legacy","token-legacy");
+  finishRuntimeInputs([pending[0]!],"token-legacy","completed","done");
+  expect(queue.get({id:pending[0]!.id,scopeId:owner.scopeId,targetActorKey:owner.targetActorKey})).toMatchObject({status:"settled",deliveryKind:"urgent"});
 });
