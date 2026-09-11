@@ -84,3 +84,15 @@ it.each([true,false])("reuses only exact history-owned snapshots already publish
  if(exact){await importLegacyDocuments(ctx,entries,[]);expect(listDocumentHistory(ctx.db,path)[0].snapshotPath).toBe(snapshot);expect(staged.has(snapshot)).toBe(false)}
  else await expect(importLegacyDocuments(ctx,entries,[])).rejects.toThrow(/snapshot|Snapshot/);
 });
+it("reuses published snapshots for sanitized legacy room-document owners on retry",async()=>{
+ const content="original revision",path="rooms/room-one/memory/members/old_name/principles.md";
+ const snapshot=documentSnapshotPath(path,documentContentMeta(content).contentHash);
+ const {ctx,entries,staged}=setup({
+  "rooms/room-one/memory/principles-history.jsonl":JSON.stringify({scope:"member",memberId:"old/name",content,ts:1,actorType:"member"})+"\n",
+  [snapshot]:content,
+ });
+ const live=join(ctx.root,snapshot);mkdirSync(dirname(live),{recursive:true});writeFileSync(live,content);
+ await importLegacyDocuments(ctx,entries,[]);
+ expect(listDocumentHistory(ctx.db,path).map(r=>r.snapshotPath)).toEqual([snapshot]);
+ expect(staged.has(snapshot)).toBe(false);
+});
