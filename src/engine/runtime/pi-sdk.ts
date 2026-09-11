@@ -20,7 +20,6 @@ import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpCo
 import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
-import { resolveOwningRoomId } from "../../workspace/topic-store.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
@@ -216,7 +215,7 @@ function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberCo
     throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
   }
   ensureBossmodeMcpDirs();
-  const mcpRoomId = args.roomId.startsWith("topic:") ? resolveOwningRoomId(args.roomId) : args.roomId;
+  const mcpRoomId = args.roomId;
   const scoped = writeMemberScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id });
   if (scoped.serverNames.length > 0) {
     process.env.MCP_DIRECT_TOOLS = "__none__";

@@ -106,16 +106,6 @@ it("notification keys are scoped even when two scopes use the same local message
   expect(pendingScopeNotifications().map(row=>row.scopeId)).toEqual(["capture-room","dm:mem_a"]);
 });
 
-it("topic delivery keeps its own scope and its original parent-roster targets",async()=>{
-  rooms.upsertTopic({id:"capture-topic",roomId:"capture-room",title:"Topic",anchorMessageId:"old-anchor",createdBy:"user",status:"active",createdAt:1,seedMode:"fresh",participants:[]});
-  const mention=vi.fn();stops.push(initRouter({mention}));
-  const request=postMessage("topic:capture-topic","user","@Alpha answer",["Alpha"]);
-  members.update({...members.get("mem_a")!,name:"Renamed"});members.update({...members.get("mem_c")!,name:"Alpha"});
-  await flush();expect(mention.mock.calls[0]).toMatchObject(["topic:capture-topic","mem_a",{capture:{messageId:request.id}}]);
-  expect(fixture.db.get("SELECT 1 FROM reply_obligations WHERE scope_id='capture-room'")).toBeUndefined();
-  expect(fixture.db.get("SELECT actor_key FROM reply_obligations WHERE scope_id='topic:capture-topic'")).toEqual({actor_key:"mem_a"});
-});
-
 it("one callback cannot mutate the captured routing plan for another recipient",async()=>{
   const calls:string[]=[];stops.push(initRouter({mention:(_scope,id,context)=>{
     calls.push(id);context.capture.snapshot.targets.ordinary.length=0;context.capture.snapshot.message.sender="poison";

@@ -49,6 +49,8 @@ CREATE TABLE room_rule_docs (
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   position INTEGER NOT NULL, path TEXT NOT NULL, PRIMARY KEY(room_id,position)
 );
+-- Retired topic feature (fish #19358): tables remain for schema stability and are emptied by the
+-- core-topic-retirement-v1 migration; no runtime path writes here anymore.
 CREATE TABLE topics (
   id TEXT NOT NULL PRIMARY KEY,
   scope_id TEXT NOT NULL UNIQUE REFERENCES scopes(id) ON DELETE CASCADE,

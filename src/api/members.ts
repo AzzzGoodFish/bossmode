@@ -34,7 +34,6 @@ import { activeWorkspaceRoot, listWorkspaces } from "../workspace/workspace-regi
 import { readMemberSshPublicKey } from "../workspace/ssh-keygen.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
-import * as topicStore from "../workspace/topic-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
@@ -132,16 +131,6 @@ addRoute("GET", "/api/chats", async (_req, res) => {
       unreadCount: number;
       mentioned: boolean;
       status: string;
-      /** Room rows carry their topics for the sidebar sub-list (topic-threads v2). */
-      topics?: Array<{
-        topicId: string;
-        title: string;
-        status: "active" | "closed";
-        lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
-        unreadCount: number;
-        mentioned: boolean;
-        anyWorking: boolean;
-      }>;
     }> = [];
 
     let getScopeLiveStatus: ((scopeId: string) => string) | null = null;
@@ -187,29 +176,6 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         login,
       );
       const live = getScopeLiveStatus?.(scopeId) || "idle";
-      // Topic sub-list (topic-threads v2): per-topic unread/mention from the topic's
-      // own cursor + working flag from any live topic instance.
-      const topics = topicStore.listTopics(room.id).map((t) => {
-        const tScope = scopeIdOf({ kind: "topic", topicId: t.id, roomId: room.id });
-        const tMsgs = topicStore.readAllTopicMessages(room.id, t.id);
-        const tLast = tMsgs[tMsgs.length - 1];
-        const tCursor = getUserReadCursor(tScope);
-        const { unreadCount: tUnread, mentioned: tMentioned } = countUserUnreadAndMention(
-          tMsgs,
-          tCursor?.messageId ?? null,
-          tCursor?.seq ?? null,
-          login,
-        );
-        return {
-          topicId: t.id,
-          title: t.title,
-          status: t.status,
-          lastMessage: summarizeMessage(tLast),
-          unreadCount: tUnread,
-          mentioned: tMentioned,
-          anyWorking: (getScopeLiveStatus?.(tScope) || "idle") === "working",
-        };
-      });
       chats.push({
         scopeId,
         kind: "room",
@@ -218,7 +184,6 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         unreadCount,
         mentioned,
         status: live === "inactive" ? "idle" : live,
-        topics,
       });
     }
 
@@ -246,14 +211,6 @@ addRoute("POST", "/api/conversations/:scope/read", async (req, res, params) => {
       const ref = parseScopeId(scopeId)!;
       if (ref.kind === "dm") {
         const msgs = readAllDmMessages(ref.memberId);
-        const last = msgs[msgs.length - 1];
-        messageId = last?.id ?? null;
-        seq = typeof last?.seq === "number" ? last.seq : null;
-      } else if (ref.kind === "topic") {
-        // Topic-threads v2: the sidebar sub-list badge clears via this same route.
-        // roomId is not embedded in the scope id — resolve via the topic record.
-        const topicRoomId = topicStore.resolveTopicRoomId(ref.topicId);
-        const msgs = topicRoomId ? topicStore.readAllTopicMessages(topicRoomId, ref.topicId) : [];
         const last = msgs[msgs.length - 1];
         messageId = last?.id ?? null;
         seq = typeof last?.seq === "number" ? last.seq : null;
@@ -447,11 +404,8 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       return;
     }
 
-    // room + topic: roster member config, room cwd (topic mirrors room with a
-    // cwd fallback), global-skill + extension skill paths.
-    const { getTopicById } = await import("../workspace/topic-store.js");
-    const topicRec = ref.kind === "topic" ? getTopicById(ref.topicId) : null;
-    const roomId = ref.kind === "topic" ? topicRec?.roomId : ref.roomId;
+    // room: roster member config, room cwd, global-skill + extension skill paths.
+    const roomId = ref.roomId;
     const room = roomId ? getRoom(roomId) : null;
     const rosterMember = roomId ? resolveRoomMember(roomId, m.id) : null;
     if (!room || !rosterMember || !resolveRoomMemberRef(room.id, m.id)) {
@@ -464,26 +418,12 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       ...resolveGlobalSkillPaths(skills),
     ];
 
-    if (ref.kind === "room") {
-      const compiled = compileMemberPromptForScope({
-        scopeId: scopeParam,
-        memberId: member.id,
-        memberName: member.name,
-        room,
-        docsRoot: join(getBossmodeDir(), "memory", "projects"),
-      });
-      respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
-      return;
-    }
-
-    // topic: parent-room roster + topic title, cwd mirrors topic activation.
     const compiled = compileMemberPromptForScope({
       scopeId: scopeParam,
       memberId: member.id,
       memberName: member.name,
       room,
       docsRoot: join(getBossmodeDir(), "memory", "projects"),
-      topicTitle: topicRec?.title ?? null,
     });
     respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
   } catch (err) {
@@ -523,7 +463,7 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     const beforeModel = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id })).model;
 
     // Model/credential: the one public switch method — validates, applies to
-    // every live instance (room+DM+topic) via the SDK, saves config once.
+    // every live instance (room+DM) via the SDK, saves config once.
     let modelSwitch: Awaited<ReturnType<typeof switchMemberModel>> | undefined;
     if (body.model !== undefined || body.credentialId !== undefined) {
       const eff = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id }));

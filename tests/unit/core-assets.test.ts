@@ -49,7 +49,6 @@ function ready(bind = true): Database {
   new SettingsRepository(database).importConfig(getDefaultConfig());
   database.run("INSERT INTO scopes VALUES (?, 'room', ?, NULL)", room, room);
   database.run("INSERT INTO scopes VALUES (?, 'dm', NULL, ?)", `dm:${member}`, member);
-  database.run("INSERT INTO scopes VALUES ('topic:topic-one', 'topic', ?, NULL)", room);
   if (bind) bindDatabase(database);
   return database;
 }
@@ -123,10 +122,10 @@ it("never consults or updates retained legacy metadata/history", () => {
     `rooms/${room}/memory/mainline-history.jsonl`, `members/${member}/memory/persona-history.jsonl`]) expect(current(path)).toBe("not json\n");
 });
 
-it("preserves user/global, member, room, DM and topic ownership with no fabricated IDs", () => {
+it("preserves user/global, member, room and DM ownership with no fabricated IDs", () => {
   writeMemoryLayer(member, "persona", "global", user);
   expect(getDocument(db, personaPath)).toMatchObject({ memberId: member, scopeId: undefined, meta: { updatedBy: "user", updatedByMemberId: undefined } });
-  for (const [scopeId, dir, sqlScope] of [[`room:${room}`, `room-${room}`, room], [`dm:${member}`, "dm", `dm:${member}`], ["topic:topic-one", "topic-topic-one", "topic:topic-one"]]) {
+  for (const [scopeId, dir, sqlScope] of [[`room:${room}`, `room-${room}`, room], [`dm:${member}`, "dm", `dm:${member}`]]) {
     for (const layer of ["principles", "mainline"] as const) {
       writeMemoryLayer(member, layer, `text ${scopeId}`, actor, { scopeId });
       expect(readMemoryLayerInfo(member, layer, scopeId).revision).toBe(1);
@@ -190,9 +189,9 @@ it("rejects ownership collisions and absent shared scope references", () => {
   writeMemoryLayer(member, "principles", "first", actor, { scopeId: `dm:${member}` });
   expect(() => readMemoryLayerInfo(member, "principles", "dm:other")).toThrow("ownership mismatch");
   expect(() => writeMemoryLayer(member, "principles", "second", actor, { scopeId: "dm:other" })).toThrow("ownership mismatch");
-  expect(() => writeMemoryLayer(member, "mainline", "missing", actor, { scopeId: "topic:missing" })).toThrow();
-  expect(getDocument(db, `members/${member}/memory/scopes/topic-missing/mainline.md`)).toBeUndefined();
-  expect(existsSync(join(root, `members/${member}/memory/scopes/topic-missing/mainline.md`))).toBe(false);
+  expect(() => writeMemoryLayer(member, "mainline", "missing", actor, { scopeId: "room:missing-room" })).toThrow();
+  expect(getDocument(db, `members/${member}/memory/scopes/room-missing-room/mainline.md`)).toBeUndefined();
+  expect(existsSync(join(root, `members/${member}/memory/scopes/room-missing-room/mainline.md`))).toBe(false);
 });
 
 it("deduplicates identical snapshots but never overwrites different retained content", () => {

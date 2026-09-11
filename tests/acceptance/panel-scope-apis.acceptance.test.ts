@@ -44,18 +44,15 @@ describe("Authenticated member panel scope APIs", () => {
     return { memberId: body.member.memberId, name };
   }
 
-  it("serves scoped SQL stats and activity pages for room, DM and topic, ignoring old files", async () => {
+  it("serves scoped SQL stats and activity pages for room and DM, ignoring old files", async () => {
     const { memberId } = await createMember("panel-stats");
     const created = await jsonRequest(ts.port, "POST", "/api/rooms", { token, body: { name: "Panel", memberIds: [memberId] } });
     expect(created.status).toBe(200);
     const room = JSON.parse(created.body);
-    const { createTopic } = await import("../../src/workspace/topic-store.js");
-    const topic = createTopic({ roomId: room.id, title: "Panel topic", anchorMessageId: "anchor", seedMode: "fresh" });
     const { appendAgentEvent, readAgentEvents } = await import("../../src/storage/event-repository.js");
     const scopes = [
       { id: room.id, api: `room:${room.id}`, path: `rooms/${room.id}` },
       { id: `dm:${memberId}`, api: `dm:${memberId}`, path: `rooms/dm:${memberId}` },
-      { id: `topic:${topic.id}`, api: `topic:${topic.id}`, path: `rooms/${room.id}/topics/${topic.id}` },
     ];
     for (const [index, scope] of scopes.entries()) {
       const value = index + 1;

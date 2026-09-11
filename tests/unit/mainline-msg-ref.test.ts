@@ -109,17 +109,15 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
     expect(parsed.index.some((e) => e.kind === "msg")).toBe(false);
   });
 
-  it("isolates SQL message IDs and sequences across room, DM and topic references", async () => {
+  it("isolates SQL message IDs and sequences across room and DM references", async () => {
     const { addMessage } = await import("../../src/workspace/message-store.js");
     const { createMember } = await import("../../src/workspace/member-registry.js");
-    const { createTopic } = await import("../../src/workspace/topic-store.js");
     const { loadScopeMessages, buildMsgLookup, parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
     const member = createMember({ name: "scope-owner" });
     const roomMessage = addMessage("room-a", { sender: "user", content: "room only", mentions: [] });
-    const topic = createTopic({ roomId: "room-a", title: "topic", anchorMessageId: roomMessage.id });
-    const scopes = ["room-a", `dm:${member.id}`, `topic:${topic.id}`];
+    const scopes = ["room-a", `dm:${member.id}`];
     const messages = [roomMessage, ...scopes.slice(1).map(scope => addMessage(scope, { sender: "user", content: `  ${scope} \n` + "😀".repeat(50), mentions: [] }))];
-    expect(messages.map(m => m.seq)).toEqual([1, 1, 1]);
+    expect(messages.map(m => m.seq)).toEqual([1, 1]);
     fixture.reopen();
     for (const [i, scope] of scopes.entries()) {
       const loaded = loadScopeMessages(scope);

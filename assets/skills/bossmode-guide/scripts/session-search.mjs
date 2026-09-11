@@ -95,7 +95,6 @@ function scopeFor(file) {
   const kind = parts[index + 2];
   const id = parts[index + 3];
   if (kind === "rooms") return `room:${id}`;
-  if (kind === "topics") return `topic:${id}`;
   if (kind === "dm") return `dm:${memberId}`;
   return "unknown";
 }

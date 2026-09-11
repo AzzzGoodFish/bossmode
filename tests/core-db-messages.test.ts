@@ -143,7 +143,7 @@ describe("history, search and cursors",() => {
     expect(searchMessageFacts("room",{aroundSeq:4,query:"ignored",limit:3})).toEqual({total:1,messages:all.slice(2,5)});
     expect(searchMessageFacts("room",{after:12,before:15}).messages).toEqual(all.slice(2,5).reverse());
   });
-  it("patches mutable topic cards without changing identity/order and never rewinds sequence",() => {
+  it("patches message content without changing identity/order and never rewinds sequence",() => {
     const a = appendMessage("room",input); const b = appendMessage("room",input);
     expect(patchMessage("room",a.id,{content:"closed",id:"illegal",seq:500,ts:0})).toEqual({...a,content:"closed"});
     expect(readMessages("room").map(m => m.id)).toEqual([a.id,b.id]);

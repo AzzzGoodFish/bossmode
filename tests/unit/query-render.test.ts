@@ -193,12 +193,11 @@ describe("query renderer (member view)", () => {
     );
   });
 
-  it.each(["dm", "topic"] as const)("%s output preserves attachment ownership and does not resolve foreign reply targets", async kind => {
+  it("dm output preserves attachment ownership and does not resolve foreign reply targets", async () => {
     const { createMember } = await import("../../src/workspace/member-registry.js");
     const { createRoom, inviteGlobalMember } = await import("../../src/workspace/room-store.js");
-    const { createTopic } = await import("../../src/workspace/topic-store.js");
     const { addMessage } = await import("../../src/workspace/message-store.js");
-    const { getDmAttachmentPath, getAttachmentPath } = await import("../../src/workspace/attachment-store.js");
+    const { getDmAttachmentPath } = await import("../../src/workspace/attachment-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
     const { dirname } = await import("node:path");
@@ -206,9 +205,8 @@ describe("query renderer (member view)", () => {
     const room = createRoom("Read scopes", undefined, []);
     inviteGlobalMember(room.id, { id: member.id, name: member.name });
     const foreign = addMessage(room.id, { sender: "user", content: "room-only target", mentions: [] });
-    const topic = createTopic({ roomId: room.id, title: "Read scopes", anchorMessageId: foreign.id });
-    const scope = kind === "dm" ? `dm:${member.id}` : `topic:${topic.id}`;
-    const path = kind === "dm" ? getDmAttachmentPath(member.id, "report.md") : getAttachmentPath(room.id, "report.md");
+    const scope = `dm:${member.id}`;
+    const path = getDmAttachmentPath(member.id, "report.md");
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "😀");
     addMessage(scope, { sender: "user", content: "scoped reply", mentions: [],

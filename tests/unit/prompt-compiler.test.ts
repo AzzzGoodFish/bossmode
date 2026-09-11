@@ -23,10 +23,6 @@ beforeEach(() => {
     new ConversationsRepository(fixture.db).ensureDmScope(m.id);
   }
   new ConversationsRepository(fixture.db).upsertRoom(room());
-  for (const id of ["topic_abc", "topic_x"]) {
-    new ConversationsRepository(fixture.db).upsertTopic({ id, roomId: "room-a", title: "T", anchorMessageId: "",
-      createdBy: "user", participants: ["mem_qa"], status: "active", createdAt: 1, seedMode: "fresh" });
-  }
   mkdirSync(join(tmpDir, "members", "mem_qa"), { recursive: true });
 });
 
@@ -97,7 +93,7 @@ describe("prompt compiler (three-segment)", () => {
     expect(compiled.fullPrompt).not.toMatch(/Legacy notes/);
   });
 
-  it("DM first line and topic first line variants", async () => {
+  it("DM first line variant", async () => {
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const dm = compileMemberPromptForScope({
       scopeId: "dm:mem_qa",
@@ -107,48 +103,6 @@ describe("prompt compiler (three-segment)", () => {
     });
     expect(dm.fullPrompt).toContain("You are in a private chat with the user.");
     expect(dm.fullPrompt).not.toContain("shared workspace");
-
-    const topic = compileMemberPromptForScope({
-      scopeId: "topic:topic_abc",
-      memberId: "mem_qa",
-      memberName: "qa",
-      room: room(),
-      docsRoot: "/docs",
-      topicTitle: "Wire up cache",
-    });
-    expect(topic.fullPrompt).toContain('You are in topic "Wire up cache" of room "Prompt Lab"');
-  });
-
-  it("Member + Communication are byte-identical between room and topic (cache invariant)", async () => {
-    writeFileSync(
-      join(tmpDir, "members", "mem_qa", "persona.md"),
-      "---\nname: qa\n---\n\nSteady.\n",
-      "utf-8",
-    );
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const roomC = compileMemberPromptForScope({
-      scopeId: "room:room-a",
-      memberId: "mem_qa",
-      memberName: "qa",
-      room: room(),
-      docsRoot: "/docs",
-    });
-    const topicC = compileMemberPromptForScope({
-      scopeId: "topic:topic_x",
-      memberId: "mem_qa",
-      memberName: "qa",
-      room: room(),
-      docsRoot: "/docs",
-      topicTitle: "T",
-    });
-    const roomMember = roomC.sections.find((s) => s.id === "member")!.content;
-    const topicMember = topicC.sections.find((s) => s.id === "member")!.content;
-    const roomComm = roomC.sections.find((s) => s.id === "communication")!.content;
-    const topicComm = topicC.sections.find((s) => s.id === "communication")!.content;
-    expect(roomMember).toBe(topicMember);
-    expect(roomComm).toBe(topicComm);
-    // Environment differs
-    expect(roomC.envPrompt).not.toBe(topicC.envPrompt);
   });
 
   it("persona is literal Markdown; identity comes only from the current member name", async () => {
@@ -167,13 +121,13 @@ describe("prompt compiler (three-segment)", () => {
     ["\uFEFF\n---\nname: not-identity\n---\n\nLiteral Markdown.\n", "---\nname: not-identity\n---\n\nLiteral Markdown."],
     [" \t\r\n\uFEFF", ""],
     ["", ""],
-  ])("normalizes only the prompt boundary across room, DM and topic (%j)", async (raw, body) => {
+  ])("normalizes only the prompt boundary across room and DM (%j)", async (raw, body) => {
     const path = join(tmpDir, "members", "mem_qa", "persona.md");
     writeFileSync(path, raw, "utf-8");
     const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
     const { readMemberProfile } = await import("../../src/workspace/member-profile.js");
     const expected = `# Member\n\nI am qa.${body ? `\n\n${body}` : ""}`;
-    for (const scopeId of ["room:room-a", "dm:mem_qa", "topic:topic_x"] as const) {
+    for (const scopeId of ["room:room-a", "dm:mem_qa"] as const) {
       const compiled = compileMemberPromptForScope({
         scopeId, memberId: "mem_qa", memberName: "qa",
         ...(scopeId.startsWith("dm:") ? {} : { room: room() }), docsRoot: "/docs",

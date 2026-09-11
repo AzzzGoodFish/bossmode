@@ -58,28 +58,24 @@ describe("background task store", () => {
     expect(store.getBackgroundTask("mem_other", a.taskId)).toBeNull();
   });
 
-  it("isolates known members and room/DM/topic records, including terminal waiters", async () => {
+  it("isolates known members and room/DM records, including terminal waiters", async () => {
     const other = createMember({name: "other"}).id;
-    const conversations = new ConversationsRepository(fixture.db);
-    conversations.upsertTopic({id: "topic", roomId: "bgroom", title: "Topic", anchorMessageId: "anchor", createdBy: "user",
-      createdAt: 1, status: "active", seedMode: "fresh", participants: [memberId, other]});
     const roomTask = mkTask();
     const dmTask = mkTask({scopeId: `dm:${memberId}`});
-    const topicTask = mkTask({scopeId: "topic:topic"});
     const otherTask = mkTask({memberId: other, scopeId: `dm:${other}`});
-    expect(store.listBackgroundTasks(memberId).map(t => t.scopeId).sort()).toEqual(["room:bgroom", `dm:${memberId}`, "topic:topic"].sort());
+    expect(store.listBackgroundTasks(memberId).map(t => t.scopeId).sort()).toEqual(["room:bgroom", `dm:${memberId}`].sort());
     expect(store.listBackgroundTasks(other)).toEqual([otherTask]);
     expect(store.getBackgroundTask(other, roomTask.taskId)).toBeNull();
     expect(() => store.updateBackgroundTask(other, roomTask.taskId, {status: "running"})).toThrow(/not found/);
     const waiting = store.whenTerminal(memberId, dmTask.taskId);
     let settled = false;
     void waiting.promise.then(() => { settled = true; });
-    store.updateBackgroundTask(memberId, topicTask.taskId, {status: "failed", error: "topic failed"});
+    store.updateBackgroundTask(memberId, roomTask.taskId, {status: "failed", error: "room failed"});
     await Promise.resolve();
     expect(settled).toBe(false);
     store.updateBackgroundTask(memberId, dmTask.taskId, {status: "failed", error: "DM failed"});
     expect((await waiting.promise).scopeId).toBe(`dm:${memberId}`);
-    expect(store.getBackgroundTask(memberId, roomTask.taskId)?.status).toBe("starting");
+    expect(store.getBackgroundTask(memberId, roomTask.taskId)?.status).toBe("failed");
     expect(store.getBackgroundTask(other, otherTask.taskId)?.status).toBe("starting");
   });
 

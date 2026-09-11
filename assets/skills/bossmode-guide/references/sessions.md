@@ -9,7 +9,7 @@ GUIDE_DIR=/absolute/path/to/bossmode/assets/skills/bossmode-guide
 MEMBER_DIR=/absolute/path/to/.bossmode/members/<memberId>
 
 node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" list \
-  [--scope 'room:<roomId>|dm:<memberId>|topic:<topicId>'] \
+  [--scope 'room:<roomId>|dm:<memberId>'] \
   [--from '<UTC ISO>'] [--to '<UTC ISO>'] [--include-background] [--limit 50]
 
 node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" search \

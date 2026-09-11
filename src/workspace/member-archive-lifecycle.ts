@@ -58,7 +58,7 @@ function syncTree(path: string): void {
   if (stat.isDirectory() || stat.isFile()) syncPath(path);
 }
 export interface ArchiveLifecycleHooks {
-  /** Must stop live room/DM/topic executions, builders, shells and private tasks, and await release of assets. */
+  /** Must stop live room/DM executions, builders, shells and private tasks, and await release of assets. */
   quiesce(memberId: string): Promise<void>;
 }
 const inFlight = new WeakMap<Database, Map<string, Promise<{archived:string}>>>();

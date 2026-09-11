@@ -2,7 +2,7 @@ import type { coreFixture } from "../helpers/core-fixture.js";
 /**
  * fish No.16834: query_room_messages returns attachments per message
  * ({originalFilename, path}); markdown export appends Attachment lines;
- * missing file → "unavailable". Room / DM / topic scopes.
+ * missing file → "unavailable". Room / DM scopes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -145,48 +145,6 @@ describe("query_room_messages attachments", () => {
     const hit = rows.find((r) => r.content.includes("dm attach"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "shot.png", path: join(dmAttachDir, "dmf1.png") },
-    ]);
-  });
-
-  it("topic scope resolves the parent room attachment dir", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const creds = await import("../../src/engine/model-credentials.js");
-    creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const room = roomStore.createRoom("R3", undefined, []);
-    roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
-
-    const attachDir = join(dir, "rooms", room.id, "attachments");
-    mkdirSync(attachDir, { recursive: true });
-    writeFileSync(join(attachDir, "topicfile.md"), "t", "utf-8");
-
-    const topicStore = await import("../../src/workspace/topic-store.js");
-    const topic = topicStore.createTopic({
-      roomId: room.id,
-      title: "T",
-      anchorMessageId: "",
-      seedMode: "fresh",
-      createdBy: "user",
-    });
-    topicStore.addTopicMessage(room.id, topic.id, {
-      sender: "user",
-      content: "topic attach",
-      mentions: [],
-      attachments: [{ storedFilename: "topicfile.md", originalFilename: "tnote.md", size: 1 }],
-    } as any);
-
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback(
-      "query_room_messages",
-      `topic:${topic.id}`,
-      "pm",
-      {},
-      { memberId: m.id },
-    )) as any[];
-    const hit = rows.find((r) => r.content.includes("topic attach"));
-    expect(hit?.attachments).toEqual([
-      { originalFilename: "tnote.md", path: join(attachDir, "topicfile.md") },
     ]);
   });
 });

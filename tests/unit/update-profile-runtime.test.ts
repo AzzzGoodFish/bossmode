@@ -6,10 +6,9 @@ setupTestWorkspace();
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
-it("renames a running member across room/DM/topic without abort; next prompt refreshes self and peers", async () => {
+it("renames a running member across room/DM without abort; next prompt refreshes self and peers", async () => {
   const reg = await import("../../src/workspace/member-registry.js");
   const roomStore = await import("../../src/workspace/room-store.js");
-  const topics = await import("../../src/workspace/topic-store.js");
   const manager = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
   const suffix = randomUUID().slice(0, 6);
@@ -17,7 +16,6 @@ it("renames a running member across room/DM/topic without abort; next prompt ref
   const peer = reg.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const room = roomStore.createRoom("Runtime identity", undefined, []);
   roomStore.stampGlobalMemberIds(room.id, [own.id, peer.id]);
-  const topic = topics.createTopic({ roomId: room.id, title: "Runtime topic", createdBy: own.name, seedMode: "fresh", anchorMessageId: "anchor" });
   const started = deferred(), release = deferred();
   const built: Array<{ opts: any; handle: any }> = [];
   let hold = true;
@@ -38,7 +36,7 @@ it("renames a running member across room/DM/topic without abort; next prompt ref
   };
   const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes);
   try {
-    const scopes = [`room:${room.id}`, `dm:${own.id}`, `topic:${topic.id}`];
+    const scopes = [`room:${room.id}`, `dm:${own.id}`];
     for (const scope of scopes) expect(await manager.buildMemberAgentSession(own.id, scope)).toBeTruthy();
     expect(await manager.buildMemberAgentSession(peer.id, scopes[0])).toBeTruthy();
     const { postMessage } = await import("../../src/communication/message-bus.js");
@@ -63,7 +61,7 @@ it("renames a running member across room/DM/topic without abort; next prompt ref
     await manager.activateAgent(room.id, peer.id, { senderName: "peer", needResponseMemberIds: [] });
     const peerHandle = built.find(e => e.opts.member.id === peer.id)!.handle;
     expect(JSON.stringify(peerHandle.refreshPrompt.mock.calls)).toContain(next);
-    expect(runtime.createAgent).toHaveBeenCalledTimes(4);
+    expect(runtime.createAgent).toHaveBeenCalledTimes(3);
     for (const entry of built) expect(entry.handle.abort).not.toHaveBeenCalled();
   } finally { release.resolve(); await manager.shutdownAll(); }
 });
@@ -91,10 +89,9 @@ it("reconciles a rename while handle construction is awaiting", async () => {
   } finally { release.resolve(); await manager.shutdownAll(); }
 });
 
-it.each(["room", "topic"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
+it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
   const reg = await import("../../src/workspace/member-registry.js");
   const rooms = await import("../../src/workspace/room-store.js");
-  const topics = await import("../../src/workspace/topic-store.js");
   const manager = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
   const { postMessage } = await import("../../src/communication/message-bus.js");
@@ -104,8 +101,7 @@ it.each(["room", "topic"])("keeps queued %s trigger and cursor on IDs when the o
   const peer = reg.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
   const room = rooms.createRoom("Queued identity", undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
-  const topic = topics.createTopic({ roomId: room.id, title: "Queued topic", createdBy: own.name, seedMode: "fresh", anchorMessageId: "anchor" });
-  const scope = kind === "room" ? room.id : `topic:${topic.id}`;
+  const scope = room.id;
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any;
   handle.refreshPrompt = vi.fn(); handle.prompt = vi.fn(async () => {});
@@ -114,7 +110,7 @@ it.each(["room", "topic"])("keeps queued %s trigger and cursor on IDs when the o
   try {
     const first = postMessage(scope, "user", `@${own.name} ORIGINAL_REQUEST`, [own.name], { mentionMemberIds: [own.id] });
     const ctx = { senderName: "user", needResponseMemberIds: [] };
-    const pending = kind === "room" ? manager.activateAgent(room.id, own.id, ctx) : manager.activateTopicMember(room.id, topic.id, own.id, ctx);
+    const pending = manager.activateAgent(room.id, own.id, ctx);
     await entered.promise;
     updateProfileForMember(own.id, { name: `New-${suffix}` });
     updateProfileForMember(peer.id, { name: own.name });
@@ -124,7 +120,7 @@ it.each(["room", "topic"])("keeps queued %s trigger and cursor on IDs when the o
     expect(handle.prompt).toHaveBeenCalledOnce();
     expect(handle.prompt.mock.calls[0][0]).toContain("ORIGINAL_REQUEST");
     expect(handle.prompt.mock.calls[0][0]).not.toContain("ANOTHER_MEMBER_REQUEST");
-    const cursors = kind === "room" ? rooms.getCursors(room.id) : topics.getTopicCursors(room.id, topic.id);
+    const cursors = rooms.getCursors(room.id);
     expect(cursors[own.id]).toBe(first.id);
     expect(rooms.getRoom(room.id)!.members).toContain(`New-${suffix}`);
     expect(handle.refreshPrompt.mock.calls[0][0].agentPrompt).toContain(`New-${suffix}`);

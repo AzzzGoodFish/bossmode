@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, BookOpen, FileText, Square, Eye, MessagesSquare, ArrowDown } from "lucide-react";
 import type { RoomMessage, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
-import { getTopicMessages } from "../api/client";
 import { MemberName } from "./MemberName";
 import { MessageBubble } from "./MessageBubble";
 import { MessageSearchBar } from "./MessageSearchBar";
@@ -28,14 +27,12 @@ interface ChatAreaProps {
   onJumpToMessage?: (messageId: string) => Promise<void>;
   onReturnToLatest?: () => void;
   inHistoryView?: boolean;
-  /** Hover action bar (topic-threads-v1): reply quote + create topic from a message. */
+  /** Hover action bar: reply quote. */
   onReplyMessage?: (msg: RoomMessage) => void;
-  onCreateTopicFromMessage?: (msg: RoomMessage) => void;
-  onOpenTopic?: (topicId: string) => void;
 }
 
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
   const [atBottom, setAtBottom] = useState(true);
@@ -236,7 +233,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       onPreview={onPreviewArtifact ? () => onPreviewArtifact({ kind: "message", messageId: msg.id, title: msg.knowledge_event_meta!.title, artifacts: [msg.knowledge_event_meta!.path], selectedIndex: 0 }) : undefined}
                     />
                   ) : msg.type === "topic_event" && msg.topic_event_meta ? (
-                    <TopicEventCard meta={msg.topic_event_meta} roomId={roomId} onOpen={onOpenTopic ? () => onOpenTopic(msg.topic_event_meta!.topicId) : undefined} onJumpToAnchor={msg.topic_event_meta.anchorMessageId ? () => void scrollToMessage(msg.topic_event_meta!.anchorMessageId!) : undefined} />
+                    <RetiredTopicEventCard meta={msg.topic_event_meta} />
                   ) : (
                     <MessageBubble
                       sender={msg.sender}
@@ -257,7 +254,6 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       quote={resolveQuote(messages, msg)}
                       onJumpToMessage={(targetId) => void scrollToMessage(targetId)}
                       onReply={onReplyMessage && msg.sender !== "system" ? () => onReplyMessage(msg) : undefined}
-                      onCreateTopic={onCreateTopicFromMessage && msg.sender !== "system" ? () => onCreateTopicFromMessage(msg) : undefined}
                       onPreviewAttachment={roomId && onPreviewAttachment ? (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => onPreviewAttachment({ kind: "attachment", messageId, title: "Attachment preview", attachments, selectedIndex }) : undefined}
                     />
                   )}
@@ -318,66 +314,22 @@ function resolveQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number;
   };
 }
 
-/** Topic stream card (prototype topic-threads-v1 spec ④): opened state navigates; closed state carries the summary with inline expandable full discussion. */
-function TopicEventCard({ meta, roomId, onOpen, onJumpToAnchor }: { meta: TopicEventMeta; roomId?: string; onOpen?: () => void; onJumpToAnchor?: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const [fullMessages, setFullMessages] = useState<RoomMessage[] | null>(null);
-  const toggleExpand = async () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && fullMessages === null && roomId) {
-      try {
-        const res = await getTopicMessages(roomId, meta.topicId, 500);
-        setFullMessages(res.messages);
-      } catch {
-        setFullMessages([]);
-      }
-    }
-  };
-  if (meta.action === "closed") {
-    return (
-      <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
-        <div className="flex items-center gap-2 text-xs text-ink-3">
-          <MessagesSquare size={13} className="text-ink-4 shrink-0" />
-          <span className="flex-1 min-w-0">
-            <span className="text-ink-2">topic closed</span> · <span className="font-medium text-ink-1">{meta.title}</span>
-          </span>
-        </div>
-        {meta.anchorExcerpt && <div className="mt-1 text-[11px] text-ink-4 truncate">↳ {meta.anchorExcerpt}</div>}
-        <div className="mt-1.5 text-xs text-ink-2 leading-relaxed">{meta.summary ? <><span className="font-semibold text-ink-1">Summary</span> · {meta.summary}</> : <span className="text-ink-3">Summary pending…</span>}</div>
-        <div className="mt-1.5 flex items-center gap-2">
-          <button type="button" onClick={() => void toggleExpand()} className="text-[11px] font-semibold text-accent-ink hover:opacity-80 cursor-pointer">
-            {expanded ? "Collapse ▴" : "Expand full discussion ▾"}
-          </button>
-        </div>
-        {expanded && (
-          <div className="mt-2 border-t border-line-soft pt-2 max-h-[220px] overflow-y-auto space-y-1.5">
-            {fullMessages === null && <div className="text-[11px] text-ink-4">Loading…</div>}
-            {fullMessages && fullMessages.length === 0 && <div className="text-[11px] text-ink-4">No messages.</div>}
-            {fullMessages?.map((m) => (
-              <div key={m.id} className="text-xs text-ink-2"><span className="font-semibold text-ink-1"><MemberName memberId={m.senderMemberId} recordedName={m.sender === "user" ? "you" : m.sender} /></span>：{m.content}</div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+/** Topic feature retired (fish #19358): historical topic cards stay readable as
+ * plain text — no navigation, no live topic identity; closed cards keep the summary. */
+function RetiredTopicEventCard({ meta }: { meta: TopicEventMeta }) {
   return (
-    <div
-      className={`border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40 ${onOpen ? "cursor-pointer hover:border-line-strong transition-colors" : ""}`}
-      onClick={onOpen}
-    >
+    <div className="border border-line rounded-lg px-3 py-2 mt-3 bg-surface-0/40">
       <div className="flex items-center gap-2 text-xs text-ink-3">
-        <MessagesSquare size={13} className="text-accent-ink shrink-0" />
+        <MessagesSquare size={13} className="text-ink-4 shrink-0" />
         <span className="flex-1 min-w-0">
-          <span className="font-medium text-ink-2">{meta.actor === "user" ? "you" : meta.actor}</span> opened topic <span className="font-medium text-ink-1">{meta.title}</span>
+          {meta.action === "closed"
+            ? <><span className="text-ink-2">topic closed</span> · <span className="font-medium text-ink-1">{meta.title}</span></>
+            : <><span className="font-medium text-ink-2">{meta.actor === "user" ? "you" : meta.actor}</span> opened topic <span className="font-medium text-ink-1">{meta.title}</span></>}
         </span>
-        {onOpen && <span className="shrink-0 text-[11px] font-semibold text-accent-ink">Open topic →</span>}
       </div>
-      {meta.anchorExcerpt && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onJumpToAnchor?.(); }} className="mt-1 block max-w-full text-left text-[11px] text-ink-4 truncate hover:text-ink-3 cursor-pointer" title="Jump to anchor message">
-          ↳ {meta.anchorExcerpt}
-        </button>
+      {meta.anchorExcerpt && <div className="mt-1 text-[11px] text-ink-4 truncate">↳ {meta.anchorExcerpt}</div>}
+      {meta.action === "closed" && (
+        <div className="mt-1.5 text-xs text-ink-2 leading-relaxed">{meta.summary ? <><span className="font-semibold text-ink-1">Summary</span> · {meta.summary}</> : <span className="text-ink-3">No summary.</span>}</div>
       )}
     </div>
   );

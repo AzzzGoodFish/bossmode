@@ -18,7 +18,7 @@ const actor = { ownerKey: "mem_one", memberId: "mem_one" };
 const event = (n: number) => ({ type: "message_end", ts: n, seq: 0, model: "p/m", usage: { inputTokens: n, outputTokens: n * 2, cacheRead: n * 3, cacheWrite: n * 4, cost: n / 4 }, extra: { zero: 0, empty: "", list: [0, null, false] } });
 function source(name: string, events: object[], scope = "room"): LegacySourceEntry {
   const root = join(fixture.root, "snapshot");
-  const path = scope.startsWith("topic:") ? `rooms/room/topics/${scope.slice(6)}/agent-events/${name}.jsonl` : `rooms/${scope}/agent-events/${name}.jsonl`;
+  const path = `rooms/${scope}/agent-events/${name}.jsonl`;
   mkdirSync(dirname(join(root, path)), { recursive: true });
   writeFileSync(join(root, path), "\n" + events.map(e => JSON.stringify(e)).join("\n\n") + "\n");
   return discoverLegacyInventory(root).entries.find(e => e.path === path)!;
@@ -48,7 +48,7 @@ function provenance() {
   return fixture.db.all<{ value: string }>("SELECT value FROM storage_meta WHERE key LIKE 'legacy-event-occurrence-v1:%' ORDER BY key").map(r => JSON.parse(r.value));
 }
 
-it.each(["room", "dm:mem_one", "topic:one"])("allocates independent same-owner source occurrences without using payload sequence in %s", async scope => {
+it.each(["room", "dm:mem_one"])("allocates independent same-owner source occurrences without using payload sequence in %s", async scope => {
   const a = source("old-label", [event(0), event(0), event(2)], scope);
   const b = source("mem_one", [event(0), event(3)], scope);
   const entries = [a, b];
@@ -211,7 +211,8 @@ it("retains independent same-owner source order across the 128-row batching boun
   expect(snapshot()).toEqual(before);
 });
 
-it.each(["dm:mem_one", "topic:one"])("merges proven duplicate events with original provenance in %s", async scope => {
+it("merges proven duplicate events with original provenance in dm:mem_one", async () => {
+  const scope = "dm:mem_one";
   const a = source("one", [event(1)], scope);
   const b = source("two", [event(0), event(1)], scope);
   const entries = [a, b];

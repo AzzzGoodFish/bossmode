@@ -7,7 +7,7 @@ import {SessionRepository} from "./repositories/session-repository.js";
 import {RuntimeRepository} from "./repositories/runtime-repository.js";
 import {BackgroundRepository} from "./repositories/background-repository.js";
 import {executionScopeId,importExecutionAmbiguity} from "./repositories/execution-identity.js";
-import {ensureImportedScope} from "./upgrade-conversations.js";
+import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import type {AgentSession,BackgroundTaskRecord} from "../shared/types.js";
 
@@ -37,6 +37,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
   const data=object(readLegacyJson(ctx.sourceRoot,e),e.path);const at=Math.trunc(e.mtimeMs);
   if(e.kind==="current-sessions"){
    for(const [key,value]of Object.entries(data)){
+    if(retiredTopicScope(key))continue; // topic scope retired (fish #19358)
     if(!known(e.memberId)){quarantine(e,key,"session",value,"unresolved-current-session-owner");continue;}
     const scope=ensureImportedScope(ctx.db,key);const session=object(value,e.path) as AgentSession;
     if(session.sessionFile!==undefined){
@@ -51,6 +52,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
   }else if(e.kind==="runtime-state"){
    for(const [key,value]of Object.entries(data)){
     const split=key.lastIndexOf(":");const member=key.slice(split+1);const rawScope=key.slice(0,split);
+    if(retiredTopicScope(rawScope))continue; // topic scope retired (fish #19358)
     if(split<1||!known(member)||e.memberId!==undefined&&e.memberId!==member){quarantine(e,key,"runtime",value,"unresolved-runtime-owner");continue;}
     let scope:string;try{scope=executionScopeId(rawScope);}catch{quarantine(e,key,"runtime",value,"invalid-runtime-scope");continue;}
     ensureImportedScope(ctx.db,scope);
@@ -59,6 +61,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
    }
   }else{
    if(data.taskId!==e.taskId||data.memberId!==e.memberId)throw new Error(`Background source ownership mismatch: ${e.path}`);
+   if(retiredTopicScope(data.scopeId)){consumed.add(e.path);continue;} // topic scope retired (fish #19358)
    if(!known(e.memberId)){quarantine(e,data.taskId,"background",data,"unresolved-background-owner");consumed.add(e.path);continue;}
    ensureImportedScope(ctx.db,data.scopeId);
    // File inventory, not an untrusted sessionDir string, identifies this owned task directory.

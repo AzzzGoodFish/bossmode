@@ -84,17 +84,15 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     }
   });
 
-  it.each(["room", "dm", "topic"])("%s messages wait in SQL during compaction; only explicit Stop aborts it", async kind => {
+  it.each(["room", "dm"])("%s messages wait in SQL during compaction; only explicit Stop aborts it", async kind => {
     const { ts, roomId, memberId } = await setupRoom(`compact-${kind}`);
     let release = () => {};
     let compacting: Promise<unknown> | undefined;
     try {
       const manager = await import("../../src/engine/agent-manager.js");
-      const { createTopic, addTopicMessage } = await import("../../src/workspace/topic-store.js");
       const { addDmMessage } = await import("../../src/workspace/dm-message-store.js");
       const { addMessage } = await import("../../src/workspace/message-store.js");
-      const topic = kind === "topic" ? createTopic({ roomId, title: "compaction", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
-      const scopeId = kind === "dm" ? `dm:${memberId}` : topic ? `topic:${topic.id}` : `room:${roomId}`;
+      const scopeId = kind === "dm" ? `dm:${memberId}` : `room:${roomId}`;
       const instance = await manager.buildMemberAgentSession(memberId, scopeId);
       expect(instance).toBeTruthy();
       const gate = new Promise<void>(resolve => { release = resolve; });
@@ -110,14 +108,13 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
       expect(pendingRuntimeInputCount(owner)).toBe(0);
       const message = { sender: "user", content: `@compact-${kind} continue`, mentions: [`compact-${kind}`] };
       if (kind === "dm") { addDmMessage(memberId, message); await manager.activateDmMember(memberId); }
-      else if (topic) { addTopicMessage(roomId, topic.id, message); await manager.activateTopicMember(roomId, topic.id, memberId); }
       else { addMessage(roomId, message); await manager.activateAgent(roomId, memberId); }
       expect(abort).not.toHaveBeenCalled();
       expect(prompt).not.toHaveBeenCalled();
       expect(pendingRuntimeInputCount(owner)).toBe(1);
       if (kind !== "dm") {
-        if (!topic) addMessage(roomId, { ...message, content: "urgent follow-up" });
-        await manager.interruptAgent(topic ? scopeId : roomId, memberId, "user");
+        addMessage(roomId, { ...message, content: "urgent follow-up" });
+        await manager.interruptAgent(roomId, memberId, "user");
         expect(abort).not.toHaveBeenCalled();
         expect(pendingRuntimeInputCount(owner)).toBe(2);
       }
@@ -140,6 +137,6 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, "../../src/engine/agent-manager.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
-    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(3);
+    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(2);
   });
 });

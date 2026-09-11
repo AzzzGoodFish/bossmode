@@ -22,7 +22,7 @@ function setup(files:Record<string,string>){
  const ctx:UpgradeImportContext={db,root,sourceRoot,previousDatabase:undefined,sourceFiles:entries.map(e=>e.path),legacy:true,progress(){},stageAsset(){throw new Error("unexpected body");}};
  return {ctx,entries};
 }
-it("preserves room/topic/DM facts, explicit empty rosters and independent cursors (legacy task files archived)",async()=>{
+it("preserves room/DM facts, explicit empty rosters and independent cursors (retired topic & legacy task sources consumed)",async()=>{
  const topic={id:"topic-one",roomId:room.id,title:"Topic",anchorMessageId:message.id,createdBy:"old-label",createdAt:3,status:"active",seedMode:"fresh",participants:[]};
  const task={id:"task-one",roomId:room.id,title:"Task",status:"todo",priority:"P1",createdBy:"historic",createdAt:1,updatedAt:2,assignee:"old-label",subscriberMemberIds:[],subscribers:["old-label"],comments:[{id:"c1",author:"historic",content:"literal",createdAt:1}]};
  const {ctx,entries}=setup({
@@ -37,9 +37,10 @@ it("preserves room/topic/DM facts, explicit empty rosters and independent cursor
  });
  const consumed=await importLegacyConversations(ctx,entries);expect(consumed.size).toBe(entries.length);
  expect(new ConversationsRepository(ctx.db).getRoom(room.id)).toMatchObject(room);
- expect(new ConversationsRepository(ctx.db).getTopic(room.id,topic.id)).toEqual(topic);
  expect(readMessages(room.id,ctx.db)).toEqual([message]);expect(readMessages("dm:mem_one",ctx.db)[0].id).toBe("dm-message");
- expect(readMessages("topic:topic-one",ctx.db)[0].id).toBe("topic-message");
+ // Topic feature retired (fish #19358): topic sources are consumed, never imported.
+ expect(ctx.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();
+ expect(ctx.db.all("SELECT 1 FROM messages WHERE scope_id LIKE 'topic:%'")).toEqual([]);
  // Legacy task files are consumed (archived, not imported): the source is not left unhandled.
  const {existsSync,readdirSync}=await import("node:fs");
  expect(existsSync(join(root!,"archive"))).toBe(true);
@@ -60,12 +61,11 @@ it("retires obsolete response flags without recipient inference or historical ex
  const expected={...message,mentions:raw.mentions};
  const {ctx,entries}=setup({
   "rooms/room-one/messages.jsonl":JSON.stringify(raw)+"\n",
-  "rooms/room-one/topics/topic-one/messages.jsonl":JSON.stringify(raw)+"\n",
   "members/mem_one/dm-messages.jsonl":JSON.stringify(raw)+"\n",
   "rooms/room-one/archives/123.jsonl":JSON.stringify({...raw,needResponse:false})+"\n",
  });
  await importLegacyConversations(ctx,entries);
- for(const scope of ["room-one","topic:topic-one","dm:mem_one"])expect(readMessages(scope,ctx.db)).toEqual([expected]);
+ for(const scope of ["room-one",`dm:mem_one`])expect(readMessages(scope,ctx.db)).toEqual([expected]);
  expect(readArchivedMessages("room-one",123,ctx.db)).toEqual([expected]);
  for(const table of ["outbox","reply_obligations","queued_inputs","execution_attempts"])expect(ctx.db.all(`SELECT * FROM ${table}`)).toEqual([]);
 });

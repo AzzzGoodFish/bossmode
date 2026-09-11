@@ -4,11 +4,9 @@
  * Grouping = consecutive bubbles from the same sender within a short interval
  * collapse into one visual group (avatar/sender row only on the first).
  *
- * Typed event cards (task/knowledge/topic) are boundary BREAKERS: they render
- * as cards, not bubbles — messages never merge across them, and a card never
- * joins a bubble group. (fish 2026-08-19: a user message right after a
- * "you opened topic" card — sender "user" — lost its avatar/sender row because
- * the card counted as the same-group predecessor.)
+ * Typed event cards (task/knowledge/topic historical events included) are
+ * boundary BREAKERS: they render as cards, not bubbles — messages never merge
+ * across them, and a card never joins a bubble group.
  */
 import { isSameLocalDate } from "./message-date";
 import type { RoomMessage } from "../api/client";

@@ -14,8 +14,6 @@ export interface BossmodeRuntimeConfig {
   websocketConnectTimeoutMs?: number;
   /** HTTP idle timeout passed to pi SDK when set. */
   httpIdleTimeoutMs?: number;
-  /** Default topic session seed. fork = inherit room session prefix. Default fork. */
-  topicSeedMode?: "fork" | "fresh";
 }
 
 export interface BossmodeMcpConfig {
@@ -567,7 +565,8 @@ export interface BackgroundTaskRecord {
   parentSessionRef: string | null;
 }
 
-// -- Topic activity (plan-topic-threads-v1: room stream keeps only these two cards) --
+// -- Retired topic lifecycle cards (fish #19358): stored history only — the room
+// stream keeps these two cards, rendered plain-text, never written again. --
 
 export interface TopicEventMeta {
   action: "opened" | "closed";

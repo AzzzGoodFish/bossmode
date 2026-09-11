@@ -8,13 +8,12 @@ import {
 import { mockPromptFn, resetMocks } from "../helpers/mock-runtime.js";
 import { postMessage } from "../../src/communication/message-bus.js";
 import {
-  activateDmMember, activateAgent, activateTopicMember, buildMemberAgentSession,
+  activateDmMember, activateAgent, buildMemberAgentSession,
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
   reloadMemberResources, reloadMemberSession, resolveSkills,
 } from "../../src/engine/agent-manager.js";
 import { getMember, updateMember } from "../../src/workspace/member-registry.js";
 import { memberProfilePath } from "../../src/workspace/member-profile.js";
-import { createTopic } from "../../src/workspace/topic-store.js";
 import { getRuntimeStateEntry } from "../../src/workspace/runtime-state.js";
 import { getSessions } from "../../src/workspace/session-store.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
@@ -51,7 +50,7 @@ function damageHistoricalTemplate(mode: string): () => void {
 
 describe("current runtime does not depend on historical agent templates", () => {
   it.each(["absent catalog", "missing body", "corrupt catalog path", "unreadable body"])(
-    "%s cannot change room/DM/topic creation, preview, identity refresh or reload",
+    "%s cannot change room/DM creation, preview, identity refresh or reload",
     async mode => {
       const server = await createTestServer();
       resetMocks();
@@ -65,8 +64,7 @@ describe("current runtime does not depend on historical agent templates", () => 
         updateMember(id, { global: { ...getMember(id)!.global, skills: [] } });
         restore = damageHistoricalTemplate(mode);
 
-        const topic = createTopic({ roomId: room.id, title: "Runtime topic", anchorMessageId: "anchor", createdBy: "user", seedMode: "fresh" });
-        const scopes = [`room:${room.id}`, `dm:${id}`, `topic:${topic.id}`];
+        const scopes = [`room:${room.id}`, `dm:${id}`];
         const runtime = getRegistry()!.get("pi-cli")!;
         const create = vi.spyOn(runtime, "createAgent");
         const publicResponse = await jsonRequest(server.port, "GET", `/api/members/${id}`, { token });
@@ -123,7 +121,6 @@ describe("current runtime does not depend on historical agent templates", () => 
           instance.handle.refreshPrompt = refresh;
           expect(instance.sessionSources.compiled.agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
           if (scope.startsWith("dm:")) await activateDmMember(id);
-          else if (scope.startsWith("topic:")) await activateTopicMember(room.id, topic.id, id);
           else {
             postMessage(room.id, "user", "Refresh identity.", []);
             await activateAgent(room.id, id);
@@ -138,7 +135,7 @@ describe("current runtime does not depend on historical agent templates", () => 
           expect(JSON.parse(preview.body).text).not.toContain("Literal persona.");
           expect(JSON.parse(preview.body).text).toContain(`I am ${renamed.name}.`);
         }
-        expect(mockPromptFn).toHaveBeenCalledTimes(3);
+        expect(mockPromptFn).toHaveBeenCalledTimes(2);
         expect(create).toHaveBeenCalledTimes(creationsBeforeRefresh);
         for (const scope of scopes) {
           expect(await reloadMemberSession(scope, id, "empty persona reload")).toEqual({ queued: false, rebuilt: true });

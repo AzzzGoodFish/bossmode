@@ -18,9 +18,6 @@ export type ActivePage =
   | { type: "chats" }
   | { type: "dm"; memberId: string }
   | { type: "room"; id: string }
-  | { type: "topic"; roomId: string; topicId: string }
-  /** Topic draft (topic-threads v3, fish): opened from a message's topic button; nothing persists until the first message sends. */
-  | { type: "topic-draft"; roomId: string; anchorMessageId: string; anchorSeq?: number; anchorTitle: string; anchorExcerpt: string }
   | { type: "settings"; section?: SettingsSection }
   | null;
 

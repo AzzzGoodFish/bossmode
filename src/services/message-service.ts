@@ -4,7 +4,6 @@ import { executionScopeId } from "../storage/repositories/execution-identity.js"
 import { DeliveryRepository, type CapturedMessage, type DeliveryActor, type CapturedDeliverySnapshot } from "../storage/repositories/delivery-repository.js";
 import { ReplyObligationRepository } from "../storage/repositories/reply-obligation-repository.js";
 import { MembersRepository } from "../storage/repositories/members.js";
-import { resolveOwningRoomId } from "../workspace/topic-store.js";
 import { getRoomMembers } from "../workspace/room-store.js";
 import type { RoomMessage } from "../shared/types.js";
 
@@ -24,7 +23,7 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
       if (!names?.length) return [];
       if (!roster) {
         const owner = isDm ? members.getRetained(scopeId.slice(3)) : null;
-        roster = isDm ? (owner ? [owner] : []) : getRoomMembers(resolveOwningRoomId(scopeId));
+        roster = isDm ? (owner ? [owner] : []) : getRoomMembers(scopeId);
       }
       if (names.includes("all")) return roster.map(member => member.id);
       const current = roster;

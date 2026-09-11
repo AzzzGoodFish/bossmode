@@ -77,7 +77,7 @@ describe("member system-prompt preview", () => {
 
     expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt`, { token })).status).toBe(400);
     expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=nonsense`, { token })).status).toBe(400);
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=topic:topic_missing`, { token })).status).toBe(404);
+    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=topic:topic_missing`, { token })).status).toBe(400);
     expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=dm:${outsiderId}`, { token })).status).toBe(404);
     expect((await jsonRequest(ts.port, "GET", `/api/members/${outsiderId}/system-prompt?scope=${encodeURIComponent(`room:${roomId}`)}`, { token })).status).toBe(404);
     expect((await jsonRequest(ts.port, "GET", "/api/members/mem_does_not_exist/system-prompt?scope=dm:mem_does_not_exist", { token })).status).toBe(404);

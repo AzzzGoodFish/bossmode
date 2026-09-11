@@ -161,11 +161,10 @@ function archiveNonEmpty(dir: string): boolean {
 }
 
 function buildEnvironmentSegment(args: {
-  scopeKind: "room" | "dm" | "topic";
+  scopeKind: "room" | "dm";
   memberId: string;
   memberName: string;
   room?: Room | null;
-  topicTitle?: string | null;
   contextWindowTokens: number;
 }): string {
   const boss = getBossmodeDir();
@@ -187,13 +186,6 @@ function buildEnvironmentSegment(args: {
 
   if (args.scopeKind === "dm") {
     lines.push(`- You are in a private chat with the user.`);
-  } else if (args.scopeKind === "topic") {
-    const roomName = args.room?.name || "room";
-    const title = args.topicTitle || "topic";
-    const roster = formatMemberRoster(args.room?.members || [], args.memberName);
-    lines.push(
-      `- You are in topic "${title}" of room "${roomName}". Members: ${roster}.`,
-    );
   } else {
     const roomName = args.room?.name || "room";
     const roster = formatMemberRoster(args.room?.members || [], args.memberName);
@@ -243,8 +235,7 @@ function buildEnvironmentSegment(args: {
 }
 
 /**
- * Scope-aware three-segment compiler.
- * Topic fork cache: Member + Communication byte-identical to room; only Environment first line differs.
+ * Scope-aware three-segment compiler (room / DM).
  */
 export function compileMemberPromptForScope(args: {
   scopeId: ScopeId;
@@ -255,16 +246,14 @@ export function compileMemberPromptForScope(args: {
   activeScopes?: string[];
   /** Model context window for skill budget (tokens). Default 128000. */
   contextWindowTokens?: number;
-  topicTitle?: string | null;
 }): CompiledMemberPrompt {
   const ref = parseScopeId(args.scopeId);
   if (!ref) throw new Error(`scope_not_found: ${args.scopeId}`);
 
-  const scopeKind: "room" | "dm" | "topic" =
-    ref.kind === "dm" ? "dm" : ref.kind === "topic" ? "topic" : "room";
+  const scopeKind: "room" | "dm" = ref.kind === "dm" ? "dm" : "room";
 
-  if ((scopeKind === "room" || scopeKind === "topic") && !args.room) {
-    throw new Error("room required for room/topic scope compile");
+  if (scopeKind === "room" && !args.room) {
+    throw new Error("room required for room scope compile");
   }
 
   const profile = readMemberProfile(args.memberId);
@@ -275,7 +264,6 @@ export function compileMemberPromptForScope(args: {
     memberId: args.memberId,
     memberName: args.memberName,
     room: args.room,
-    topicTitle: args.topicTitle,
     contextWindowTokens: args.contextWindowTokens ?? 128_000,
   });
 
@@ -295,9 +283,8 @@ export function compileMemberPromptForScope(args: {
   );
 
   // Contract = code-owned Communication + scope kind (not member body, not paths).
-  const fingerprintKind = scopeKind === "topic" ? "room" : scopeKind;
   const contractFingerprint = createHash("sha1")
-    .update(`${fingerprintKind}\n${COMMUNICATION_SEGMENT}`)
+    .update(`${scopeKind}\n${COMMUNICATION_SEGMENT}`)
     .digest("hex");
 
   logger.info("agent", "compilePrompt", {

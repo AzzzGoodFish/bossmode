@@ -12,13 +12,11 @@ import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
-import * as topicStore from "../workspace/topic-store.js";
-import { scopeIdOf } from "../shared/conversation-ref.js";
 import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
 
-import { readConfig, writeConfig, getBossmodeDir, getTopicSeedMode } from "../shared/config.js";
+import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
@@ -50,24 +48,6 @@ function parseUserAttachments(roomId: string, raw: unknown): { ok: true; attachm
     });
   }
   return { ok: true, attachments };
-}
-
-/** FYI @ participants on the room stream when a topic closes. Never throws to the caller. */
-function notifyTopicClosed(roomId: string, topic: { title: string; participants: string[] }, card: RoomMessage | null): void {
-  const names: string[] = [];
-  const ids: string[] = [];
-  for (const pid of topic.participants || []) {
-    const m = resolveRoomMember(roomId, pid);
-    if (!m || ids.includes(m.id)) continue;
-    names.push(m.name);
-    ids.push(m.id);
-  }
-  if (ids.length === 0) return;
-  postMessage(roomId, "user", `Topic "${topic.title}" is closed. The summary is on the topic card.`, names, {
-    mentionMemberIds: ids,
-    needResponse: [],
-    ...(card && typeof card.seq === "number" ? { replyTo: { seq: card.seq, messageId: card.id } } : {}),
-  });
 }
 
 // ── Rooms ──
@@ -591,10 +571,7 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params)
 
   if (globalMemberId) {
     try {
-      clearCurrentSessions(globalMemberId, [
-        `room:${params.id}`,
-        ...topicStore.listTopics(params.id).map((topic) => `topic:${topic.id}`),
-      ]);
+      clearCurrentSessions(globalMemberId, [`room:${params.id}`]);
     } catch (err) {
       sendJson(res, 500, { error: "Member current-session cleanup failed", memberId: globalMemberId, detail: String(err) });
       return;
@@ -753,242 +730,3 @@ addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
   sendJson(res, 200, result);
 });
 // Attachment routes moved to src/api/uploads.ts (stream-based)
-
-// ── Topics (plan-topic-threads-v1 batch 1) ──
-
-addRoute("GET", "/api/rooms/:id/topics", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const topics = topicStore.listTopics(params.id);
-  sendJson(res, 200, { topics });
-});
-
-addRoute("POST", "/api/rooms/:id/topics", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const body = (await parseBody(req)) as {
-    title?: string;
-    anchorMessageId?: string;
-    anchorSeq?: number;
-    content?: string;
-    attachments?: AttachmentInput[];
-  };
-  const content = String(body.content ?? "").trim();
-  const parsed = parseUserAttachments(params.id, body.attachments);
-  if (!parsed.ok) { sendJson(res, 400, { error: parsed.error }); return; }
-  const attachments = parsed.attachments;
-  const all = messageStore.readAllMessages(params.id);
-  const anchor = body.anchorMessageId
-    ? all.find((m) => m.id === body.anchorMessageId)
-    : (body.anchorSeq !== undefined ? all.find((m) => m.seq === body.anchorSeq) : undefined);
-  if (body.anchorMessageId && !anchor) { sendJson(res, 404, { error: "Anchor message not found in room" }); return; }
-  if (!anchor && !content && attachments.length === 0) { sendJson(res, 400, { error: "anchorMessageId, content, or attachments is required" }); return; }
-
-  const seedMode = getTopicSeedMode();
-  const sourceText = content || String(anchor?.content || "");
-  const title = (body.title || "").trim() || topicStore.titleFromMessage(sourceText) || "Untitled topic";
-  const guideText = topicStore.buildTopicGuideText({
-    title,
-    roomName: room.name,
-    roomId: room.id,
-    anchorExcerpt: sourceText,
-    seedMode,
-  });
-  const topic = topicStore.createTopic({
-    roomId: room.id,
-    title,
-    anchorMessageId: anchor?.id || "",
-    anchorSeq: anchor?.seq,
-    seedMode,
-    guideText,
-    anchorExcerpt: topicStore.normalizeAnchorExcerpt(sourceText),
-  });
-
-  // Opening card on the room stream (batch 3: structured topic_event card; batch 4 flips on close).
-  const card = postMessage(room.id, "user", `Topic opened: ${topic.title}`, [], {
-    type: "topic_event",
-    topic_event_meta: {
-      action: "opened",
-      topicId: topic.id,
-      title: topic.title,
-      anchorSeq: anchor?.seq ?? topic.anchorSeq,
-      anchorMessageId: anchor?.id || topic.anchorMessageId,
-      anchorExcerpt: topicStore.normalizeAnchorExcerpt(sourceText).slice(0, 120),
-      actor: "user",
-    },
-  });
-  if (!anchor) {
-    topic.anchorMessageId = card.id;
-    topic.anchorSeq = card.seq;
-    topicStore.saveTopic(topic);
-  }
-
-  // Composer mode: first topic message + @ activations via the mention router (single path).
-  if (content || attachments.length > 0) {
-    const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
-    const roomMembers = roomStore.getRoomMembers(params.id);
-    const urgentMentions = parseUrgentMentions(content, roomMembers.map((m) => m.name));
-    const mentions = [...new Set([...parseMentions(content, roomMembers.map((m) => m.name)), ...urgentMentions])];
-    const mentionMemberIds = [...new Set([
-      ...parseMentionMemberIds(content, roomMembers),
-      ...parseUrgentMentionMemberIds(content, roomMembers),
-    ])];
-    const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
-    postMessage(scopeId, "user", content, mentions, {
-      mentionMemberIds,
-      ...(urgentMentions.length ? { urgentMentions } : {}),
-      ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
-      ...(attachments.length > 0 ? { attachments } : {}),
-    });
-  }
-
-  sendJson(res, 201, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
-});
-
-addRoute("GET", "/api/rooms/:id/topics/:topicId", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const topic = topicStore.getTopic(params.id, params.topicId);
-  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
-  sendJson(res, 200, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
-});
-
-addRoute("GET", "/api/rooms/:id/topics/:topicId/messages", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const topic = topicStore.getTopic(params.id, params.topicId);
-  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
-  const url = new URL(req.url || "", "http://localhost");
-  const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 500));
-  const all = topicStore.readAllTopicMessages(params.id, params.topicId);
-  sendJson(res, 200, { messages: all.slice(-limit) });
-});
-
-addRoute("POST", "/api/rooms/:id/topics/:topicId/messages", async (req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const topic = topicStore.getTopic(params.id, params.topicId);
-  if (!topic) { sendJson(res, 404, { error: "Topic not found" }); return; }
-  if (topic.status !== "active") { sendJson(res, 400, { error: "Topic is closed" }); return; }
-
-  const body = (await parseBody(req)) as { content?: string; text?: string; replyTo?: { seq?: number }; attachments?: AttachmentInput[] };
-  const content = String(body.content ?? body.text ?? "").trim();
-  const parsed = parseUserAttachments(params.id, body.attachments);
-  if (!parsed.ok) { sendJson(res, 400, { error: parsed.error }); return; }
-  const attachments = parsed.attachments;
-  if (!content && attachments.length === 0) { sendJson(res, 400, { error: "content or attachments is required" }); return; }
-
-  let replyTo: { seq: number; messageId: string } | undefined;
-  if (body.replyTo !== undefined && body.replyTo !== null) {
-    const seq = Number(body.replyTo.seq);
-    if (!Number.isFinite(seq)) { sendJson(res, 400, { error: "replyTo.seq must be a number" }); return; }
-    const target = topicStore.readAllTopicMessages(params.id, topic.id).find((m) => m.seq === seq);
-    if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
-    replyTo = { seq, messageId: target.id };
-  }
-
-  const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id });
-  const roomMembers = roomStore.getRoomMembers(params.id);
-  const urgentMentions = parseUrgentMentions(content, roomMembers.map((m) => m.name));
-  const mentions = [...new Set([...parseMentions(content, roomMembers.map((m) => m.name)), ...urgentMentions])];
-  const mentionMemberIds = [...new Set([
-    ...parseMentionMemberIds(content, roomMembers),
-    ...parseUrgentMentionMemberIds(content, roomMembers),
-  ])];
-  const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
-
-  // Post into topic scope — never the parent room stream.
-  // Activation is solely the mention-router (wireMentionRouter → activateTopicMember).
-  const message = postMessage(scopeId, "user", content, mentions, {
-    mentionMemberIds,
-    ...(replyTo ? { replyTo } : {}),
-    ...(urgentMentions.length ? { urgentMentions } : {}),
-    ...(urgentMentionMemberIds.length ? { urgentMentionMemberIds } : {}),
-    ...(attachments.length > 0 ? { attachments } : {}),
-  });
-
-  sendJson(res, 200, message);
-});
-
-addRoute("POST", "/api/rooms/:id/topics/:topicId/close", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) { sendJson(res, 404, { error: "Room not found" }); return; }
-  const existing = topicStore.getTopic(params.id, params.topicId);
-  if (!existing) { sendJson(res, 404, { error: "Topic not found" }); return; }
-
-  const topic = topicStore.closeTopic(params.id, params.topicId);
-  if (!topic) { sendJson(res, 500, { error: "Failed to close topic" }); return; }
-
-  // Flip the opening card in place (same message id → WS replace).
-  let closedCard: ReturnType<typeof messageStore.updateMessage> = null;
-  const roomMsgs = messageStore.readAllMessages(params.id);
-  const opened = [...roomMsgs].reverse().find(
-    (m) => m.type === "topic_event" && m.topic_event_meta?.topicId === topic.id && m.topic_event_meta?.action === "opened",
-  );
-  if (opened) {
-    const flipped = messageStore.updateMessage(params.id, opened.id, {
-      content: `Topic closed: ${topic.title}`,
-      type: "topic_event",
-      topic_event_meta: {
-        action: "closed",
-        topicId: topic.id,
-        title: topic.title,
-        anchorSeq: topic.anchorSeq,
-        anchorMessageId: topic.anchorMessageId,
-        anchorExcerpt: topic.anchorExcerpt || opened.topic_event_meta?.anchorExcerpt,
-        actor: "user",
-        summary: topic.summary,
-      },
-    });
-    if (flipped) {
-      broadcastToRoom(params.id, { type: "room:message", roomId: params.id, message: flipped });
-    }
-    closedCard = flipped;
-  } else {
-    closedCard = postMessage(params.id, "user", `Topic closed: ${topic.title}`, [], {
-      type: "topic_event",
-      topic_event_meta: {
-        action: "closed",
-        topicId: topic.id,
-        title: topic.title,
-        anchorSeq: topic.anchorSeq,
-        anchorMessageId: topic.anchorMessageId,
-        actor: "user",
-        summary: topic.summary,
-      },
-    });
-  }
-
-  try {
-    notifyTopicClosed(params.id, topic, closedCard);
-  } catch (err) {
-    logger.warn("api", "topic close FYI failed", { topicId: topic.id, error: String(err) });
-  }
-
-  const cleanupFailures: Array<{ target: string; error: string }> = [];
-  try {
-    const { destroyTopicInstances } = await import("../engine/agent-manager.js");
-    destroyTopicInstances(topic.id);
-  } catch (err) {
-    cleanupFailures.push({ target: "active-instances", error: String(err) });
-  }
-  for (const member of memberRegistry.listMembers()) {
-    try {
-      clearCurrentSession(member.id, `topic:${topic.id}`);
-    } catch (err) {
-      cleanupFailures.push({ target: member.id, error: String(err) });
-    }
-  }
-  if (cleanupFailures.length) {
-    logger.error("api", "topic closed with incomplete session cleanup", { topicId: topic.id, cleanupFailures });
-    sendJson(res, 500, {
-      error: "Topic closed but current-session cleanup was incomplete",
-      topic,
-      scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }),
-      cleanupFailures,
-    });
-    return;
-  }
-
-  sendJson(res, 200, { topic, scopeId: scopeIdOf({ kind: "topic", topicId: topic.id, roomId: room.id }) });
-});

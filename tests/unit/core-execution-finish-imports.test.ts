@@ -103,7 +103,7 @@ describe("explicit historical identity import, not recurring name/marker repair"
 });
 
 describe("historical execution metadata uses stable IDs, explicit imports and source time", () => {
-  it("imports room/DM/topic associations and checkpoints with exact source times and quarantines reused labels", async () => {
+  it("consumes retired topic sources without import while room/DM associations keep exact source times", async () => {
     seedMember();
     const session = {runtime: "pi-sdk", sessionId: "historical-sdk-id"};
     const checkpoint = {contractFingerprint: "historical", contractVersion: 4, driftNotified: 5,
@@ -115,14 +115,21 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
       "rooms/runtime-state.json": {"topic:t:mem_one": checkpoint},
       "members/mem_one/runtime-state.json": {"dm:mem_one:mem_one": checkpoint},
     });
-    await importLegacyConversations(ctx, entries);
+    const consumed = await importLegacyConversations(ctx, entries);
     importLegacyExecution(ctx, entries);
+    // Topic feature retired (fish #19358): topic sources and topic-scoped keys are
+    // consumed by the source-retire flow, never imported — no topic scopes,
+    // sessions, checkpoints or cursors survive an upgrade.
+    expect(consumed.has("rooms/r/topics/t/topic.json")).toBe(true);
     fixture.reopen();
-    for (const scope of ["room:r", "dm:mem_one", "topic:t"]) {
+    for (const scope of ["room:r", "dm:mem_one"]) {
       expect(new SessionRepository(fixture.db).get(member.id, scope)).toMatchObject({session, createdAt: 123000, updatedAt: 123000});
       expect(new RuntimeRepository(fixture.db).get(scope, member.id)).toEqual(checkpoint);
     }
-    expect(fixture.db.all("SELECT updated_at FROM runtime_checkpoints")).toEqual(Array(3).fill({updated_at: 123000}));
+    expect(fixture.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();
+    expect(fixture.db.get("SELECT 1 FROM current_sessions WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
+    expect(fixture.db.get("SELECT 1 FROM runtime_checkpoints WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
+    expect(fixture.db.all("SELECT updated_at FROM runtime_checkpoints")).toEqual(Array(2).fill({updated_at: 123000}));
     expect(fixture.db.get("SELECT source_key,reason,record_json FROM execution_import_ambiguities")).toEqual({
       source_key: "room:r:pm", reason: "unresolved-runtime-owner", record_json: JSON.stringify({contractFingerprint: "ambiguous"})});
   });
@@ -159,7 +166,9 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
     await importLegacyConversations(ctx, entries);
     fixture.reopen();
     expect(new ConversationsRepository(fixture.db).getCursors("r")).toEqual({pm: "label-position", mem_one: "id-position"});
-    expect(new UserCursorRepository(fixture.db).list()).toEqual({"room:r": user, "dm:mem_one": {...user, seq: null}, "topic:t": {...user, seq: 9}});
+    // Retired topic cursor keys are consumed by the retire flow, never imported.
+    expect(new UserCursorRepository(fixture.db).list()).toEqual({"room:r": user, "dm:mem_one": {...user, seq: null}});
+    expect(fixture.db.get("SELECT 1 FROM read_cursors WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
     expect(fixture.db.all("SELECT updated_at FROM read_cursors WHERE kind='member'")).toEqual([{updated_at: 123000}, {updated_at: 123000}]);
   });
 });

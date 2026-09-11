@@ -17,7 +17,7 @@ export class SettingsRepository {
       auth: { username: auth.username, passwordHash: auth.password_hash },
       apiKeys: Object.fromEntries(this.db.all<any>("SELECT * FROM provider_api_keys").map(k => [k.provider, k.api_key])),
       defaults: { host: r.host, port: r.port },
-      runtime: { sessionResume: !!r.session_resume, topicSeedMode: r.topic_seed_mode, ...defined({ codexTransport: r.codex_transport, websocketConnectTimeoutMs: r.websocket_connect_timeout_ms, httpIdleTimeoutMs: r.http_idle_timeout_ms }) },
+      runtime: { sessionResume: !!r.session_resume, ...defined({ codexTransport: r.codex_transport, websocketConnectTimeoutMs: r.websocket_connect_timeout_ms, httpIdleTimeoutMs: r.http_idle_timeout_ms }) },
       ...(r.mcp_enabled === null ? {} : { mcp: { enabled: !!r.mcp_enabled } }),
       ...(Object.keys(budgets).length ? { memoryBudgets: budgets } : {}),
       ...(r.catalog_interval_days === null ? {} : { catalog: { autoRefreshIntervalDays: r.catalog_interval_days } }),
@@ -27,7 +27,7 @@ export class SettingsRepository {
   importConfig(c: BossmodeConfig): void {
     this.db.transaction(tx => {
       tx.run(`INSERT OR REPLACE INTO app_settings VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.defaults.host, c.defaults.port,
-        Number(c.runtime?.sessionResume !== false), c.runtime?.topicSeedMode === "fresh" ? "fresh" : "fork",
+        Number(c.runtime?.sessionResume !== false), "fork", // topic_seed_mode retired (fish #19358): legacy column, no writer input
         c.runtime?.codexTransport ?? null, c.runtime?.websocketConnectTimeoutMs ?? null, c.runtime?.httpIdleTimeoutMs ?? null,
         bool(c.mcp?.enabled), c.memoryBudgets?.persona ?? null, c.memoryBudgets?.memberPrinciples ?? null,
         c.memoryBudgets?.mainline ?? null, c.memoryBudgets?.roomPrinciples ?? null, c.catalog?.autoRefreshIntervalDays ?? null);

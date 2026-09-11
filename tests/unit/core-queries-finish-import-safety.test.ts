@@ -14,10 +14,10 @@ function write(root: string, path: string, body: string) { const file = join(roo
 const event = (n: number) => ({ type: "message_end", ts: 1000 + n, usage: { inputTokens: n, outputTokens: n * 2, cacheRead: n * 3, cacheWrite: n * 4, cost: n * 0.25 }, model: "p/m" });
 const jsonl = (values: object[]) => values.map(v => JSON.stringify(v)).join("\n") + "\n";
 
-it.each(["room", "dm:mem_one", "topic:one"])("preserves an unreadable %s event line in SQL quarantine and imports the readable history exactly once", async scope => {
+it.each(["room", "dm:mem_one"])("preserves an unreadable %s event line in SQL quarantine and imports the readable history exactly once", async scope => {
   fixture.db.exec("CREATE TABLE retained_fact(value TEXT); INSERT INTO retained_fact VALUES('authoritative')");
   const root = fixture.root;
-  const path = scope.startsWith("topic:") ? "rooms/room/topics/one/agent-events/historic.jsonl" : `rooms/${scope}/agent-events/historic.jsonl`;
+  const path = `rooms/${scope}/agent-events/historic.jsonl`;
   const good = jsonl(Array.from({ length: 130 }, (_, i) => event(i + 1)));
   const source = good + "{corrupt}\n";
   const file = write(root, path, source);

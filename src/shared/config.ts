@@ -31,10 +31,6 @@ export function readConfig(): BossmodeConfig {
   return config;
 }
 
-export function getTopicSeedMode(): "fork" | "fresh" {
-  return readConfig().runtime?.topicSeedMode === "fresh" ? "fresh" : "fork";
-}
-
 export function writeConfig(config: BossmodeConfig): void {
   new SettingsRepository(getDatabase()).importConfig(config);
 }
@@ -74,7 +70,7 @@ export function getDefaultConfig(): BossmodeConfig {
     auth: { username: "", passwordHash: "" },
     apiKeys: {},
     defaults: { host: "127.0.0.1", port: 8080 },
-    runtime: { sessionResume: true, topicSeedMode: "fork", codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
+    runtime: { sessionResume: true, codexTransport: "auto", websocketConnectTimeoutMs: 15000 },
     mcp: { enabled: false },
   };
 }

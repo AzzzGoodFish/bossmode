@@ -1,6 +1,6 @@
 /**
  * Tool surface by scope — identity batch-2: memory family retired; leader gate gone
- * (any room member may edit_room / create_topic).
+ * (any room member may edit_room).
  */
 import { parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 

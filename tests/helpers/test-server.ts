@@ -106,7 +106,7 @@ export async function createTestServer(): Promise<TestServer> {
   registry.register(new MockRuntime("pi-cli"));
   initAgentManager(registry);
 
-  // Same mention-router as production — topic: must not hit room getOrCreate.
+  // Same mention-router as production — scope routing stays on one code path.
   const stopRouter = wireMentionRouter();
 
   const server = http.createServer(async (req, res) => {

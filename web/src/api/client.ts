@@ -854,6 +854,7 @@ export interface RoomMessage {
   replyTo?: { seq: number; messageId: string };
 }
 
+/** Historical topic_event payload (topic feature retired 2026-09-11) — kept only so old room cards still parse and render as plain text. */
 export interface TopicEventMeta {
   action: "opened" | "closed";
   topicId: string;
@@ -864,59 +865,6 @@ export interface TopicEventMeta {
   actor: string;
   /** Closed cards carry the auto summary (batch 4 writes it). */
   summary?: string;
-}
-
-export type TopicStatus = "active" | "closed";
-export type TopicSeedMode = "fork" | "fresh";
-
-export interface TopicRecord {
-  id: string;
-  roomId: string;
-  title: string;
-  anchorMessageId: string;
-  anchorSeq?: number;
-  anchorExcerpt?: string;
-  createdBy: string;
-  status: TopicStatus;
-  seedMode: TopicSeedMode;
-  createdAt: number;
-  closedAt?: number;
-  summary?: string;
-  participants: string[];
-  brief?: string;
-}
-
-export async function listTopics(roomId: string): Promise<{ topics: TopicRecord[] }> {
-  return apiFetch(`/api/rooms/${roomId}/topics`);
-}
-
-export async function createTopic(roomId: string, input: { title?: string; anchorMessageId?: string; anchorSeq?: number; content?: string; seedMode?: TopicSeedMode; attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }> }): Promise<{ topic: TopicRecord; scopeId: string }> {
-  return apiFetch(`/api/rooms/${roomId}/topics`, { method: "POST", body: JSON.stringify(input) });
-}
-
-export async function getTopic(roomId: string, topicId: string): Promise<{ topic: TopicRecord; scopeId: string }> {
-  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}`);
-}
-
-export async function getTopicMessages(roomId: string, topicId: string, limit = 200): Promise<{ messages: RoomMessage[] }> {
-  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages?limit=${limit}`);
-}
-
-export async function sendTopicMessage(
-  roomId: string,
-  topicId: string,
-  content: string,
-  replyTo?: { seq: number },
-  attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
-): Promise<RoomMessage> {
-  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}), ...(replyTo ? { replyTo } : {}) }),
-  });
-}
-
-export async function closeTopic(roomId: string, topicId: string): Promise<{ topic: TopicRecord; scopeId: string }> {
-  return apiFetch(`/api/rooms/${roomId}/topics/${topicId}/close`, { method: "POST" });
 }
 
 export interface MessageSearchResult {
@@ -1023,7 +971,7 @@ export async function getAgentEventsPaginated(roomId: string, agentName: string,
   return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events${params}`);
 }
 
-/** Scope-addressed events (topic:<id> / dm:<id> / room:<id>). */
+/** Scope-addressed events (dm:<id> / room:<id>). */
 export async function getConversationEvents(scopeId: string, member: string, limit: number, before?: number): Promise<PaginatedEvents> {
   const qs = new URLSearchParams({ member, limit: String(limit) });
   if (before !== undefined) qs.set("before", String(before));
@@ -1113,9 +1061,6 @@ export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "ss
 
 export interface RuntimeSettings {
   sessionResume: boolean;
-
-  /** Default topic seed: fork inherits room session; fresh starts empty. */
-  topicSeedMode?: "fork" | "fresh";
   codexTransport?: PiTransportSetting;
   websocketConnectTimeoutMs?: number;
   httpIdleTimeoutMs?: number | null;
@@ -1500,18 +1445,6 @@ export interface ChatEntry {
   unreadCount: number;
   mentioned: boolean;
   status?: string;
-  /** Room rows: topic sub-list for the sidebar (topic-threads v2). */
-  topics?: TopicChatEntry[];
-}
-
-export interface TopicChatEntry {
-  topicId: string;
-  title: string;
-  status: "active" | "closed";
-  lastMessage?: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
-  unreadCount: number;
-  mentioned: boolean;
-  anyWorking: boolean;
 }
 
 export async function getChats(): Promise<{ chats: ChatEntry[] }> {

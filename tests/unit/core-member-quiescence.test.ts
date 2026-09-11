@@ -52,15 +52,11 @@ it("global shutdown retains reset builders and rejects new creation",async()=>{
   }finally{release?.();vi.restoreAllMocks();await closeTestServer(server);}
 });
 
-it.each(["room","dm","topic"])("reset rejects a delayed %s creator's old session publication",async(kind)=>{
+it.each(["room","dm"])("reset rejects a delayed %s creator's old session publication",async(kind)=>{
   const server=await createTestServer();let release!:()=>void;
   try{
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,`References ${kind}`,[`reference-${kind}`]);const id=room.globalMemberIds![0];
-    let scope=kind==="dm"?`dm:${id}`:`room:${room.id}`;
-    if(kind==="topic"){
-      const topics=await import("../../src/workspace/topic-store.js");
-      const topic=topics.createTopic({roomId:room.id,title:"Reference topic",anchorMessageId:"anchor",createdBy:"user",seedMode:"fresh"});scope=`topic:${topic.id}`;
-    }
+    const scope=kind==="dm"?`dm:${id}`:`room:${room.id}`;
     const sessions=await import("../../src/workspace/session-store.js");
     const directory=sessions.mainSessionDirectory(id,scope);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
     sessions.saveSession(scope,id,{runtime:"pi-cli",sessionId:"old",sessionFile:file});

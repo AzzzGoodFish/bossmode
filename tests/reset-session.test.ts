@@ -8,7 +8,6 @@ import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSes
 import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
 import { createMember, updateMemberIdentity } from "../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/workspace/room-store.js";
-import { createTopic } from "../src/workspace/topic-store.js";
 import { addMessage } from "../src/workspace/message-store.js";
 import * as sessionStore from "../src/workspace/session-store.js";
 import { loadEventsFromDisk } from "../src/engine/event-handler.js";
@@ -106,9 +105,8 @@ describe("resetAgentSession", () => {
     expect(readFileSync(saved.sessionFile, "utf8")).toBe(history);
   });
 
-  it.each(["dm", "topic"])("preserves the full %s scope for non-room reset state and events", kind => {
-    const topic = kind === "topic" ? createTopic({ roomId, title: "Reset topic", anchorMessageId: "anchor", seedMode: "fresh" }) : null;
-    const scope = topic ? `topic:${topic.id}` : `dm:${memberId}`;
+  it("preserves the full dm scope for non-room reset state and events", () => {
+    const scope = `dm:${memberId}`;
     const retained = retainSession(memberId, scope);
     const roomCursor = getCursors(roomId)[memberId];
     resetAgentSession(scope, memberId);
@@ -117,8 +115,7 @@ describe("resetAgentSession", () => {
     expect(getCursors(roomId)[memberId]).toBe(roomCursor);
     expect(loadEventsFromDisk(scope, memberId)).toEqual(expect.arrayContaining([expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh." })]));
     const status = expect.objectContaining({ type: "agent:status", roomId: scope, memberId, status: "inactive" });
-    if (kind === "dm") expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scope, "pm", status);
-    else expect(broadcastToRoom).toHaveBeenCalledWith(scope, status);
+    expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scope, "pm", status);
     expect(readFileSync(retained.sessionFile, "utf8")).toContain("retained requirement");
   });
 

@@ -155,13 +155,11 @@ function harness(initial: Props) {
 const scopes = [
   { name: "room", scopeId: "room_one" },
   { name: "DM", scopeId: "dm:mem_one" },
-  { name: "topic", scopeId: "topic:topic_one" },
 ] as const;
 function propsFor(name: typeof scopes[number]["name"], agentName = "old", memberId = "mem_one", scopeId?: string): Props {
   return {
     roomId: "room_one", agentName, memberId,
     ...(name === "DM" ? { dmScope: { scopeId: scopeId ?? `dm:${memberId}`, memberId } } : {}),
-    ...(name === "topic" ? { activityScope: { scopeId: scopeId ?? "topic:topic_one", memberId } } : {}),
   };
 }
 function reply(text: string): AgentEvent { return { type: "message_end", text, ts: 1000 }; }
@@ -257,9 +255,8 @@ describe.each(scopes)("ActivityTab stable $name identity", ({ name, scopeId }) =
     view.render();
     await view.settle();
     const first = Socket.instances[0];
-    const nextScope = name === "room" ? "room_one" : name === "DM" ? "dm:mem_two" : "topic:topic_two";
-    // Topic switches exercise scope identity independently of member identity.
-    const nextMember = name === "topic" ? "mem_one" : "mem_two";
+    const nextScope = name === "room" ? "room_one" : "dm:mem_two";
+    const nextMember = "mem_two";
     view.render(propsFor(name, "old", nextMember, nextScope));
     await view.settle();
     expect(api).toHaveBeenCalledTimes(2);

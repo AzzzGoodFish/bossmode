@@ -17,7 +17,7 @@ type FilterMode = "all" | "tools" | "replies";
  * - Only the event stream scrolls. Infinite scroll-up + scroll anchoring apply to
  *   that stream container alone.
  */
-export function ActivityTab({ roomId, agentName, memberId, dmScope, activityScope }: {
+export function ActivityTab({ roomId, agentName, memberId, dmScope }: {
   roomId: string;
   agentName: string;
   memberId?: string;
@@ -25,8 +25,6 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope, activityScop
    * come from the members-shaped route and the WS subscription targets the
    * synthetic dm:<memberId> room the DM instance emits on. */
   dmScope?: { scopeId: string; memberId: string };
-  /** Topic page: read/watch topic:<id> events (member config stays on roomId). */
-  activityScope?: { scopeId: string; memberId: string };
 }) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +42,7 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope, activityScop
   // scrollTop assignment; real wheel gestures were fine, but a ref is cheap insurance).
   const loadingOlderRef = useRef(false);
 
-  const scoped = activityScope || dmScope;
+  const scoped = dmScope;
   const historyScopeId = scoped?.scopeId;
   const historyMemberRef = scoped?.memberId || memberId || agentName;
 
@@ -77,8 +75,8 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope, activityScop
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    const watchRoomId = activityScope?.scopeId || (dmScope ? `dm:${dmScope.memberId}` : roomId);
-    const watchMemberId = activityScope?.memberId || dmScope?.memberId || memberId;
+    const watchRoomId = dmScope ? `dm:${dmScope.memberId}` : roomId;
+    const watchMemberId = dmScope?.memberId || memberId;
     ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: historyMemberRef, memberId: watchMemberId }));
     ws.onmessage = (e) => {
       try {

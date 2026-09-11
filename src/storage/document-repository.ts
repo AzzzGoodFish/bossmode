@@ -8,7 +8,7 @@ export interface DocumentIdentity {
   path: string;
   layer: "persona" | "principles" | "mainline";
   memberId?: string;
-  /** Shared scopes key: bare room ID, dm:<id>, topic:<id>; absent for global. */
+  /** Shared scopes key: bare room ID, dm:<id>; absent for global. */
   scopeId?: string;
 }
 export interface DocumentHistory {

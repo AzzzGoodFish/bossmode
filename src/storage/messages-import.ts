@@ -1,5 +1,7 @@
 /** Mechanical source inventory for the parent's one-time, staged importer.
  * These paths are patterns, not live read/discovery functions. Never import backups as live duplicates.
+ * Orphaned reference: no live code imports this module; the upgrade path uses legacy-inventory.ts
+ * rules. Topic patterns describe retired sources — identified and consumed, never imported.
  */
 export const messagesLegacySources = [
   {pattern:"rooms/<roomId>/messages.jsonl",kind:"messages",scope:"<roomId>"},

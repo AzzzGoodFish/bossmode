@@ -24,7 +24,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
  * - working turn settles first (shell waits + abort + waitForIdle)
  * - Stop in the gap (old prompt finished, compact not started) cancels the request
  * - Stop after start aborts the operation; lifecycle resets; queue resumes
- * - room / DM / topic instances all key by their real scopeId
+ * - room / DM instances all key by their real scopeId
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentHandle, AgentStreamEvent } from "../../src/engine/runtime/types.js";
@@ -139,7 +139,7 @@ const registry = {
 beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
-  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false, topicSeedMode: "fresh" } });
+  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
   const members = new MembersRepository(fixture.db);
   const conversations = new ConversationsRepository(fixture.db);
   for (const name of ["pm", "qa"]) {
@@ -154,7 +154,6 @@ beforeEach(async () => {
   for (const id of ["room", "room2", "room3"]) {
     conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });
   }
-  conversations.upsertTopic({ id: "mem-topic", roomId: "room", title: "Topic", anchorMessageId: "anchor", createdBy: "user", createdAt: 1, status: "active", seedMode: "fresh", participants: ["mem_pm"] });
   bus.postMessage("room", "user", "@pm hi", ["pm"]);
   vi.mocked(bus.postMessage).mockClear();
 });
@@ -288,20 +287,16 @@ describe("manual compaction conversation action", () => {
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
   });
 
-  it("DM and topic instances are addressed by their real scopeIds", async () => {
+  it("DM instances are addressed by their real scopeIds", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const roomHandle = handles[0];
 
     const dmBuilt = await manager.buildMemberAgentSession("mem_pm", "dm:mem_pm");
-    const topicBuilt = await manager.buildMemberAgentSession("mem_pm", "topic:mem-topic");
     expect(dmBuilt?.scopeId).toBe("dm:mem_pm");
-    expect(topicBuilt?.scopeId).toBe("topic:mem-topic");
 
     const dmResult = await manager.compactMember("dm:mem_pm", "mem_pm");
-    const topicResult = await manager.compactMember("topic:mem-topic", "mem_pm");
     expect(dmResult).toEqual({ ok: true, action: "compacted" });
-    expect(topicResult).toEqual({ ok: true, action: "compacted" });
     expect(roomHandle.compactCalls).toBe(0); // scope-exact, no room-path spillover
   });
 });

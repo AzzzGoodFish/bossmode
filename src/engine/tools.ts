@@ -12,9 +12,7 @@ import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../works
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { resolveTopicRoomId, resolveOwningRoomId, resolveChatScopeRoomId, resolveChatScopeRoom, readAllTopicMessages, createTopic, saveTopic, buildTopicGuideText, titleFromMessage, normalizeAnchorExcerpt } from "../workspace/topic-store.js";
-import { scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
-import { getTopicSeedMode } from "../shared/config.js";
+import { chatScopeRoomId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import type { RoomMessage } from "../shared/types.js";
 import { parseMentions, parseUrgentMentions, parseMentionMemberIds, parseUrgentMentionMemberIds } from "../communication/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
@@ -33,8 +31,8 @@ const MAX_RESULT_CHARS = 25_000;
  * member-global store keyed by ScopeId (contract §6).
  */
 function toolScopeId(roomId: string): ScopeId {
-  // topic:<id> is already a full ScopeId; dm:<id> same; bare room uuid → room:<uuid>
-  if (roomId.startsWith("dm:") || roomId.startsWith("topic:")) return roomId;
+  // dm:<id> is already a full ScopeId; bare room uuid → room:<uuid>
+  if (roomId.startsWith("dm:")) return roomId;
   return `room:${roomId}`;
 
 }
@@ -43,12 +41,6 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
   if (roomId.startsWith("dm:")) {
     const member = getMember(roomId.slice("dm:".length));
     return member ? { id: member.id, name: member.name } : null;
-  }
-  if (roomId.startsWith("topic:")) {
-    // Resolve actor against the parent room membership.
-    const parent = resolveTopicRoomId(roomId.slice("topic:".length));
-    if (!parent) return null;
-    return roomStore.resolveRoomMemberRef(parent, agentName);
   }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
@@ -70,7 +62,6 @@ function resolveReadTarget(
   try {
     const access = assertMemberScopeAccess(actor.id, scopeId);
     if (access.kind === "dm") return { ok: true, roomId: `dm:${access.memberId}` };
-    if (access.kind === "topic") return { ok: true, roomId: `topic:${access.topicId}` };
     return { ok: true, roomId: access.roomId };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
@@ -131,21 +122,15 @@ export function excerptForReply(content: string, max = REPLY_EXCERPT_MAX): strin
   return oneLine.slice(0, max - 1) + "…";
 }
 
-/** Look up messages in the current conversation scope (room uuid / dm:<id> / topic:<id>). */
+/** Look up messages in the current conversation scope (room uuid / dm:<id>). */
 export function loadScopeMessages(scopeId: string): RoomMessage[] {
   if (scopeId.startsWith("dm:")) {
     return readAllDmMessages(scopeId.slice("dm:".length));
   }
-  if (scopeId.startsWith("topic:")) {
-    const topicId = scopeId.slice("topic:".length);
-    const parent = resolveOwningRoomId(scopeId);
-    if (!parent || parent.startsWith("topic:")) return [];
-    return readAllTopicMessages(parent, topicId);
-  }
   return messageStore.readAllMessages(scopeId);
 }
 
-/** In-memory filter for scopes without a query index (DM + topic). */
+/** In-memory filter for scopes without a query index (DM). */
 function filterMessagesInMemory(
   all: RoomMessage[],
   searchOpts: messageStore.SearchOptions,
@@ -184,7 +169,7 @@ export function truncateToolResult(text: string): string {
 /** Resolve the calling member's global id from a scope-shaped roomId + agent name. */
 function resolveCallerMemberId(roomId: string, agentName: string): string {
   if (roomId.startsWith("dm:")) return roomId.slice("dm:".length);
-  const rosterRoomId = resolveChatScopeRoomId(roomId) || roomId;
+  const rosterRoomId = chatScopeRoomId(roomId) || roomId;
   const rosterMember = roomStore.resolveRoomMemberRef(rosterRoomId, agentName);
   if (rosterMember) return rosterMember.id;
   return agentName;
@@ -251,8 +236,8 @@ export async function handleToolCallback(
       }
 
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
-      const rosterId = resolveChatScopeRoomId(roomId) || roomId;
-      const room = resolveChatScopeRoom(roomId) || roomStore.getRoom(rosterId);
+      const rosterId = chatScopeRoomId(roomId) || roomId;
+      const room = roomStore.getRoom(rosterId);
       const roomMembers = roomId.startsWith("dm:") ? [] : roomStore.getRoomMembers(rosterId);
       const senderMember = context?.memberId ? boundActor() : roomStore.resolveRoomMemberRef(rosterId, actorRef);
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [], urgentMentions: [], urgentMentionMemberIds: [] };
@@ -262,7 +247,7 @@ export async function handleToolCallback(
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const attachRoomId = resolveChatScopeRoomId(roomId) || roomId;
+        const attachRoomId = chatScopeRoomId(roomId) || roomId;
         const outcomes = await processAgentAttachments(attachRoomId, params.attachments.map(String));
         const errors: string[] = [];
         for (const o of outcomes) {
@@ -326,9 +311,8 @@ export async function handleToolCallback(
         fromSeq !== undefined;
 
       let messages: RoomMessage[];
-      if (targetRoomId.startsWith("dm:") || targetRoomId.startsWith("topic:")) {
-        // DM / topic have no query index — filter in memory. Topic must not
-        // fall through to rooms/topic:xxx/ (that directory does not exist).
+      if (targetRoomId.startsWith("dm:")) {
+        // DM has no query index — filter in memory.
         messages = filterMessagesInMemory(loadScopeMessages(targetRoomId), searchOpts, fromSeq, limit);
       } else if (fromSeq !== undefined) {
         // Backlog read (hybrid injection msg:#14818): messages strictly after
@@ -352,7 +336,7 @@ export async function handleToolCallback(
       // internal lookup, not the member reading their room — unread
       // positions must survive recall/memorize runs.
       const isBackgroundRead = context?.execution === "background";
-      if (!isBackgroundRead && !targetRoomId.startsWith("dm:") && !targetRoomId.startsWith("topic:") && targetRoomId === roomId && messages.length > 0) {
+      if (!isBackgroundRead && !targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
         let maxSeq = -1;
         let maxMsg: RoomMessage | null = null;
         for (const m of messages) {
@@ -404,63 +388,6 @@ export async function handleToolCallback(
       // member-view renderer (renderQueryRowsForMember) so both modes match.
       return rows;
     }
-    case "create_topic": {
-      const message = String(params?.message ?? "").trim();
-      if (!message) return { ok: false, error: "message is required" };
-      if (roomId.startsWith("dm:")) return { ok: false, error: "create_topic is not available in a DM scope" };
-      const parentRoomId = resolveChatScopeRoomId(roomId) || roomId;
-      const room = roomStore.getRoom(parentRoomId);
-      if (!room) return { ok: false, error: "Room not found" };
-      const actor = resolveMemoryActor(roomId, actorRef);
-      if (!actor) return { ok: false, error: "Current member is not in this room" };
-      const brief = String(params?.brief ?? "").trim();
-      const seedMode = getTopicSeedMode();
-      const title = titleFromMessage(message) || "Untitled topic";
-      const guideText = buildTopicGuideText({
-        title,
-        roomName: room.name,
-        roomId: parentRoomId,
-        anchorExcerpt: message,
-        seedMode,
-        ...(brief ? { brief, briefBy: actor.name } : {}),
-      });
-      const topic = createTopic({
-        roomId: parentRoomId,
-        title,
-        anchorMessageId: "",
-        seedMode,
-        guideText,
-        anchorExcerpt: normalizeAnchorExcerpt(message),
-        createdBy: actor.name,
-        ...(brief ? { brief } : {}),
-      });
-      const card = postMessage(parentRoomId, actor.name, `Topic opened: ${topic.title}`, [], {
-        type: "topic_event",
-        topic_event_meta: {
-          action: "opened",
-          topicId: topic.id,
-          title: topic.title,
-          actor: actor.name,
-          anchorExcerpt: normalizeAnchorExcerpt(message).slice(0, 120),
-        },
-      });
-      topic.anchorMessageId = card.id;
-      topic.anchorSeq = card.seq;
-      saveTopic(topic);
-      const scopeId = scopeIdOf({ kind: "topic", topicId: topic.id, roomId: parentRoomId });
-      const roomMembers = roomStore.getRoomMembers(parentRoomId);
-      const urgentMentions = parseUrgentMentions(message, roomMembers.map((m) => m.name));
-      const mentions = [...new Set([...parseMentions(message, roomMembers.map((m) => m.name)), ...urgentMentions])];
-      const mentionMemberIds = [...new Set([
-        ...parseMentionMemberIds(message, roomMembers),
-        ...parseUrgentMentionMemberIds(message, roomMembers),
-      ])];
-      postMessage(scopeId, actor.name, message, mentions, {
-        mentionMemberIds,
-        ...(urgentMentions.length ? { urgentMentions } : {}),
-      });
-      return { ok: true, topicId: topic.id, scopeId, title: topic.title };
-    }
     case "list_scopes": {
       const actor = resolveMemoryActor(roomId, actorRef);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
@@ -469,7 +396,7 @@ export async function handleToolCallback(
     }
     case "member_status": {
       // Room-scope read-only live status (same source as the member panel lamp).
-      const statusRoomId = resolveChatScopeRoomId(roomId) || roomId;
+      const statusRoomId = chatScopeRoomId(roomId) || roomId;
       const room = roomStore.getRoom(statusRoomId);
       if (!room) return { ok: false, error: "Room not found" };
       const { getRoomMemberStatusReport } = await import("./agent-manager.js");
@@ -580,7 +507,7 @@ export async function handleToolCallback(
     }
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.
-      // roomId arrives scope-shaped ("dm:<id>" / "topic:<id>" / room id).
+      // roomId arrives scope-shaped ("dm:<id>" / room id).
       const { reloadMemberSession } = await import("./agent-manager.js");
       const reloadMemberId = resolveCallerMemberId(roomId, actorRef);
       const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
@@ -595,8 +522,8 @@ export async function handleToolCallback(
     }
     case "wait": {
       // 0.20: wait available to all room members (no longer leader-only).
-      // Roster from parent room; wait watches the current scope (topic instance if any).
-      const waitRosterId = resolveChatScopeRoomId(roomId) || roomId;
+      // Roster from the room scope; DM scopes have no room roster.
+      const waitRosterId = chatScopeRoomId(roomId) || roomId;
       const room = roomStore.getRoom(waitRosterId);
       const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(waitRosterId, actorRef) : undefined;
       if (!room || !actor) return { ok: false, error: "Room or member not found" };
@@ -721,7 +648,7 @@ export async function handleToolCallback(
       if (!actorGlobal) return { ok: false, error: `Member not found: ${actorName()}` };
 
       const rawTarget = String(params?.roomId || roomId || "").trim();
-      const targetRoomId = resolveChatScopeRoomId(rawTarget) || rawTarget;
+      const targetRoomId = chatScopeRoomId(rawTarget) || rawTarget;
       if (!targetRoomId) return { ok: false, error: "roomId is required" };
       const room = roomStore.getRoom(targetRoomId);
       if (!room) return { ok: false, error: "Room not found" };
@@ -887,16 +814,10 @@ function terminalWaitResult(record: import("../shared/types.js").BackgroundTaskR
 }
 
 /** Resolve the acting member for background tools from the tool-call scope.
- * Room scopes arrive as the bare room id; dm/topic as full scope ids. */
+ * Room scopes arrive as the bare room id; dm as full scope ids. */
 function resolveBackgroundActor(roomId: string, agentName: string): { memberId: string; scopeId: string } | null {
   if (roomId.startsWith("dm:")) {
     return { memberId: roomId.slice(3), scopeId: roomId };
-  }
-  if (roomId.startsWith("topic:")) {
-    const parentRoomId = resolveOwningRoomId(roomId);
-    const roster = parentRoomId ? roomStore.getRoom(parentRoomId) : null;
-    const actor = roster ? (roomStore as any).resolveRoomMemberRef(parentRoomId, agentName) : undefined;
-    return actor ? { memberId: actor.id, scopeId: roomId } : null;
   }
   // bare room id (createAgent binds room scopes by raw id)
   const roster = roomStore.getRoom(roomId);
@@ -931,7 +852,7 @@ function parseTimeArg(input: string): number | undefined {
 
 /** Resolve a message's attachments for member-facing reads (fish No.16834):
  *  {originalFilename, path} — path is the attachment-store absolute path for the
- *  owning scope (room dir / DM dir / topic → parent room dir), or "unavailable"
+ *  owning scope (room dir / DM dir), or "unavailable"
  *  when the file is missing (envelope catch behavior). */
 function resolveMessageAttachmentsForRead(
   scopeRoomId: string,
@@ -944,10 +865,7 @@ function resolveMessageAttachmentsForRead(
       if (scopeRoomId.startsWith("dm:")) {
         absPath = attachmentStore.getDmAttachmentPath(scopeRoomId.slice(3), a.storedFilename);
       } else {
-        const owner = scopeRoomId.startsWith("topic:")
-          ? (resolveChatScopeRoomId(scopeRoomId) || scopeRoomId)
-          : scopeRoomId;
-        absPath = attachmentStore.getAttachmentPath(owner, a.storedFilename);
+        absPath = attachmentStore.getAttachmentPath(scopeRoomId, a.storedFilename);
       }
       if (!existsSync(absPath)) {
         return { originalFilename: a.originalFilename, path: "unavailable" };

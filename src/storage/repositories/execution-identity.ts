@@ -1,10 +1,11 @@
 import type { Database } from "../database.js";
 
-/** Shared DB keys use bare room IDs. API session/runtime keys also accept room:<id>. */
+/** Shared DB keys use bare room IDs. API session/runtime keys also accept room:<id>.
+ * Topic scopes were retired (fish #19358) and are no longer accepted here. */
 export function executionScopeId(scope: string): string {
   const key = scope.startsWith("room:") ? scope.slice(5) : scope;
   if (!key || (scope.startsWith("room:") && key.includes(":")) ||
-    !/^(?:dm:|topic:)?[^/:\\\0]+$/.test(key) || [".", ".."].includes(key.split(":").at(-1)!)) {
+    !/^(?:dm:)?[^/:\\\0]+$/.test(key) || [".", ".."].includes(key.split(":").at(-1)!)) {
     throw new Error(`Invalid execution scope: ${scope}`);
   }
   return key;

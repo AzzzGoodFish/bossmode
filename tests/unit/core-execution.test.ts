@@ -58,7 +58,6 @@ beforeEach(() => {
     db.run("INSERT INTO scopes(id,kind,member_id) VALUES(?,'dm',?)", `dm:${id}`, id);
   }
   db.run("INSERT INTO scopes(id,kind,room_id) VALUES('r','room','r')");
-  db.run("INSERT INTO scopes(id,kind,room_id) VALUES('topic:t','topic','r')");
 });
 afterEach(async () => {
   await Promise.resolve(); // Drain commit-only listener notifications before closing.
@@ -80,13 +79,13 @@ describe("DB session associations, unchanged SDK files", () => {
     expect(sessions.getCurrentSession(owner,"r")).toBeUndefined();
     expect(readFileSync(file)).toEqual(bytes);
   });
-  it("keeps room/DM/topic ownership separate, stable over rename and reuse", () => {
-    for (const scope of ["r",`dm:${owner}`,"topic:t"]) sessions.saveCurrentSession(owner,scope,{runtime:"pi-sdk",sessionId:scope});
+  it("keeps room/DM ownership separate, stable over rename and reuse", () => {
+    for (const scope of ["r",`dm:${owner}`]) sessions.saveCurrentSession(owner,scope,{runtime:"pi-sdk",sessionId:scope});
     db.run("UPDATE members SET name='Renamed',name_key='renamed' WHERE id=?",owner);
     db.run("UPDATE members SET name='Alice',name_key='alice' WHERE id=?",other);
     expect(sessions.getCurrentSession(other,"r")).toBeUndefined();
     expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe("r");
-    sessions.clearCurrentSession(owner,"topic:t");
+    sessions.clearCurrentSession(owner,"r");
     expect(sessions.getCurrentSession(owner,`dm:${owner}`)?.sessionId).toBe(`dm:${owner}`);
     expect(() => sessions.saveCurrentSession(other,`dm:${owner}`,{runtime:"pi-sdk"})).toThrow(/belong/);
     expect(() => sessions.saveCurrentSession("Alice","r",{runtime:"pi-sdk"})).toThrow(/member ID/);
@@ -94,7 +93,7 @@ describe("DB session associations, unchanged SDK files", () => {
   });
   it("rejects wrong-scope, symlink, escaped, and missing references", () => {
     const file = sessionFile();
-    expect(() => sessions.saveCurrentSession(owner,"topic:t",{runtime:"pi-sdk",sessionFile:file})).toThrow(/outside/);
+    expect(() => sessions.saveCurrentSession(owner,`dm:${owner}`,{runtime:"pi-sdk",sessionFile:file})).toThrow(/outside/);
     expect(() => sessions.saveCurrentSession("../escape","r",{runtime:"pi-sdk",sessionFile:file})).toThrow(/Invalid member/);
     const link = join(dirname(file),"link.jsonl"); symlinkSync(file,link);
     expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:link})).toThrow(/symlink/);
@@ -132,26 +131,26 @@ describe("DB session associations, unchanged SDK files", () => {
     const opened=SessionManager.open(association.sessionFile!,dir,sandbox);
     expect(opened.getSessionId()).toBe(manager.getSessionId());
     expect(JSON.stringify(opened.buildSessionContext())).toBe(context);
-    const topicDir=sessions.mainSessionDirectory(owner,"topic:t");mkdirSync(topicDir,{recursive:true});
-    const fork=SessionManager.forkFrom(file,sandbox,topicDir);
+    const dmDir=sessions.mainSessionDirectory(owner,`dm:${owner}`);mkdirSync(dmDir,{recursive:true});
+    const fork=SessionManager.forkFrom(file,sandbox,dmDir);
     expect(JSON.stringify(fork.buildSessionContext())).toBe(context);
-    sessions.saveCurrentSession(owner,"topic:t",{runtime:"pi-sdk",sessionId:fork.getSessionId(),sessionFile:fork.getSessionFile()});
-    fork.appendMessage({role:"user",content:[{type:"text",text:"topic-only continuation"}]} as any);
-    fork.appendMessage({role:"assistant",content:[{type:"text",text:"topic answer"}]} as any);
+    sessions.saveCurrentSession(owner,`dm:${owner}`,{runtime:"pi-sdk",sessionId:fork.getSessionId(),sessionFile:fork.getSessionFile()});
+    fork.appendMessage({role:"user",content:[{type:"text",text:"dm-only continuation"}]} as any);
+    fork.appendMessage({role:"assistant",content:[{type:"text",text:"dm answer"}]} as any);
     expect(readFileSync(file)).toEqual(bytes);
     const task=background.createBackgroundTask({...input(),sessionMode:"fork",parentSessionRef:file});
     const child=SessionManager.forkFrom(file,sandbox,task.sessionDir);
     expect(JSON.stringify(child.buildSessionContext())).toBe(context);
     expect(readFileSync(file)).toEqual(bytes);
     expect(existsSync(join(task.sessionDir,"task.json"))).toBe(false);
-    sessions.clearCurrentSession(owner,"topic:t");
+    sessions.clearCurrentSession(owner,`dm:${owner}`);
     expect(existsSync(fork.getSessionFile()!)).toBe(true);
     expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe(manager.getSessionId());
   });
   it("rejects malformed pure-import archive references and non-file SDK references", () => {
     const repo=new SessionRepository(db);
     expect(() => repo.importAssociation({memberId:owner,scopeId:"r",referenceKind:"member-relative",createdAt:1,updatedAt:2,
-      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/topics/t/wrong.jsonl"}})).toThrow(/owned scope/);
+      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/rooms/other/wrong.jsonl"}})).toThrow(/owned scope/);
     const fake=join(sandbox,"members",owner,"sessions/2026-09-09/rooms/r/directory.jsonl");mkdirSync(fake,{recursive:true});
     expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:fake})).toThrow(/not a file/);
   });
@@ -178,12 +177,10 @@ describe("runtime checkpoints and numeric user cursor semantics", () => {
     runtime.markDriftNotified("room:r",owner,9);
     runtime.setContractFingerprint("room:r",owner,"hash",10);
     runtime.setContractFingerprint(`dm:${owner}`,owner,"dm",1);
-    runtime.setContractFingerprint("topic:t",owner,"topic",2);
     restart();
     expect(runtime.getRuntimeStateEntry("r",owner)).toMatchObject({contractFingerprint:"hash",contractVersion:10,staleMounts:{fields:["mcpServers","extensions"]}});
     expect(runtime.getRuntimeStateEntry("r",owner).driftNotified).toBeUndefined();
     expect(Object.keys(runtime.readRuntimeState("room:r"))).toEqual([`room:r:${owner}`]);
-    expect(runtime.readRuntimeState("topic:t")[`topic:t:${owner}`].contractFingerprint).toBe("topic");
     runtime.clearStaleMounts("room:r",owner);
     expect(db.all("SELECT * FROM runtime_stale_fields")).toEqual([]);
     runtime.clearRuntimeStateEntry("r",owner);
@@ -198,8 +195,8 @@ describe("runtime checkpoints and numeric user cursor semantics", () => {
     expect(() => repo.importEntry("r",owner,{contractFingerprint:"changed",staleMounts:{since:200,fields:["two","bad"]}},201)).toThrow(/injected/);
     expect(repo.get("r",owner)).toEqual({contractFingerprint:"original",staleMounts:{since:100,fields:["one"]}});
     expect(db.get("SELECT updated_at FROM runtime_checkpoints")).toEqual({updated_at:101});
-    runtime.clearStaleMounts("topic:t",owner);
-    expect(db.all("SELECT * FROM runtime_checkpoints WHERE scope_id='topic:t'")).toEqual([]);
+    runtime.clearStaleMounts(`dm:${owner}`,owner);
+    expect(db.all("SELECT * FROM runtime_checkpoints WHERE scope_id=?", `dm:${owner}`)).toEqual([]);
   });
   it("keeps user numeric seq as TEXT and message ID separate, preserving null, zero and partial patches", () => {
     db.run("INSERT INTO read_cursors VALUES('r','member',?,'member-message',1)",owner);
@@ -215,12 +212,12 @@ describe("runtime checkpoints and numeric user cursor semantics", () => {
     expect(cursors.getUserReadCursor("invalid")).toBeNull();
     expect(() => cursors.setUserReadCursor("invalid",{seq:1})).toThrow(/scope_not_found/);
   });
-  it("imports user cursors preserving time/numbers and room/DM/topic unread keys without reading files", () => {
+  it("imports user cursors preserving time/numbers and room/DM unread keys without reading files", () => {
     const repo=new UserCursorRepository(db);
-    for(const scope of ["room:r",`dm:${owner}`,"topic:t"]) repo.importCursor(scope,{seq:123.5,messageId:"unchanged-id",updatedAt:789});
+    for(const scope of ["room:r",`dm:${owner}`]) repo.importCursor(scope,{seq:123.5,messageId:"unchanged-id",updatedAt:789});
     writeFileSync(join(sandbox,"user-read-cursors.json"),JSON.stringify({"room:r":{seq:999}}));
     restart();
-    expect(cursors.listUserReadCursors()).toEqual(Object.fromEntries(["room:r",`dm:${owner}`,"topic:t"].map(s=>[s,{seq:123.5,messageId:"unchanged-id",updatedAt:789}])));
+    expect(cursors.listUserReadCursors()).toEqual(Object.fromEntries(["room:r",`dm:${owner}`].map(s=>[s,{seq:123.5,messageId:"unchanged-id",updatedAt:789}])));
     expect(existsSync(join(sandbox,"user-read-cursors.json"))).toBe(true);
   });
   it("atomically rolls back user seq if message metadata write fails", () => {

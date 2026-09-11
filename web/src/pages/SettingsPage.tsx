@@ -51,7 +51,6 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
 function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     sessionResume: settings.sessionResume !== false,
-    topicSeedMode: settings.topicSeedMode === "fresh" ? "fresh" : "fork",
     codexTransport: settings.codexTransport || "auto",
     websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
     httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
@@ -79,7 +78,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
   const { toast, confirm } = useDialog();
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
     sessionResume: true,
-    topicSeedMode: "fork",
     codexTransport: "auto",
     websocketConnectTimeoutMs: 15000,
   });
@@ -181,10 +179,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
     await handleRuntimeChange({ sessionResume: !runtimeSettings.sessionResume });
   };
 
-  const handleTopicSeedModeToggle = async () => {
-    await handleRuntimeChange({ topicSeedMode: runtimeSettings.topicSeedMode === "fresh" ? "fork" : "fresh" });
-  };
-
   const handleRuntimeNetworkSave = async () => {
     const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 15000;
     const wsSeconds = Math.round(websocketConnectTimeoutMs / 1000);
@@ -260,23 +254,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
               on={!!runtimeSettings.sessionResume}
               onToggle={() => handleSessionResumeToggle()}
               label="Continue previous sessions"
-              disabled={runtimeSaving}
-            />
-          </div>
-        </div>
-
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Start topic members fresh</div>
-              <div className="text-xs text-ink-3 mt-0.5">
-                Off: new topics fork the room session at the anchor. On: members start with the topic guide only. Applies to topics created after you change this.
-              </div>
-            </div>
-            <ToggleSwitch
-              on={runtimeSettings.topicSeedMode === "fresh"}
-              onToggle={() => handleTopicSeedModeToggle()}
-              label="Start topic members fresh"
               disabled={runtimeSaving}
             />
           </div>

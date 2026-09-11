@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getConversationEvents, getToken, restartMember, resetAgentSession,
+  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getToken, restartMember, resetAgentSession,
   getMemberStats, getMemberActiveTools,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
@@ -27,8 +27,6 @@ interface StationPanelProps {
   agentStatus: AgentStatusMap;
   contextUsage: Record<string, ContextUsageData>;
   roomId: string;
-  /** Topic page: activity reads/watches this scope; member config still uses roomId. */
-  activityScope?: string;
   onMembersChanged?: () => void;
   unreadAgents?: Set<string> | null;
   onJumpToMessage?: (messageId: string) => Promise<void>;
@@ -66,7 +64,7 @@ export function thinkLevelTextClass(level?: string | null): string {
 }
 
 /** Room member stations with status, model controls, context usage, and actions. */
-export function StationPanel({ members, agentStatus, contextUsage, roomId, activityScope, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
+export function StationPanel({ members, agentStatus, contextUsage, roomId, onMembersChanged, unreadAgents, onJumpToMessage }: StationPanelProps) {
   const { toast, confirm } = useDialog();
   const float = useMemberFloat();
   const [memberInfos, setMemberInfos] = useState<Record<string, MemberInfo>>({});
@@ -124,7 +122,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
 
 
 
-  const eventWatchId = activityScope || roomId;
+  const eventWatchId = roomId;
   const memberInfosRef = useRef(memberInfos);
   memberInfosRef.current = memberInfos;
   const subscriptionMembers = members.map((name) => ({ name, memberId: memberInfos[name]?.id }));
@@ -136,14 +134,12 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, activ
   // as the member Activity tab (isActivityStreamEvent).
   const loadFeedEvents = useCallback(async (name: string) => {
     try {
-      const result = activityScope
-        ? await getConversationEvents(activityScope, name, FEED_PAGE_SIZE)
-        : await getAgentEventsPaginated(roomId, name, FEED_PAGE_SIZE);
+      const result = await getAgentEventsPaginated(roomId, name, FEED_PAGE_SIZE);
       setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter((e) => isActivityStreamEvent(e) || e.type === "message_start").slice(-FEED_PAGE_SIZE) }));
     } catch (err) {
       console.error("Failed to load agent activity:", err);
     }
-  }, [roomId, activityScope]);
+  }, [roomId]);
 
   useEffect(() => {
     if (!eventWatchId) return;

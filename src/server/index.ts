@@ -87,7 +87,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     logger.info("server", "cursors reset — session resume disabled", { resetCount });
   }
 
-  // Initialize communication router — topic: scopes dispatch to activateTopicMember.
+  // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();
 
   const webDistDir = join(import.meta.dirname, "../../web/dist");

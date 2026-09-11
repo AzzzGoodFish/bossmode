@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { createMember } from "../../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/workspace/room-store.js";
-import { createTopic } from "../../src/workspace/topic-store.js";
 import { postMessage } from "../../src/communication/message-bus.js";
 import { initRouter } from "../../src/communication/router.js";
 import { ReplyObligationRepository } from "../../src/storage/repositories/reply-obligation-repository.js";
@@ -20,13 +19,12 @@ let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
-function setup(kind: "room" | "dm" | "topic") {
+function setup(kind: "room" | "dm") {
   const sender = createMember({ name: "Sender" });
   const target = createMember({ name: "Target" });
   const room = createRoom("Chat contract", undefined, []);
   stampGlobalMemberIds(room.id, [sender.id, target.id]);
-  const topic = createTopic({ roomId: room.id, title: "Chat contract", anchorMessageId: "anchor", seedMode: "fresh" });
-  const scope = kind === "dm" ? `dm:${sender.id}` : kind === "topic" ? `topic:${topic.id}` : room.id;
+  const scope = kind === "dm" ? `dm:${sender.id}` : room.id;
   const chat = createBossmodeSdkTools({ roomId: scope, memberId: sender.id, scopeKind: kind === "dm" ? "dm" : "room" }).find(t => t.name === "chat")!;
   const call = (params: Record<string, unknown>) => handleToolCallback("chat", scope, sender.name, params, { memberId: sender.id });
   return { sender, target, scope, chat, call };
@@ -35,7 +33,7 @@ function setup(kind: "room" | "dm" | "topic") {
 describe("chat tool contract", () => {
   // Replaces the removed parameter parsers' success/validation tests. No value
   // of an unknown field, even an empty one, is an accepted chat argument.
-  it.each(["room", "dm", "topic"] as const)("%s rejects unknown fields before copying, posting, activation or debt settlement", async kind => {
+  it.each(["room", "dm"] as const)("%s rejects unknown fields before copying, posting, activation or debt settlement", async kind => {
     const { sender, target, scope, chat, call } = setup(kind);
     const ask = postMessage(scope, "user", "@Sender question", [sender.name]);
     await Promise.resolve(); // Do not count the prior user message as a tool activation.
@@ -68,7 +66,7 @@ describe("chat tool contract", () => {
     } finally { stop(); }
   });
 
-  it.each(["room", "dm", "topic"] as const)("%s supported SDK chat settles own user debt and keeps member mentions FYI", async kind => {
+  it.each(["room", "dm"] as const)("%s supported SDK chat settles own user debt and keeps member mentions FYI", async kind => {
     const { sender, target, scope, chat } = setup(kind);
     postMessage(scope, "user", "@Sender question", [sender.name]);
     const debts = new ReplyObligationRepository(fixture.db);

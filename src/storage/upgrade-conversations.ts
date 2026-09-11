@@ -13,17 +13,20 @@ import {executionScopeId} from "./repositories/execution-identity.js";
 import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "./message-repository.js";
 import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "./event-repository.js";
 import type {Room,RoomMessage} from "../shared/types.js";
-import type {TopicRecord} from "../workspace/topic-store.js";
 
 function object(value:unknown,path:string):Record<string,any>{
  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy conversation object: ${path}`);
  return value as Record<string,any>;
 }
+/** Topic feature retired (fish #19358, 2026-09-11): topic scopes are never
+ * imported. Legacy topic sources are consumed by the standard source-retire
+ * flow instead of being imported; no topic archive copy is written. */
+export function retiredTopicScope(scope:string|undefined):boolean{return !!scope&&scope.startsWith("topic:");}
 /** Missing historical metadata does not justify inventing a current room or member. */
-export function ensureImportedScope(db:Database,input:string,roomHint?:string):string{
+export function ensureImportedScope(db:Database,input:string,_roomHint?:string):string{
  const id=executionScopeId(input);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;
- const kind=id.startsWith("dm:")?"dm":id.startsWith("topic:")?"topic":"room";
- db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,?,?,?)",id,kind,kind==="room"?id:kind==="topic"?roomHint??null:null,kind==="dm"?id.slice(3):null);
+ const kind=id.startsWith("dm:")?"dm":"room";
+ db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,?,?,?)",id,kind,kind==="room"?id:null,kind==="dm"?id.slice(3):null);
  return id;
 }
 /** Actor evidence is independent of execution-event evidence. Neither is inferred
@@ -161,17 +164,19 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   if(room.id!==e.scopeId)throw new Error(`Room source ownership mismatch: ${e.path}`);
   conversations.upsertRoom(room);consumed.add(e.path);
  }
- for(const e of entries.filter(e=>e.kind==="topic-metadata")){
-  const topic=object(read(e),e.path) as TopicRecord;const room=e.path.split("/")[1];
-  if(`topic:${topic.id}`!==e.scopeId||topic.roomId!==room)throw new Error(`Topic source ownership mismatch: ${e.path}`);
-  conversations.upsertTopic(topic);consumed.add(e.path);
- }
  let completed=0;const provenSources:ImportEventSource[]=[];
  for(const e of entries){
   if(consumed.has(e.path))continue;
+  // Topic feature retired (fish #19358): legacy topic sources (metadata, messages,
+  // sequences, events, archives) are not imported. They are consumed here so the
+  // source-retire flow retains no unhandled domain; no topic archive copy is written.
+  if(e.kind==="topic-metadata"||retiredTopicScope(e.scopeId)){consumed.add(e.path);continue;}
   if(e.kind==="user-cursors"){
    const cursors=object(read(e),e.path);const repo=new UserCursorRepository(ctx.db);
-   for(const [key,cursor]of Object.entries(cursors)){ensureImportedScope(ctx.db,key);repo.importCursor(key,cursor);}
+   for(const [key,cursor]of Object.entries(cursors)){
+    if(retiredTopicScope(key))continue; // topic scope retired (fish #19358)
+    ensureImportedScope(ctx.db,key);repo.importCursor(key,cursor);
+   }
    consumed.add(e.path);continue;
   }
   if(!["tasks","messages","message-sequence","member-cursors","dm-member-cursor","agent-events","message-archive","message-archive-summary","derived-event-stats"].includes(e.kind))continue;

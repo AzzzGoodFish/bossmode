@@ -20,7 +20,6 @@ vi.mock("../../src/shared/mcp-settings.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "mcp.json"), serverNames: [], dispose: mock.configDispose }),
 }));
-vi.mock("../../src/workspace/topic-store.js", () => ({ resolveOwningRoomId: () => "r" }));
 vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
 vi.mock("../../src/engine/model-credentials.js", () => ({
@@ -100,7 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks(); mock.hosted = true; mock.stage.mockReset(); mock.reload.mockReset(); mock.configDispose.mockReset();
   fixture = coreFixture(); mock.root = fixture.root;
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,'SDK owner','sdk owner','test','{}',1,1)", owner);
-  fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('r','room','r'),('topic:t','topic','r')");
+  fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('r','room','r')");
   fixture.db.run("INSERT INTO scopes(id,kind,member_id) VALUES(?,'dm',?)", `dm:${owner}`, owner);
   session = makeSession(); handles = []; runtime = new PiSdkRuntime();
   mock.create.mockReset().mockResolvedValue({ session });
@@ -221,7 +220,7 @@ describe("actual prompt dispatches", () => {
     expect(rows()[0]).toMatchObject({ status: "interrupted", diagnosis: expect.stringContaining("abort requested") });
   });
 
-  it.each(["r", "room:r", `dm:${owner}`, "topic:t"])("requires and preserves real SQL ownership for %s", async scope => {
+  it.each(["r", "room:r", `dm:${owner}`])("requires and preserves real SQL ownership for %s", async scope => {
     await handle(scope).prompt("private child or live input");
     expect(rows()[0]).toMatchObject({ member_id: owner, scope_id: scope === "room:r" ? "r" : scope });
   });

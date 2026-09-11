@@ -54,7 +54,7 @@ describe("session-store SQL associations", () => {
     const roomFile = join(tempDir, "members", "rm_pm", "sessions", "2026-09-07", "rooms", "room_a", "one.jsonl");
     mkdirSync(join(roomFile, ".."), { recursive: true });
     writeFileSync(roomFile, "{}\n");
-    expect(() => sessionStore.saveSession("topic:topic_a", "rm_pm", { runtime: "pi-sdk", sessionFile: roomFile })).toThrow(/outside the topic:topic_a archive/);
+    expect(() => sessionStore.saveSession("dm:rm_pm", "rm_pm", { runtime: "pi-sdk", sessionFile: roomFile })).toThrow(/outside the dm:rm_pm archive/);
     new SessionRepository(fixture.db).importAssociation({memberId: "rm_pm", scopeId: "room:room_a",
       session: {runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/rooms/room_a/missing.jsonl"},
       referenceKind: "member-relative", createdAt: 1, updatedAt: 2});

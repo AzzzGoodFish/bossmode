@@ -5,7 +5,7 @@ import type {UpgradeImportContext} from "./upgrade-runner.js";
 import type {MemberSourceImport} from "./upgrade-members.js";
 import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
 import {managedPath,requireRegularFile,syncFile,syncDirectoryChain} from "./upgrade-files.js";
-import {ensureImportedScope} from "./upgrade-conversations.js";
+import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js";
 import {documentContentMeta,importDocument,type DocumentImport,type DocumentIdentity,type ImportedDocumentHistory} from "./document-repository.js";
 import type {PrinciplesMeta} from "../shared/types.js";
 
@@ -38,6 +38,9 @@ function obsoleteSupplementHistory(entry:LegacySourceEntry,event:Record<string,a
  * History is never fabricated from today's body; body assets stay outside SQLite. */
 export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],personas:MemberSourceImport["personas"]):Promise<Set<string>>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();const plans=new Map<string,DocumentImport>();
+ // Topic feature retired (fish #19358): member-scope topic documents are not
+ // imported; they follow the standard source-retire flow like other topic sources.
+ for(const e of entries)if(retiredTopicScope(e.scopeId))consumed.add(e.path);
  const bodies=new Map(personas.map(p=>[p.path,text(p.body,p.path)]));
  const check=(e:LegacySourceEntry)=>{if(!ctx.sourceFiles.includes(e.path))throw new Error(`Unsnapshotted document source: ${e.path}`);};
  const scope=(s:string|undefined)=>s===undefined?undefined:ensureImportedScope(ctx.db,s);
@@ -64,6 +67,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
  // a sanitized body basename cannot silently choose between colliding identities.
  let completed=0;
  for(const e of entries.filter(e=>e.kind==="document-meta"||e.kind==="document-history")){
+  if(retiredTopicScope(e.scopeId))continue;
   check(e);
   if(e.kind==="document-meta"){
    const meta=object(readLegacyJson(ctx.sourceRoot,e),e.path);
@@ -84,6 +88,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   consumed.add(e.path);
  }
  for(const e of entries.filter(e=>e.kind==="document-body")){
+  if(retiredTopicScope(e.scopeId))continue;
   check(e);const file=managedPath(ctx.sourceRoot,e.path);requireRegularFile(file);const content=text(readFileSync(file),e.path);
   if(bodies.has(e.path)&&bodies.get(e.path)!==content)throw new Error(`Conflicting current document body: ${e.path}`);
   bodies.set(e.path,content);
@@ -117,6 +122,6 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   }},p);ctx.progress(++completed);
  }
  // Existing content-addressed snapshots remain assets, not legacy metadata.
- for(const e of entries.filter(e=>e.kind==="document-snapshot")){check(e);consumed.add(e.path);}
+ for(const e of entries.filter(e=>e.kind==="document-snapshot")){if(retiredTopicScope(e.scopeId))continue;check(e);consumed.add(e.path);}
  return consumed;
 }

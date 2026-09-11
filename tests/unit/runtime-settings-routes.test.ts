@@ -22,7 +22,7 @@ describe("runtime settings HTTP with SQL authority", () => {
     const original = readConfig();
     const response = await put({ httpIdleTimeoutMs: null });
     expect(response.status).toBe(200);
-    const expected = { sessionResume: true, topicSeedMode: "fork", codexTransport: "websocket-cached", websocketConnectTimeoutMs: 60000 };
+    const expected = { sessionResume: true, codexTransport: "websocket-cached", websocketConnectTimeoutMs: 60000 };
     expect(JSON.parse(response.body)).toEqual(expected);
     getTestWorkspace().reopen();
     const { httpIdleTimeoutMs: _, ...retained } = original.runtime!;
@@ -32,19 +32,17 @@ describe("runtime settings HTTP with SQL authority", () => {
     expect(JSON.parse(fetched.body)).toEqual(expected);
   });
 
-  it("persists topicSeedMode toggle in both directions without changing other settings", async () => {
+  it("ignores the retired topicSeedMode key without persisting it", async () => {
     const original = readConfig();
-    for (const topicSeedMode of ["fresh", "fork"] as const) {
-      const response = await put({ topicSeedMode });
-      expect(response.status).toBe(200);
-      expect(JSON.parse(response.body).topicSeedMode).toBe(topicSeedMode);
-      getTestWorkspace().reopen();
-      expect(readConfig()).toEqual({ ...original, runtime: { ...original.runtime, topicSeedMode } });
-    }
+    const response = await put({ topicSeedMode: "fresh" });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).topicSeedMode).toBeUndefined();
+    getTestWorkspace().reopen();
+    expect(readConfig()).toEqual(original);
   });
 
   it.each([
-    { sessionResume: "false" }, { topicSeedMode: "invalid" }, { codexTransport: "invalid" },
+    { sessionResume: "false" }, { codexTransport: "invalid" },
     { httpIdleTimeoutMs: -1 }, { websocketConnectTimeoutMs: "100" },
   ])("rejects invalid patch %j without persisting partial changes", async invalid => {
     const before = readConfig();

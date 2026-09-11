@@ -1,8 +1,7 @@
 import { getDatabase, type Database } from "../database.js";
 import type { Room, RoomMemberRecord, CursorMap } from "../../shared/types.js";
-import type { TopicRecord, TopicStatus } from "../../workspace/topic-store.js";
 
-interface ScopeRow { id: string; kind: "room" | "topic" | "dm"; room_id: string | null; member_id: string | null }
+interface ScopeRow { id: string; kind: "room" | "dm"; room_id: string | null; member_id: string | null }
 interface RoomRow {
   id: string; name: string; created_at: number; legacy_cwd: string | null;
   docs_path: string | null; leader_member_id: string | null; leader_global_member_id: string | null;
@@ -11,11 +10,6 @@ interface RoomRow {
 interface SnapshotRow {
   id: string; name: string; source_agent: string; source_member_id: string | null; avatar: string | null;
   created_at: number; updated_at: number; migrated_name: string | null; migrated_id: string | null; config_json: string | null;
-}
-interface TopicRow {
-  id: string; room_id: string; title: string; anchor_message_id: string; anchor_seq: number | null;
-  created_by: string; status: TopicStatus; created_at: number; closed_at: number | null;
-  seed_mode: TopicRecord["seedMode"]; summary: string | null; brief: string | null; guide_text: string | null; anchor_excerpt: string | null;
 }
 
 /** Historical references deliberately have no FK to live members. Never resolve names here. */
@@ -43,7 +37,7 @@ export class ConversationsRepository {
 
   /** Pure import/upsert: preserves source IDs, timestamps, labels and absent vs empty rosters. */
   upsertRoom(room: Room): void {
-    if (!room.id || room.id.startsWith("room:") || room.id.startsWith("topic:") || room.id.startsWith("dm:")) {
+    if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) {
       throw new Error("Room scope must use the bare room ID");
     }
     this.db.transaction(() => {
@@ -107,48 +101,9 @@ export class ConversationsRepository {
   deleteRoom(id: string): boolean {
     return this.db.transaction(() => {
       if (!this.getRoom(id)) return false;
-      // Topic scopes do not FK to rooms in the common schema. Delete them explicitly.
-      this.db.run("DELETE FROM scopes WHERE kind='topic' AND room_id=?", id);
       this.db.run("DELETE FROM scopes WHERE kind='room' AND id=?", id);
       return true;
     });
-  }
-
-  upsertTopic(t: TopicRecord): void {
-    this.db.transaction(() => {
-      this.ensureScope(`topic:${t.id}`, "topic", t.roomId, null);
-      this.db.run(`INSERT INTO topics(id,scope_id,room_id,title,anchor_message_id,anchor_seq,created_by,status,
-        created_at,closed_at,seed_mode,summary,brief,guide_text,anchor_excerpt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title,anchor_message_id=excluded.anchor_message_id,anchor_seq=excluded.anchor_seq,
-        created_by=excluded.created_by,status=excluded.status,created_at=excluded.created_at,closed_at=excluded.closed_at,
-        seed_mode=excluded.seed_mode,summary=excluded.summary,brief=excluded.brief,guide_text=excluded.guide_text,anchor_excerpt=excluded.anchor_excerpt`,
-        t.id, `topic:${t.id}`, t.roomId, t.title, t.anchorMessageId, t.anchorSeq ?? null, t.createdBy, t.status,
-        t.createdAt, t.closedAt ?? null, t.seedMode, t.summary ?? null, t.brief ?? null, t.guideText ?? null, t.anchorExcerpt ?? null);
-      this.db.run("DELETE FROM topic_participants WHERE topic_id=?", t.id);
-      t.participants.forEach((ref, i) => this.db.run("INSERT INTO topic_participants VALUES (?,?,?)", t.id, i, ref));
-    });
-  }
-
-  resolveTopicRoomId(id: string): string | null {
-    return this.db.get<{ room_id: string }>("SELECT room_id FROM topics WHERE id=?", id)?.room_id ?? null;
-  }
-
-  getTopic(roomId: string, id: string): TopicRecord | null {
-    const t = this.db.get<TopicRow>("SELECT * FROM topics WHERE id=? AND room_id=?", id, roomId);
-    if (!t) return null;
-    return {
-      id, roomId, title: t.title, anchorMessageId: t.anchor_message_id, createdBy: t.created_by,
-      status: t.status, createdAt: t.created_at, seedMode: t.seed_mode,
-      participants: this.db.all<{ member_ref: string }>("SELECT member_ref FROM topic_participants WHERE topic_id=? ORDER BY position", id).map(r => r.member_ref),
-      ...(t.anchor_seq !== null ? { anchorSeq: t.anchor_seq } : {}), ...(t.closed_at !== null ? { closedAt: t.closed_at } : {}),
-      ...(t.summary !== null ? { summary: t.summary } : {}), ...(t.brief !== null ? { brief: t.brief } : {}),
-      ...(t.guide_text !== null ? { guideText: t.guide_text } : {}), ...(t.anchor_excerpt !== null ? { anchorExcerpt: t.anchor_excerpt } : {}),
-    };
-  }
-
-  listTopics(roomId: string, status?: TopicStatus): TopicRecord[] {
-    return this.db.all<{ id: string }>(`SELECT id FROM topics WHERE room_id=? ${status ? "AND status=?" : ""} ORDER BY created_at DESC,id`,
-      roomId, ...(status ? [status] : [])).map(r => this.getTopic(roomId, r.id)!);
   }
 
   getCursors(scopeId: string): CursorMap {

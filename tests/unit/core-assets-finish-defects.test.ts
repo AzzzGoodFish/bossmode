@@ -5,14 +5,13 @@ import { getDefaultConfig } from "../../src/shared/config.js";
 import { SettingsRepository } from "../../src/storage/repositories/settings.js";
 import { createMember } from "../../src/workspace/member-registry.js";
 import { createRoom, inviteGlobalMember } from "../../src/workspace/room-store.js";
-import { createTopic } from "../../src/workspace/topic-store.js";
 import { addMessage } from "../../src/workspace/message-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { renderQueryRowsForMember, type QueryRow } from "../../src/engine/query-render.js";
 
 // Parent-owned tools.ts applies member visibility to rows, but not reply targets.
 // Keep these desired-behavior regressions separate from the 44 modernized cases.
-describe.each(["room", "dm", "topic"] as const)("hidden reply target in %s", kind => {
+describe.each(["room", "dm"] as const)("hidden reply target in %s", kind => {
   let fixture: ReturnType<typeof coreFixture>;
   let rows: QueryRow[];
   let inline: string;
@@ -25,8 +24,7 @@ describe.each(["room", "dm", "topic"] as const)("hidden reply target in %s", kin
     const member = createMember({ name: "reader" });
     const room = createRoom("Visibility", undefined, []);
     inviteGlobalMember(room.id, { id: member.id, name: member.name });
-    const topic = createTopic({ roomId: room.id, title: "Visibility", anchorMessageId: "historical-anchor" });
-    const scope = kind === "room" ? room.id : kind === "dm" ? `dm:${member.id}` : `topic:${topic.id}`;
+    const scope = kind === "room" ? room.id : `dm:${member.id}`;
     const target = addMessage(scope, { sender: "system", content: hidden, mentions: [] });
     addMessage(scope, { sender: "user", content: "Visible reply", mentions: [], replyTo: { messageId: target.id, seq: target.seq! } });
     rows = await handleToolCallback("query_room_messages", scope, member.id, {}) as QueryRow[];

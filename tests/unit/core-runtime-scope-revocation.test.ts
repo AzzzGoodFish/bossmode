@@ -3,20 +3,18 @@ import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, 
 import { resetMocks, mockPromptFn, MockRuntime, MockAgentHandle } from "../helpers/mock-runtime.js";
 import { getDatabase } from "../../src/storage/database.js";
 import { ReplyObligationRepository } from "../../src/storage/repositories/reply-obligation-repository.js";
-import { createTopic } from "../../src/workspace/topic-store.js";
 import { resolveRoomMemberRef } from "../../src/workspace/room-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { getAgentInstanceForScope } from "../../src/engine/agent-manager.js";
 setupTestWorkspace();
 const barrier = () => { let release!: () => void; const promise = new Promise<void>(r => release = r); return { promise, release }; };
-async function fixture(kind: "room" | "topic" = "room") {
+async function fixture() {
   const server = await createTestServer(); resetMocks();
   const token = await loginAndGetToken(server.port);
   const room = await createMockRoom(server.port, token, "Revocation", ["revoked", "controller"]);
   const [id, controller] = room.globalMemberIds!;
-  const topic = kind === "topic" ? createTopic({ roomId: room.id, title: "Revocation", anchorMessageId: "fixture-anchor", seedMode: "fresh" }) : undefined;
-  const scope = topic ? `topic:${topic.id}` : room.id;
-  const path = `/api/rooms/${room.id}${topic ? `/topics/${topic.id}` : ""}/messages`;
+  const scope = room.id;
+  const path = `/api/rooms/${room.id}/messages`;
   return { server, token, room, id, controller, scope,
     post: (text: string) => jsonRequest(server.port, "POST", path, { token, body: { content: `@revoked ${text}` } }),
     remove: async (via: "api" | "tool" = "api") => {
@@ -35,8 +33,8 @@ const assertCancelled = (inputId: number) => {
 };
 const debts = (scope: string, id: string) => new ReplyObligationRepository(getDatabase()).listPending(scope, id);
 
-it.each([ ["room", "api"], ["room", "tool"], ["topic", "api"], ["topic", "tool"] ] as const)("does not dispatch pending %s input after membership removal through %s", async (kind, via) => {
-  const f = await fixture(kind), gate = barrier();
+it.each(["api", "tool"] as const)("does not dispatch pending room input after membership removal through %s", async (via) => {
+  const f = await fixture(), gate = barrier();
   try {
     mockPromptFn.mockImplementationOnce(() => gate.promise);
     expect((await f.post("first")).status).toBe(200);

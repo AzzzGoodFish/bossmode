@@ -13,7 +13,6 @@ import {
   inviteRoomMember,
   getContractDrift,
   dismissContractDrift,
-  createTopic,
   type ContractDriftEntry,
   type RoomMessage,
 } from "../api/client";
@@ -26,7 +25,6 @@ import { PreviewSurface, previewSurfaceStateFrom } from "../components/PreviewSu
 import { StationPanel } from "../components/StationPanel";
 import { ResizableRail } from "../components/ResizableRail";
 import { MessageInput } from "../components/MessageInput";
-import { TopicRail, TopicRailToggle, useRoomTopics, useTopicRailOpen } from "../components/TopicRail";
 import { CreateRoomDialog } from "../components/CreateRoomDialog";
 import { AddMemberDialog } from "../components/AddMemberDialog";
 import { RoomSettingsDialog } from "../components/RoomSettingsDialog";
@@ -49,13 +47,6 @@ interface MainProps {
   onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
-  /** Navigate to a topic workspace page (topic-threads v2 — replaces the v1 panel/Surface). */
-  onOpenTopicPage?: (roomId: string, topicId: string) => void;
-  /** Open an unsent topic draft on a message (topic-threads v3 — creates on first send, Feishu semantics). */
-  onOpenTopicDraft?: (roomId: string, anchor: { anchorMessageId: string; anchorSeq?: number; title: string; excerpt: string }) => void;
-  /** Cross-page jump (topic anchor block → this room's message): consumed once the room is loaded. */
-  pendingJump?: { roomId: string; messageId: string } | null;
-  onConsumeJump?: () => void;
 }
 
 type RoomView = "chat";
@@ -66,10 +57,6 @@ export function Main({
   connected, reconnecting, onRegisterWsHandler,
   unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
   onOpenMobileSidebar,
-  onOpenTopicPage,
-  onOpenTopicDraft,
-  pendingJump,
-  onConsumeJump,
 }: MainProps) {
   const { toast } = useDialog();
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -82,12 +69,8 @@ export function Main({
     setSurfaceExpandedRaw(v);
     localStorage.setItem("bossmode_preview_surface", v ? "expanded" : "panel");
   };
-  // ── Topic rail (fish pick 2026-08-19: direction A + collapsible) ──
-  const [topicRailOpen, toggleTopicRail] = useTopicRailOpen(selectedRoomId);
-  const { topics: roomTopics, activeCount: topicActiveCount } = useRoomTopics(selectedRoomId);
-  // ── Quote reply + topic composer mode (plan-reply-to-v1 / topic-threads v2) ──
+  // ── Quote reply (plan-reply-to-v1) ──
   const [replyQuote, setReplyQuote] = useState<{ seq: number; messageId: string; sender: string; senderMemberId?: string; excerpt: string } | null>(null);
-  const [topicMode, setTopicMode] = useState(false);
   const [previewPct, setPreviewPct] = useState<number>(() => readPreviewPct(localStorage, window.innerWidth));
   const isPreviewDragging = useRef(false);
   const isMobile = useIsMobile();
@@ -120,13 +103,6 @@ export function Main({
     returnToLatest,
     inHistoryView,
   } = useRoom(selectedRoomId);
-
-  // Cross-page jump: topic anchor block asked us to land on a specific room message.
-  useEffect(() => {
-    if (!pendingJump || pendingJump.roomId !== selectedRoomId || loading) return;
-    void jumpToMessage(pendingJump.messageId);
-    onConsumeJump?.();
-  }, [pendingJump, selectedRoomId, loading, jumpToMessage, onConsumeJump]);
 
   const globalMembers = useGlobalMembers();
 
@@ -330,7 +306,6 @@ export function Main({
         </div>
 
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          <TopicRailToggle open={topicRailOpen} activeCount={topicActiveCount} onToggle={toggleTopicRail} />
           <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
             {reconnecting && <span className="text-[10px] text-think animate-pulse hidden sm:block">reconnecting</span>}
             {!connected && !reconnecting && <span className="text-[10px] text-blocked hidden sm:block">offline</span>}
@@ -353,30 +328,10 @@ export function Main({
 
       {/* 内容区：chat/tasks + 工位墙 */}
       <div className="flex-1 flex min-h-0 bg-surface-1">
-        {/* Topic rail (v3): embedded, collapsible via the topbar Topics button; chat view only */}
-        {topicRailOpen && view === "chat" && selectedRoomId && (
-          <TopicRail
-            topics={roomTopics}
-            currentTopicId={null}
-            onSelectRoom={() => {}}
-            onSelectTopic={(topicId) => onOpenTopicPage?.(selectedRoomId, topicId)}
-            onClose={toggleTopicRail}
-          />
-        )}
         <div className="flex-1 flex flex-col min-w-0">
           <>
-            <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} onCreateTopicFromMessage={(msg) => {
-                if (!selectedRoomId) return;
-                const firstLine = (msg.content || "").split("\n").find((l) => l.trim())?.trim() ?? "";
-                const excerpt = (msg.content || "").replace(/\s+/g, " ").slice(0, 120);
-                onOpenTopicDraft?.(selectedRoomId, {
-                  anchorMessageId: msg.id,
-                  anchorSeq: typeof msg.seq === "number" ? msg.seq : undefined,
-                  title: firstLine.slice(0, 80) || "New topic",
-                  excerpt,
-                });
-              }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
-              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content, ...(atts?.length ? { attachments: atts } : {}) }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
+            <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} />
+              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} />
             </>
         </div>
 

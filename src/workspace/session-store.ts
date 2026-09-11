@@ -6,7 +6,7 @@ import { getDatabase } from "../storage/database.js";
 import { SessionRepository } from "../storage/repositories/session-repository.js";
 import type { AgentSession } from "../shared/types.js";
 
-export type MainScopeId = `room:${string}` | `dm:${string}` | `topic:${string}`;
+export type MainScopeId = `room:${string}` | `dm:${string}`;
 function repository(): SessionRepository { return new SessionRepository(getDatabase()); }
 const SAFE_ID = /^[^/:\\]+$/;
 
@@ -19,7 +19,7 @@ function canonicalScope(scope: string, memberId: string): MainScopeId {
   const split = scope.indexOf(":");
   const kind = scope.slice(0, split);
   const id = scope.slice(split + 1);
-  if (!SAFE_ID.test(id) || !["room", "topic", "dm"].includes(kind)) throw new Error(`Invalid member session scope: ${scope}`);
+  if (!SAFE_ID.test(id) || !["room", "dm"].includes(kind)) throw new Error(`Invalid member session scope: ${scope}`);
   if (kind === "dm" && id !== memberId) throw new Error(`DM session scope does not belong to member ${memberId}`);
   return scope as MainScopeId;
 }
@@ -35,7 +35,7 @@ function validateSession(scope: MainScopeId, value: unknown): AgentSession {
 }
 function scopePathPattern(scope: MainScopeId): RegExp {
   const escaped = scope.slice(scope.indexOf(":") + 1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tail = scope.startsWith("room:") ? `rooms/${escaped}` : scope.startsWith("topic:") ? `topics/${escaped}` : "dm";
+  const tail = scope.startsWith("room:") ? `rooms/${escaped}` : "dm";
   return new RegExp(`^sessions/\\d{4}-\\d{2}-\\d{2}/${tail}/[^/]+\\.jsonl$`);
 }
 function existingRealPath(path: string): string {

@@ -53,13 +53,11 @@ describe("self-only update_profile", () => {
     expect(await f.call("update_profile", { title: "bad" }, `dm:${f.peer.id}`)).toMatchObject({ ok: false, code: "scope_access_denied" });
   });
 
-  it("keeps room/DM/topic and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
+  it("keeps room/DM and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
     const f = await fixture();
-    const { createTopic } = await import("../../src/workspace/topic-store.js");
-    const topic = createTopic({ roomId: f.room.id, title: "Identity", createdBy: f.own.id, anchorMessageId: "anchor" });
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
     const { loadScopeMessages, handleToolCallback } = await import("../../src/engine/tools.js");
-    const scopes = [f.room.id, `dm:${f.own.id}`, `topic:${topic.id}`];
+    const scopes = [f.room.id, `dm:${f.own.id}`];
     const toolSets = scopes.map(roomId => createBossmodeSdkTools({ roomId, memberId: f.own.id }));
     await f.call("chat", { message: "historical snapshot" });
     const originalName = f.own.name;

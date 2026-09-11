@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { getBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
-import { resolveOwningRoomId } from "../workspace/topic-store.js";
 import { logger } from "../foundation/logger.js";
 import {
   createDatabaseModelsStore,
@@ -2063,17 +2062,12 @@ function safeFsSegment(s: string): string {
   return String(s || "_").replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
-/** pi agentDir for a scope. Topic instances nest under the parent room — never a `topic:` phantom. */
+/** pi agentDir for a scope (room or DM). */
 export function resolvePiAgentDir(roomIdOrScope: string, memberIdOrName: string): string {
   const safeMember = safeFsSegment(memberIdOrName);
   const root = getBossmodePiRuntimeRoot();
   if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("dm:")) {
     return join(root, "members", safeMember, "dm");
-  }
-  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("topic:")) {
-    const topicId = roomIdOrScope.slice("topic:".length);
-    const parent = resolveOwningRoomId(roomIdOrScope);
-    return join(root, safeFsSegment(parent), safeMember, `topic-${safeFsSegment(topicId)}`);
   }
   return join(root, safeFsSegment(roomIdOrScope), safeMember);
 }

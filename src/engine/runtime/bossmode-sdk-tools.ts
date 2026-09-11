@@ -367,21 +367,6 @@ export function createBossmodeSdkTools(opts: {
   if (scopeKind === "room") {
     // Room: wait for all members. Tasks already in base list above.
     tools.push(defineTool({
-      name: "create_topic",
-      label: "Create topic",
-      description: "Create a focused topic in this room. message is the first post (title is its first line; @-mentions activate those members). brief is an optional instruction injected into the topic guide (behavior boundary, e.g. research only — do not touch main).",
-      parameters: Type.Object({
-        message: Type.String({ description: "First topic message — becomes the topic title (first line) and is posted into the topic. @ a member to bring them in." }),
-        brief: Type.Optional(Type.String({ description: "Optional topic instruction injected into the guide before the concurrency reminder." })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("create_topic", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "create_topic failed");
-        return textResult(`Topic created: ${data.title} (${data.scopeId})`);
-      },
-    }));
-
-    tools.push(defineTool({
       name: "wait",
       label: "Wait",
       description: WAIT_DESCRIPTION,
@@ -404,7 +389,7 @@ export function createBossmodeSdkTools(opts: {
     tools.push(defineTool({
       name: "member_status",
       label: "Member Status",
-      description: "Query live runtime status of room members. Returns each member's aggregated status plus a room/topics breakdown — topics lists this member's live topic instances in the current room. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
+      description: "Query live runtime status of room members. Returns each member's aggregated status plus a room breakdown. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
       parameters: Type.Object({
         member: Type.Optional(Type.String({ description: "Member name; omit for all room members" })),
       }),
@@ -413,15 +398,12 @@ export function createBossmodeSdkTools(opts: {
         if (data?.ok === false) throw new Error(data.error || "Member status failed");
         const members = (data.members ?? []) as Array<{
           name: string; status: string; room?: string;
-          topics?: Array<{ topicId: string; title: string; status: string }>;
           activeScopes: Array<{ scope: string; status: string }>;
         }>;
         const lines = members.map((m) => {
-          const topicBits = (m.topics ?? []).map((t) => `${t.title} (${t.status})`).join(", ");
           const scopes = (m.activeScopes ?? []).map((s) => `${s.scope} (${s.status})`).join(", ");
           const extra = [
             m.room ? `room ${m.room}` : "",
-            topicBits ? `topics: ${topicBits}` : "",
             scopes,
           ].filter(Boolean).join(" — ");
           return `- ${m.name}: ${m.status}${extra ? ` — ${extra}` : ""}`;

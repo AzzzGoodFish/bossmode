@@ -8,7 +8,7 @@ import * as roomStore from "../workspace/room-store.js";
 import { memberDir } from "../workspace/member-profile.js";
 import { readWorkspaces } from "../workspace/workspace-registry.js";
 import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../workspace/room-store.js";
-import { resolveChatScopeRoomId } from "../workspace/topic-store.js";
+import { chatScopeRoomId } from "../shared/conversation-ref.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../foundation/logger.js";
 
@@ -30,7 +30,7 @@ export type AttachmentOutcome = AttachmentSuccess | AttachmentError;
 
 /** Build path policy for a room — defines allowed attachment source directories. */
 function buildPolicy(roomId: string): PathPolicy {
-  const parentId = resolveChatScopeRoomId(roomId) || roomId;
+  const parentId = chatScopeRoomId(roomId) || roomId;
   if (!roomStore.getRoom(parentId)) throw new Error(`Room not found: ${roomId}`);
   const allowedPrefixes: string[] = [];
   for (const root of roomMemberAssetRoots(parentId)) {
@@ -62,7 +62,7 @@ export async function processAgentAttachments(
       continue;
     }
     try {
-      const stored = await copyToAttachment(check.absolutePath, resolveChatScopeRoomId(roomId) || roomId);
+      const stored = await copyToAttachment(check.absolutePath, chatScopeRoomId(roomId) || roomId);
       results.push({ ok: true, ...stored });
     } catch (err: any) {
       results.push({ ok: false, path: p, error: err.message || String(err) });

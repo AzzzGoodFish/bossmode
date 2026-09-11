@@ -4,7 +4,6 @@ import {InputQueueRepository,type QueuedInput} from "../storage/repositories/inp
 import {ReplyObligationRepository,type ReplyDisposition} from "../storage/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../storage/repositories/delivery-repository.js";
 import {readMemberProfile,isBlankPersona} from "../workspace/member-profile.js";
-import {getTopicCursors,getTopicMessagesSince,setTopicCursor,addTopicParticipant,buildTopicGuideText} from "../workspace/topic-store.js";
 import type {MentionActivationCtx} from "../communication/router.js";
 import { getDatabase } from "../storage/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
@@ -54,7 +53,6 @@ import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getMo
 import { notifyMemberIdle, settleWaitOnAbort, settleMemberWaits } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
 import { settleBackgroundWaits } from "./background-task-store.js";
-import { resolveTopicRoomId, getTopic } from "../workspace/topic-store.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
 
 // -- Registry injection --
@@ -188,7 +186,7 @@ export interface BackgroundSessionSources {
   skillPaths: string[];
   cwd: string;
   roomMembers: string[];
-  /** Scope id the child's tool callbacks bind to (room:…/dm:…/topic:…). */
+  /** Scope id the child's tool callbacks bind to (room:…/dm:…). */
   toolScopeId: string;
   runtimeName: string;
 }
@@ -290,7 +288,7 @@ function pendingCreationsFor(memberId: string): Array<Promise<AgentInstance | nu
 function instanceKey(roomIdOrScope: string, memberId: string): string {
   if (
     typeof roomIdOrScope === "string"
-    && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:") || roomIdOrScope.startsWith("topic:"))
+    && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:"))
   ) {
     return scopeInstanceKey(roomIdOrScope, memberId);
   }
@@ -309,10 +307,7 @@ function roomScopeId(roomId: string): ScopeId {
 function memberHasScopeAccess(scopeValue: string, memberId: string): boolean {
   const scope = runtimeInputOwner(scopeValue, memberId).scopeId;
   if (scope.startsWith("dm:")) return scope === `dm:${memberId}`;
-  const topicId = scope.startsWith("topic:") ? scope.slice(6) : undefined;
-  const parent = topicId ? resolveTopicRoomId(topicId) : scope;
-  return !!parent && !!roomStore.resolveRoomMemberRef(parent, memberId)
-    && (!topicId || getTopic(parent, topicId)?.status === "active");
+  return !!scope && !!roomStore.resolveRoomMemberRef(scope, memberId);
 }
 function memberScopeAllowsExecution(scopeValue: string, memberId: string): boolean {
   return memberRuntimeAllowed(memberId) && memberHasScopeAccess(scopeValue, memberId);
@@ -330,17 +325,6 @@ export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inac
     if (st === "working") return "working";
     if (st === "inactive") return "inactive";
     return "idle";
-  }
-  if (ref.kind === "topic") {
-    // Topic instances live under topic:<id>:<memberId>, not the parent room.
-    const want = `topic:${ref.topicId}`;
-    let sawInstance = false;
-    for (const inst of instances.values()) {
-      if (inst.scopeId !== want) continue;
-      sawInstance = true;
-      if (inst.status === "working") return "working";
-    }
-    return sawInstance ? "idle" : "inactive";
   }
   // Room: any member working → working; else idle if any live instance else inactive
   let sawInstance = false;
@@ -456,7 +440,7 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
   const epoch=inputScopeEpoch.get(key)??0;
   let failed=false;
   const operation=trackMemberOperation(memberId,async()=>{
-    const scopeId=owner.scopeId.startsWith("dm:")||owner.scopeId.startsWith("topic:")?owner.scopeId:roomScopeId(owner.scopeId);
+    const scopeId=owner.scopeId.startsWith("dm:")?owner.scopeId:roomScopeId(owner.scopeId);
     const instance=await buildMemberAgentSession(memberId,scopeId);
     if(!instance){
       if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch){
@@ -558,12 +542,11 @@ function refreshProfileSources(instance: AgentInstance): void {
   const member = getMember(instance.memberId);
   if (!member) throw new Error(`Member no longer exists: ${instance.memberId}`);
   const ref = parseScopeId(instance.scopeId)!;
-  const parentId = ref.kind === "topic" ? resolveTopicRoomId(ref.topicId) : ref.kind === "room" ? ref.roomId : undefined;
+  const parentId = ref.kind === "room" ? ref.roomId : undefined;
   const room = parentId ? roomStore.getRoom(parentId) : null;
   const compiled = compileMemberPromptForScope({
     scopeId: instance.scopeId, memberId: member.id, memberName: member.name,
     room, docsRoot: join(getBossmodeDir(), "memory", "projects"),
-    ...(ref.kind === "topic" && parentId ? { topicTitle: getTopic(parentId, ref.topicId)?.title } : {}),
   });
   instance.agentName = member.name;
   instance.sessionSources.member.name = member.name;
@@ -1065,7 +1048,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         },
       };
       var runtime = runtime0;
-    } else if (ref.kind === "room") {
+    } else {
       // ── Room scope: roster member + global effective-config overlay ──
       const r = roomStore.getRoom(ref.roomId);
       if (!r) {
@@ -1157,110 +1140,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         },
       };
       var runtime = runtime1;
-    } else {
-      // ── Topic scope: parent-room roster (global fallback), topic title, seed/fork ──
-      // Topic scope ids carry no roomId — the parent comes from topic-store.
-      const { getTopic, saveTopic, resolveOwningRoomId } = await import("../workspace/topic-store.js");
-      const topicId = ref.topicId;
-      const parentRoomId = resolveOwningRoomId(scopeId);
-      const r = parentRoomId ? roomStore.getRoom(parentRoomId) : null;
-      if (!r) {
-        logger.error("agent", "topic parent room not found", { parentRoomId, topicId });
-        return null;
-      }
-      room = r;
-      let m = resolveRoomMember(parentRoomId, memberId);
-      if (!m) {
-        const cfg = memberRecordToConfig(memberId);
-        if (!cfg) {
-          logger.error("agent", "topic member not found", { memberId, topicId });
-          return null;
-        }
-        m = cfg;
-      }
-      member = m;
-      if (!isMemberConfigured(member)) {
-        logger.error("agent", "topic member unconfigured", { member: member.name, memberId, topicId });
-        return null;
-      }
-      var runtime2 = registry.get(member.runtime);
-      if (!runtime2) {
-        logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
-        return null;
-      }
-      const topicRec = getTopic(parentRoomId, topicId);
-      // Member+Communication byte-identical to room; Environment first line is topic-scoped.
-      compiled = compileMemberPromptForScope({
-        scopeId,
-        memberId,
-        memberName: member.name,
-        room: r,
-        docsRoot: docsRootPath,
-        topicTitle: topicRec?.title ?? null,
-      });
-      setContractFingerprint(scopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      clearStaleMounts(scopeId, memberId);
-      skills = resolveSkills(member);
-      cwd = activeWorkspaceRoot(memberId);
-      sessionDir = mainSessionDirectory(memberId, scopeId);
-      roomMembers = r.members;
-      keyRoomId = scopeId; // "topic:<id>" — postMessage routes to topic-store
-      logLabel = "topicAgentCreated";
-      errLabel = "topic";
-      const topicKey = key;
-      const topicMemberName = () => currentRuntimeName(memberId, member.name);
-      const topicScopeId = scopeId;
-
-      // Batch 2: prefix-fork the room session when seedMode=fork (degrades to fresh).
-      const { forkRoomSessionPrefix, getTopicSession, saveTopicSession } = await import("./topic-session-fork.js");
-      const existingTopicSession = getTopicSession(parentRoomId, topicId, memberId);
-      resumeSession = existingTopicSession?.sessionFile
-        ? { sessionId: existingTopicSession.sessionId, sessionFile: existingTopicSession.sessionFile }
-        : undefined;
-      if (!resumeSession && topicRec?.seedMode === "fork") {
-        const fork = forkRoomSessionPrefix({
-          parentRoomId,
-          topicId,
-          memberId,
-          cwd: r.cwd || process.cwd(),
-          seedMode: "fork",
-          // Must be the stored anchor excerpt — never the guide text (fish/architect 2026-08-18).
-          anchorExcerpt: topicRec.anchorExcerpt,
-        });
-        if (fork.mode === "fork" && fork.sessionFile) {
-          resumeSession = { sessionId: fork.sessionId, sessionFile: fork.sessionFile };
-          forkSessionManager = fork.sessionManager;
-          if (fork.prefixSummary && topicRec && !topicRec.guideText?.includes(fork.prefixSummary.slice(0, 40))) {
-            const { buildTopicGuideText } = await import("../workspace/topic-store.js");
-            topicRec.guideText = buildTopicGuideText({
-              title: topicRec.title,
-              roomName: r.name,
-              roomId: parentRoomId,
-              anchorExcerpt: "",
-              seedMode: "fork",
-              prefixSummary: fork.prefixSummary,
-            });
-            saveTopic(topicRec);
-          }
-        }
-      }
-      onSessionChanged = (session) => {
-        if (!canPublishSession()) return;
-        saveTopicSession(parentRoomId, topicId, memberId, {
-          sessionId: session.sessionId, sessionFile: session.sessionFile,
-        });
-      };
-      callbacks = {
-        onChat: async (message: string) => {
-          postMessage(topicScopeId, topicMemberName(), message, [], { senderMemberId: memberId });
-        },
-        onMention: async (target: string, message: string) => {
-          // Mentions inside a topic stay in the topic scope.
-          const targetMember = roomStore.resolveRoomMemberRef(parentRoomId, target);
-          postMessage(topicScopeId, topicMemberName(), message, [target], { senderMemberId: memberId, mentionMemberIds: targetMember ? [targetMember.id] : [] });
-        },
-      };
-      var runtime = runtime2;
     }
 
     try {
@@ -1319,7 +1198,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
           cwd,
           roomMembers: [...roomMembers],
           // EXACTLY the id createAgent binds tools with (bare room id for rooms;
-          // full scope id for dm/topic) — background children must receive the
+          // full scope id for dm) — background children must receive the
           // same binding format the live parent used, or scope-keyed tool
           // callbacks (create_task, queries…) misresolve.
           toolScopeId: keyRoomId,
@@ -1465,35 +1344,28 @@ function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,c
     else prompt="You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.";
     return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
   }
-  const topicId=scope.startsWith("topic:")?scope.slice(6):undefined;
-  const parent=topicId?resolveTopicRoomId(topicId):scope;
-  if(!parent)throw new Error("Topic parent not found");
+  const parent=scope;
   const room=roomStore.getRoom(parent);if(!room)throw new Error("Room not found");
-  const topic=topicId?getTopic(parent,topicId):undefined;
-  if(topicId&&(!topic||topic.status!=="active"))throw new Error("Topic is closed or missing");
   const member=resolveRoomMember(parent,memberId);if(!member)throw new Error("Member is not in the room");
-  const cursor=topicId?getTopicCursors(parent,topicId)[memberId]:roomStore.getCursors(parent)[memberId];
-  const all=topicId?getTopicMessagesSince(parent,topicId,cursor??null):getMessagesSince(parent,cursor??null);
+  const cursor=roomStore.getCursors(parent)[memberId];
+  const all=getMessagesSince(parent,cursor??null);
   const visible=filterAgentVisibleMessages(all,rec.name);
   const index=lastMentionTriggerIndex(visible,rec.name,memberId);
   const trigger=captured??visible[index>=0?index:visible.length-1];
-  if(!trigger&&!topic)return null;
+  if(!trigger)return null;
   let formatted=trigger?formatMessagesForAgent(scope,[trigger],rec.name,room.name):"";
-  if(topic){
-    formatted=[topic.guideText||buildTopicGuideText({title:topic.title,roomName:room.name,roomId:parent,anchorExcerpt:"",seedMode:topic.seedMode}),formatted].filter(Boolean).join("\n\n");
-  }else if(trigger){
+  if(trigger){
     const backlog=visible.filter(m=>m.id!==trigger.id&&(m.seq??0)<(trigger.seq??Number.MAX_SAFE_INTEGER)&&!isOwnMessage(m,memberId,rec.name));
     const limit=(member as any).contextLimit||50;
     const hint=buildUnreadBacklogHint(backlog.slice(-limit),backlog.length>limit?{total:backlog.length,fromSeq:(backlog[0].seq??1)-1}:undefined);
     if(hint)formatted=`${hint}\n\n${formatted}`;
   }
   return {payload:{prompt:[banner,formatted].filter(Boolean).join("\n\n"),source:"room_mention",trigger:"activate"},replyExpected,onAccepted:()=>{
-    if(topicId)addTopicParticipant(parent,topicId,memberId);
     if(trigger?.id){
-      const current=topicId?getTopicCursors(parent,topicId)[memberId]:roomStore.getCursors(parent)[memberId];
+      const current=roomStore.getCursors(parent)[memberId];
       const currentMessage=current?loadScopeMessages(scope).find(m=>m.id===current):undefined;
       if(!currentMessage||(currentMessage.seq??0)<=(trigger.seq??Number.MAX_SAFE_INTEGER)){
-        if(topicId)setTopicCursor(parent,topicId,memberId,trigger.id);else roomStore.setCursor(parent,memberId,trigger.id);
+        roomStore.setCursor(parent,memberId,trigger.id);
       }
     }
   }};
@@ -1509,8 +1381,7 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
   const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
   const scopeAllowed=memberHasScopeAccess(scope,memberId);
   const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
-  const notInTopic=scope.startsWith("topic:")&&urgent&&!active;
-  const skipped=unavailable||notInTopic||(broadcast&&busy);
+  const skipped=unavailable||(broadcast&&busy);
   let prepared:ReturnType<typeof prepareScopeInput>;
   const receipt=acceptRuntimeInput(ctx.capture,{scopeId:scope,messageId:ctx.capture.messageId,targetActorKey:memberId,deliveryKind:ctx.deliveryKind},()=>{
     if(skipped)return {prompt:"",source:"system",trigger:"not-dispatched"};
@@ -1519,9 +1390,8 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
     const payload={...prepared.payload};
     if(busy&&!active!.compacting)payload.prompt=`${urgent?`[INTERRUPTED] Your previous turn was aborted by an urgent message from ${ctx.senderName}. Verify partial work before continuing.`:INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
     return payload;
-  },{placement:urgent||(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:notInTopic?"not in topic":unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
+  },{placement:urgent||(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
   if(receipt.input.status!=="pending"){
-    if(receipt.accepted&&notInTopic&&scopeAllowed)postMessage(scope,"system",`Member "${getMember(memberId)?.name??memberId}" is not in this topic; urgent interruption was skipped.`);
     return;
   }
   if(receipt.accepted&&busy&&!active!.compacting){
@@ -1535,7 +1405,7 @@ async function activateControl(scope:string,memberId:string,ctx?:ReplyContext,ur
   if(!memberRuntimeAllowed(memberId))return;
   const prepared=prepareScopeInput(scope,memberId,ctx);
   if(!prepared){
-    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")||scope.startsWith("topic:")?scope:roomScopeId(scope)) as ScopeId);
+    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")?scope:roomScopeId(scope)) as ScopeId);
     return;
   }
   const active=instances.get(instanceKey(scope,memberId));
@@ -1667,7 +1537,7 @@ async function rollbackSwitchedInstances(
  * The ONE model switch method (design-model-switch-single-path-v1 §3, §10),
  * keyed by memberId: acquire the member lock synchronously → let already-
  * pending creations finish → validate the complete target binding → apply to
- * every live instance (room + DM + topic, idle and working) via the SDK's
+ * every live instance (room + DM, idle and working) via the SDK's
  * setModel(model, credentialId) → save the global config exactly once. Any
  * failure (an instance rejecting the switch, or the config save) rolls every
  * attempted instance back through the single rollback path above; the config
@@ -1820,13 +1690,6 @@ export function getRoomAgentStale(roomId: string): Record<string, { mounts?: { s
 
 // -- Member status report (member_status tool) --
 
-export interface MemberStatusTopicSlice {
-  topicId: string;
-  title: string;
-  status: AgentStatus;
-  lastActivity?: number;
-}
-
 export interface MemberStatusEntry {
   name: string;
   memberId: string;
@@ -1834,8 +1697,6 @@ export interface MemberStatusEntry {
   status: AgentStatus;
   /** Room-instance status in this room (inactive if none). */
   room: AgentStatus;
-  /** Live topic instances for this member whose parent is this room. */
-  topics: MemberStatusTopicSlice[];
   /** Live instances only: which scopes this member is active in, with per-scope status. */
   activeScopes: Array<{ scope: string; status: AgentStatus }>;
   /** Mount/contract stale markers for badges (auto-reload prompt). */
@@ -1856,7 +1717,6 @@ export function getRoomMemberStatusReport(roomId: string, memberRef?: string): M
   return members.map((m) => {
     const gid = (thisRoom ? roomStore.resolveGlobalMemberId(thisRoom, m) : null) || m.id;
     const activeScopes: Array<{ scope: string; status: AgentStatus }> = [];
-    const topics: MemberStatusTopicSlice[] = [];
     let roomStatus: AgentStatus = "inactive";
     let status: AgentStatus = "inactive";
     const bump = (st: AgentStatus) => {
@@ -1871,18 +1731,6 @@ export function getRoomMemberStatusReport(roomId: string, memberRef?: string): M
         bump(inst.status);
         continue;
       }
-      if (inst.scopeId.startsWith("topic:")) {
-        const topicId = inst.scopeId.slice("topic:".length);
-        const parent = resolveTopicRoomId(topicId);
-        if (parent !== roomId) continue;
-        const match = inst.memberId === m.id || inst.memberId === gid || inst.agentName === m.name;
-        if (!match) continue;
-        const rec = getTopic(parent, topicId);
-        topics.push({ topicId, title: rec?.title || topicId, status: inst.status });
-        activeScopes.push({ scope: `topic: ${rec?.title || topicId}`, status: inst.status });
-        bump(inst.status);
-        continue;
-      }
       const r = roomStore.getRoom(inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId);
       if (!r) continue;
       const local = roomStore.getRoomMembers(r.id).find((rm) => rm.id === inst.memberId || rm.name === inst.agentName);
@@ -1893,7 +1741,7 @@ export function getRoomMemberStatusReport(roomId: string, memberRef?: string): M
       if (r.id === roomId) roomStatus = inst.status === "working" ? "working" : (roomStatus === "working" ? "working" : inst.status);
       bump(inst.status);
     }
-    return { name: m.name, memberId: m.id, status, room: roomStatus, topics, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
+    return { name: m.name, memberId: m.id, status, room: roomStatus, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
   });
 }
 
@@ -2078,9 +1926,9 @@ function emitAgentLocalEvent(
   event: AgentHistoryEvent,
   identity?: { memberId: string; agentName: string },
 ): void {
-  const scopedMember = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? getMember(memberRef) : null;
+  const scopedMember = roomId.startsWith("dm:") ? getMember(memberRef) : null;
   const member = identity ? undefined : scopedMember ?? roomStore.resolveRoomMemberRef(roomId, memberRef);
-  // Prefer live instance identity, then the global member record for DM/topic.
+  // Prefer live instance identity, then the global member record for DM.
   const keyHint = instanceKey(roomId, member?.id || memberRef);
   const instance = instances.get(keyHint)
     || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
@@ -2095,7 +1943,7 @@ function emitAgentLocalEvent(
 // -- Manual compaction (conversation action) --
 
 /** Manual compaction as ONE explicit conversation action (steer-removal §2):
- * room, DM and topic all address the live instance by its real scopeId — no
+ * room and DM address the live instance by its real scopeId — no
  * more room-path shortcuts. The operation marks the lifecycle busy BEFORE the
  * first await, so ordinary and urgent messages queue (they never cancel it);
  * explicit Stop stays the one canceller, including in the window between the
@@ -2215,10 +2063,6 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
  * never see system notices per the rc.5 filter).
  */
 export async function interruptAgent(roomId:string,memberRef:string,urgentByName:string,ctx?:ReplyContext):Promise<{ok:boolean;action:string}>{
-  if(roomId.startsWith("topic:")){
-    const parent=resolveTopicRoomId(roomId.slice(6));if(!parent)return {ok:false,action:"not_in_topic"};
-    return interruptTopicMember(parent,roomId.slice(6),memberRef,urgentByName,ctx);
-  }
   const member=resolveRoomMember(roomId,memberRef);if(!member)return {ok:false,action:"not_found"};
   const active=instances.get(instanceKey(roomId,member.id));
   const action=active?.compacting?"queued_front":active?.status==="working"?"interrupted":"activated";
@@ -2307,7 +2151,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
 }
 
 export function resetAgentSession(roomId: string, memberRef: string): { ok: true; message: string } {
-  const scopeId = roomId.startsWith("dm:") || roomId.startsWith("topic:") ? roomId : `room:${roomId}`;
+  const scopeId = roomId.startsWith("dm:") ? roomId : `room:${roomId}`;
   const ref = parseScopeId(scopeId);
   const resolved = ref?.kind === "room" ? resolveRoomMember(ref.roomId, memberRef) : undefined;
   const memberId = resolved?.id || memberRef;
@@ -2360,28 +2204,6 @@ export function destroyInstance(roomId: string, memberRef: string,options:{prese
 
 export function getActiveInstanceCount(): number {
   return instances.size;
-}
-
-/** Tear down every live instance for a topic after End topic (plan §2.1). */
-export function destroyTopicInstances(topicId: string): number {
-  for(const key of inputPumps.keys())if(key.startsWith(`topic:${topicId}:`))invalidateInputScope(key);
-  for(const row of getDatabase().all<{target:string}>("SELECT DISTINCT target_actor_key target FROM queued_inputs WHERE scope_id=? AND status='pending'",`topic:${topicId}`))cancelPendingRuntimeInputs(runtimeInputOwner(`topic:${topicId}`,row.target),"topic closed");
-  const prefix = `topic:${topicId}:`;
-  for(const key of sessionPublishOwners.keys())if(key.startsWith(prefix))sessionPublishOwners.delete(key);
-  for (const key of pendingCreations.keys()) if (key.startsWith(prefix)) cancelledCreations.add(key);
-  let n = 0;
-  for (const [key, instance] of [...instances.entries()]) {
-    if (!key.startsWith(prefix) && instance.scopeId !== `topic:${topicId}`) continue;
-    try { requestInstanceStop(instance); } catch (error) { logger.error("agent","topic stop failed",{error:String(error)}); }
-    try { instance.handle.destroy(); } catch { /* ignore */ }
-    try { instance.unsubscribe(); } catch { /* ignore */ }
-    instances.delete(key);
-    contextUsageCache.delete(key);
-    contextCompactionWarningCache.delete(key);
-    n += 1;
-  }
-  logger.info("agent", "topic instances destroyed", { topicId, count: n });
-  return n;
 }
 
 // -- DM activation (0.20, no @ required) -------------------------------------
@@ -2567,67 +2389,12 @@ function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:st
   updateDispatchState(instance,"aborting",trigger);
 }
 
-function topicInstanceKey(topicId: string, memberId: string): string {
-  return scopeInstanceKey(scopeIdOf({ kind: "topic", topicId, roomId: "" }), memberId);
-}
 
-async function getOrCreateTopic(parentRoomId: string, topicId: string, memberId: string): Promise<AgentInstance | null> {
-  const room = roomStore.getRoom(parentRoomId);
-  if (!room) {
-    logger.error("agent", "topic parent room not found", { parentRoomId, topicId });
-    return null;
-  }
-  return buildMemberAgentSession(memberId, scopeIdOf({ kind: "topic", topicId, roomId: parentRoomId }));
-}
-
-/**
- * Activate a room member inside a topic (batch 1: fresh seed + guide message).
- * Does not touch the parent room instance.
- */
-export async function activateTopicMember(parentRoomId:string,topicId:string,memberRef:string,ctx?:ReplyContext):Promise<void>{
-  const member=resolveRoomMember(parentRoomId,memberRef);if(!member)return;
-  return activateControl(`topic:${topicId}`,member.id,ctx);
-}
-
-/** Abort a live topic instance only. No topic instance → error, never touch the room instance. */
-async function interruptTopicMember(parentRoomId: string, topicId: string, memberRef: string, urgentByName: string, ctx?:ReplyContext): Promise<{ ok: boolean; action: string }> {
-  const roomMember = resolveRoomMember(parentRoomId, memberRef);
-  const memberId = roomMember?.id || memberRef;
-  const memberName = roomMember?.name || memberRef;
-  const key = topicInstanceKey(topicId, memberId);
-  const instance = instances.get(key);
-  if (!instance) {
-    postMessage(`topic:${topicId}`, "system", `Member "${memberName}" is not in this topic.`);
-    logger.info("agent", "urgentInterruptNotInTopic", { member: memberName, memberId, topicId, urgentBy: urgentByName });
-    return { ok: false, action: "not_in_topic" };
-  }
-  if (instance.compacting) {
-    await activateTopicMember(parentRoomId, topicId, memberRef, ctx);
-    return { ok: true, action: "queued" };
-  }
-  if (instance.status === "working") {
-    try { settleWaitOnAbort(`topic:${topicId}`, memberId); } catch { /* ignore */ }
-    try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
-    try { settleBackgroundWaits(memberId); } catch { /* ignore */ }
-    try { instance.handle.abort({ preserveCompaction: true }); } catch { /* ignore */ }
-    updateDispatchState(instance, "aborting", "urgent_interrupt");
-    postMessage(`topic:${topicId}`, "system", `Member "${memberName}"'s current turn was aborted by an urgent message from ${urgentByName}.`);
-    logger.info("agent", "urgentInterruptAbort", { member: memberName, memberId, roomId: `topic:${topicId}`, urgentBy: urgentByName });
-  }
-  await activateTopicMember(parentRoomId, topicId, memberRef, ctx);
-  return { ok: true, action: instance.status === "working" ? "interrupted" : "activated" };
-}
-
-/** Single mention-router wiring for production server + acceptance tests (no topic: leak into room getOrCreate). */
+/** Single mention-router wiring for production server + acceptance tests (canonical room:/dm: scopes only). */
 export function wireMentionRouter():()=>void{
   return initRouter({mention:admitCapturedActivation,urgent:admitCapturedActivation});
 }
 
-function resolveTopicParent(topicId: string): string | null {
-  const parent = resolveTopicRoomId(topicId);
-  if (!parent) logger.error("router", "topic parent room not found", { topicId });
-  return parent;
-}
 
 function requestInstanceStop(instance: AgentInstance,preservePending=false): void {
   const failures: unknown[] = [];

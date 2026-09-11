@@ -15,6 +15,8 @@ CREATE TABLE storage_upgrade_files (
   retire INTEGER NOT NULL CHECK (retire IN (0,1)),
   retired_at INTEGER
 );
+-- 'topic' scopes are retired (fish #19358): the kind stays in the CHECK so legacy rows remain
+-- valid until the core-topic-retirement-v1 cleanup deletes them; no runtime path creates new ones.
 CREATE TABLE scopes (
   id TEXT NOT NULL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('room', 'dm', 'topic')),

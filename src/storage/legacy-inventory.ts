@@ -81,6 +81,8 @@ const tokens: Record<string, RegExp> = {
 const rules: Rule[] = [];
 function rule(pattern: string, describe: Rule["describe"]): void { rules.push({ parts: pattern.split("/"), describe }); }
 function description(kind: LegacyKind, format: LegacyFormat = "json", retire = true): Description { return { kind, format, retire }; }
+// Topic paths/dirs remain identifiable here so importers can consume them via the
+// source-retire flow; topic sources are never imported (fish #19358).
 function scope(p: Params): string { return p.topic ? `topic:${p.topic}` : p.room; }
 function memberScope(p: Params): string {
   return p.scope === "dm" ? `dm:${p.member}` : p.scope.startsWith("room-") ? p.scope.slice(5) : `topic:${p.scope.slice(6)}`;
@@ -112,6 +114,7 @@ rule("agents/:template", p => ({ ...description("agent-template-mixed", "text"),
 rule("rooms/:room/room.json", p => ({ ...description("room-metadata"), scopeId: scope(p) }));
 rule("rooms/:room/tasks.json", p => ({ ...description("tasks"), scopeId: scope(p) }));
 rule("rooms/:room/runtime-state.json", p => ({ ...description("runtime-state"), scopeId: scope(p) }));
+// Retired topic layout (fish #19358): recognized and consumed, never imported.
 rule("rooms/:room/topics/:topic/topic.json", p => ({ ...description("topic-metadata"), scopeId: scope(p) }));
 for (const base of ["rooms/:room", "rooms/:room/topics/:topic"]) {
   for (const [file, kind, format] of [

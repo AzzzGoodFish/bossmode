@@ -16,9 +16,6 @@ import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
 
 import { Main } from "./Main";
-import { TopicPage } from "./TopicPage";
-import { createTopic } from "../api/client";
-import { useDialog } from "../components/dialogs";
 import { MemberFloatProvider } from "../components/member-float";
 import { SettingsPage } from "./SettingsPage";
 import { useWebSocket, type WsEvent } from "../hooks/useWebSocket";
@@ -51,10 +48,7 @@ export function patchRoomAgentStatus(rooms: Room[], roomId: string, agent: strin
 }
 
 export function Layout({ onLogout, username }: LayoutProps) {
-  const { toast } = useDialog();
   const [activePage, setActivePage] = useState<ActivePage>({ type: "chats" });
-  /** Cross-page jump target: topic anchor block → room stream message (topic-threads v2). */
-  const [pendingJump, setPendingJump] = useState<{ roomId: string; messageId: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   // Live member status keyed `scopeId:memberName` — feeds the member float's
   // header so it shows the same live state as the peek card (fish 2026-09-03:
@@ -310,57 +304,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            onOpenTopicPage={(roomId, topicId) => handleNavigate({ type: "topic", roomId, topicId })}
-            onOpenTopicDraft={(roomId, anchor) => handleNavigate({ type: "topic-draft", roomId, anchorMessageId: anchor.anchorMessageId, anchorSeq: anchor.anchorSeq, anchorTitle: anchor.title, anchorExcerpt: anchor.excerpt })}
-            pendingJump={pendingJump}
-            onConsumeJump={() => setPendingJump(null)}
-          />
-        )}
-
-        {/* Topic workspace (topic-threads v2): room-form page, back returns to the room */}
-        {activePage?.type === "topic" && (
-          <TopicPage
-            roomId={activePage.roomId}
-            topicId={activePage.topicId}
-            onBack={() => handleNavigate({ type: "room", id: activePage.roomId })}
-            onOpenTopic={(topicId) => handleNavigate({ type: "topic", roomId: activePage.roomId, topicId })}
-            onJumpToRoomMessage={(messageId) => {
-              setPendingJump({ roomId: activePage.roomId, messageId });
-              handleNavigate({ type: "room", id: activePage.roomId });
-            }}
-          />
-        )}
-
-        {/* Topic draft (v3): unsent workspace — the first message creates the topic */}
-        {activePage?.type === "topic-draft" && (
-          <TopicPage
-            roomId={activePage.roomId}
-            topicId={null}
-            draft={{
-              anchorMessageId: activePage.anchorMessageId,
-              anchorSeq: activePage.anchorSeq,
-              title: activePage.anchorTitle,
-              excerpt: activePage.anchorExcerpt,
-            }}
-            onCreateDraft={async (content, attachments) => {
-              const page = activePageRef.current;
-              if (page?.type !== "topic-draft") return;
-              const res = await createTopic(page.roomId, {
-                anchorMessageId: page.anchorMessageId,
-                content,
-                title: page.anchorTitle,
-                ...(attachments?.length ? { attachments } : {}),
-              }).catch((e) => {
-                toast(e instanceof Error ? e.message : "Failed to create topic", "error");
-                throw e;
-              });
-              handleNavigate({ type: "topic", roomId: page.roomId, topicId: res.topic.id });
-            }}
-            onBack={() => handleNavigate({ type: "room", id: activePage.roomId })}
-            onJumpToRoomMessage={(messageId) => {
-              setPendingJump({ roomId: activePage.roomId, messageId });
-              handleNavigate({ type: "room", id: activePage.roomId });
-            }}
           />
         )}
 

@@ -3,22 +3,15 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { conversationsFixture } from "./core-conversations-fixture.js";
 import type { Room, Task } from "../../src/shared/types.js";
-import type { TopicRecord } from "../../src/workspace/topic-store.js";
 import { getRoom, listRooms, getRoomMembersFromRoom, stampGlobalMemberIds, resolveGlobalMemberId, removeRoomMemberByRef,
   getCursors, setCursor, deleteCursor, inviteGlobalMember, updateRoomName, updateRoomPromptLeader, updateRoomDocsPath, updateRoomRuleDocs,
   updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom, roomDir } from "../../src/workspace/room-store.js";
-import { getTopic, saveTopic, listTopics, resolveTopicRoomId, getTopicById, createTopic, addTopicParticipant,
-  resolveOwningRoomId, resolveChatScopeRoomId } from "../../src/workspace/topic-store.js";
+import { chatScopeRoomId } from "../../src/shared/conversation-ref.js";
 import { ensureDmScope } from "../../src/storage/repositories/conversations.js";
 
 let f: ReturnType<typeof conversationsFixture>;
 beforeEach(() => { f = conversationsFixture(); });
 afterEach(() => { f.close(); });
-const topic = (roomId: string): TopicRecord => ({
-  id: "topic_original", roomId, title: "历史 日本語 👩🏽‍💻", anchorMessageId: "msg-anchor", anchorSeq: 0,
-  createdBy: "旧名字", status: "closed", createdAt: 0, closedAt: 2, seedMode: "fork", summary: "",
-  brief: "保留\n空白  ", guideText: "guide", anchorExcerpt: " exact  source ", participants: ["mem_deleted", "unresolved-name"],
-});
 
 describe("normalized conversation authority", () => {
   it("imports modern empty rosters without resurrecting historical shadows or discovering files", () => {
@@ -67,32 +60,19 @@ describe("normalized conversation authority", () => {
     expect(f.repository().getRoom(room.id)!.roomMembers![0].name).toBe("旧名字");
   });
 
-  it("persists canonical scope ownership, explicit DMs, topics and participant source references", () => {
+  it("persists canonical scope ownership and explicit DMs", () => {
     const room = f.room();
-    const t = topic(room.id);
-    saveTopic(t);
     expect(ensureDmScope("mem_original")).toBe("dm:mem_original");
     expect(ensureDmScope("mem_original")).toBe("dm:mem_original");
     expect(f.db.all("SELECT id,kind,room_id,member_id FROM scopes ORDER BY id")).toEqual([
       { id: "dm:mem_original", kind: "dm", room_id: null, member_id: "mem_original" },
       { id: room.id, kind: "room", room_id: room.id, member_id: null },
-      { id: `topic:${t.id}`, kind: "topic", room_id: room.id, member_id: null },
     ]);
-    expect(getTopic(room.id, t.id)).toEqual(t);
-    expect(getTopic("wrong-room", t.id)).toBeNull();
-    expect(getTopicById(t.id)).toEqual(t);
-    expect(resolveTopicRoomId(t.id)).toBe(room.id);
-    expect(resolveOwningRoomId(`topic:${t.id}`)).toBe(room.id);
-    expect(resolveChatScopeRoomId("dm:mem_original")).toBeNull();
-    expect(listTopics(room.id, { status: "active" })).toEqual([]);
+    expect(chatScopeRoomId("dm:mem_original")).toBeNull();
     f.reopen();
-    expect(getTopicById(t.id)).toEqual(t);
-    expect(() => saveTopic({ ...t, roomId: f.room("other-room").id })).toThrow("ownership cannot change");
-    expect(getTopicById(t.id)).toEqual(t);
-    expect(() => saveTopic({ ...t, id: "orphan", roomId: "missing" })).toThrow();
-    expect(f.db.get("SELECT * FROM scopes WHERE id='topic:orphan'")).toBeUndefined();
+    expect(f.repository().getRoom(room.id)).not.toBeNull();
     expect(() => ensureDmScope("")).toThrow();
-    expect(() => f.repository().upsertRoom({ ...room, id: `topic:${t.id}` })).toThrow();
+    expect(() => f.repository().upsertRoom({ ...room, id: "room:not-bare" })).toThrow();
   });
 
   it("creates and edits room metadata without JSON authority or stale path discovery", () => {
@@ -187,15 +167,6 @@ describe("normalized conversation authority", () => {
     expect(f.db.all("SELECT * FROM rooms")).toEqual([]);
   });
 
-  it("rejects a direct SQL NULL topic key even with valid scope and room foreign keys", () => {
-    const room = f.room();
-    f.db.run("INSERT INTO scopes(id,kind,room_id) VALUES ('topic:null-key','topic',?)", room.id);
-    expect(() => f.db.run(`INSERT INTO topics(id,scope_id,room_id,title,anchor_message_id,created_by,status,created_at,seed_mode)
-      VALUES (NULL,'topic:null-key',?,'invalid','anchor','user','active',0,'fresh')`, room.id))
-      .toThrow(/NOT NULL constraint failed: topics.id/);
-    expect(f.db.all("SELECT * FROM topics")).toEqual([]);
-  });
-
   it("rolls back membership and cursor changes together when a cursor write fails", () => {
     const room = f.room();
     f.member("mem_a", "Alice");
@@ -210,26 +181,17 @@ describe("normalized conversation authority", () => {
     expect(getCursors(room.id)).toEqual({ mem_a: null });
   });
 
-  it("creates topics and deduplicates participants without touching message/cursor functions", () => {
-    const room = f.room();
-    const t = createTopic({ roomId: room.id, title: " Topic ", anchorMessageId: "original-anchor", brief: " Scope " });
-    addTopicParticipant(room.id, t.id, "mem_unknown");
-    addTopicParticipant(room.id, t.id, "mem_unknown");
-    expect(getTopicById(t.id)).toMatchObject({ title: "Topic", brief: "Scope", participants: ["mem_unknown"] });
-  });
-
-  it("deletes owned room/topic relations, but never member identities or another DM", () => {
+  it("deletes owned room relations, but never member identities or another DM", () => {
     const room = f.room();
     const other = f.room("other");
     f.member("mem_a", "alive");
     ensureDmScope("mem_a");
-    f.repository().upsertTopic(topic(room.id));
-    f.repository().setCursor(`topic:${topic(room.id).id}`, "mem_a", null);
+    f.repository().setCursor(room.id, "mem_a", null);
+    f.repository().setCursor("dm:mem_a", "mem_a", null);
     expect(deleteRoom(room.id)).toBe(true);
     expect(deleteRoom(room.id)).toBe(false);
-    for (const table of ["topics", "topic_participants", "read_cursors"]) {
-      expect(f.db.get<{ n: number }>(`SELECT COUNT(*) n FROM ${table}`)!.n).toBe(0);
-    }
+    expect(f.db.get<{ n: number }>("SELECT COUNT(*) n FROM read_cursors WHERE scope_id=?", room.id)!.n).toBe(0);
+    expect(f.db.get<{ n: number }>("SELECT COUNT(*) n FROM read_cursors WHERE scope_id='dm:mem_a'")!.n).toBe(1);
     // Task tables are retired and gone from the schema entirely.
     for (const table of ["tasks", "task_comments", "task_references", "task_subscribers"]) {
       expect(f.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", table)).toBeUndefined();

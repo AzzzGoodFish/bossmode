@@ -23,7 +23,7 @@ import { resolvePiSystemPromptSources } from "./runtime/pi-sdk.js";
 import type { AgentMemberConfig } from "../shared/types.js";
 
 export interface FinalMemberSystemPromptArgs {
-  /** Scope-shaped id exactly as the runtime passes it (room:<id> / topic:<id> / dm:<memberId>). */
+  /** Scope-shaped id exactly as the runtime passes it (room:<id> / dm:<memberId>). */
   scopeId: string;
   /** Session cwd exactly as the runtime passes it (room cwd / process.cwd() for DM). */
   cwd: string;

@@ -39,8 +39,7 @@ export class SessionRepository {
     }
     if (file !== undefined && a.referenceKind === "member-relative") {
       const parts = file.split("/");
-      const archiveScope = scope.startsWith("dm:") ? "dm"
-        : scope.startsWith("topic:") ? `topics/${scope.slice(6)}` : `rooms/${scope}`;
+      const archiveScope = scope.startsWith("dm:") ? "dm" : `rooms/${scope}`;
       if (parts[0] !== "sessions" || !/^\d{4}-\d{2}-\d{2}$/.test(parts[1] ?? "") ||
         parts.slice(2, -1).join("/") !== archiveScope || !/^[^/]+\.jsonl$/.test(parts.at(-1) ?? "")) {
         throw new Error("Session file reference does not match its owned scope archive");
