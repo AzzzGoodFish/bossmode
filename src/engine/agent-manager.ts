@@ -33,7 +33,7 @@ import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
-import { deliverMemberMessage, loadScopeMessages } from "./tools.js";
+import { loadScopeMessages } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
 import {
@@ -216,13 +216,6 @@ interface AgentInstance {
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
-  /** Final-text fallback: per-turn completed text segments. `turnSegmentSeq`
-   * increments per completed message_end; `lastCompletedFinalText`/Seq hold the
-   * last completed segment — the fallback candidate when a debt turn ends
-   * without a chat call. Both reset on agent_start. */
-  turnSegmentSeq: number;
-  lastCompletedFinalText: string;
-  lastCompletedFinalSeq: number;
   /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
   compacting: boolean;
   /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
@@ -529,11 +522,10 @@ function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],tr
   }
   const owner=runtimeInputOwner(instance.scopeId,instance.memberId);
   if(!skipChatWarning&&!instance.hadErrorInTurn&&hasRuntimeReply(owner,inputs)){
-    if(instance.lastCompletedFinalText)deliverMemberMessage(instance.roomId,instance.memberId,instance.lastCompletedFinalText,{autoDelivered:true});
-    if(hasRuntimeReply(owner,inputs)){
-      dismissRuntimeReplies(inputs,"silent","member finished without replying");
-      postMessage(instance.roomId,"system",`Member "${instance.agentName}" finished without replying.`);
-    }
+    // A reply was owed but the turn ended without a chat call: nothing is
+    // delivered — the debt is dismissed and the silence is made visible.
+    dismissRuntimeReplies(inputs,"silent","member finished without replying");
+    postMessage(instance.roomId,"system",`Member "${instance.agentName}" finished without replying.`);
   }
 }
 
@@ -1313,9 +1305,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         lastMessageEndWasLength: false,
         lengthContinuationPending: false,
         lengthContinuationAttempted: false,
-        turnSegmentSeq: 0,
-        lastCompletedFinalText: "",
-        lastCompletedFinalSeq: 0,
         compacting: false,
         turnActive: false,
         sessionSources: {
@@ -2437,11 +2426,6 @@ function wireInstanceEvents(
     const memberName = instance.agentName;
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
     if (event.type === "agent_start") {
-      // Fresh turn: reset final-text segment tracking so each turn is numbered independently.
-      // Note: pi session retries also emit agent_start; segment reset is intentional per attempt.
-      instance.turnSegmentSeq = 0;
-      instance.lastCompletedFinalText = "";
-      instance.lastCompletedFinalSeq = 0;
       instance.turnActive = true;
       if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
       if(instance.dispatchState!=="aborting")updateDispatchState(instance, "running", event.type);
@@ -2524,19 +2508,6 @@ function wireInstanceEvents(
       if (instance.lastMessageEndWasLength) {
         instance.lengthContinuationPending = true;
         logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
-      }
-      // Final-text capture: only *completed* segments are fallback candidates —
-      // length truncation, provider errors and aborts never are (their text is
-      // a broken fragment, not a reply). The final settlement posts the last
-      // completed segment only when the reply debt is still pending.
-      const aborted = event.stopReason === "aborted" || event.stopReason === "error" || Boolean((event as any).errorMessage);
-      if (!instance.lastMessageEndWasLength && !aborted) {
-        const text = (event.text || "").trim();
-        if (text) {
-          instance.turnSegmentSeq += 1;
-          instance.lastCompletedFinalText = text;
-          instance.lastCompletedFinalSeq = instance.turnSegmentSeq;
-        }
       }
     }
 

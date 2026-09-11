@@ -19,7 +19,7 @@ export let mockAbortFn = vi.fn();
 export let mockIsWorking = false;
 
 // Live mock handles — acceptance tests emit stream events (message_end/tool_end)
-// from inside mockPromptFn via emitMockEvent to exercise final-text fallback.
+// from inside mockPromptFn via emitMockEvent to exercise turn settlement.
 const liveHandles: MockAgentHandle[] = [];
 
 export function emitMockEvent(event: AgentStreamEvent): void {

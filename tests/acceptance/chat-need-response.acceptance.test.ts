@@ -1,4 +1,4 @@
-/** Chat surface, retained internal reply obligations and final-text fallback. */
+/** Chat surface and reply-debt silence (final-text fallback retired 2026-09-11). */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
@@ -6,7 +6,7 @@ import { mockPromptFn, resetMocks, setMockPromptFn, emitMockEvent } from "../hel
 
 setupTestWorkspace();
 
-describe("Acceptance: chat tool and final-text fallback", () => {
+describe("Acceptance: chat tool and reply-debt silence", () => {
   let ts: TestServer;
   let token: string;
 
@@ -40,7 +40,7 @@ describe("Acceptance: chat tool and final-text fallback", () => {
     return JSON.parse(res.body);
   }
 
-  it("① user @ → member writes only bare text → room still receives it (autoDelivered fallback)", async () => {
+  it("① user @ → member writes only bare text → room does NOT receive it; silence note fires (fallback retired)", async () => {
     const room = await createRoomWithMembers("ftd-user-bare", ["pm"]);
     const prompts: string[] = [];
     setMockPromptFn(async (msg: string) => {
@@ -50,18 +50,18 @@ describe("Acceptance: chat tool and final-text fallback", () => {
 
     await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "@pm status?" } });
 
-    await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "pm"));
+    await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying")));
     const messages = await roomMessages(room.id);
-    const pmMsg = messages.find((m: any) => m.sender === "pm");
-    expect(pmMsg.content).toBe("bare text reply to the user");
-    expect(pmMsg.autoDelivered).toBe(true);
+    // The bare text was never delivered.
+    expect(messages.some((m: any) => m.sender === "pm")).toBe(false);
+    expect(messages.some((m: any) => String(m.content).includes("bare text reply"))).toBe(false);
     // The user @ activation carried the REPLY EXPECTED banner.
     expect(prompts[0]).toContain("[REPLY EXPECTED] Respond using the chat tool.");
-    // No silence note — the fallback delivered.
-    expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(false);
+    // The silence is made visible.
+    expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(true);
   });
 
-  it("② captured member reply debt keeps the sender banner and bare-text fallback", async () => {
+  it("② captured member reply debt keeps the sender banner; bare text is not delivered and the note fires", async () => {
     const room = await createRoomWithMembers("ftd-need-response", ["pm", "qa"]);
     const prompts: string[] = [];
     setMockPromptFn(async (msg: string) => {
@@ -72,17 +72,16 @@ describe("Acceptance: chat tool and final-text fallback", () => {
     const { postMessage } = await import("../../src/communication/message-bus.js");
     postMessage(room.id, "pm", "@qa verify the fallback", ["qa"], { senderMemberId: room.globalMemberIds![0], mentionMemberIds: [room.globalMemberIds![1]], needResponse: ["qa"], needResponseMemberIds: [room.globalMemberIds![1]] });
 
-    await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "qa"));
+    await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying")));
     const messages = await roomMessages(room.id);
     // pm's chat message carries needResponse.
     const pmMsg = messages.find((m: any) => m.sender === "pm");
     expect(pmMsg.needResponse).toEqual(["qa"]);
     // qa's activation payload has the sender-named banner.
     expect(prompts.some((p) => p.includes("[REPLY EXPECTED] pm expects your reply — respond with the chat tool."))).toBe(true);
-    // qa never called chat → bare text fallback-posted.
-    const qaMsg = messages.find((m: any) => m.sender === "qa");
-    expect(qaMsg.content).toBe("qa bare reply under expectation");
-    expect(qaMsg.autoDelivered).toBe(true);
+    // qa never called chat → bare text is not delivered; only the silence note appears.
+    expect(messages.some((m: any) => m.sender === "qa")).toBe(false);
+    expect(messages.some((m: any) => String(m.content).includes("qa bare reply"))).toBe(false);
   });
 
   it("③ member chat activates FYI: no banner, no fallback, no warning", async () => {
@@ -126,7 +125,7 @@ describe("Acceptance: chat tool and final-text fallback", () => {
     expect(await handleToolCallback("chat", room.id, "pm", { message: "plain post" })).toEqual({ ok: true });
   });
 
-  it("⑤ DM same rule: user DM message expects a reply → bare text fallback-delivered into the DM", async () => {
+  it("⑤ DM same rule: user DM message expects a reply → bare text is not delivered; silence note lands in the DM", async () => {
     const memberRes = await jsonRequest(ts.port, "POST", "/api/members", { token, body: { name: "architect", model: MOCK_MEMBER_MODEL, credentialId: MOCK_MEMBER_CREDENTIAL_ID } });
     const memberId = JSON.parse(memberRes.body).member.memberId;
 
@@ -136,11 +135,14 @@ describe("Acceptance: chat tool and final-text fallback", () => {
 
     await jsonRequest(ts.port, "POST", `/api/dm/${memberId}/messages`, { token, body: { text: "hello in private" } });
 
+    await waitFor(async () => {
+      const res = await jsonRequest(ts.port, "GET", `/api/dm/${memberId}/messages`, { token });
+      const msgs = JSON.parse(res.body).messages;
+      return msgs.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"));
+    });
     const dmRes = await jsonRequest(ts.port, "GET", `/api/dm/${memberId}/messages`, { token });
     const dmMessages = JSON.parse(dmRes.body).messages;
-    const memberMsg = dmMessages.find((m: any) => m.sender !== "user" && m.sender !== "system");
-    expect(memberMsg).toBeTruthy();
-    expect(memberMsg.content).toBe("dm bare reply");
-    expect(memberMsg.autoDelivered).toBe(true);
+    expect(dmMessages.some((m: any) => m.content === "dm bare reply")).toBe(false);
+    expect(dmMessages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(true);
   });
 });

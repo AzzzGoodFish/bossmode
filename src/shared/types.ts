@@ -479,8 +479,6 @@ export interface RoomMessage {
   needResponse?: string[];
   /** Stable reply-obligation targets, captured when the message is sent. */
   needResponseMemberIds?: string[];
-  /** Message was auto-posted by the final-text fallback (debt turn ended without a chat call). */
-  autoDelivered?: boolean;
   /**
    * Retained reference to another message in the same scope.
    * seq for display/jump; messageId is the stable anchor.

@@ -70,32 +70,11 @@ it("capture failure rolls back message, sequence and outbox with no callback",as
   expect(fixture.db.get("SELECT 1 FROM outbox")).toBeUndefined();expect(fixture.db.get("SELECT 1 FROM scope_sequences")).toBeUndefined();
 });
 
-it("fallback text uses the stable sender, parses exact mentions once, and treats plain names as literal text",async()=>{
-  const {deliverMemberMessage}=await import("../../src/engine/tools.js");const mention=vi.fn();stops.push(initRouter({mention}));
-  members.update({...members.get("mem_a")!,name:"mem_b"});members.update({...members.get("mem_c")!,name:"Alpha"});
-  const room=rooms.getRoom("capture-room")!;room.globalMemberIds=["mem_a","mem_b","mem_c"];rooms.upsertRoom(room);
-  deliverMemberMessage("capture-room","mem_a","@Beta @Alpha sync",{autoDelivered:true});
-  deliverMemberMessage("capture-room","mem_a","Beta and Alpha are plain references");
-  deliverMemberMessage("capture-room","mem_a","@mem_b self ping");
-  await flush();expect(mention.mock.calls.map(call=>call[1])).toEqual(["mem_b","mem_c"]);
-  const messages=readMessages("capture-room");expect(messages[0]).toMatchObject({sender:"mem_b",senderMemberId:"mem_a",mentions:["Beta","Alpha"],mentionMemberIds:["mem_b","mem_c"],autoDelivered:true});
-  expect(messages[1].mentionMemberIds).toEqual([]);
-  deliverMemberMessage("capture-room","mem_b","@mem_b back to you");await flush();expect(mention.mock.calls.at(-1)![1]).toBe("mem_a");
-});
-
-it("fallback DM replies preserve the UI payload and owner, and cannot post to another member's DM",async()=>{
-  const {deliverMemberMessage}=await import("../../src/engine/tools.js");const mention=vi.fn();stops.push(initRouter({mention}));
-  deliverMemberMessage("dm:mem_a","mem_a","hello dm");await flush();
-  const [message]=readMessages("dm:mem_a");expect(message).toMatchObject({sender:"Alpha",senderMemberId:"mem_a",content:"hello dm",id:expect.any(String),ts:expect.any(Number)});
-  expect(transport.broadcast).toHaveBeenCalledWith("dm:mem_a",{type:"room:message",roomId:"dm:mem_a",message});expect(mention).not.toHaveBeenCalled();
-  expect(()=>deliverMemberMessage("dm:mem_b","mem_a","wrong owner")).toThrow("does not own");expect(readMessages("dm:mem_b")).toEqual([]);
-});
-
-it("a retained scope without an active room cannot recover routing targets from names",async()=>{
-  const {deliverMemberMessage}=await import("../../src/engine/tools.js");const mention=vi.fn();stops.push(initRouter({mention}));
-  fixture.db.run("INSERT INTO scopes VALUES('retained-room','room','retained-room',NULL)");
-  deliverMemberMessage("retained-room","mem_a","@Beta");await flush();
-  expect(readMessages("retained-room")[0].mentionMemberIds).toEqual([]);expect(mention).not.toHaveBeenCalled();
+it("a member chat call cannot post into another member's DM",async()=>{
+  const {handleToolCallback}=await import("../../src/engine/tools.js");
+  const denied=await handleToolCallback("chat","dm:mem_b","Alpha",{message:"wrong owner"},{memberId:"mem_a"});
+  expect(denied).toMatchObject({ok:false,code:"scope_access_denied"});
+  expect(readMessages("dm:mem_b")).toEqual([]);
 });
 
 it("self urgent is silent and an optional normal callback can accept an urgent target",async()=>{

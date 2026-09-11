@@ -114,7 +114,7 @@ describe("chat enforcement pending reply", () => {
     expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
-  it("[room]-marked text is plain text now: a debt turn's final text is fallback-posted verbatim (marker mechanism removed)", async () => {
+  it("a debt turn's completed text stays invisible (marker or not) — only the silence note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "Let me check...\n[room]\nFound it — the failure is in the token refresh.", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -122,16 +122,14 @@ describe("chat enforcement pending reply", () => {
 
     await activateAgent("room1", "developer");
 
-    // The marker is dead text — the completed segment is delivered as-is by the fallback.
+    // No chat call → the text is a work note; the room sees only the silence note.
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0][2]).toBe("Let me check...\n[room]\nFound it — the failure is in the token refresh.");
-    expect(delivered[0][4]).toMatchObject({ autoDelivered: true });
-    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(delivered).toHaveLength(0);
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
     expect(handle.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it("a debt turn's bare final text is fallback-posted verbatim — no silence note", async () => {
+  it("a debt turn's bare final text is never delivered — the silence note fires", async () => {
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "Done — the fix is in place.", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -141,10 +139,9 @@ describe("chat enforcement pending reply", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(1);
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0][2]).toBe("Done — the fix is in place.");
-    // Fallback delivery clears the reply debt → no silence note.
-    expect(bus.postMessage).not.toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
+    expect(delivered).toHaveLength(0);
+    // No chat call → the debt stays pending; the silence is made visible.
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("an FYI turn (no debt) never fallback-posts bare text and never warns", async () => {
@@ -180,10 +177,10 @@ describe("chat enforcement pending reply", () => {
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
     expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
-    // Only the continuation's completed text was fallback-posted.
+    // The continuation's completed text is not delivered — no chat call was made.
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0][2]).toBe("Full result after continuation.");
+    expect(delivered).toHaveLength(0);
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("continues once after length-truncated threshold compaction with no SDK retry", async () => {
@@ -206,8 +203,8 @@ describe("chat enforcement pending reply", () => {
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
     expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0][2]).toBe("Result after threshold compaction.");
+    expect(delivered).toHaveLength(0);
+    expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');
   });
 
   it("does not continue after normal threshold compaction", async () => {
