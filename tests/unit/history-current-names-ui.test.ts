@@ -1,3 +1,4 @@
+import { memberTitleHints } from "../../web/src/utils/member-title-hints";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, act } from "../../web/node_modules/react/index.js";
 
@@ -125,6 +126,37 @@ describe("current names in real rendered historical messages", () => {
     await render({sender:"system",content:"system notice"});
     expect(authorNames()).toEqual([]);
     expect(container.textContent).toContain("system notice");
+  });
+  it("renders current titles in open mention options and removes cleared titles without template fallback", async () => {
+    const members = [
+      {name:"言实",title:"工程师",agentTemplate:"architect"},
+      {name:"untitled",title:null,agentTemplate:"general"},
+    ];
+    const props = () => ({onSend:vi.fn(),members:members.map(m=>m.name),memberHints:memberTitleHints(members),draftKey:null});
+    await act(async()=>root.render(createElement(MessageInput,props())));
+    const input = nodes().find(n=>n.tagName==="TEXTAREA")!;
+    await act(async()=>input.props.onChange({target:{value:"@"}}));
+    const options = () => nodes().filter(n=>n.props?.role==="option").map(n=>n.textContent);
+    expect(options()).toEqual(["@allactivate all members","@言实工程师","@untitled"]);
+    members[0].title="Reviewer";
+    await act(async()=>root.render(createElement(MessageInput,props())));
+    expect(options()).toContain("@言实Reviewer");
+    members[0].title=null;
+    await act(async()=>root.render(createElement(MessageInput,props())));
+    expect(options()).toEqual(["@allactivate all members","@言实","@untitled"]);
+    expect(input.value).toBe("@");
+  });
+  it("keeps literal titles and empty hints independent of names or retired template labels", () => {
+    const members = [
+      {name:"pm",title:"pm exact TITLE",agentTemplate:"architect"},
+      {name:"empty",title:"",agentTemplate:"general"},
+      {name:"missing",agentTemplate:"qa"},
+      {name:"__proto__",title:null},
+    ];
+    const hints=memberTitleHints(members);
+    expect(hints.pm).toBe("pm exact TITLE");
+    expect(hints.empty).toBe("");expect(hints.missing).toBe("");
+    expect(Object.hasOwn(hints,"__proto__")).toBe(true);expect(hints["__proto__"]).toBe("");
   });
   it("shares directory loading, retains names on failure, retries and reloads on reconnect", async () => {
     vi.useFakeTimers({toFake:["setTimeout","setInterval","clearTimeout","clearInterval"]});

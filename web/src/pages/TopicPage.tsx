@@ -1,3 +1,4 @@
+import { memberTitleHints } from "../utils/member-title-hints";
 import { useMemberProfileRevision, currentMemberName } from "../hooks/useMemberProfileRevision";
 /**
  * Topic workspace (topic-threads v3, fish 2026-08-19 feedback on rc.5):
@@ -180,6 +181,7 @@ export function TopicPage({
   }, [roomId, profileRevision]);
 
   const members = useMemo(() => memberInfos.map((m) => m.name), [memberInfos]);
+  const memberHints = useMemo(() => memberTitleHints(memberInfos), [memberInfos]);
 
   // Right rail shows ONLY the topic's participants (members @-mentioned/activated
   // in this topic) — not the full room roster (fish 2026-08-19 ②).
@@ -352,6 +354,7 @@ export function TopicPage({
             <MessageInput
               onSend={(content, attachments) => handleSend(content, attachments)}
               members={members}
+              memberHints={memberHints}
               roomId={roomId}
               draftKey={isDraft ? `topic-draft:${draft?.anchorMessageId}` : `topic:${topicId}`}
               placeholder={isDraft ? "Send the first message to create this topic… (@ to mention)" : "Message topic… (@ to mention)"}

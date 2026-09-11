@@ -1,3 +1,4 @@
+import { memberTitleHints } from "../utils/member-title-hints";
 import { useState, useEffect, useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { Room, MemberInfo } from "../api/client";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -61,22 +62,6 @@ interface MainProps {
 }
 
 type RoomView = "chat" | "tasks";
-
-function displayAgentHint(agentName: string): string {
-  if (!agentName) return "Agent";
-  const normalized = agentName.trim();
-  const upper = normalized.toUpperCase();
-  if (["QA", "PM"].includes(upper)) return upper;
-  return normalized
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => {
-      const acronym = part.toUpperCase();
-      if (["QA", "PM"].includes(acronym)) return acronym;
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(" ");
-}
 
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
@@ -189,6 +174,7 @@ export function Main({
         return {
           id: gid,
           name: c?.name ?? gid.slice(0, 12),
+          title: c?.title,
           agent: c?.agentTemplate ?? "general",
           sourceAgent: c?.agentTemplate ?? "general",
           roomId: room.id,
@@ -203,7 +189,7 @@ export function Main({
     return (room?.members || []).map((name) => ({ id: name, name, agent: name, sourceAgent: name, thinkingLevel: "off", mcpServers: [] } as MemberInfo));
   }, [room, globalMembers]);
   const displayMembers = useMemo(() => displayMemberInfos.map((member) => member.name), [displayMemberInfos]);
-  const displayMemberAgentHints = useMemo(() => Object.fromEntries(displayMemberInfos.map((member) => [member.name, displayAgentHint(member.agent || member.sourceAgent || member.name)])), [displayMemberInfos]);
+  const displayMemberHints = useMemo(() => memberTitleHints(displayMemberInfos), [displayMemberInfos]);
   const displayAgentStatus = agentStatus;
   const displayContextUsage = contextUsage;
 
@@ -403,7 +389,7 @@ export function Main({
                   excerpt,
                 });
               }} onOpenTopic={(topicId) => selectedRoomId && onOpenTopicPage?.(selectedRoomId, topicId)} />
-              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content, ...(atts?.length ? { attachments: atts } : {}) }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberAgentHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
+              <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); if (topicMode && selectedRoomId) { setTopicMode(false); return createTopic(selectedRoomId, { content, ...(atts?.length ? { attachments: atts } : {}) }).then((r) => onOpenTopicPage?.(selectedRoomId, r.topic.id)).catch((e) => { toast(e instanceof Error ? e.message : "Failed to create topic", "error"); }); } return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} topicMode={{ active: topicMode, onToggle: () => setTopicMode((v) => !v) }} />
             </>
           ) : selectedRoomId ? (
             <TasksTab
