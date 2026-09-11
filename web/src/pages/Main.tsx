@@ -44,18 +44,15 @@ interface MainProps {
   reconnecting: boolean;
   onRegisterWsHandler: (handler: (event: WsEvent) => void) => void;
   unreadTabs: Set<string> | null;
-  onClearUnreadTab: (roomId: string, tabKey: string) => void;
   onActiveTabKeyChange: (tabKey: string) => void;
   onOpenMobileSidebar?: () => void;
 }
-
-type RoomView = "chat";
 
 export function Main({
   selectedRoomId, onSelectRoom, onRoomCreated, onRoomDeleted, username,
   externalShowCreateRoom, onCreateRoomShown,
   connected, reconnecting, onRegisterWsHandler,
-  unreadTabs, onClearUnreadTab, onActiveTabKeyChange,
+  unreadTabs, onActiveTabKeyChange,
   onOpenMobileSidebar,
 }: MainProps) {
   const { toast } = useDialog();
@@ -83,9 +80,6 @@ export function Main({
       onCreateRoomShown?.();
     }
   }, [externalShowCreateRoom, onCreateRoomShown]);
-
-  // 视图：Chat | Tasks
-  const [view, setView] = useState<RoomView>("chat");
 
   const {
     room,
@@ -168,11 +162,10 @@ export function Main({
     onRegisterWsHandler(handleWsEvent);
   }, [handleWsEvent, onRegisterWsHandler]);
 
-  // 房间切换时重置视图
+  // 房间切换时重置预览
   useEffect(() => {
     const restoreTab = sessionStorage.getItem("bossmode_main_restore_tab");
     sessionStorage.removeItem("bossmode_main_restore_tab");
-    setView("chat");
     setArtifactPreview(null);
   }, [selectedRoomId]);
 
@@ -180,14 +173,6 @@ export function Main({
   useEffect(() => {
     onActiveTabKeyChange("room");
   }, [onActiveTabKeyChange]);
-
-  const switchView = useCallback((v: RoomView) => {
-    setView(v);
-    if (v !== "chat") {
-      setArtifactPreview(null);
-    }
-    if (selectedRoomId) onClearUnreadTab(selectedRoomId, "room");
-  }, [selectedRoomId, onClearUnreadTab]);
 
   const handlePreviewResizeStart = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
@@ -272,10 +257,6 @@ export function Main({
     );
   }
 
-  const segBtn = (active: boolean) =>
-    `px-3.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
-      active ? "bg-surface-3 text-ink-1" : "text-ink-3 hover:text-ink-2"
-    }`;
   const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
   return (
@@ -298,12 +279,6 @@ export function Main({
         >
           <h2 className="text-sm font-semibold tracking-tight text-ink-1 whitespace-nowrap">{room.name}</h2>
         </button>
-
-        <div className="flex bg-inset border border-line-soft rounded-lg p-0.5 shrink-0">
-          <button onClick={() => switchView("chat")} className={segBtn(view === "chat")}>
-            Chat
-          </button>
-        </div>
 
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <span className="flex items-center gap-1.5 mr-1.5" title={connected ? "Connected" : reconnecting ? "Reconnecting" : "Disconnected"}>
@@ -330,12 +305,12 @@ export function Main({
       <div className="flex-1 flex min-h-0 bg-surface-1">
         <div className="flex-1 flex flex-col min-w-0">
           <>
-            <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onPreviewArtifact={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setView("chat"); setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} />
+            <ChatArea messages={messages} roomName={room.name} roomId={room.id} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={loadOlder} searchOpen={searchOpen} onCloseSearch={() => setSearchOpen(false)} members={displayMembers} memberIdentities={displayMemberInfos} onPreviewArtifact={(preview) => { setMobileMembersOpen(false); setArtifactPreview(preview); }} onPreviewAttachment={(preview) => { setMobileMembersOpen(false); setArtifactPreview(preview); }} activeArtifactPreview={artifactPreview && artifactPreview.kind !== "attachment" ? { messageId: artifactPreview.messageId, selectedIndex: artifactPreview.selectedIndex } : null} activeAttachmentPreview={artifactPreview?.kind === "attachment" ? { messageId: artifactPreview.messageId, storedFilename: artifactPreview.attachments[artifactPreview.selectedIndex]?.storedFilename || "" } : null} onJumpToMessage={jumpToMessage} onReturnToLatest={returnToLatest} inHistoryView={inHistoryView} onReplyMessage={(msg) => setReplyQuote({ seq: msg.seq ?? 0, messageId: msg.id, sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId, excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "" })} />
               <MessageInput onSend={(content, atts) => { const q = replyQuote; setReplyQuote(null); return sendMessage(content, atts, q ? { seq: q.seq } : undefined); }} members={displayMembers} memberHints={displayMemberHints} disabled={loading} roomId={selectedRoomId || undefined} onError={(msg) => toast(msg, "error")} quote={replyQuote} onClearQuote={() => setReplyQuote(null)} />
             </>
         </div>
 
-        {artifactPreview && view === "chat" && selectedRoomId && !isMobile && (
+        {artifactPreview && selectedRoomId && !isMobile && (
           <>
             <div
               role="separator"
@@ -360,7 +335,7 @@ export function Main({
         )}
 
         {/* 工位墙（桌面，可拖拽调宽 fish 2026-08-21） */}
-        <ResizableRail className={`${artifactPreview && view === "chat" ? "hidden xl:block" : "hidden md:block"}`}>
+        <ResizableRail className={`${artifactPreview ? "hidden xl:block" : "hidden md:block"}`}>
           <StationPanel
             members={displayMembers}
             agentStatus={displayAgentStatus}

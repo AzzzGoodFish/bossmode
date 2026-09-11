@@ -238,20 +238,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
     }
   }, []);
 
-  // F4: Clear tab red dot
-  const handleClearUnreadTab = useCallback((roomId: string, tabKey: string) => {
-    setUnreadTabs((prev) => {
-      const roomTabs = prev.get(roomId);
-      if (!roomTabs?.has(tabKey)) return prev;
-      const next = new Map(prev);
-      const nextTabs = new Set(roomTabs);
-      nextTabs.delete(tabKey);
-      if (nextTabs.size === 0) next.delete(roomId);
-      else next.set(roomId, nextTabs);
-      return next;
-    });
-  }, []);
-
   // Get unread tabs for the selected room
   const selectedRoomId = activePage?.type === "room" ? activePage.id : null;
   const currentRoomUnreadTabs = selectedRoomId ? unreadTabs.get(selectedRoomId) ?? null : null;
@@ -301,7 +287,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             reconnecting={reconnecting}
             onRegisterWsHandler={(handler) => { mainWsHandlerRef.current = handler; }}
             unreadTabs={currentRoomUnreadTabs}
-            onClearUnreadTab={handleClearUnreadTab}
             onActiveTabKeyChange={setActiveTabKey}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
@@ -318,7 +303,6 @@ export function Layout({ onLogout, username }: LayoutProps) {
             reconnecting={false}
             onRegisterWsHandler={() => {}}
             unreadTabs={null}
-            onClearUnreadTab={() => {}}
             onActiveTabKeyChange={() => {}}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />

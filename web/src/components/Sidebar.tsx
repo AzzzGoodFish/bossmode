@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   LogOut, MessageSquare, Settings, Sun, Moon,
-  Loader2, Plus, Contact, Hash, Search, MessagesSquare,
+  Loader2, Plus, Contact, Hash, Search,
   
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -230,22 +230,6 @@ export function Sidebar({
           </>
         )}
       </div>
-
-      {domain === "chats" && (
-        <div className="border-t border-line-soft shrink-0 p-2 space-y-px">
-          <button
-            onClick={() => onNavigate({ type: "chats" })}
-            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] transition-colors cursor-pointer ${
-              activePage?.type === "chats" || activePage?.type === "dm"
-                ? "bg-surface-2 text-ink-1"
-                : "text-ink-3 hover:bg-surface-1 hover:text-ink-2"
-            }`}
-          >
-            <MessagesSquare size={14} />
-            <span>All chats</span>
-          </button>
-        </div>
-      )}
     </aside>
   );
 
