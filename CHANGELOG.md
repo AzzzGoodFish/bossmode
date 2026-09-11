@@ -4,6 +4,27 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.0-rc.2] — 2026-09-11
+
+### Changed
+- SQLite is the sole authority for core application data: settings and credentials, members, conversations, messages and events, tasks, asset metadata, session associations and execution/delivery state. Retired JSON/JSONL metadata and derived indexes are not live fallbacks.
+- Ordinary startup automatically backs up supported legacy data, imports and validates it, switches authority, and retires obsolete metadata. No separate migration command is required. Interrupted upgrades can resume through normal startup; corrupt or missing authoritative data still fails closed.
+- Room creation and invitations select existing Contacts by stable member ID. Live agent-template management, factory agent seeding and template-based member creation are retired; historical template records remain importable.
+- The `chat` tool accepts only `message` and optional `attachments`. The `need_response` and `reply_to` parameters are removed. Stable mention activation, historical quote rendering and internal delivery obligations remain supported.
+- Core persistence uses explicit startup, domain services, repositories and transaction boundaries. Pending input, reply dispositions and actual SDK execution attempts are durable; historical imports do not trigger execution.
+
+### Fixed
+- Newly created members commit their persona metadata with identity, so ordinary restart no longer fails with missing persona ownership. Empty and nonempty persona bodies remain literal, and failed creation rolls back owned assets and SQL state.
+- Legacy boolean response flags and verified pre-Principles metadata-only bookkeeping no longer block upgrade. Only those obsolete fields/records are retired; message bodies and real body-history snapshots are preserved, with original sources retained in the upgrade backup.
+- Contacts selection reads the actual members API envelope and preserves selection on failed room creation or invitation.
+- Runtime shutdown and member removal respect actual resource teardown and execution ownership. Topic forks use public SDK APIs and verify branch durability by reopening before publishing the session association.
+
+### Preserved
+- Persona and other Markdown bodies, attachments, skills/extensions and SDK-owned session JSONL stay as files. SDK create/resume/fork uses the pinned public SDK without rewriting its history.
+- This candidate does not make downgrades, corrupt-data repair, external execution replay or physical power-loss recovery automatic. Keep the data directory and upgrade backups intact if startup reports a problem.
+
+---
+
 ## [0.24.0-rc.1] — 2026-09-09
 
 ### Added
