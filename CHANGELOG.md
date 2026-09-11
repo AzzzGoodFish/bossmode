@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.0] — 2026-09-11
+
+### Release
+- Promotes the accepted 0.24.0-rc.3 runtime to the stable 0.24.0 release; no additional runtime, dependency or storage-format changes.
+- SQLite owns core application metadata, with automatic backup, validated migration and retirement during ordinary startup. Persona, memory, attachment, skill/extension bodies and SDK session files remain files.
+- Rooms select existing Contacts by stable member ID. Members use their own profiles rather than live agent templates, and the `chat` tool accepts only message and optional attachments.
+- Durable input/reply state, explicit SDK execution boundaries and actual resource teardown preserve the accepted session, stop/reload and topic-fork behavior.
+- Historical chat authors follow current names by stable ID without rewriting message snapshots; mention menus use current titles without retired-template fallbacks.
+
 ## [0.24.0-rc.3] — 2026-09-11
 
 ### Fixed
