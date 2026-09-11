@@ -4,6 +4,13 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.0-rc.3] — 2026-09-11
+
+### Fixed
+- Historical chat authors with a stable member ID display the member's current name in rooms, DMs, topics, search results, quotes, composer previews, expanded discussions and conversation previews. Initial loading, live profile changes and reconnection refresh share the same identity directory; retained archived identities remain displayable.
+- Sender filtering and message grouping use stable IDs where available, so reusing an old name cannot assign historical messages to another member. Unknown/no-ID authors retain their recorded label. Stored sender snapshots, message and mention text, quote anchors and SDK history are unchanged.
+- Room and topic mention suggestions display the member's current title instead of a retired agent-template label. Editing or clearing a title updates an open menu; empty titles have no template/name fallback. Mention insertion and routing are unchanged.
+
 ## [0.24.0-rc.2] — 2026-09-11
 
 ### Changed
